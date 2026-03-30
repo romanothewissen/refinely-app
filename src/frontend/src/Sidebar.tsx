@@ -117,19 +117,16 @@ export function Sidebar({
 
       <div className="flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-3 overflow-y-auto no-scrollbar">
         {/* Project context card */}
-        <div className="rounded-lg border border-[var(--rf-border)] bg-white p-4 shadow-[var(--rf-shadow-sm)]">
-          <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3.5 py-3 shadow-[var(--rf-shadow-sm)]">
+          <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Project Context</div>
-              <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{projectTitle}</div>
-              <p className="mt-0.5 text-[11px] text-[var(--rf-text-tertiary)]">
-                Choose the Jira project whose golden examples and instructions should power this run.
-              </p>
+              <div className="mt-0.5 text-sm font-semibold text-[var(--rf-text)] truncate">{projectTitle}</div>
             </div>
             <select
               value={projectKey}
               onChange={(e) => setProjectKey(e.target.value)}
-              className="shrink-0 min-w-[140px] rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand)]"
+              className="shrink-0 min-w-[132px] rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand)]"
             >
               <option value="*">No project selected</option>
               {availableProjects.map(project => (
@@ -139,70 +136,47 @@ export function Sidebar({
               ))}
             </select>
           </div>
-
           {projectKey === '*' && availableProjects.length > 0 && (
-            <div className="mb-3 rounded-md border border-amber-300 bg-[var(--rf-warning-subtle)] px-3 py-2 text-[11px] text-amber-800">
-              Select a project to unlock project-scoped golden examples and work instructions.
+            <div className="mt-2 text-[11px] text-[var(--rf-text-tertiary)]">
+              Select a project to unlock project-scoped examples and instructions.
             </div>
           )}
+        </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="rounded-md border border-[var(--rf-border)] bg-[var(--rf-bg)] px-3 py-2.5 text-left transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)]"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Connector Health</div>
-                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide border ${activeGoldSources.length > 0 ? 'border-green-300 bg-[var(--rf-success-subtle)] text-[var(--rf-success)]' : 'border-amber-300 bg-[var(--rf-warning-subtle)] text-amber-700'}`}>
-                  {activeGoldSources.length > 0 ? 'Connected' : 'Not connected'}
-                </span>
-              </div>
-              <div className="mt-1.5 text-xs font-medium text-[var(--rf-text)]">{matchedConnectorLabel}</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {activeGoldSources.length > 0 ? (
-                  activeGoldSources.slice(0, 3).map(source => (
-                    <span key={source.key} className="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200">
-                      {source.key}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-[10px] text-[var(--rf-text-tertiary)]">Open settings to wire the selected project to golden examples.</span>
-                )}
-              </div>
-            </button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => onOpenProjectSettings('jira', projectKey)}
+            className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2.5 text-left shadow-[var(--rf-shadow-sm)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Connector Health</div>
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide border ${activeGoldSources.length > 0 ? 'border-green-300 bg-[var(--rf-success-subtle)] text-[var(--rf-success)]' : 'border-amber-300 bg-[var(--rf-warning-subtle)] text-amber-700'}`}>
+                {activeGoldSources.length > 0 ? 'Connected' : 'Not connected'}
+              </span>
+            </div>
+            <div className="mt-1.5 text-xs font-medium text-[var(--rf-text)]">{matchedConnectorLabel}</div>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => onOpenProjectSettings('domain', projectKey)}
-              className="rounded-md border border-[var(--rf-border)] bg-[var(--rf-bg)] px-3 py-2.5 text-left transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)]"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Work Instructions</div>
-                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide border ${activeWiDocs.length > 0 ? 'border-green-300 bg-[var(--rf-success-subtle)] text-[var(--rf-success)]' : 'border-[var(--rf-border)] bg-[var(--rf-bg)] text-[var(--rf-text-tertiary)]'}`}>
-                  {activeWiDocs.length > 0 ? 'Ingested' : 'Empty'}
-                </span>
-              </div>
-              <div className="mt-1.5 text-xs font-medium text-[var(--rf-text)]">
-                {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {activeWiDocs.length > 0 ? (
-                  activeWiDocs.slice(0, 3).map(doc => (
-                    <span key={doc.docId} className="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-medium bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200">
-                      {doc.filename}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-[10px] text-[var(--rf-text-tertiary)]">Open settings to upload or map project docs.</span>
-                )}
-              </div>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => onOpenProjectSettings('domain', projectKey)}
+            className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2.5 text-left shadow-[var(--rf-shadow-sm)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Work Instructions</div>
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide border ${activeWiDocs.length > 0 ? 'border-green-300 bg-[var(--rf-success-subtle)] text-[var(--rf-success)]' : 'border-[var(--rf-border)] bg-[var(--rf-bg)] text-[var(--rf-text-tertiary)]'}`}>
+                {activeWiDocs.length > 0 ? 'Ingested' : 'Empty'}
+              </span>
+            </div>
+            <div className="mt-1.5 text-xs font-medium text-[var(--rf-text)]">
+              {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
+            </div>
+          </button>
         </div>
 
         {/* Requirement scope label */}
-        <div className="flex items-center justify-between gap-3 px-0.5">
+        <div className="flex items-center justify-between gap-3 px-0.5 pt-1">
           <div>
             <label className="text-[10px] font-semibold text-[var(--rf-text-tertiary)] uppercase tracking-wide">Requirement Scope</label>
           </div>
@@ -218,7 +192,7 @@ export function Sidebar({
             onChange={(e) => setRequirement(e.target.value)}
             placeholder="Describe your feature requirement in detail... e.g. 'As a user, I want to be able to reset my password using an email link...'"
             disabled={isWorking}
-            className="min-h-[220px] h-[clamp(220px,32vh,340px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2"
+            className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2"
           />
           <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-4 py-2.5">
             <button
