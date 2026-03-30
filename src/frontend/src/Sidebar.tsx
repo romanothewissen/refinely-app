@@ -85,12 +85,12 @@ export function Sidebar({
 
   return (
     <aside
-      className="h-full flex flex-col shrink-0 overflow-hidden border-r border-[rgba(216,222,232,0.92)] bg-[linear-gradient(180deg,rgba(247,249,252,0.96),rgba(236,241,247,0.98))] backdrop-blur-sm"
+      className="h-full flex flex-col shrink-0 overflow-hidden border-r border-[var(--rf-border)] bg-[var(--rf-bg)]"
       style={{ width: width ?? 380 }}
     >
       {/* Header — matches canvas header height and shadow treatment */}
       <motion.div
-        className="px-5 py-4 bg-white flex items-center justify-between shrink-0"
+        className="px-6 h-[88px] bg-white flex items-center justify-between shrink-0 border-b border-[var(--rf-border)]"
         style={{ boxShadow: 'var(--rf-header-shadow)' }}
         variants={fadeUpVariant}
         initial="hidden"
@@ -105,7 +105,7 @@ export function Sidebar({
             >
               Refinely
             </h1>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[var(--rf-brand-muted)] text-[#0052CC] shadow-[inset_0_0_0_1px_rgba(0,82,204,0.08)]">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[var(--rf-brand-muted)] text-[#0052CC] border border-[rgba(0,82,204,0.08)]">
               {tierName}
             </span>
           </div>
@@ -137,7 +137,7 @@ export function Sidebar({
         </div>
       </motion.div>
 
-      <div className="flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-3.5 overflow-y-auto no-scrollbar">
+      <div className="flex-1 min-h-0 flex flex-col w-full px-5 py-5 gap-3.5 overflow-y-auto no-scrollbar">
         {/* Project context card */}
         <motion.div
           className="rf-card px-3.5 py-3"
@@ -154,7 +154,7 @@ export function Sidebar({
             <select
               value={projectKey}
               onChange={(e) => setProjectKey(e.target.value)}
-              className="shrink-0 min-w-[132px] rounded-lg border border-[var(--rf-border)] bg-[rgba(255,255,255,0.9)] px-2.5 py-1.5 text-[11px] font-medium text-[#172B4D] outline-none focus:border-[#0052CC] focus:ring-2 focus:ring-[#0052CC]/20 transition-shadow shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]"
+              className="shrink-0 min-w-[132px] rounded-lg border border-[var(--rf-border)] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#172B4D] outline-none focus:border-[#0052CC] focus:ring-2 focus:ring-[#0052CC]/20 transition-shadow"
             >
               <option value="*">No project selected</option>
               {availableProjects.map(project => (
@@ -244,7 +244,7 @@ export function Sidebar({
             disabled={isWorking}
             className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[#172B4D] placeholder-[#8993A4] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2"
           />
-          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-4 py-2.5 bg-[linear-gradient(180deg,rgba(248,250,253,0.95),rgba(242,246,251,0.95))]">
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-4 py-2.5 bg-[var(--rf-surface-soft)]">
             <motion.button
               title="Attach doc (PDF/TXT)"
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium text-[#626F86] transition"
@@ -270,8 +270,8 @@ export function Sidebar({
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Monthly generation limit reached.' : ''}
-            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#0B63E5,#0052CC)] hover:bg-[#0747A6] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-[0_10px_24px_rgba(0,82,204,0.24)]"
-            whileHover={!brainstormDisabled ? { scale: 1.01, boxShadow: '0 14px 30px rgba(0,82,204,0.28)' } : {}}
+            className="brainstorm-shimmer w-full bg-[#0B63E5] hover:bg-[#0052CC] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-[0_1px_2px_rgba(0,82,204,0.18)]"
+            whileHover={!brainstormDisabled ? { scale: 1.005, boxShadow: '0 2px 6px rgba(0,82,204,0.18)' } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
             {isWorking ? (

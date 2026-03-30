@@ -443,7 +443,7 @@ export function MainContent({
         {[1, 2, 3].map(i => (
           <motion.div
             key={i}
-            className="overflow-hidden rounded-xl border border-[rgba(216,222,232,0.92)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,249,252,0.98))]"
+            className="overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white"
             style={{ boxShadow: 'var(--rf-shadow-sm)' }}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -468,15 +468,15 @@ export function MainContent({
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
-      {/* Header — matches sidebar header: py-4, same shadow treatment */}
+      {/* Header — aligned to sidebar header height and padding */}
       <motion.header
-        className="shrink-0 bg-[rgba(255,255,255,0.88)] backdrop-blur-md px-5 py-4 z-10 sticky top-0 border-b border-[rgba(216,222,232,0.72)]"
+        className="shrink-0 h-[88px] bg-white px-6 z-10 sticky top-0 border-b border-[var(--rf-border)] flex items-center"
         style={{ boxShadow: 'var(--rf-header-shadow)' }}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             {!sidebarOpen && (
               <motion.button
@@ -491,7 +491,7 @@ export function MainContent({
             )}
             <div className="min-w-0 flex flex-wrap items-center gap-2.5">
               <h2 className="text-base font-bold text-[#172B4D] tracking-tight">Feature Canvas</h2>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[rgba(237,244,253,0.9)] px-2.5 py-0.5 text-[10px] font-semibold text-[#626F86] shadow-[inset_0_0_0_1px_rgba(0,82,204,0.08)]">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rf-brand-muted)] px-2.5 py-0.5 text-[10px] font-semibold text-[#626F86] border border-[rgba(0,82,204,0.08)]">
                 <span className="text-[#8993A4]">Scope</span>
                 <span className="text-[#172B4D]">
                   {projectKey === '*' ? 'Standalone workspace' : projectKey}
@@ -503,7 +503,7 @@ export function MainContent({
             <motion.button
               type="button"
               onClick={() => setShowTokenDetails(prev => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[rgba(247,249,252,0.92)] hover:bg-[rgba(232,237,244,0.92)] px-2.5 py-1.5 text-[11px] font-semibold text-[#626F86] transition-colors shadow-[inset_0_0_0_1px_rgba(216,222,232,0.85)]"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--rf-surface-soft)] hover:bg-[#eef2f7] px-2.5 py-1.5 text-[11px] font-semibold text-[#626F86] transition-colors border border-[var(--rf-border-subtle)]"
               title="Workflow token usage"
               whileTap={{ scale: 0.97 }}
             >
@@ -513,7 +513,7 @@ export function MainContent({
             <AnimatePresence>
               {showTokenDetails && (
                 <motion.div
-                  className="absolute right-0 top-full mt-2 w-[250px] rounded-lg border border-[var(--rf-border)] bg-[rgba(255,255,255,0.96)] backdrop-blur-md p-3 shadow-[var(--rf-shadow-md)] z-40"
+                  className="absolute right-0 top-full mt-2 w-[250px] rounded-lg border border-[var(--rf-border)] bg-white p-3 shadow-[var(--rf-shadow-md)] z-40"
                   initial={{ opacity: 0, y: -4, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.98 }}
@@ -638,7 +638,7 @@ export function MainContent({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="levitate w-14 h-14 rounded-xl flex items-center justify-center mb-5 shadow-[0_10px_26px_rgba(0,82,204,0.12)] bg-[linear-gradient(180deg,rgba(223,233,251,0.95),rgba(255,255,255,0.96))] border border-[rgba(203,220,245,0.95)]">
+            <div className="levitate w-14 h-14 rounded-xl flex items-center justify-center mb-5 shadow-[var(--rf-shadow-sm)] bg-white border border-[rgba(203,220,245,0.95)]">
               <Sparkles className="w-6 h-6 text-[#0052CC]" />
             </div>
             <h2 className="text-xl font-semibold text-[#172B4D] mb-2">Ready to generate</h2>
@@ -733,12 +733,12 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`overflow-hidden rounded-xl border border-[rgba(216,222,232,0.92)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,249,252,0.98))] backdrop-blur-sm ${feature.pendingRemoval ? 'opacity-80' : ''}`}
+                  className={`overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white ${feature.pendingRemoval ? 'opacity-80' : ''}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.06, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  style={{ boxShadow: feature.isAccepted ? '0 0 0 1px rgba(0,135,90,0.25), 0 10px 24px rgba(15,23,42,0.08)' : feature.pendingRemoval ? '0 0 0 1px rgba(222,53,11,0.25), 0 10px 24px rgba(15,23,42,0.08)' : 'var(--rf-shadow-sm)' }}
-                  whileHover={{ boxShadow: feature.isAccepted ? '0 0 0 1px rgba(0,135,90,0.3), 0 14px 28px rgba(15,23,42,0.1)' : 'var(--rf-shadow-md)', y: -1 }}
+                  style={{ boxShadow: feature.isAccepted ? '0 0 0 1px rgba(0,135,90,0.25), 0 2px 6px rgba(15,23,42,0.05)' : feature.pendingRemoval ? '0 0 0 1px rgba(222,53,11,0.25), 0 2px 6px rgba(15,23,42,0.05)' : 'var(--rf-shadow-sm)' }}
+                  whileHover={{ boxShadow: feature.isAccepted ? '0 0 0 1px rgba(0,135,90,0.3), 0 4px 10px rgba(15,23,42,0.06)' : 'var(--rf-shadow-md)', y: -1 }}
                 >
                   {/* Left accent bar */}
                   <div className="flex">

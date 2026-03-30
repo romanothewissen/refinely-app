@@ -546,11 +546,6 @@ export default function App() {
         />
       ) : (
         <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
-          <div className="pointer-events-none absolute inset-0">
-            <div className="absolute inset-x-0 top-0 h-40 bg-[linear-gradient(180deg,rgba(255,255,255,0.56),transparent)]" />
-            <div className="absolute right-[-12%] top-[-8%] h-64 w-64 rounded-full bg-[rgba(0,82,204,0.06)] blur-3xl" />
-            <div className="absolute left-[-10%] bottom-[-10%] h-72 w-72 rounded-full bg-[rgba(54,179,126,0.05)] blur-3xl" />
-          </div>
           <AnimatePresence>
             {generationError && (
               <motion.div
