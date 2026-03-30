@@ -466,7 +466,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden text-[#172B4D] font-sans bg-transparent">
+    <div className="flex h-full w-full overflow-hidden text-slate-900 font-sans bg-transparent">
       {/* Left Sidebar — animated & resizable */}
       <AnimatePresence>
         {(sidebarOpen || sidebarExiting) && (
@@ -476,7 +476,7 @@ export default function App() {
             animate={{ opacity: 1, x: 0, width: sidebarWidth }}
             exit={{ opacity: 0, x: -16, width: 0 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="shrink-0 overflow-hidden"
+            className="shrink-0 overflow-hidden shadow-2xl z-40 relative"
           >
             <div className="relative h-full w-full flex">
               <Sidebar
@@ -526,10 +526,10 @@ export default function App() {
               {sidebarOpen && (
                 <div
                   onMouseDown={startResizing}
-                  className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-[#0052CC] group z-50 transition-colors"
+                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-blue-500/20 group z-50 transition-colors flex items-center justify-center"
                   style={{ cursor: 'col-resize' }}
                 >
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-[#DFE1E6] group-hover:bg-white rounded-full transition-colors" />
+                  <div className="w-1 h-8 bg-white/20 group-hover:bg-blue-500 rounded-full transition-colors" />
                 </div>
               )}
             </div>
@@ -549,14 +549,14 @@ export default function App() {
           <AnimatePresence>
             {generationError && (
               <motion.div
-                className="w-full bg-[rgba(255,235,230,0.92)] backdrop-blur-sm text-[#DE350B] border-b border-red-300 px-6 py-3 text-sm font-medium flex items-start gap-3 z-50"
+                className="w-full bg-rose-50/95 backdrop-blur-sm text-rose-700 border-b border-rose-200 px-6 py-3 text-sm font-bold flex items-start gap-3 z-50 shadow-sm"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
               >
                 <span className="flex-1">{generationError}</span>
-                <button onClick={() => setGenerationError(null)} className="text-[#DE350B] hover:text-red-800 font-semibold text-sm leading-none">&times;</button>
+                <button onClick={() => setGenerationError(null)} className="text-rose-500 hover:text-rose-800 font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition">&times;</button>
               </motion.div>
             )}
           </AnimatePresence>

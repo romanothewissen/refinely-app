@@ -3,6 +3,7 @@ import {
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
   Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, ExternalLink
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { REDACTED } from './types';
 
@@ -566,66 +567,77 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     : null;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-transparent relative overflow-hidden font-sans">
-      <header className="shrink-0 h-[88px] border-b border-[var(--rf-border)] bg-white flex items-center justify-between px-6 z-30 sticky top-0">
+    <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden font-sans">
+      <header className="shrink-0 h-[88px] border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-30 sticky top-0 shadow-sm">
         <div className="flex items-center gap-5">
-          <button onClick={onClose} className="p-2.5 rounded-2xl border border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] transition-all group shadow-[var(--rf-shadow-sm)]">
-             <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5" />
-          </button>
+          <motion.button 
+            onClick={onClose} 
+            className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+             <ChevronLeft className="w-5 h-5" />
+          </motion.button>
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Workspace Settings</div>
-            <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--rf-text)]">Configure Refinely</h2>
-            <p className="mt-1 text-xs text-[var(--rf-text-secondary)]">Set up AI, choose a Jira project, then add optional guidance only where it helps.</p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase border ${isAdmin ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Workspace Settings</div>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">Configure Refinely</h2>
+            <div className="flex items-center gap-2 mt-1.5">
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${isAdmin ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
                 {isAdmin ? 'Administrator' : 'Read-Only'}
               </span>
-              <span className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-wider flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-[var(--rf-brand)]" /> {tier} plan
+              <span className="text-[10px] text-blue-600 font-bold uppercase tracking-wider flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                <ShieldCheck className="w-3 h-3" /> {tier} plan
               </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-4">
           {isAdmin && activeTab !== 'jira' && (
-            <button onClick={handleSave} disabled={isSaving} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 text-white text-sm font-bold px-6 py-2.5 rounded-2xl shadow-[var(--rf-shadow-md)] transition-all active:scale-[0.98] flex items-center gap-2">
+            <motion.button 
+              onClick={handleSave} 
+              disabled={isSaving} 
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-400 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-blue-600/20 transition-all flex items-center gap-2"
+              whileTap={{ scale: 0.98 }}
+            >
               {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               Save Workspace
-            </button>
+            </motion.button>
           )}
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden flex bg-transparent">
-          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-[linear-gradient(180deg,#fcfdff_0%,var(--rf-bg)_55%,var(--rf-bg-canvas)_100%)] p-6 flex flex-col gap-2">
+      <div className="flex-1 overflow-hidden flex">
+          <div className="w-72 shrink-0 border-r border-slate-200 bg-slate-50/50 p-6 flex flex-col gap-2">
             {settingsNav.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                  activeTab === tab.id ? 'bg-white text-[var(--rf-brand)] border-[rgba(0,82,204,0.12)] shadow-[var(--rf-shadow-sm)]' : 'text-[var(--rf-text-secondary)] border-transparent hover:bg-white/70'
+                  activeTab === tab.id ? 'bg-white text-blue-600 border-slate-200 shadow-sm' : 'text-slate-500 border-transparent hover:bg-slate-100 hover:text-slate-700'
                 }`}
               >
-                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`} />
+                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`} />
                 <div className="text-left">
-                  <div className="text-xs font-bold">{tab.label}</div>
-                  <div className="text-[10px] text-[var(--rf-text-tertiary)]">{tab.sub}</div>
+                  <div className={`text-xs font-bold ${activeTab === tab.id ? 'text-blue-700' : 'text-slate-700'}`}>{tab.label}</div>
+                  <div className={`text-[10px] mt-0.5 ${activeTab === tab.id ? 'text-blue-500' : 'text-slate-400'}`}>{tab.sub}</div>
                 </div>
               </button>
             ))}
             
-            <div className="mt-auto px-3 py-5 border-t border-[var(--rf-border-subtle)]">
-               <div className="rf-panel-soft rounded-2xl p-4 text-[var(--rf-text)] space-y-3">
+            <div className="mt-auto pt-6 border-t border-slate-200">
+               <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
                  <div>
-                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Recommended Order</div>
-                   <div className="text-sm font-semibold">1. AI Setup</div>
-                   <div className="text-sm font-semibold">2. Project Setup</div>
-                   <div className="text-sm font-semibold">3. Guidance</div>
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Recommended Order</div>
+                   <div className="text-xs font-semibold text-slate-700 space-y-1.5">
+                     <div>1. AI Setup</div>
+                     <div>2. Project Setup</div>
+                     <div>3. Guidance</div>
+                   </div>
                  </div>
-                 <div className="pt-3 border-t border-[var(--rf-border-subtle)]">
-                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Current Plan</div>
-                   <div className="text-base font-bold capitalize">{tier}</div>
-                   <div className="text-xs text-[var(--rf-text-secondary)] mt-1">
+                 <div className="pt-4 mt-4 border-t border-slate-100">
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Current Plan</div>
+                   <div className="text-sm font-bold text-slate-900 capitalize">{tier}</div>
+                   <div className="text-[11px] font-medium text-slate-500 mt-1">
                      {usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0} generations
                    </div>
                  </div>
@@ -633,21 +645,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-8 lg:p-10 space-y-10 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-8 lg:p-10 custom-scrollbar bg-slate-50/50">
             {activeTab === 'models' && (
-              <div className="max-w-3xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <motion.div 
+                className="max-w-3xl space-y-6"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
                 <div className="space-y-1">
-                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">AI Setup</div>
-                   <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Choose a provider and assign the core model roles</h3>
-                   <p className="text-[var(--rf-text-secondary)] text-sm">You only need three things here: a provider, credentials, and which models handle the main reasoning steps.</p>
+                   <h3 className="text-2xl font-bold text-slate-900 tracking-tight">AI Provider & Models</h3>
+                   <p className="text-slate-500 text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
                 </div>
 
-                <div className="rf-panel rounded-[28px] p-6 space-y-6">
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200 shadow-sm space-y-8">
                   <div className="space-y-3">
-                    <label className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-wider">LLM Provider</label>
-                    <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border-subtle)]">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">LLM Provider</label>
+                    <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
                       {(['openai', 'gemini', 'forge_llms'] as const).map(p => (
-                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm' : 'text-[var(--rf-text-tertiary)]'}`}>
+                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${provider === p ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>
                           {p.replace('_', ' ')}
                         </button>
                       ))}
@@ -655,126 +671,123 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   {provider === 'openai' && (
-                    <div className="space-y-2 pt-2 animate-in slide-in-from-top-1">
+                    <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                       <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">OpenAI API Key</label>
-                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[9px] font-bold text-red-500 hover:underline">Clear Stored</button>}
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">OpenAI API Key</label>
+                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-rose-700">Clear Stored</button>}
                       </div>
-                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
-                    </div>
+                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none" />
+                    </motion.div>
                   )}
 
                   {provider === 'gemini' && (
-                    <div className="space-y-2 pt-2 animate-in slide-in-from-top-1">
+                    <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                       <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Gemini API Key</label>
-                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[9px] font-bold text-red-500 hover:underline">Clear Stored</button>}
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Gemini API Key</label>
+                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-rose-700">Clear Stored</button>}
                       </div>
-                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
-                    </div>
+                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none" />
+                    </motion.div>
                   )}
 
-                  <div className="space-y-4 pt-4 border-t border-slate-100">
-                    <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)]">
-                      <span className="font-semibold text-[var(--rf-text)]">Keep it simple:</span> one stronger model for decomposition, one fast model for clarify/evaluation, and optionally a separate refine model later.
+                  <div className="space-y-5 pt-6 border-t border-slate-100">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 flex items-start gap-3">
+                      <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                      <p><span className="font-bold text-slate-900">Best practice:</span> use a stronger model for decomposition and a faster model for clarify and evaluation.</p>
                     </div>
-                    {[
-                      { label: 'Decomposition Pass', val: decompositionModel, set: setDecompositionModel },
-                      { label: 'Reasoning & Clarify', val: clarifyModel, set: setClarifyModel },
-                      { label: 'Evaluation & Theme', val: evaluateModel, set: setEvaluateModel },
-                    ].map((item, i) => (
-                      <div key={i} className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
-                        <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[11px] font-semibold text-[var(--rf-text)] min-w-[180px] outline-none">
-                          {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                        </select>
-                      </div>
-                    ))}
+                    
+                    <div className="space-y-4">
+                      {[
+                        { label: 'Decomposition Pass', val: decompositionModel, set: setDecompositionModel },
+                        { label: 'Reasoning & Clarify', val: clarifyModel, set: setClarifyModel },
+                        { label: 'Evaluation & Theme', val: evaluateModel, set: setEvaluateModel },
+                      ].map((item, i) => (
+                        <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <span className="text-sm font-bold text-slate-700">{item.label}</span>
+                          <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 sm:w-[240px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition">
+                            {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="pt-4 flex items-center gap-4">
-                    <button onClick={testLlmConnection} disabled={isTestingLlm} className="bg-[var(--rf-text)] hover:bg-slate-900 text-white text-[10px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
-                       {isTestingLlm ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />} Test Connection
-                    </button>
+                  <div className="pt-6 border-t border-slate-100 flex items-center gap-4">
+                    <motion.button 
+                      onClick={testLlmConnection} 
+                      disabled={isTestingLlm} 
+                      className="bg-slate-900 hover:bg-black text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg transition-all flex items-center gap-2"
+                      whileTap={{ scale: 0.98 }}
+                    >
+                       {isTestingLlm ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Test Connection
+                    </motion.button>
                     {llmTestResult && (
-                      <div className={`px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-2 border ${llmTestResult.ok ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
-                         {llmTestResult.ok ? <Check className="w-3.5 h-3.5" /> : <Info className="w-3.5 h-3.5" />} {llmTestResult.message}
+                      <div className={`px-4 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-2 border ${llmTestResult.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                         {llmTestResult.ok ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />} {llmTestResult.message}
                       </div>
                     )}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             )}
 
             {activeTab === 'jira' && (
-              <div className="max-w-4xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Project Setup</div>
-                    <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Set up one Jira project at a time</h3>
-                    <p className="text-[var(--rf-text-secondary)] text-sm">Focus on the essentials first: sync Jira, choose a project, define backlog context, then add optional boosters like curated examples only if needed.</p>
-                  </div>
+              <motion.div 
+                className="max-w-4xl space-y-8"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="space-y-1">
+                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Project Setup</h3>
+                  <p className="text-slate-500 text-sm">Sync Jira, select a project, and define its backlog context and optional boosters.</p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-8">
-                <div className="rf-panel rounded-[28px] p-8 space-y-8">
-                  <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-6">
-                    <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="space-y-1">
-                          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 1</div>
-                          <h4 className="text-base font-bold text-[var(--rf-text)]">Workspace Jira discovery</h4>
-                          <p className="text-xs text-[var(--rf-text-secondary)]">Refresh projects and fields before editing project-specific rules.</p>
-                        </div>
-                        <button onClick={discoverJira} disabled={isDiscovering} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 border border-slate-200 shadow-sm">
-                          {isDiscovering ? <RefreshCw className="w-3.5 h-3.5 animate-spin"/> : <RefreshCw className="w-3.5 h-3.5" />} Sync Jira
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Projects Found</div>
-                          <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{projects.length}</div>
-                        </div>
-                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Custom Fields</div>
-                          <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{customFields.length}</div>
-                        </div>
-                      </div>
+                <div className="space-y-6">
+                  {/* Step 1 */}
+                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step 1</div>
+                      <h4 className="text-lg font-bold text-slate-900">Workspace Jira Discovery</h4>
+                      <p className="text-xs font-medium text-slate-500">Refresh projects and fields before editing project rules.</p>
                     </div>
-
-                    <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
-                      <div className="space-y-1">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workspace Default</div>
-                        <h4 className="text-base font-bold text-[var(--rf-text)]">Issue linking</h4>
-                        <p className="text-xs text-[var(--rf-text-secondary)]">Used when a project does not override its Jira issue link type.</p>
+                    <div className="flex items-center gap-4">
+                      <div className="flex gap-4 mr-2">
+                        <div className="text-center">
+                          <div className="text-2xl font-black text-slate-900">{projects.length}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Projects</div>
+                        </div>
+                        <div className="w-px bg-slate-200"></div>
+                        <div className="text-center">
+                          <div className="text-2xl font-black text-slate-900">{customFields.length}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Fields</div>
+                        </div>
                       </div>
-                      <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-white border border-[var(--rf-border)] px-4 py-3 rounded-xl text-sm font-semibold text-[var(--rf-text)] outline-none shadow-[var(--rf-shadow-sm)] w-full">
-                        {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
-                      </select>
-                      {isAdmin && (
-                        <button onClick={handleSave} disabled={isSaving} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all active:scale-[0.98] flex items-center gap-2">
-                          {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                          Save Workspace Default
-                        </button>
-                      )}
+                      <motion.button 
+                        onClick={discoverJira} 
+                        disabled={isDiscovering} 
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2 border border-slate-200"
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isDiscovering ? 'animate-spin' : ''}`} /> Sync
+                      </motion.button>
                     </div>
                   </div>
 
-                  <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
+                  {/* Step 2 Selection */}
+                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="space-y-1">
-                      <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 2</div>
-                      <h4 className="text-base font-bold text-[var(--rf-text)]">Choose the project you want to configure</h4>
-                      <p className="text-xs text-[var(--rf-text-secondary)]">Everything below applies only to this project: backlog cache scope, AR field mapping, project guidance, and optional curated examples.</p>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step 2</div>
+                      <h4 className="text-lg font-bold text-slate-900">Select Project</h4>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-                      <select value={activeArProj} onChange={e => setActiveArProj(e.target.value)} className="bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] shadow-[var(--rf-shadow-sm)] focus:ring-2 focus:ring-blue-500/20 outline-none min-w-[240px]">
-                        <option value="*">Select a project...</option>
-                        {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
-                      </select>
-                      <div className="text-xs text-[var(--rf-text-secondary)]">
-                        {activeArProj !== '*' ? `Currently editing ${activeArProj}.` : 'Pick a Jira project to unlock project-specific setup.'}
-                      </div>
-                    </div>
+                    <select 
+                      value={activeArProj} 
+                      onChange={e => setActiveArProj(e.target.value)} 
+                      className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none sm:w-64 transition"
+                    >
+                      <option value="*">Select a project...</option>
+                      {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
+                    </select>
                   </div>
 
                   {activeArProj !== '*' ? (
@@ -792,64 +805,64 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       onRefreshBacklogCache={handleRefreshBacklogCache}
                     />
                   ) : (
-                    <div className="rf-panel-soft rounded-[24px] p-10 text-center border border-dashed border-[var(--rf-border)]">
-                      <Database className="w-10 h-10 text-[var(--rf-text-tertiary)]/40 mx-auto mb-4" />
-                      <h4 className="text-base font-semibold text-[var(--rf-text)]">Select a project to continue</h4>
-                      <p className="text-sm text-[var(--rf-text-secondary)] mt-2">Once a project is selected, you can define which deployed backlog items are indexed, how ARs are read, and whether curated examples should boost the output.</p>
+                    <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-slate-200">
+                      <Database className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                      <h4 className="text-lg font-bold text-slate-900">Select a project to configure</h4>
+                      <p className="text-sm font-medium text-slate-500 mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and optional curated examples for the selected project.</p>
                     </div>
                   )}
 
-                  <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
+                  {/* Step 3 WIs */}
+                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-1">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
-                        <h4 className="text-base font-bold text-[var(--rf-text)]">Project work instructions</h4>
-                        <p className="text-xs text-[var(--rf-text-secondary)]">
-                          Attach PDF instructions to the selected project so clarify and generation can reference them.
-                        </p>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step 3</div>
+                        <h4 className="text-lg font-bold text-slate-900">Project Work Instructions</h4>
+                        <p className="text-xs font-medium text-slate-500">Attach PDFs to inform AI generation for this project.</p>
                       </div>
-                      <button
+                      <motion.button
                         onClick={() => wiFileInputRef.current?.click()}
                         disabled={activeArProj === '*' || !!wiUploadState}
-                        className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] disabled:opacity-60 text-[var(--rf-text)] text-xs font-black px-5 py-2.5 rounded-xl shadow-[var(--rf-shadow-sm)] transition-all"
+                        className="bg-slate-900 hover:bg-black disabled:bg-slate-300 text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg shadow-sm transition-all"
+                        whileTap={{ scale: 0.98 }}
                       >
                         {wiUploadState ? 'Uploading…' : 'Add PDF'}
-                      </button>
+                      </motion.button>
                       <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
                     </div>
 
                     {activeArProj === '*' ? (
-                      <div className="rounded-2xl border border-dashed border-[var(--rf-border)] bg-white px-4 py-5 text-sm text-[var(--rf-text-secondary)]">
-                        Select a project first to manage project-specific work instructions.
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-medium text-slate-500 text-center">
+                        Select a project first to manage instructions.
                       </div>
                     ) : (
                       <>
                         {(wiUploadState || wiUploadError) && (
-                          <div className={`rounded-2xl border p-4 ${wiUploadError ? 'border-red-200 bg-[var(--rf-danger-subtle)]' : 'border-[rgba(0,82,204,0.12)] bg-[var(--rf-brand-muted)]'}`}>
+                          <div className={`rounded-xl border p-4 ${wiUploadError ? 'border-rose-200 bg-rose-50' : 'border-blue-200 bg-blue-50'}`}>
                             {wiUploadState && (
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between gap-3">
                                   <div>
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Upload In Progress</div>
-                                    <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{wiUploadState.filename}</div>
+                                    <div className="text-[10px] font-bold uppercase tracking-widest text-blue-500">Upload In Progress</div>
+                                    <div className="mt-1 text-sm font-bold text-slate-900">{wiUploadState.filename}</div>
                                   </div>
-                                  <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-semibold">
+                                  <div className="inline-flex items-center gap-2 text-blue-600 text-xs font-bold">
                                     <RefreshCw className="w-4 h-4 animate-spin" />
                                     {wiUploadCopy}
                                   </div>
                                 </div>
-                                <div className="h-2 overflow-hidden rounded-full bg-white/70 border border-[rgba(0,82,204,0.08)]">
-                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                                <div className="h-1.5 overflow-hidden rounded-full bg-blue-100">
+                                  <div className="h-full w-1/2 rounded-full bg-blue-500 animate-pulse" />
                                 </div>
                               </div>
                             )}
                             {wiUploadError && (
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-danger)]">Upload Failed</div>
-                                  <p className="mt-1 text-sm text-[var(--rf-text)]">{wiUploadError}</p>
+                                  <div className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Upload Failed</div>
+                                  <p className="mt-1 text-sm font-bold text-slate-900">{wiUploadError}</p>
                                 </div>
-                                <button type="button" onClick={() => setWiUploadError(null)} className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-[var(--rf-danger)]">Dismiss</button>
+                                <button type="button" onClick={() => setWiUploadError(null)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-rose-600 border border-rose-200">Dismiss</button>
                               </div>
                             )}
                           </div>
@@ -857,23 +870,23 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {wiDocs.length === 0 ? (
-                            <div className="col-span-2 p-10 text-center border-2 border-dashed border-[var(--rf-border-subtle)] rounded-3xl bg-[var(--rf-surface-soft)]">
-                              <FileText className="w-10 h-10 text-[var(--rf-text-tertiary)]/30 mx-auto mb-3" />
-                              <p className="text-sm font-semibold text-[var(--rf-text-tertiary)]">No work instructions linked to {activeArProj}.</p>
+                            <div className="col-span-2 p-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
+                              <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                              <p className="text-sm font-semibold text-slate-500">No work instructions linked to {activeArProj}.</p>
                             </div>
                           ) : (
                             wiDocs.map(doc => (
-                              <div key={doc.docId} className="rf-panel-soft p-4 rounded-2xl flex items-center justify-between group hover:bg-white transition-all duration-300">
+                              <div key={doc.docId} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between group hover:border-slate-300 transition-all">
                                 <div className="flex items-center gap-3 truncate">
-                                  <div className="shrink-0 w-9 h-9 bg-white rounded-lg border border-[var(--rf-border)] flex items-center justify-center">
-                                    <FileText className="w-4 h-4 text-[var(--rf-text-tertiary)] font-light" />
+                                  <div className="shrink-0 w-10 h-10 bg-white rounded-lg border border-slate-200 flex items-center justify-center shadow-sm">
+                                    <FileText className="w-5 h-5 text-blue-500" />
                                   </div>
                                   <div className="truncate">
-                                    <p className="text-xs font-bold text-[var(--rf-text)] truncate">{doc.filename}</p>
-                                    <p className="text-[10px] text-[var(--rf-text-tertiary)] font-semibold uppercase">{doc.chunkCount} chunks</p>
+                                    <p className="text-sm font-bold text-slate-900 truncate">{doc.filename}</p>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">{doc.chunkCount} chunks</p>
                                   </div>
                                 </div>
-                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-red-500 transition-colors">
+                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-slate-400 hover:text-rose-500 p-2 rounded-lg hover:bg-rose-50 transition-colors">
                                   <Trash className="w-4 h-4" />
                                 </button>
                               </div>
@@ -884,60 +897,70 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     )}
                   </div>
                 </div>
-                </div>
-              </div>
+              </motion.div>
             )}
 
             {activeTab === 'domain' && (
-              <div className="max-w-4xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <motion.div 
+                className="max-w-3xl space-y-8"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
                 <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Guidance</div>
-                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Set the shared guidance Refinely should follow</h3>
-                  <p className="text-sm text-[var(--rf-text-secondary)]">Use this section for workspace-wide defaults only. Project-specific rules now live in Project Setup.</p>
+                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Workspace Guidance</h3>
+                  <p className="text-sm font-medium text-slate-500">Global defaults for the workspace. Project-specific rules live in Project Setup.</p>
                 </div>
-                <div className="rf-panel rounded-[32px] p-8 lg:p-10 space-y-10">
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200 shadow-sm space-y-8">
                   <div className="space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(0,82,204,0.1)]"><Users className="w-6 h-6" /></div>
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shadow-sm"><Users className="w-6 h-6" /></div>
                       <div>
-                        <h4 className="text-lg font-bold text-[var(--rf-text)]">Core persona roles</h4>
-                        <p className="text-xs text-[var(--rf-text-secondary)] font-medium">Key stakeholders for story decomposition.</p>
+                        <h4 className="text-base font-bold text-slate-900">Core persona roles</h4>
+                        <p className="text-xs font-medium text-slate-500">Key stakeholders to consider during generation.</p>
                       </div>
                     </div>
-                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Project Manager" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl px-6 py-4 text-sm font-medium focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Product Manager" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-3.5 text-sm font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition" />
                   </div>
 
-                  <div className="pt-10 border-t border-[var(--rf-border-subtle)] rounded-2xl border border-dashed border-[var(--rf-border)] bg-white px-5 py-4">
-                    <div className="text-xs font-semibold text-[var(--rf-text)]">Project work instructions moved</div>
-                    <p className="mt-1 text-xs text-[var(--rf-text-secondary)]">
-                      Work instructions are project-scoped and are now managed in <span className="font-semibold">Jira Governance</span> after selecting a project.
-                    </p>
+                  <div className="space-y-4 pt-6 border-t border-slate-100">
+                    <div>
+                      <h4 className="text-base font-bold text-slate-900">Issue linking default</h4>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Used when a project does not override its Jira issue link type.</p>
+                    </div>
+                    <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none w-full max-w-sm transition">
+                      {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             )}
 
             {activeTab === 'billing' && (
-              <div className="max-w-4xl space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <motion.div 
+                className="max-w-4xl space-y-8"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
                 <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Billing</div>
-                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Plan, usage, and compliance controls</h3>
+                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Billing & Compliance</h3>
                 </div>
 
-                <div className="rf-panel rounded-[28px] p-8 space-y-6">
+                <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
-                    <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
-                    <h4 className="text-3xl font-black text-slate-900 capitalize mt-2">{tier}</h4>
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
+                    <h4 className="text-3xl font-black text-blue-600 capitalize mt-1">{tier}</h4>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm font-semibold text-slate-700">
+                  <div className="flex-1 max-w-sm space-y-2">
+                    <div className="flex justify-between text-sm font-bold text-slate-700">
                       <span>Generations this month</span>
-                      <span>{usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span>
+                      <span>{usage?.currentMonth ?? 0} <span className="text-slate-400 font-medium">/ {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span></span>
                     </div>
                     {limits?.generationsPerMonth !== -1 && (
-                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
                         <div
-                          className="h-full bg-blue-600 transition-all duration-500"
+                          className="h-full bg-blue-500 transition-all duration-500"
                           style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
                         />
                       </div>
@@ -945,51 +968,27 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                   {[
-                    {
-                      key: 'free',
-                      name: 'Free',
-                      price: 'Try it out',
-                      highlights: ['Core generation', 'Limited monthly volume', 'Basic workspace setup'],
-                    },
-                    {
-                      key: 'standard',
-                      name: 'Standard',
-                      price: 'For growing teams',
-                      highlights: ['Higher monthly volume', 'Backlog context features', 'Project governance controls'],
-                    },
-                    {
-                      key: 'premium',
-                      name: 'Premium',
-                      price: 'For advanced workflows',
-                      highlights: ['Unlimited generations', 'Full automation support', 'Best fit for enterprise rollout'],
-                    },
-                    {
-                      key: 'enterprise',
-                      name: 'Enterprise',
-                      price: 'Regulated industries',
-                      highlights: ['Compliance Pack', 'PII masking and transparency reports', 'Immutable audit trail + Jira audit visibility'],
-                    },
+                    { key: 'free', name: 'Free', price: 'Try it out', highlights: ['Core generation', 'Limited volume', 'Basic setup'] },
+                    { key: 'standard', name: 'Standard', price: 'Growing teams', highlights: ['Higher volume', 'Backlog context', 'Project controls'] },
+                    { key: 'premium', name: 'Premium', price: 'Advanced workflows', highlights: ['Unlimited gens', 'Full automation', 'Enterprise fit'] },
+                    { key: 'enterprise', name: 'Enterprise', price: 'Regulated', highlights: ['Compliance Pack', 'PII masking', 'Audit trail'] },
                   ].map(plan => {
                     const isCurrent = tier === plan.key;
                     return (
-                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 shadow-[var(--rf-shadow-sm)] ${isCurrent ? 'border-[var(--rf-brand)]' : 'border-[var(--rf-border)]'}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-lg font-bold text-[var(--rf-text)]">{plan.name}</div>
-                            <div className="text-xs text-[var(--rf-text-secondary)] mt-1">{plan.price}</div>
+                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-blue-500 shadow-md shadow-blue-500/10' : 'border-slate-200 hover:border-slate-300'}`}>
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between">
+                            <div className={`text-lg font-black ${isCurrent ? 'text-blue-600' : 'text-slate-900'}`}>{plan.name}</div>
+                            {isCurrent && <span className="bg-blue-50 text-blue-600 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md border border-blue-100">Current</span>}
                           </div>
-                          {isCurrent && (
-                            <span className="rounded-full bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-brand)]">
-                              Current
-                            </span>
-                          )}
+                          <div className="text-xs font-semibold text-slate-500 mt-1">{plan.price}</div>
                         </div>
-                        <ul className="mt-4 space-y-2">
+                        <ul className="space-y-2.5 mb-6 flex-1">
                           {plan.highlights.map(item => (
-                            <li key={item} className="text-xs text-[var(--rf-text-secondary)] flex items-center gap-2">
-                              <Check className="w-3.5 h-3.5 text-[var(--rf-brand)]" />
+                            <li key={item} className="text-xs font-medium text-slate-600 flex items-start gap-2">
+                              <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
                               {item}
                             </li>
                           ))}
@@ -998,121 +997,52 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           href="https://marketplace.atlassian.com"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={`mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                          className={`mt-auto inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-bold transition ${
                             isCurrent
-                              ? 'border-[var(--rf-border)] bg-white text-[var(--rf-text-secondary)] hover:bg-[var(--rf-surface-soft)]'
-                              : 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white hover:bg-[var(--rf-brand-hover)]'
+                              ? 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                              : 'border-slate-900 bg-slate-900 text-white hover:bg-black'
                           }`}
                         >
                           {isCurrent ? 'Manage Plan' : 'Upgrade'}
-                          <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       </div>
                     );
                   })}
                 </div>
 
-                <div className="rf-panel rounded-[28px] p-8 space-y-6">
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200 shadow-sm space-y-6">
                   <div>
-                    <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Compliance Pack</p>
-                    <h4 className="text-2xl font-black text-slate-900 mt-2">GDPR + EU AI Act readiness</h4>
-                    <p className="mt-2 text-sm text-[var(--rf-text-secondary)]">
-                      Enable transparency reports, data minimization through PII masking, and immutable compliance audits.
+                    <div className="flex items-center gap-2 mb-1">
+                      <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                      <p className="text-[11px] uppercase tracking-widest text-indigo-600 font-bold">Compliance Pack</p>
+                    </div>
+                    <h4 className="text-xl font-bold text-slate-900">GDPR + EU AI Act readiness</h4>
+                    <p className="mt-1 text-sm font-medium text-slate-500">
+                      Enable transparency reports, PII masking, and immutable audits.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {[
                       { key: 'enabled', label: 'Compliance mode', value: complianceEnabled, set: setComplianceEnabled },
                       { key: 'transparency', label: 'Transparency reports', value: transparencyEnabled, set: setTransparencyEnabled },
-                      { key: 'pii', label: 'PII masking before LLM calls', value: piiMaskingEnabled, set: setPiiMaskingEnabled },
+                      { key: 'pii', label: 'PII masking before LLM', value: piiMaskingEnabled, set: setPiiMaskingEnabled },
                       { key: 'audit', label: 'Immutable audit trail', value: auditTrailEnabled, set: setAuditTrailEnabled },
                     ].map(item => (
-                      <label key={item.key} className="flex items-center justify-between rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm">
-                        <span className="font-medium text-[var(--rf-text)]">{item.label}</span>
+                      <label key={item.key} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 cursor-pointer hover:bg-slate-100 transition">
+                        <span className="font-bold text-sm text-slate-700">{item.label}</span>
                         <input
                           type="checkbox"
                           checked={item.value}
                           onChange={(e) => item.set(e.target.checked)}
                           disabled={!isAdmin}
-                          className="h-4 w-4 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]"
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
                       </label>
                     ))}
                   </div>
                 </div>
-
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  <div className="rf-panel rounded-[24px] p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-bold text-[var(--rf-text)]">Transparency reports</h4>
-                      <span className="text-xs text-[var(--rf-text-tertiary)]">{transparencyReports.length} recent</span>
-                    </div>
-                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-                      {transparencyReports.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-[var(--rf-border)] px-4 py-6 text-xs text-[var(--rf-text-tertiary)]">
-                          No reports yet.
-                        </div>
-                      ) : (
-                        transparencyReports.map((report) => (
-                          <div key={report.reportId} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-xs font-semibold text-[var(--rf-text)] uppercase">{report.turnType}</div>
-                              <div className="text-[10px] text-[var(--rf-text-tertiary)]">{new Date(report.createdAt).toLocaleString()}</div>
-                            </div>
-                            <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">
-                              {(report.decisionSummary || []).slice(0, 1).join(' ') || 'No summary'}
-                            </div>
-                            <div className="mt-1 text-[10px] text-[var(--rf-text-tertiary)]">
-                              PII redactions: {report.piiMasking?.totalRedactions ?? 0} • Tokens: {report.tokenUsage?.total ?? 0}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rf-panel rounded-[24px] p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-bold text-[var(--rf-text)]">Compliance audit trail</h4>
-                      <span className="text-xs text-[var(--rf-text-tertiary)]">{complianceEvents.length} recent</span>
-                    </div>
-                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-                      {complianceEvents.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-[var(--rf-border)] px-4 py-6 text-xs text-[var(--rf-text-tertiary)]">
-                          No audit events yet.
-                        </div>
-                      ) : (
-                        complianceEvents.map((event) => (
-                          <div key={event.eventId} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-xs font-semibold text-[var(--rf-text)]">{event.action}</div>
-                              <div className="text-[10px] text-[var(--rf-text-tertiary)]">{new Date(event.timestamp).toLocaleString()}</div>
-                            </div>
-                            <div className="mt-1 text-[10px] uppercase tracking-wide text-[var(--rf-text-tertiary)]">{event.category}</div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rf-panel rounded-[24px] p-6 space-y-3">
-                  <h4 className="text-sm font-bold text-[var(--rf-text)]">Atlassian audit correlation</h4>
-                  <p className="text-xs text-[var(--rf-text-secondary)]">
-                    Recent Jira audit records are shown here for security/compliance teams to cross-check with app-level audit events.
-                  </p>
-                  <div className="text-xs text-[var(--rf-text-tertiary)]">
-                    Jira audit records fetched: {jiraAuditRecords.length}
-                  </div>
-                </div>
-
-                {isAdmin && (
-                  <button onClick={handleResetUsage} className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-red-600 hover:text-white border border-red-200 hover:bg-red-600 rounded-xl transition-all">
-                    Reset Usage Counter
-                  </button>
-                )}
-              </div>
+              </motion.div>
             )}
           </div>
       </div>
@@ -1215,9 +1145,9 @@ function ProjectConfigurationManager({
         if (refreshed.issueCount > 0) {
           setProjectNotice(`Backlog cache rebuilt with ${refreshed.issueCount} issues.`);
         } else if (refreshed.diagnostics?.likelyReason) {
-          setProjectNotice(`Backlog cache rebuilt, but returned 0 items. ${refreshed.diagnostics.likelyReason}`);
+          setProjectNotice(`Cache rebuilt: 0 items. ${refreshed.diagnostics.likelyReason}`);
         } else {
-          setProjectNotice('Backlog cache rebuilt, but 0 matching issues were found for the selected statuses.');
+          setProjectNotice('Cache rebuilt: 0 matching issues found.');
         }
       }
     } catch (e: any) {
@@ -1228,159 +1158,105 @@ function ProjectConfigurationManager({
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in">
-      <div className="flex flex-col gap-4 border-b border-[var(--rf-border-subtle)] pb-6">
+    <div className="space-y-6 animate-in fade-in">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-t border-slate-200 pt-6">
         <div>
-          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Project Configuration</div>
-          <h4 className="text-lg font-bold text-[var(--rf-text)]">Project setup for {activeArProj}</h4>
-          <p className="text-sm text-[var(--rf-text-secondary)] mt-1">Start with backlog context and project guidance. Acceptance-criteria mapping and curated examples are there if you need them, but they are not required for every rollout.</p>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-blue-600 mb-1">Editing Project</div>
+          <h4 className="text-xl font-bold text-slate-900">{activeArProj} Configuration</h4>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Required First</div>
-            <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">Backlog context</div>
+        {isProjectAdmin && (
+          <div className="flex flex-wrap gap-2">
+            <motion.button 
+              onClick={handleSave} 
+              disabled={isSavingProject || isRefreshingBacklogCache} 
+              className="bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 text-slate-700"
+              whileTap={{ scale: 0.98 }}
+            >
+              {isSavingProject ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
+            </motion.button>
+            <motion.button 
+              onClick={handleSaveAndRefresh} 
+              disabled={isSavingProject || isRefreshingBacklogCache} 
+              className="bg-slate-900 hover:bg-black text-white text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2"
+              whileTap={{ scale: 0.98 }}
+            >
+              {(isSavingProject || isRefreshingBacklogCache) ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Save & Rebuild
+            </motion.button>
           </div>
-          <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Usually Helpful</div>
-            <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">Project guidance</div>
-          </div>
-          <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced / Optional</div>
-            <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">AR mapping and examples</div>
-          </div>
-        </div>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          {projectNotice ? (
-            <div className="text-xs font-semibold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] border border-[rgba(0,82,204,0.12)] rounded-2xl px-4 py-3">
-              {projectNotice}
-            </div>
-          ) : (
-            <div className="text-xs text-[var(--rf-text-secondary)]">
-              Project admins can save project-only changes here without affecting the rest of the workspace.
-            </div>
-          )}
-          {isProjectAdmin && (
-            <div className="flex flex-wrap gap-2">
-              <button onClick={handleSave} disabled={isSavingProject || isRefreshingBacklogCache} className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] text-[10px] font-bold uppercase tracking-widest px-5 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all flex items-center gap-2">
-                {isSavingProject ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save Project
-              </button>
-              <button onClick={handleSaveAndRefresh} disabled={isSavingProject || isRefreshingBacklogCache} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-[10px] font-bold uppercase tracking-widest px-5 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] active:scale-[0.98] transition-all flex items-center gap-2">
-                {(isSavingProject || isRefreshingBacklogCache) ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Save + Rebuild Cache
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-         <div className="col-span-full space-y-4">
+      {projectNotice && (
+        <div className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-2">
+          <Check className="w-4 h-4" /> {projectNotice}
+        </div>
+      )}
+
+      <div className="space-y-4">
+         <div className="space-y-3">
            <button
              type="button"
              onClick={() => toggleSection('backlog')}
-             className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+             className="w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm hover:border-slate-300 transition"
            >
-             <div>
-               <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
-                 <Database className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Backlog Context
-                 <span className="rounded-full bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[9px] text-[var(--rf-brand)] border border-[rgba(0,82,204,0.1)]">Required</span>
-               </h5>
-               <p className="text-xs text-[var(--rf-text-secondary)] mt-1">
-                 Choose which Jira statuses Refinely should treat as the usable backlog context for this project.
-               </p>
+             <div className="flex items-center gap-3">
+               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center border border-blue-100"><Database className="w-4 h-4 text-blue-600" /></div>
+               <div>
+                 <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                   Backlog Context
+                   <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-rose-600 border border-rose-100">Required</span>
+                 </h5>
+                 <p className="text-xs font-medium text-slate-500 mt-0.5">Define Jira statuses for AI context.</p>
+               </div>
              </div>
-             <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.backlog ? 'rotate-90' : ''}`} />
+             <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${expandedSections.backlog ? 'rotate-90' : ''}`} />
            </button>
 
            {expandedSections.backlog && (
-           <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
-                 <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{backlogCacheInfo?.issueCount ?? 0}</div>
+           <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-5">
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Indexed Items</div>
+                 <div className="mt-1 text-xl font-black text-slate-900">{backlogCacheInfo?.issueCount ?? 0}</div>
                </div>
-               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
-                 <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
+               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Last Built</div>
+                 <div className="mt-1 text-sm font-bold text-slate-700">
                    {backlogCacheInfo?.builtAt ? new Date(backlogCacheInfo.builtAt).toLocaleString() : 'Not built yet'}
                  </div>
                </div>
-               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Refresh Policy</div>
-                 <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
-                   {backlogCacheInfo?.stale ? 'Needs refresh' : 'Fresh'}
+               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</div>
+                 <div className="mt-1 text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                   {backlogCacheInfo?.stale ? <><AlertCircle className="w-4 h-4 text-amber-500"/> Needs refresh</> : <><Check className="w-4 h-4 text-emerald-500"/> Fresh</>}
                  </div>
-                 <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">Weekly scheduled rebuild plus manual refresh anytime.</div>
                </div>
              </div>
 
-             {backlogDiagnostics && (
-               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-4 space-y-2">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Why This Count</div>
-                 <div className="text-xs text-[var(--rf-text-secondary)]">{backlogDiagnostics.likelyReason}</div>
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                   <div className="rounded-xl bg-[var(--rf-surface-soft)] px-3 py-2">
-                     <div className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Project Issues</div>
-                     <div className="mt-1 font-semibold text-[var(--rf-text)]">{backlogDiagnostics.totalProjectIssues}</div>
-                   </div>
-                   <div className="rounded-xl bg-[var(--rf-surface-soft)] px-3 py-2">
-                     <div className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Done Category</div>
-                     <div className="mt-1 font-semibold text-[var(--rf-text)]">{backlogDiagnostics.doneCategoryIssues}</div>
-                   </div>
-                   <div className="rounded-xl bg-[var(--rf-surface-soft)] px-3 py-2">
-                     <div className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Matches Scope</div>
-                     <div className="mt-1 font-semibold text-[var(--rf-text)]">{backlogDiagnostics.matchingScopeIssues}</div>
-                   </div>
+             <div className="space-y-3 pt-2">
+               <div className="flex items-center justify-between">
+                 <div className="text-sm font-bold text-slate-900">
+                   {effectiveBacklogStatuses.length} status{effectiveBacklogStatuses.length === 1 ? '' : 'es'} in scope
                  </div>
-                 <div className="text-[11px] text-[var(--rf-text-tertiary)] font-mono break-all">JQL: {backlogDiagnostics.jqlUsed}</div>
+                 <div className="flex gap-2">
+                   <button onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))} className="text-[10px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded">Default</button>
+                   <button onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))} className="text-[10px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded">All</button>
+                 </div>
                </div>
-             )}
-
-             <div className="flex items-center justify-between gap-3">
-               <div className="text-xs font-semibold text-[var(--rf-text)]">
-                 {effectiveBacklogStatuses.length} status{effectiveBacklogStatuses.length === 1 ? '' : 'es'} currently in scope
+               <div className="flex flex-wrap gap-2">
+                 {backlogStatusOptions.map((status: any) => {
+                   const selected = effectiveBacklogStatuses.includes(status.name);
+                   return (
+                     <button
+                       key={status.name}
+                       onClick={() => updateBacklogStatuses(selected ? effectiveBacklogStatuses.filter((item: string) => item !== status.name) : [...effectiveBacklogStatuses, status.name])}
+                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}
+                     >
+                       {status.name}
+                     </button>
+                   );
+                 })}
                </div>
-               <div className="flex items-center gap-2">
-                 <button
-                   type="button"
-                   onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))}
-                   className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
-                 >
-                   Reset to done-like defaults
-                 </button>
-                 <button
-                   type="button"
-                   onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))}
-                   className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
-                 >
-                   Select all
-                 </button>
-               </div>
-             </div>
-
-             <div className="flex flex-wrap gap-2">
-               {backlogStatusOptions.map((status: any) => {
-                 const selected = effectiveBacklogStatuses.includes(status.name);
-                 const categoryLabel = status.statusCategory?.name || '';
-                 return (
-                   <button
-                     key={status.name}
-                     type="button"
-                     onClick={() => updateBacklogStatuses(
-                       selected
-                         ? effectiveBacklogStatuses.filter((item: string) => item !== status.name)
-                         : [...effectiveBacklogStatuses, status.name],
-                     )}
-                     className={`px-3 py-2 rounded-2xl text-left text-xs font-semibold border transition-colors ${selected ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.14)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}
-                   >
-                     <span className="block">{status.name}</span>
-                     {categoryLabel ? <span className="block text-[10px] opacity-70 mt-0.5">{categoryLabel}</span> : null}
-                   </button>
-                 );
-               })}
-             </div>
-
-             <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-[11px] text-[var(--rf-text-secondary)]">
-               If you click <span className="font-semibold text-[var(--rf-text)]">Save + Rebuild Cache</span>, the current project settings are saved first and then the cache is rebuilt immediately using the selected statuses.
              </div>
            </div>
            )}
@@ -1390,191 +1266,74 @@ function ProjectConfigurationManager({
             <button
               type="button"
               onClick={() => toggleSection('guidance')}
-              className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+              className="w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm hover:border-slate-300 transition"
             >
-              <div>
-                <h5 className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
-                  Project Guidance
-                  <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] text-[var(--rf-text-secondary)] border border-[var(--rf-border-subtle)]">Recommended</span>
-                </h5>
-                <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Optional writing or process rules that should apply only to this project.</p>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-100"><Globe className="w-4 h-4 text-indigo-600" /></div>
+                <div>
+                  <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    Project Guidance
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-slate-500 border border-slate-200">Recommended</span>
+                  </h5>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">Rules or context specific to this project.</p>
+                </div>
               </div>
-              <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
+              <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
             </button>
             {expandedSections.guidance && (
-              <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
+              <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
+                <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-32 bg-white border border-slate-200 rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition shadow-sm resize-none" />
+              </div>
             )}
          </div>
 
-         <div className="space-y-6">
+         <div className="space-y-3">
             <button
               type="button"
               onClick={() => toggleSection('mapping')}
-              className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+              className="w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm hover:border-slate-300 transition"
             >
-              <div>
-                <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
-                  <Layers className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> AR Field Mapping
-                  <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] text-[var(--rf-text-secondary)] border border-[var(--rf-border-subtle)]">Advanced</span>
-                </h5>
-                <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Only needed if acceptance criteria live in custom Jira fields or iterative slots.</p>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-100"><Layers className="w-4 h-4 text-emerald-600" /></div>
+                <div>
+                  <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    AR Field Mapping
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-slate-500 border border-slate-200">Advanced</span>
+                  </h5>
+                  <p className="text-xs font-medium text-slate-500 mt-0.5">Map where Acceptance Criteria go.</p>
+                </div>
               </div>
-              <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.mapping ? 'rotate-90' : ''}`} />
+              <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${expandedSections.mapping ? 'rotate-90' : ''}`} />
             </button>
             {expandedSections.mapping && (
-            <div className="rf-panel-soft rounded-[24px] p-6 space-y-6">
-               <div className="flex p-1 bg-white rounded-2xl border border-[var(--rf-border-subtle)] shadow-[var(--rf-shadow-sm)] max-w-[240px]">
-                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-md' : 'text-[var(--rf-text-tertiary)]'}`}>Consolidated</button>
-                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'iterative' ? 'bg-[var(--rf-text)] text-white shadow-md' : 'text-[var(--rf-text-tertiary)]'}`}>Iterative</button>
+            <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-5">
+               <div className="flex p-1 bg-white rounded-lg border border-slate-200 shadow-sm max-w-[240px]">
+                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'consolidated' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Consolidated</button>
+                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'iterative' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Iterative</button>
                </div>
                
-               <div className="pt-2">
+               <div>
                  {currentMapping.mode === 'consolidated' ? (
-                   <div className="flex items-center justify-between gap-4">
-                     <span className="text-xs font-bold text-[var(--rf-text)]">Storage Field</span>
+                   <div className="flex items-center justify-between gap-4 bg-white p-3 rounded-xl border border-slate-200">
+                     <span className="text-xs font-bold text-slate-700">Storage Field</span>
                      <FieldSelector value={currentMapping.consolidatedFieldId} onChange={(fid: string) => updateMapping({ consolidatedFieldId: fid })} customFields={customFields} />
                    </div>
                  ) : (
-                   <div className="space-y-4">
+                   <div className="space-y-3">
                      {currentMapping.iterativeFieldIds.map((fid: string, i: number) => (
-                       <div key={i} className="flex items-center gap-3">
-                         <span className="text-[9px] font-black text-slate-300 min-w-[28px]">#{i+1}</span>
+                       <div key={i} className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200">
+                         <span className="text-[10px] font-black text-slate-400 min-w-[24px] text-center">#{i+1}</span>
                          <div className="flex-1"><FieldSelector value={fid} onChange={(newF: string) => { const ids = [...currentMapping.iterativeFieldIds]; ids[i] = newF; updateMapping({ iterativeFieldIds: ids }); }} customFields={customFields} /></div>
-                         <button onClick={() => updateMapping({ iterativeFieldIds: currentMapping.iterativeFieldIds.filter((_: any, idx: number) => idx !== i) })} className="text-slate-200 hover:text-red-500"><X className="w-4 h-4"/></button>
+                         <button onClick={() => updateMapping({ iterativeFieldIds: currentMapping.iterativeFieldIds.filter((_: any, idx: number) => idx !== i) })} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition"><X className="w-4 h-4"/></button>
                        </div>
                      ))}
-                     <button onClick={() => updateMapping({ iterativeFieldIds: [...currentMapping.iterativeFieldIds, ''] })} className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">+ Add iteration slot</button>
+                     <button onClick={() => updateMapping({ iterativeFieldIds: [...currentMapping.iterativeFieldIds, ''] })} className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg uppercase tracking-widest transition">+ Add slot</button>
                    </div>
                  )}
-               </div>
-
-               <div className="pt-6 border-t border-[var(--rf-border-subtle)] flex items-center justify-between">
-                  <span className="text-xs font-bold text-[var(--rf-text)]">Issue Linking</span>
-                  <select value={currentMapping.issueLinkType || ''} onChange={e => updateMapping({ issueLinkType: e.target.value })} className="bg-white border border-[var(--rf-border)] px-4 py-2 rounded-xl text-xs font-bold text-[var(--rf-text-secondary)] outline-none shadow-[var(--rf-shadow-sm)] min-w-[140px]">
-                    <option value="">Global Default</option>
-                    {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
                </div>
             </div>
             )}
          </div>
-
-         <div className="col-span-full space-y-6 pt-8 border-t border-[var(--rf-border-subtle)] animate-in fade-in slide-in-from-bottom-2 duration-500">
-             <button
-               type="button"
-               onClick={() => toggleSection('examples')}
-               className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
-             >
-               <div>
-                 <h5 className="text-[11px] font-black text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2">
-                   <Globe className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Curated Examples
-                   <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] text-[var(--rf-text-secondary)] border border-[var(--rf-border-subtle)]">Optional</span>
-                 </h5>
-                 <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Use this only if you want to boost especially strong reference stories. Backlog context remains the primary source.</p>
-               </div>
-               <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.examples ? 'rotate-90' : ''}`} />
-             </button>
-             
-             {expandedSections.examples && (
-             <div className="space-y-5">
-             {activeArProj !== '*' && (
-                <div className="rf-panel rounded-[24px] p-6 space-y-5">
-                  <div className="flex flex-wrap gap-4">
-                    <div className="space-y-1.5 min-w-[220px]">
-                      <span className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest ml-1">Source Project</span>
-                      <select
-                        className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-xs text-[var(--rf-text)] outline-none w-full"
-                        onChange={e => onProjectSelect(e.target.value)}
-                        value={newSource.project || ''}
-                      >
-                        <option value="">Select Project...</option>
-                        {projects.map((p: any) => <option key={p.key} value={p.key}>{p.key}{p.key === activeArProj ? ' (Local)' : ''}</option>)}
-                      </select>
-                    </div>
-
-                    <div className="space-y-1.5 min-w-[220px]">
-                      <span className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest ml-1">Issue Type</span>
-                      <select
-                        className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-xs text-[var(--rf-text)] outline-none w-full"
-                        onChange={e => setNewSource((p: any) => ({ ...p, issuetype: e.target.value }))}
-                        value={newSource.issuetype || ''}
-                      >
-                        <option value="">Select Type...</option>
-                        {issueTypes.map((it: any) => <option key={it.name} value={it.name}>{it.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest ml-1">Statuses In Scope</span>
-                      <button
-                        type="button"
-                        onClick={() => setNewSource((p: any) => ({ ...p, statuses: statuses.map((s: any) => s.name), status: statuses[0]?.name || '' }))}
-                        className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
-                      >
-                        Select All
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {statuses.map((st: any) => {
-                        const selected = selectedStatuses.includes(st.name);
-                        return (
-                          <button
-                            key={st.name}
-                            type="button"
-                            onClick={() => toggleStatus(st.name)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${selected ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.14)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}
-                          >
-                            {st.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="pt-2">
-                    <button
-                      onClick={addGoldSource}
-                      disabled={!newSource.project || !newSource.issuetype || selectedStatuses.length === 0}
-                      className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-40 text-white text-xs font-bold px-6 py-2.5 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all"
-                    >
-                      Add Golden Source
-                    </button>
-                  </div>
-                </div>
-             )}
-             
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-6">
-                {currentGoldSources.length === 0 ? (
-                  <div className="col-span-full py-16 text-center border-2 border-dashed border-[var(--rf-border)] rounded-[24px] bg-[var(--rf-surface-soft)]">
-                     <BrainCircuit className="w-12 h-12 text-[var(--rf-text-tertiary)]/30 mx-auto mb-4" />
-                     <p className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest">No Active Golden Sources</p>
-                     <p className="text-[11px] text-[var(--rf-text-secondary)] mt-2">The AI will use global defaults if no project sources are configured.</p>
-                  </div>
-                ) : (
-                  currentGoldSources.map((s: any, idx: number) => (
-                    <div key={idx} className="rf-panel-soft p-5 rounded-[24px] flex items-start justify-between gap-4">
-                       <div className="space-y-2">
-                         <div className="text-sm font-bold text-[var(--rf-text)]">{s.project} <span className="text-[var(--rf-text-secondary)]">/ {s.issuetype}</span></div>
-                         <div className="flex flex-wrap gap-1.5">
-                           {(Array.isArray(s.statuses) && s.statuses.length ? s.statuses : [s.status]).filter(Boolean).map((statusName: string) => (
-                             <span key={statusName} className="px-2 py-0.5 rounded-full bg-white border border-[var(--rf-border)] text-[10px] font-semibold text-[var(--rf-text-secondary)]">
-                               {statusName}
-                             </span>
-                           ))}
-                         </div>
-                       </div>
-                       <button onClick={() => setGoldSources((p: any) => p.filter((x: any) => x !== s))} className="p-2 bg-white text-[var(--rf-text-tertiary)] hover:bg-red-50 hover:text-red-500 rounded-xl transition-all border border-[var(--rf-border)]">
-                         <Trash className="w-4 h-4" />
-                       </button>
-                    </div>
-                  ))
-                )}
-             </div>
-             </div>
-             )}
-          </div>
       </div>
     </div>
   );
@@ -1600,20 +1359,22 @@ function FieldSelector({ value, onChange, customFields }: any) {
   }, []);
 
   return (
-    <div className="relative w-full max-w-[280px]" ref={wrapperRef}>
-      <button type="button" onClick={() => setIsOpen(!isOpen)} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-xs font-bold text-left flex justify-between items-center hover:border-[var(--rf-brand)] transition-all shadow-[var(--rf-shadow-sm)]">
-        <span className="truncate text-[var(--rf-text)]">{selected ? selected.name : 'Select Field'} <span className="ml-1 text-[9px] text-[var(--rf-text-tertiary)] font-mono">({selected ? selected.id : '---'})</span></span>
-        <ChevronRight className={`w-3.5 h-3.5 text-[var(--rf-text-tertiary)] transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+    <div className="relative w-full max-w-[240px]" ref={wrapperRef}>
+      <button type="button" onClick={() => setIsOpen(!isOpen)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-left flex justify-between items-center hover:border-blue-300 transition-all shadow-sm">
+        <span className="truncate text-slate-800">{selected ? selected.name : 'Select Field'}</span>
+        <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute z-[100] top-full left-0 right-0 mt-2 bg-white border border-[var(--rf-border)] rounded-[18px] shadow-[var(--rf-shadow-lg)] overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col">
-          <div className="p-3 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]"><input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-[var(--rf-border)] rounded-2xl px-4 py-2 text-xs outline-none" /></div>
-          <div className="max-h-[240px] overflow-y-auto custom-scrollbar">
+        <div className="absolute z-50 top-full left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden flex flex-col">
+          <div className="p-2 border-b border-slate-100 bg-slate-50">
+            <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium outline-none focus:border-blue-500" />
+          </div>
+          <div className="max-h-[200px] overflow-y-auto custom-scrollbar py-1">
             {filtered.map((f: any) => (
-              <button key={f.id} onClick={() => { onChange(f.id); setIsOpen(false); setSearch(''); }} className={`w-full text-left px-5 py-3.5 text-xs hover:bg-[var(--rf-surface-soft)] transition-colors flex flex-col gap-0.5 border-b border-[var(--rf-border-subtle)] last:border-0 ${value === f.id ? 'bg-[var(--rf-brand-muted)]/70' : ''}`}>
-                <span className={`font-black uppercase tracking-tight ${value === f.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text)]'}`}>{f.name}</span>
-                <span className="text-[9px] text-[var(--rf-text-tertiary)] font-mono tracking-tighter">{f.id}</span>
+              <button key={f.id} onClick={() => { onChange(f.id); setIsOpen(false); setSearch(''); }} className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-50 transition-colors flex items-center justify-between ${value === f.id ? 'bg-blue-50/50' : ''}`}>
+                <span className={`font-bold truncate ${value === f.id ? 'text-blue-700' : 'text-slate-700'}`}>{f.name}</span>
+                <span className="text-[9px] text-slate-400 font-mono shrink-0 ml-2">{f.id}</span>
               </button>
             ))}
           </div>
