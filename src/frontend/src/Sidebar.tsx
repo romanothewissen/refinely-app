@@ -85,12 +85,12 @@ export function Sidebar({
 
   return (
     <aside
-      className="h-full flex flex-col shrink-0 overflow-hidden border-r border-[var(--rf-border)] bg-[linear-gradient(180deg,#f7fafe_0%,var(--rf-bg)_55%,var(--rf-bg-canvas)_100%)]"
+      className="h-full flex flex-col shrink-0 overflow-hidden border-r border-[var(--rf-border)] bg-[linear-gradient(180deg,#fcfdff_0%,var(--rf-bg)_55%,var(--rf-bg-canvas)_100%)]"
       style={{ width: width ?? 380 }}
     >
       {/* Header — matches canvas header height and shadow treatment */}
       <motion.div
-        className="px-6 h-[88px] bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfe_100%)] flex items-center justify-between shrink-0 border-b border-[var(--rf-border)]"
+        className="px-6 h-[88px] bg-white flex items-center justify-between shrink-0 border-b border-[var(--rf-border)]"
         style={{ boxShadow: 'var(--rf-header-shadow)' }}
         variants={fadeUpVariant}
         initial="hidden"
@@ -154,7 +154,7 @@ export function Sidebar({
             <select
               value={projectKey}
               onChange={(e) => setProjectKey(e.target.value)}
-              className="shrink-0 min-w-[132px] rounded-lg border border-[var(--rf-border)] bg-[linear-gradient(180deg,#ffffff_0%,#f9fbfe_100%)] px-2.5 py-1.5 text-[11px] font-medium text-[#172B4D] outline-none focus:border-[#0052CC] focus:ring-2 focus:ring-[#0052CC]/20 transition-shadow"
+              className="shrink-0 min-w-[132px] rounded-lg border border-[var(--rf-border)] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#172B4D] outline-none focus:border-[#0052CC] focus:ring-2 focus:ring-[#0052CC]/20 transition-shadow"
             >
               <option value="*">No project selected</option>
               {availableProjects.map(project => (
@@ -244,7 +244,7 @@ export function Sidebar({
             disabled={isWorking}
             className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[#172B4D] placeholder-[#8993A4] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2"
           />
-          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-4 py-2.5 bg-[linear-gradient(180deg,#fbfcfe_0%,#f6f9fd_100%)]">
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-4 py-2.5 bg-[var(--rf-surface-soft)]">
             <motion.button
               title="Attach doc (PDF/TXT)"
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium text-[#626F86] transition"

@@ -470,7 +470,7 @@ export function MainContent({
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header — aligned to sidebar header height and padding */}
       <motion.header
-        className="shrink-0 h-[88px] bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfe_100%)] px-6 z-10 sticky top-0 border-b border-[var(--rf-border)] flex items-center"
+        className="shrink-0 h-[88px] bg-white px-6 z-10 sticky top-0 border-b border-[var(--rf-border)] flex items-center"
         style={{ boxShadow: 'var(--rf-header-shadow)' }}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -503,7 +503,7 @@ export function MainContent({
             <motion.button
               type="button"
               onClick={() => setShowTokenDetails(prev => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[linear-gradient(180deg,#fbfcfe_0%,#f6f9fd_100%)] hover:bg-[#f4f8fd] px-2.5 py-1.5 text-[11px] font-semibold text-[#626F86] transition-colors border border-[var(--rf-border-subtle)]"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--rf-surface-soft)] hover:bg-[#f5f8fc] px-2.5 py-1.5 text-[11px] font-semibold text-[#626F86] transition-colors border border-[var(--rf-border-subtle)]"
               title="Workflow token usage"
               whileTap={{ scale: 0.97 }}
             >
@@ -513,7 +513,7 @@ export function MainContent({
             <AnimatePresence>
               {showTokenDetails && (
                 <motion.div
-                  className="absolute right-0 top-full mt-2 w-[250px] rounded-lg border border-[var(--rf-border)] bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfe_100%)] p-3 shadow-[var(--rf-shadow-md)] z-40"
+                  className="absolute right-0 top-full mt-2 w-[250px] rounded-lg border border-[var(--rf-border)] bg-white p-3 shadow-[var(--rf-shadow-md)] z-40"
                   initial={{ opacity: 0, y: -4, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.98 }}
@@ -638,7 +638,7 @@ export function MainContent({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="levitate w-14 h-14 rounded-xl flex items-center justify-center mb-5 shadow-[var(--rf-shadow-sm)] bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] border border-[rgba(214,226,244,0.95)]">
+            <div className="levitate w-14 h-14 rounded-xl flex items-center justify-center mb-5 shadow-[var(--rf-shadow-sm)] bg-white border border-[rgba(219,229,244,0.95)]">
               <Sparkles className="w-6 h-6 text-[#0052CC]" />
             </div>
             <h2 className="text-xl font-semibold text-[#172B4D] mb-2">Ready to generate</h2>
@@ -733,7 +733,7 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`overflow-hidden rounded-xl border border-[var(--rf-border)] bg-[linear-gradient(180deg,#ffffff_0%,#fbfcfe_100%)] ${feature.pendingRemoval ? 'opacity-80' : ''}`}
+                  className={`overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white ${feature.pendingRemoval ? 'opacity-80' : ''}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.06, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}

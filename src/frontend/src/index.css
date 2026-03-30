@@ -5,15 +5,15 @@
 @layer base {
   :root {
     /* Atlassian-adjacent palette with a slightly richer enterprise canvas */
-    --rf-bg: #f3f6fa;
-    --rf-bg-canvas: #eef3f8;
+    --rf-bg: #f6f8fc;
+    --rf-bg-canvas: #f1f5fa;
     --rf-surface: #ffffff;
     --rf-surface-raised: #ffffff;
-    --rf-surface-soft: #f9fbfe;
-    --rf-surface-tint: #f6f9fd;
-    --rf-border: #dde5ef;
-    --rf-border-subtle: #ebf0f6;
-    --rf-border-strong: #c5cfdd;
+    --rf-surface-soft: #fafcff;
+    --rf-surface-tint: #f7faff;
+    --rf-border: #e2e8f0;
+    --rf-border-subtle: #eef3f8;
+    --rf-border-strong: #ccd6e2;
     --rf-text: #172b4d;
     --rf-text-secondary: #5f6f86;
     --rf-text-tertiary: #8290a5;
@@ -34,7 +34,7 @@
     --rf-shadow-md:  0 2px 6px rgba(15, 23, 42, 0.05);
     --rf-shadow-lg:  0 8px 18px rgba(15, 23, 42, 0.08);
     /* Header separator — soft line + micro-shadow */
-    --rf-header-shadow: 0 1px 0 rgba(221, 229, 239, 0.95);
+    --rf-header-shadow: 0 1px 0 rgba(226, 232, 240, 0.95);
     --rf-radius-sm: 4px;
     --rf-radius-md: 6px;
     --rf-radius-lg: 8px;
@@ -47,7 +47,7 @@
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background:
-      linear-gradient(180deg, #fbfcfe 0%, var(--rf-bg) 42%, var(--rf-bg-canvas) 100%);
+      linear-gradient(180deg, #ffffff 0%, var(--rf-bg) 40%, var(--rf-bg-canvas) 100%);
     color: var(--rf-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -65,8 +65,8 @@
 @layer utilities {
   /* Floating card — ring border + layered shadow, no hard border */
   .rf-card {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-    border: 1px solid rgba(221, 229, 239, 0.95);
+    background: #ffffff;
+    border: 1px solid rgba(226, 232, 240, 0.95);
     box-shadow: var(--rf-shadow-sm);
     border-radius: var(--rf-radius-lg);
   }
@@ -75,20 +75,20 @@
   }
 
   .rf-panel {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-    border: 1px solid rgba(221, 229, 239, 0.95);
+    background: #ffffff;
+    border: 1px solid rgba(226, 232, 240, 0.95);
     box-shadow: var(--rf-shadow-sm);
   }
 
   .rf-panel-soft {
-    background: linear-gradient(180deg, #fbfcfe 0%, #f7fafe 100%);
-    border: 1px solid rgba(232, 238, 246, 0.95);
+    background: var(--rf-surface-soft);
+    border: 1px solid rgba(238, 243, 248, 0.95);
     box-shadow: var(--rf-shadow-sm);
   }
 
   .rf-tint-panel {
-    background: linear-gradient(180deg, #f7faff 0%, #f1f6fd 100%);
-    border: 1px solid rgba(214, 226, 244, 0.95);
+    background: #f6f9fe;
+    border: 1px solid rgba(219, 229, 244, 0.95);
     box-shadow: var(--rf-shadow-sm);
   }
 
