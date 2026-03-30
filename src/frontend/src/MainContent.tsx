@@ -37,7 +37,7 @@ function DiffText({ oldText, newText, fullHighlight = false, mode = 'redline' }:
       {tokens.map((tok, i) => {
         if (tok.type === 'same') return <span key={i}>{tok.text}</span>;
         if (tok.type === 'added') return <mark key={i} className="bg-blue-100 text-blue-900 rounded px-0.5 not-italic">{tok.text}</mark>;
-        return <del key={i} className="text-slate-400 line-through bg-rose-50 rounded px-0.5">{tok.text}</del>;
+        return <del key={i} className="text-[var(--rf-text-tertiary)] line-through bg-[var(--rf-danger-subtle)] rounded px-0.5">{tok.text}</del>;
       })}
     </span>
   );
@@ -138,66 +138,66 @@ function RefinePopup({ feature, sessionId, onClose, onResult }: {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
       <motion.div
-        className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm"
+        className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
         onClick={!loading ? onClose : undefined}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
       />
       <motion.div
-        className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
+        className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <div className="px-5 py-4 border-b border-[var(--rf-border-subtle)] flex items-center justify-between bg-[var(--rf-surface-soft)]/50">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-600" />
-            <span className="font-bold text-slate-900 text-sm">AI Refine</span>
-            <span className="text-slate-500 text-xs ml-1 line-clamp-1 max-w-[200px]">\u2014 {feature.title || feature.summary}</span>
+            <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" />
+            <span className="font-bold text-[var(--rf-text)] text-sm">AI Refine</span>
+            <span className="text-[var(--rf-text-tertiary)] text-xs ml-1 line-clamp-1 max-w-[200px]">\u2014 {feature.title || feature.summary}</span>
           </div>
           {!loading && (
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 text-slate-500 rounded-lg transition"><X className="w-4 h-4" /></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 text-[var(--rf-text-tertiary)] rounded-lg transition"><X className="w-4 h-4" /></button>
           )}
         </div>
 
         <div className="px-5 py-5">
           {loading ? (
             <div className="flex flex-col items-center py-8 gap-4">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-                <div className="w-5 h-5 border-[2.5px] border-blue-200 border-t-blue-600 rounded-full spin-slow" />
+              <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center">
+                <div className="w-5 h-5 border-[2.5px] border-[var(--rf-brand-subtle)] border-t-blue-600 rounded-full spin-slow" />
               </div>
               <div className="text-center">
-                <p className="font-bold text-slate-900 text-sm">Refining feature\u2026</p>
-                <p className="text-xs text-slate-500 mt-1">The AI is working on your request</p>
+                <p className="font-bold text-[var(--rf-text)] text-sm">Refining feature\u2026</p>
+                <p className="text-xs text-[var(--rf-text-tertiary)] mt-1">The AI is working on your request</p>
               </div>
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-xs text-slate-600">Describe what you want changed \u2014 e.g. "Add an AR for invalid password", "Tighten the scope to mobile only"</p>
+              <p className="text-xs text-[var(--rf-text-secondary)]">Describe what you want changed \u2014 e.g. "Add an AR for invalid password", "Tighten the scope to mobile only"</p>
               <textarea
                 rows={4}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSend(); }}
                 placeholder="Your refinement instructions\u2026"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none"
+                className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none"
                 autoFocus
               />
-              {error && <p className="text-xs text-rose-600">{error}</p>}
+              {error && <p className="text-xs text-[var(--rf-danger)]">{error}</p>}
             </div>
           )}
         </div>
 
         {!loading && (
-          <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between gap-3 bg-slate-50/50">
-            <span className="text-[11px] font-medium text-slate-400">\u2318 + Enter to send</span>
+          <div className="px-5 py-4 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-3 bg-[var(--rf-surface-soft)]/50">
+            <span className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to send</span>
             <div className="flex gap-2">
-              <motion.button onClick={onClose} className="px-4 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 transition bg-white" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
+              <motion.button onClick={onClose} className="px-4 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] border border-[var(--rf-border)] rounded-lg hover:bg-[var(--rf-surface-soft)] transition bg-white" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
               <motion.button
                 onClick={handleSend}
                 disabled={!input.trim()}
-                className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg transition shadow-sm shadow-blue-600/20"
+                className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-40 rounded-lg transition shadow-sm shadow-[var(--rf-brand)]/20"
                 whileTap={{ scale: 0.98 }}
               >
                 <Send className="w-3.5 h-3.5" /> Refine
@@ -578,28 +578,28 @@ export function MainContent({
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center relative overflow-hidden">
-          <Sparkles className="w-6 h-6 text-blue-600 relative z-10" />
-          <div className="absolute inset-0 bg-blue-50/50 animate-pulse" />
+        <div className="w-14 h-14 rounded-2xl bg-white border border-[var(--rf-border)] shadow-sm flex items-center justify-center relative overflow-hidden">
+          <Sparkles className="w-6 h-6 text-[var(--rf-brand)] relative z-10" />
+          <div className="absolute inset-0 bg-[var(--rf-brand-muted)]/50 animate-pulse" />
         </div>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight">Crafting features</h2>
-          <p className="text-sm font-medium text-slate-500 mt-1">{progress || 'Processing your request\u2026'}</p>
+          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">Crafting features</h2>
+          <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1">{progress || 'Processing your request\u2026'}</p>
         </div>
-        <div className="dot-bounce text-blue-600 mt-2"><span /><span /><span /></div>
+        <div className="dot-bounce text-[var(--rf-brand)] mt-2"><span /><span /><span /></div>
       </motion.div>
 
       <div className="w-full space-y-4">
         {[1, 2, 3].map(i => (
           <motion.div
             key={i}
-            className="w-full bg-white rounded-2xl border border-slate-200 overflow-hidden"
+            className="w-full bg-white rounded-2xl border border-[var(--rf-border)] overflow-hidden"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.12, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="flex">
-              <div className="w-2 shrink-0 bg-slate-100" />
+              <div className="w-2 shrink-0 bg-[var(--rf-surface-soft)]" />
               <div className="flex-1 p-6 space-y-4">
                 <div className="shimmer h-5 w-2/5 rounded-md" />
                 <div className="shimmer h-4 w-full rounded-md" />
@@ -619,7 +619,7 @@ export function MainContent({
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header */}
       <motion.header
-        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-slate-200 shadow-sm"
+        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -629,7 +629,7 @@ export function MainContent({
             {!sidebarOpen && (
               <motion.button
                 onClick={() => setSidebarOpen(true)}
-                className="p-2 -ml-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors"
+                className="p-2 -ml-2 rounded-xl hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] transition-colors"
                 title="Open Sidebar"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -638,10 +638,10 @@ export function MainContent({
               </motion.button>
             )}
             <div className="min-w-0 flex items-center gap-3">
-              <h2 className="text-lg font-bold text-slate-900 tracking-tight">Feature Canvas</h2>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600 border border-slate-200">
-                <span className="text-slate-400">Scope</span>
-                <span className="text-slate-700">
+              <h2 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Feature Canvas</h2>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rf-surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+                <span className="text-[var(--rf-text-tertiary)]">Scope</span>
+                <span className="text-[var(--rf-text-secondary)]">
                   {projectKey === '*' ? 'Global Workspace' : projectKey}
                 </span>
               </span>
@@ -651,34 +651,34 @@ export function MainContent({
             <motion.button
               type="button"
               onClick={() => setShowTokenDetails(prev => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 transition-colors border border-slate-200 shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] px-3 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] transition-colors border border-[var(--rf-border)] shadow-sm"
               title="Workflow token usage"
               whileTap={{ scale: 0.97 }}
             >
-              <Coins className="w-4 h-4 text-slate-400" />
+              <Coins className="w-4 h-4 text-[var(--rf-text-tertiary)]" />
               Tokens
             </motion.button>
             <AnimatePresence>
               {showTokenDetails && (
                 <motion.div
-                  className="absolute right-0 top-full mt-3 w-[260px] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl z-50"
+                  className="absolute right-0 top-full mt-3 w-[260px] rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-xl z-50"
                   initial={{ opacity: 0, y: -8, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.96 }}
                   transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
                 >
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Workflow tokens</div>
-                  <div className="mt-1.5 text-2xl font-black text-slate-900 tracking-tight">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workflow tokens</div>
+                  <div className="mt-1.5 text-2xl font-black text-[var(--rf-text)] tracking-tight">
                     {(workflowTokenUsage?.total ?? 0).toLocaleString()}
                   </div>
-                  <div className="mt-1 text-xs font-medium text-slate-500">
+                  <div className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
                     {(workflowTokenUsage?.input ?? 0).toLocaleString()} in / {(workflowTokenUsage?.output ?? 0).toLocaleString()} out
                   </div>
-                  <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
+                  <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-[11px] text-[var(--rf-text-tertiary)] leading-relaxed">
                     Includes clarify, generation, and all iterative refinements.
                   </div>
                   {lastAiTokenUsage && (
-                    <div className="mt-2 text-[11px] font-medium text-slate-500 bg-slate-50 rounded-lg p-2 border border-slate-100">
+                    <div className="mt-2 text-[11px] font-medium text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] rounded-lg p-2 border border-[var(--rf-border-subtle)]">
                       Last: {lastAiTokenUsage.label} ({lastAiTokenUsage.total.toLocaleString()})
                     </div>
                   )}
@@ -689,29 +689,29 @@ export function MainContent({
         </div>
 
         {hasFeatures && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-4">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--rf-border)] pt-4">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="inline-flex items-center rounded-lg bg-slate-900 text-white px-3.5 py-1.5 text-xs font-bold shadow-sm">
+              <span className="inline-flex items-center rounded-lg bg-[var(--rf-text)] text-white px-3.5 py-1.5 text-xs font-bold shadow-sm">
                   {features.length} Features
                   <span className="mx-2 opacity-40">·</span>
                   {totalArCount} ARs
               </span>
-              <span className="text-xs font-semibold text-slate-500 whitespace-nowrap bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-                <span className="text-emerald-600 mr-1.5">{features.filter(f => f.isAccepted).length}</span> accepted
+              <span className="text-xs font-semibold text-[var(--rf-text-tertiary)] whitespace-nowrap bg-[var(--rf-surface-soft)] px-3 py-1.5 rounded-lg border border-[var(--rf-border)]">
+                <span className="text-[var(--rf-success)] mr-1.5">{features.filter(f => f.isAccepted).length}</span> accepted
               </span>
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2.5">
               {features.some(f => f.pendingRefinement) && (
                 <>
-                  <motion.button onClick={discardAllProposed} className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-lg hover:text-rose-600 hover:border-rose-200 transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
-                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
+                  <motion.button onClick={discardAllProposed} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-lg hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
+                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-emerald-600 hover:bg-[var(--rf-success-subtle)]0 text-white text-xs font-bold rounded-lg transition shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
                 </>
               )}
 
               <motion.button
                 onClick={exportFeaturesToExcel}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 transition hover:border-blue-300 hover:text-blue-600 shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--rf-border)] bg-white text-xs font-bold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] shadow-sm"
                 whileTap={{ scale: 0.97 }}
                 title="Export features and acceptance requirements to Excel"
               >
@@ -722,7 +722,7 @@ export function MainContent({
               <div className="relative">
                 <motion.button
                   onClick={() => setShowBulkRefine(!showBulkRefine)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition shadow-sm ${showBulkRefine ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'}`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition shadow-sm ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-slate-900' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'}`}
                   whileTap={{ scale: 0.97 }}
                 >
                   <Sparkles className="w-4 h-4" />
@@ -732,17 +732,17 @@ export function MainContent({
                 <AnimatePresence>
                   {showBulkRefine && (
                     <motion.div
-                      className="absolute right-0 top-full mt-3 w-[400px] bg-white rounded-2xl border border-slate-200 p-5 z-50 shadow-2xl"
+                      className="absolute right-0 top-full mt-3 w-[400px] bg-white rounded-2xl border border-[var(--rf-border)] p-5 z-50 shadow-2xl"
                       initial={{ opacity: 0, y: -8, scale: 0.96 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.96 }}
                       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                     >
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-xs font-bold text-slate-900 uppercase tracking-widest flex items-center gap-2">
-                           <Sparkles className="w-4 h-4 text-blue-600" /> Bulk Refine
+                        <h4 className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2">
+                           <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" /> Bulk Refine
                         </h4>
-                        <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-slate-100 rounded-lg transition text-slate-400"><X className="w-4 h-4" /></button>
+                        <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-surface-soft)] rounded-lg transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
                       </div>
                       <textarea
                         autoFocus
@@ -754,14 +754,14 @@ export function MainContent({
                             handleBulkRefine();
                           }
                         }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm min-h-[120px] outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none mb-4"
+                        className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm min-h-[120px] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none mb-4"
                       />
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] font-medium text-slate-400">\u2318 + Enter to apply</span>
+                        <span className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
                         <motion.button
                           onClick={handleBulkRefine}
                           disabled={!bulkInput.trim() || isBulkRefining}
-                          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-40 flex items-center gap-2 shadow-sm shadow-blue-600/20"
+                          className="px-5 py-2 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-xs font-bold rounded-lg transition disabled:opacity-40 flex items-center gap-2 shadow-sm shadow-[var(--rf-brand)]/20"
                           whileTap={{ scale: 0.98 }}
                         >
                           {isBulkRefining ? (
@@ -796,11 +796,11 @@ export function MainContent({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-blue-900/5 border border-slate-200">
-              <Sparkles className="w-7 h-7 text-blue-600" />
+            <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-blue-900/5 border border-[var(--rf-border)]">
+              <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
             </div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-3 tracking-tight">Ready to generate</h2>
-            <p className="text-slate-500 text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
+            <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
+            <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
           </motion.div>
         ) : (
           <motion.div
@@ -811,23 +811,23 @@ export function MainContent({
           >
             {generationContext && (
               <motion.div
-                className="bg-white/60 backdrop-blur-md rounded-2xl p-5 border border-slate-200 shadow-sm"
+                className="bg-white/60 backdrop-blur-md rounded-2xl p-5 border border-[var(--rf-border)] shadow-sm"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
                 <div className="flex flex-wrap items-center gap-4 text-xs">
-                  <div className="font-bold text-slate-900">
-                    Context: <span className="font-medium text-slate-600">{generationContext.goldExamplesCount} example{generationContext.goldExamplesCount !== 1 ? 's' : ''}</span>
+                  <div className="font-bold text-[var(--rf-text)]">
+                    Context: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.goldExamplesCount} example{generationContext.goldExamplesCount !== 1 ? 's' : ''}</span>
                   </div>
-                  <div className="font-bold text-slate-900">
-                    Project: <span className="font-medium text-slate-600">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
+                  <div className="font-bold text-[var(--rf-text)]">
+                    Project: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
                   </div>
-                  <div className="font-bold text-slate-900">
-                    Domain guidance: <span className="font-medium text-slate-600">{generationContext.domainContextApplied ? 'Included' : 'None'}</span>
+                  <div className="font-bold text-[var(--rf-text)]">
+                    Domain guidance: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.domainContextApplied ? 'Included' : 'None'}</span>
                   </div>
-                  <div className="font-bold text-slate-900">
-                    Attachment: <span className="font-medium text-slate-600">{generationContext.attachmentIncluded ? 'Included' : 'None'}</span>
+                  <div className="font-bold text-[var(--rf-text)]">
+                    Attachment: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.attachmentIncluded ? 'Included' : 'None'}</span>
                   </div>
                 </div>
                 {generationContext.referencedGoldExamples?.length > 0 && (
@@ -835,7 +835,7 @@ export function MainContent({
                     {generationContext.referencedGoldExamples.map((example, i) => (
                       <span
                         key={`${example.source}-${example.key}-${i}`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-blue-50 text-blue-700 border border-blue-100"
+                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-blue-100"
                         title={example.summary}
                       >
                         {example.source}: {example.key}
@@ -843,17 +843,17 @@ export function MainContent({
                     ))}
                   </div>
                 )}
-                <div className="mt-4 pt-4 border-t border-slate-200/60">
+                <div className="mt-4 pt-4 border-t border-[var(--rf-border)]/60">
                   <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <div className="font-bold text-slate-900">
+                    <div className="font-bold text-[var(--rf-text)]">
                       Work instructions ({generationContext.wiDocsCount ?? 0}):
                     </div>
                     {generationContext.referencedWiDocs?.length ? (
-                      <div className="font-medium text-slate-600">
+                      <div className="font-medium text-[var(--rf-text-secondary)]">
                         {generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')}
                       </div>
                     ) : (
-                      <div className="text-slate-400 italic">No matching docs found</div>
+                      <div className="text-[var(--rf-text-tertiary)] italic">No matching docs found</div>
                     )}
                   </div>
                 </div>
@@ -867,7 +867,7 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`group overflow-hidden rounded-2xl border bg-white ${feature.pendingRemoval ? 'opacity-70 border-rose-200' : feature.isAccepted ? 'border-emerald-200' : 'border-slate-200'}`}
+                  className={`group overflow-hidden rounded-2xl border bg-white ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'border-[var(--rf-success-subtle)]' : 'border-[var(--rf-border)]'}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
@@ -876,7 +876,7 @@ export function MainContent({
                 >
                   <div className="flex flex-col sm:flex-row">
                     {/* Left Accent Strip */}
-                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-rose-500' : feature.isAccepted ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]0' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]0' : 'bg-[var(--rf-brand-muted)]0'}`} />
 
                     <div className="flex-1 p-5 sm:p-6">
                       {/* Header Row */}
@@ -886,18 +886,18 @@ export function MainContent({
                             type="text"
                             value={draft?.title || draft?.summary || ''}
                             onChange={e => setEditDraft(d => d ? { ...d, summary: e.target.value, title: e.target.value } : null)}
-                            className="flex-1 text-lg font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition"
+                            className="flex-1 text-lg font-bold text-[var(--rf-text)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
                           />
                         ) : (
                           <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
-                            <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-slate-900 tracking-tight">
+                            <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
                             <div className="shrink-0 flex items-center gap-2">
-                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold tracking-widest border border-slate-200">
+                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[10px] font-bold tracking-widest border border-[var(--rf-border)]">
                                 {feature.acceptanceRequirements?.length || 0} ARs
                               </span>
-                              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
+                              <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
                             </div>
                           </div>
                         )}
@@ -905,22 +905,22 @@ export function MainContent({
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {isEditing ? (
                             <>
-                              <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
-                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
+                              <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
+                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-[var(--rf-success-subtle)]0 rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
                             </>
                           ) : (
                             <>
-                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-900 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
-                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-blue-600 hover:bg-blue-50 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
-                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-slate-600 bg-white border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200'}`} whileTap={{ scale: 0.97 }}>
+                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
+                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
+                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
                                 <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
                               </motion.button>
-                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
+                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
                               {feature.jiraIssueKey ? (
                                 <div className="flex items-center gap-1">
                                   <motion.button
                                     onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
-                                    className="px-3 py-1.5 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg transition flex items-center gap-1.5 hover:bg-blue-100 shadow-sm"
+                                    className="px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-blue-100 shadow-sm"
                                     whileTap={{ scale: 0.97 }}
                                   >
                                     <Check className="w-3.5 h-3.5" /> {feature.jiraIssueKey}
@@ -932,7 +932,7 @@ export function MainContent({
                                       }
                                     }}
                                     title="Push a duplicate to Jira"
-                                    className="px-2 py-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 rounded-lg transition"
+                                    className="px-2 py-1.5 text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text-secondary)] rounded-lg transition"
                                     whileTap={{ scale: 0.97 }}
                                   >
                                     <Upload className="w-4 h-4" />
@@ -943,7 +943,7 @@ export function MainContent({
                                   onClick={() => onPushFeature(idx)}
                                   disabled={!feature.isAccepted}
                                   title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
-                                  className="px-3 py-1.5 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-blue-600/20"
+                                  className="px-3 py-1.5 text-[11px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-slate-300 disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
                                   whileTap={{ scale: 0.97 }}
                                 >
                                   <Upload className="w-3.5 h-3.5" /> Push
@@ -955,12 +955,12 @@ export function MainContent({
                       </div>
 
                       {feature.pendingRemoval && (
-                        <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                           <div className="flex items-center gap-2 text-rose-700 font-bold text-sm">
+                        <div className="mb-4 p-4 rounded-xl bg-[var(--rf-danger-subtle)] border border-[var(--rf-danger-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                           <div className="flex items-center gap-2 text-[var(--rf-danger)] font-bold text-sm">
                              <Trash2 className="w-4 h-4" /> Proposed for Removal
                            </div>
                            <div className="flex items-center gap-2">
-                             <motion.button onClick={() => clearPendingRemoval(idx)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
+                             <motion.button onClick={() => clearPendingRemoval(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
                              <motion.button onClick={() => removeFeatureAt(idx)} className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm shadow-rose-600/20" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
                            </div>
                         </div>
@@ -986,54 +986,54 @@ export function MainContent({
                                 <div className="flex items-center bg-white p-1 rounded-lg border border-amber-200 shadow-sm">
                                   <button
                                     onClick={() => setDiffMode('redline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-amber-100 text-amber-900' : 'text-slate-500 hover:text-slate-700'}`}
+                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
                                   >
                                     Redline
                                   </button>
                                   <button
                                     onClick={() => setDiffMode('blackline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-amber-100 text-amber-900' : 'text-slate-500 hover:text-slate-700'}`}
+                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
                                   >
                                     Blackline
                                   </button>
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  <motion.button onClick={() => rejectRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
-                                  <motion.button onClick={() => acceptRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center gap-1.5 shadow-sm shadow-blue-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Accept</motion.button>
+                                  <motion.button onClick={() => rejectRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
+                                  <motion.button onClick={() => acceptRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] rounded-lg flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Accept</motion.button>
                                 </div>
                               </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Original</div>
-                                <h4 className="text-sm font-bold text-slate-900 mb-2">{origTitle}</h4>
-                                <div className="text-xs text-slate-600 mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
+                              <div className="bg-white p-4 rounded-xl border border-[var(--rf-border)] shadow-sm">
+                                <div className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
+                                <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2">{origTitle}</h4>
+                                <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
                                 <div className="space-y-2">
                                   {feature.acceptanceRequirements.map((ar, i) => (
-                                    <div key={i} className="bg-slate-50 border border-slate-100 p-2.5 rounded-lg text-[11px] text-slate-600">
-                                      {ar.given && <div className="mb-1"><strong className="text-slate-900">Given</strong> {ar.given}</div>}
-                                      {ar.when && <div className="mb-1"><strong className="text-slate-900">When</strong> {ar.when}</div>}
-                                      <div><strong className="text-slate-900">Then</strong> {ar.then}</div>
+                                    <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[11px] text-[var(--rf-text-secondary)]">
+                                      {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
+                                      {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
+                                      <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
                                     </div>
                                   ))}
                                 </div>
                               </div>
-                              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-200 shadow-sm">
-                                <div className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
-                                <h4 className="text-sm font-bold text-slate-900 mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
-                                <div className="text-xs text-slate-600 mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
+                              <div className="bg-[var(--rf-brand-muted)]/50 p-4 rounded-xl border border-[var(--rf-brand-subtle)] shadow-sm">
+                                <div className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
+                                <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
+                                <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
                                 <div className="space-y-2">
                                   {arDiffRows.map((row, i) => {
                                     const ar = row.proposed;
                                     const oldAr = row.oldAr;
                                     const isNew = row.isNew;
                                     return (
-                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-slate-900 border shadow-sm ${isNew ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-blue-100'}`}>
-                                        {isNew && <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-2">New AR</div>}
-                                        {ar.given && <div className="mb-1"><strong className="text-blue-700">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
-                                        {ar.when && <div className="mb-1"><strong className="text-blue-700">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
-                                        <div><strong className="text-blue-700">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
+                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-blue-100'}`}>
+                                        {isNew && <div className="text-[10px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
+                                        {ar.given && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
+                                        {ar.when && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
+                                        <div><strong className="text-[var(--rf-brand-hover)]">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
                                       </div>
                                     );
                                   })}
@@ -1051,10 +1051,10 @@ export function MainContent({
                             <textarea
                               value={draft?.description || ''}
                               onChange={e => setEditDraft(d => d ? { ...d, description: e.target.value } : null)}
-                              className="w-full text-slate-700 text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 min-h-[120px] mb-6 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none resize-y transition"
+                              className="w-full text-[var(--rf-text-secondary)] text-sm bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 min-h-[120px] mb-6 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none resize-y transition"
                             />
                           ) : (
-                            <div className="text-slate-700 text-[13px] sm:text-sm mb-6 whitespace-pre-wrap leading-relaxed border-l-2 border-blue-500/20 pl-4 py-1">
+                            <div className="text-[var(--rf-text-secondary)] text-[13px] sm:text-sm mb-6 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-brand)]/20 pl-4 py-1">
                               {feature.markdown || feature.description}
                             </div>
                           )}
@@ -1063,25 +1063,25 @@ export function MainContent({
                           {((isEditing && draft?.acceptanceRequirements) || (!isEditing && feature.acceptanceRequirements?.length > 0)) && (
                             <div className="mt-2 text-sm">
                               <div className="flex items-center justify-between mb-4 pb-2">
-                                <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Acceptance Criteria</h4>
+                                <h4 className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Acceptance Criteria</h4>
                                 {isEditing && (
-                                  <motion.button onClick={addDraftAr} className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
+                                  <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
                                 )}
                               </div>
                               <div className="space-y-2.5">
                                 {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
-                                  <div key={i} className="bg-slate-50/50 rounded-xl p-4 border border-slate-100 relative group transition hover:border-slate-200">
+                                  <div key={i} className="bg-[var(--rf-surface-soft)]/50 rounded-xl p-4 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)]">
                                     {isEditing && (
-                                      <button onClick={() => deleteDraftAr(i)} className="absolute top-3 right-3 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                                      <button onClick={() => deleteDraftAr(i)} className="absolute top-3 right-3 p-1.5 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
                                     )}
                                     {isEditing ? (
                                       <div className="space-y-3 pr-8">
                                         {(['given', 'when', 'then'] as const).map(field => (
                                           <div key={field} className="flex items-start gap-3">
-                                            <strong className="text-slate-500 w-12 pt-2 text-[10px] font-bold uppercase tracking-widest">{field}</strong>
+                                            <strong className="text-[var(--rf-text-tertiary)] w-12 pt-2 text-[10px] font-bold uppercase tracking-widest">{field}</strong>
                                             {field === 'then'
-                                              ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none transition" />
-                                              : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition" />
+                                              ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] resize-none transition" />
+                                              : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition" />
                                             }
                                           </div>
                                         ))}
@@ -1090,19 +1090,19 @@ export function MainContent({
                                       <div className="space-y-1.5 text-[13px] sm:text-sm">
                                         {ar.given?.trim() && (
                                           <div className="flex gap-4">
-                                            <div className="w-12 shrink-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-0.5">Given</div>
-                                            <div className="text-slate-800 leading-relaxed font-medium">{ar.given}</div>
+                                            <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>
+                                            <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.given}</div>
                                           </div>
                                         )}
                                         {ar.when?.trim() && (
                                           <div className="flex gap-4">
-                                            <div className="w-12 shrink-0 text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-0.5">When</div>
-                                            <div className="text-slate-800 leading-relaxed font-medium">{ar.when}</div>
+                                            <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">When</div>
+                                            <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.when}</div>
                                           </div>
                                         )}
                                         <div className="flex gap-4">
-                                          <div className="w-12 shrink-0 text-[10px] font-bold text-blue-600 uppercase tracking-widest pt-0.5">Then</div>
-                                          <div className="text-slate-900 leading-relaxed whitespace-pre-wrap font-medium">{ar.then}</div>
+                                          <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest pt-0.5">Then</div>
+                                          <div className="text-[var(--rf-text)] leading-relaxed whitespace-pre-wrap font-medium">{ar.then}</div>
                                         </div>
                                       </div>
                                     )}

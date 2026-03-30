@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, X, Clock, Pin, MessageSquare, Trash2, Edit2, Play } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 
 interface HistoryModalProps {
@@ -67,7 +67,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       <motion.div 
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
+        className="absolute inset-0 bg-[var(--rf-text)]/40 backdrop-blur-sm" 
         onClick={onClose} 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -75,21 +75,21 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
       />
 
       <motion.div 
-        className="relative bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
+        className="relative bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-4 bg-white/80 backdrop-blur-md sticky top-0 z-20">
+        <div className="px-6 py-5 border-b border-[var(--rf-border-subtle)] flex items-center gap-4 bg-white/80 backdrop-blur-md sticky top-0 z-20">
           <div className="flex-1">
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Past Conversations</h2>
-            <p className="text-sm font-medium text-slate-500 mt-1">Review, rename, or resume your previous feature generation sessions.</p>
+            <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">Past Conversations</h2>
+            <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1">Review, rename, or resume your previous feature generation sessions.</p>
           </div>
           <motion.button 
             onClick={onClose} 
-            className="p-2 hover:bg-slate-100 text-slate-500 rounded-xl transition"
+            className="p-2 hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] rounded-xl transition"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
@@ -98,27 +98,27 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
         </div>
 
         {/* Search */}
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 z-10">
+        <div className="px-6 py-4 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/50 z-10">
           <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--rf-text-tertiary)]" />
             <input
               autoFocus
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search sessions..."
-              className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition shadow-sm"
+              className="w-full bg-white border border-[var(--rf-border)] rounded-xl pl-10 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
             />
           </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-slate-50/50 p-6">
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-[var(--rf-surface-soft)]/50 p-6">
           {filtered.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center shadow-sm">
+            <div className="h-full flex flex-col items-center justify-center text-[var(--rf-text-tertiary)] gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-white border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
                 <MessageSquare className="w-8 h-8 text-slate-300" />
               </div>
-              <p className="text-sm font-medium text-slate-500">No conversations found.</p>
+              <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">No conversations found.</p>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-8 pb-8">
@@ -126,8 +126,8 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               {/* Pinned Section */}
               {pinned.length > 0 && (
                 <div className="space-y-4 fade-in">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-4">
-                    <Pin className="w-4 h-4 text-blue-500 fill-blue-500" /> Pinned
+                  <h3 className="text-xs font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2 mb-4">
+                    <Pin className="w-4 h-4 text-[var(--rf-brand)] fill-blue-500" /> Pinned
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {pinned.map((conv, idx) => (
@@ -159,7 +159,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               {/* Recent Section */}
               {recent.length > 0 && (
                 <div className="space-y-4 fade-in">
-                  <h3 className={`text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-4 ${pinned.length > 0 ? 'mt-8' : ''}`}>
+                  <h3 className={`text-xs font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2 mb-4 ${pinned.length > 0 ? 'mt-8' : ''}`}>
                     <Clock className="w-4 h-4" /> Recent
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -204,7 +204,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
     <motion.div 
       onClick={isEditing ? undefined : onRestore}
       className={`group relative bg-white border rounded-2xl p-5 flex flex-col gap-4 h-full ${
-        isCurrent ? 'border-blue-400 shadow-md shadow-blue-500/10 bg-blue-50/30' : 'border-slate-200 hover:border-blue-300 hover:shadow-lg cursor-pointer'
+        isCurrent ? 'border-blue-400 shadow-md shadow-blue-500/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
       }`}
       whileHover={!isCurrent && !isEditing ? { y: -2, scale: 1.01 } : {}}
       transition={{ duration: 0.2 }}
@@ -217,13 +217,13 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
                 autoFocus
                 value={editTitle}
                 onChange={e => setEditTitle(e.target.value)}
-                className="flex-1 bg-white border border-blue-400 rounded-lg outline-none px-3 py-1.5 text-sm font-bold text-slate-900 w-full focus:ring-2 focus:ring-blue-500/20"
+                className="flex-1 bg-white border border-blue-400 rounded-lg outline-none px-3 py-1.5 text-sm font-bold text-[var(--rf-text)] w-full focus:ring-2 focus:ring-[var(--rf-brand)]/20"
               />
-              <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-md transition">Cancel</button>
-              <button type="submit" className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-2 py-1.5 rounded-md transition">Save</button>
+              <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 px-2 py-1.5 rounded-md transition">Cancel</button>
+              <button type="submit" className="text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] px-2 py-1.5 rounded-md transition">Save</button>
             </form>
           ) : (
-            <h4 className={`text-base font-bold truncate tracking-tight ${isCurrent ? 'text-blue-900' : 'text-slate-900'}`}>
+            <h4 className={`text-base font-bold truncate tracking-tight ${isCurrent ? 'text-blue-900' : 'text-[var(--rf-text)]'}`}>
               {conv.title || 'Untitled session'}
             </h4>
           )}
@@ -233,28 +233,28 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
           <button 
             onClick={(e) => toggleBookmark(e, conv.sessionId, conv.isPinned)}
             title={conv.isPinned ? "Unpin" : "Pin"}
-            className={`p-1.5 rounded-lg hover:bg-slate-100 transition-colors ${conv.isPinned ? 'text-blue-600 opacity-100' : 'text-slate-400 hover:text-blue-600'}`}
+            className={`p-1.5 rounded-lg hover:bg-[var(--rf-surface-soft)] transition-colors ${conv.isPinned ? 'text-[var(--rf-brand)] opacity-100' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-brand)]'}`}
           >
             <Pin className={`w-4 h-4 ${conv.isPinned ? 'fill-current' : ''}`} />
           </button>
           {!isEditing && (
-            <button onClick={(e) => startEdit(e, conv.sessionId, conv.title)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+            <button onClick={(e) => startEdit(e, conv.sessionId, conv.title)} className="p-1.5 rounded-lg text-[var(--rf-text-tertiary)] hover:text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] transition-colors">
               <Edit2 className="w-4 h-4" />
             </button>
           )}
-          <button onClick={(e) => deleteConv(e, conv.sessionId)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+          <button onClick={(e) => deleteConv(e, conv.sessionId)} className="p-1.5 rounded-lg text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] transition-colors">
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
         {/* Force showing the pin if pinned even without hover */}
-        {conv.isPinned && <div className="absolute top-5 right-5 group-hover:hidden"><Pin className="w-4 h-4 text-blue-500 fill-current" /></div>}
+        {conv.isPinned && <div className="absolute top-5 right-5 group-hover:hidden"><Pin className="w-4 h-4 text-[var(--rf-brand)] fill-current" /></div>}
       </div>
 
       <div className="flex items-center justify-between mt-auto pt-2">
-        <span className="text-xs font-medium text-slate-500">
+        <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </span>
-        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500 group-hover:bg-blue-600 group-hover:text-white'}`}>
+        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-blue-100 text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
           {isCurrent ? 'Active Now' : <><Play className="w-3 h-3" /> Resume</>}
         </div>
       </div>

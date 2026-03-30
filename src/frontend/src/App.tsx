@@ -466,7 +466,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden text-slate-900 font-sans bg-transparent">
+    <div className="flex h-full w-full overflow-hidden text-[var(--rf-text)] font-sans bg-transparent">
       {/* Left Sidebar — animated & resizable */}
       <AnimatePresence>
         {(sidebarOpen || sidebarExiting) && (
@@ -526,10 +526,10 @@ export default function App() {
               {sidebarOpen && (
                 <div
                   onMouseDown={startResizing}
-                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-blue-500/20 group z-50 transition-colors flex items-center justify-center"
+                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-[var(--rf-brand-muted)]0/20 group z-50 transition-colors flex items-center justify-center"
                   style={{ cursor: 'col-resize' }}
                 >
-                  <div className="w-1 h-8 bg-white/20 group-hover:bg-blue-500 rounded-full transition-colors" />
+                  <div className="w-1 h-8 bg-white/20 group-hover:bg-[var(--rf-brand-muted)]0 rounded-full transition-colors" />
                 </div>
               )}
             </div>
@@ -549,7 +549,7 @@ export default function App() {
           <AnimatePresence>
             {generationError && (
               <motion.div
-                className="w-full bg-rose-50/95 backdrop-blur-sm text-rose-700 border-b border-rose-200 px-6 py-3 text-sm font-bold flex items-start gap-3 z-50 shadow-sm"
+                className="w-full bg-[var(--rf-danger-subtle)]/95 backdrop-blur-sm text-[var(--rf-danger)] border-b border-[var(--rf-danger-subtle)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-50 shadow-sm"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}

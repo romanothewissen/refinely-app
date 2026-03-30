@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,55 +6,56 @@
 
 @layer base {
   :root {
-    /* Corporate Modern Palette */
-    --rf-bg: #f8fafc;
-    --rf-bg-canvas: #f1f5f9;
+    /* Refined Editorial Light Theme */
+    --rf-bg: #FCFCFB;
+    --rf-bg-canvas: #F8F7F4;
     
-    /* Dark elegant sidebar */
-    --rf-bg-sidebar: #0a0f1c;
-    --rf-bg-sidebar-deep: #05080f;
-    --rf-sidebar-text: #f8fafc;
-    --rf-sidebar-text-muted: #8b9bb4;
-    --rf-sidebar-border: rgba(255, 255, 255, 0.08);
-    --rf-sidebar-card: rgba(255, 255, 255, 0.03);
-    --rf-sidebar-card-hover: rgba(255, 255, 255, 0.06);
+    /* Warm, light airy sidebar */
+    --rf-bg-sidebar: #F4F2EC;
+    --rf-bg-sidebar-deep: #EBE8E0;
+    --rf-sidebar-text: #2D2C2A;
+    --rf-sidebar-text-muted: #6E6B65;
+    --rf-sidebar-border: rgba(0, 0, 0, 0.06);
+    --rf-sidebar-card: #FFFFFF;
+    --rf-sidebar-card-hover: #FCFCFB;
 
     /* Main canvas light */
-    --rf-bg-main: #f8fafc;
-    --rf-bg-main-deep: #f1f5f9;
+    --rf-bg-main: #FCFCFB;
+    --rf-bg-main-deep: #F8F7F4;
     
-    --rf-surface: #ffffff;
-    --rf-surface-soft: #f8fafc;
+    --rf-surface: #FFFFFF;
+    --rf-surface-soft: #F8F7F4;
     
-    --rf-border: #e2e8f0;
-    --rf-border-subtle: #f1f5f9;
-    --rf-border-strong: #cbd5e1;
+    --rf-border: #E8E5DD;
+    --rf-border-subtle: #F0EEE9;
+    --rf-border-strong: #D1CEC5;
     
-    --rf-text: #0f172a;
-    --rf-text-secondary: #475569;
-    --rf-text-tertiary: #94a3b8;
+    --rf-text: #1F1E1D;
+    --rf-text-secondary: #575550;
+    --rf-text-tertiary: #8C8A82;
     
-    --rf-brand: #3b82f6;
-    --rf-brand-hover: #2563eb;
-    --rf-brand-subtle: #dbeafe;
-    --rf-brand-muted: #eff6ff;
+    /* Sophisticated Forest Green */
+    --rf-brand: #2B594A;
+    --rf-brand-hover: #1E4035;
+    --rf-brand-subtle: #E6EFEC;
+    --rf-brand-muted: #F2F7F5;
     
-    --rf-success: #059669;
-    --rf-success-subtle: #d1fae5;
+    --rf-success: #3A6B53;
+    --rf-success-subtle: #E8F2ED;
     
-    --rf-warning: #ea580c;
-    --rf-warning-subtle: #ffedd5;
+    --rf-warning: #B35E30;
+    --rf-warning-subtle: #F9EBE3;
     
-    --rf-danger: #e11d48;
-    --rf-danger-subtle: #ffe4e6;
+    --rf-danger: #9E3E47;
+    --rf-danger-subtle: #F7E5E7;
     
-    /* Elegant Shadows */
-    --rf-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --rf-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
-    --rf-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
-    --rf-header-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+    /* Editorial Soft Shadows */
+    --rf-shadow-sm: 0 2px 8px -2px rgba(31, 30, 29, 0.04);
+    --rf-shadow-md: 0 8px 24px -4px rgba(31, 30, 29, 0.06), 0 4px 12px -4px rgba(31, 30, 29, 0.04);
+    --rf-shadow-lg: 0 16px 40px -8px rgba(31, 30, 29, 0.08), 0 8px 16px -8px rgba(31, 30, 29, 0.04);
+    --rf-header-shadow: 0 1px 0 rgba(31, 30, 29, 0.06);
     
-    --rf-radius-sm: 6px;
+    --rf-radius-sm: 4px;
     --rf-radius-md: 8px;
     --rf-radius-lg: 12px;
     --rf-radius-xl: 16px;
@@ -64,16 +65,18 @@
     height: 100%;
     margin: 0;
     overflow: hidden;
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--rf-bg-main);
     color: var(--rf-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    font-weight: 300;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
-    letter-spacing: -0.02em;
+    font-family: 'Fraunces', serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
   }
 
   #root {
@@ -109,11 +112,13 @@
     background: var(--rf-sidebar-card);
     border: 1px solid var(--rf-sidebar-border);
     border-radius: var(--rf-radius-lg);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--rf-shadow-sm);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .rf-sidebar-card:hover {
     background: var(--rf-sidebar-card-hover);
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(31, 30, 29, 0.12);
+    box-shadow: var(--rf-shadow-md);
   }
 
   .rf-main-shell {

@@ -567,25 +567,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     : null;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden font-sans">
-      <header className="shrink-0 h-[88px] border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-30 sticky top-0 shadow-sm">
+    <div className="flex-1 flex flex-col h-full bg-[var(--rf-surface-soft)] relative overflow-hidden font-sans">
+      <header className="shrink-0 h-[88px] border-b border-[var(--rf-border)] bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-30 sticky top-0 shadow-sm">
         <div className="flex items-center gap-5">
           <motion.button 
             onClick={onClose} 
-            className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm"
+            className="p-2.5 rounded-xl border border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] transition-all shadow-sm"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
              <ChevronLeft className="w-5 h-5" />
           </motion.button>
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Workspace Settings</div>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">Configure Refinely</h2>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workspace Settings</div>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-[var(--rf-text)]">Configure Refinely</h2>
             <div className="flex items-center gap-2 mt-1.5">
-              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${isAdmin ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${isAdmin ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
                 {isAdmin ? 'Administrator' : 'Read-Only'}
               </span>
-              <span className="text-[10px] text-blue-600 font-bold uppercase tracking-wider flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+              <span className="text-[10px] text-[var(--rf-brand)] font-bold uppercase tracking-wider flex items-center gap-1 bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded-md border border-blue-100">
                 <ShieldCheck className="w-3 h-3" /> {tier} plan
               </span>
             </div>
@@ -596,7 +596,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             <motion.button 
               onClick={handleSave} 
               disabled={isSaving} 
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-400 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-blue-600/20 transition-all flex items-center gap-2"
+              className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:bg-slate-400 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-[var(--rf-brand)]/20 transition-all flex items-center gap-2"
               whileTap={{ scale: 0.98 }}
             >
               {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -607,37 +607,37 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       </header>
 
       <div className="flex-1 overflow-hidden flex">
-          <div className="w-72 shrink-0 border-r border-slate-200 bg-slate-50/50 p-6 flex flex-col gap-2">
+          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-6 flex flex-col gap-2">
             {settingsNav.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                  activeTab === tab.id ? 'bg-white text-blue-600 border-slate-200 shadow-sm' : 'text-slate-500 border-transparent hover:bg-slate-100 hover:text-slate-700'
+                  activeTab === tab.id ? 'bg-white text-[var(--rf-brand)] border-[var(--rf-border)] shadow-sm' : 'text-[var(--rf-text-tertiary)] border-transparent hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text-secondary)]'
                 }`}
               >
-                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`} />
+                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`} />
                 <div className="text-left">
-                  <div className={`text-xs font-bold ${activeTab === tab.id ? 'text-blue-700' : 'text-slate-700'}`}>{tab.label}</div>
-                  <div className={`text-[10px] mt-0.5 ${activeTab === tab.id ? 'text-blue-500' : 'text-slate-400'}`}>{tab.sub}</div>
+                  <div className={`text-xs font-bold ${activeTab === tab.id ? 'text-[var(--rf-brand-hover)]' : 'text-[var(--rf-text-secondary)]'}`}>{tab.label}</div>
+                  <div className={`text-[10px] mt-0.5 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>{tab.sub}</div>
                 </div>
               </button>
             ))}
             
-            <div className="mt-auto pt-6 border-t border-slate-200">
-               <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+            <div className="mt-auto pt-6 border-t border-[var(--rf-border)]">
+               <div className="bg-white rounded-xl p-4 border border-[var(--rf-border)] shadow-sm">
                  <div>
-                   <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Recommended Order</div>
-                   <div className="text-xs font-semibold text-slate-700 space-y-1.5">
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Recommended Order</div>
+                   <div className="text-xs font-semibold text-[var(--rf-text-secondary)] space-y-1.5">
                      <div>1. AI Setup</div>
                      <div>2. Project Setup</div>
                      <div>3. Guidance</div>
                    </div>
                  </div>
-                 <div className="pt-4 mt-4 border-t border-slate-100">
-                   <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Current Plan</div>
-                   <div className="text-sm font-bold text-slate-900 capitalize">{tier}</div>
-                   <div className="text-[11px] font-medium text-slate-500 mt-1">
+                 <div className="pt-4 mt-4 border-t border-[var(--rf-border-subtle)]">
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Current Plan</div>
+                   <div className="text-sm font-bold text-[var(--rf-text)] capitalize">{tier}</div>
+                   <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)] mt-1">
                      {usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0} generations
                    </div>
                  </div>
@@ -645,7 +645,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-8 lg:p-10 custom-scrollbar bg-slate-50/50">
+          <div className="flex-1 overflow-y-auto p-8 lg:p-10 custom-scrollbar bg-[var(--rf-surface-soft)]/50">
             {activeTab === 'models' && (
               <motion.div 
                 className="max-w-3xl space-y-6"
@@ -654,16 +654,16 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 transition={{ duration: 0.3 }}
               >
                 <div className="space-y-1">
-                   <h3 className="text-2xl font-bold text-slate-900 tracking-tight">AI Provider & Models</h3>
-                   <p className="text-slate-500 text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
+                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">AI Provider & Models</h3>
+                   <p className="text-[var(--rf-text-tertiary)] text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200 shadow-sm space-y-8">
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
                   <div className="space-y-3">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">LLM Provider</label>
-                    <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                    <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">LLM Provider</label>
+                    <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
                       {(['openai', 'gemini', 'forge_llms'] as const).map(p => (
-                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${provider === p ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>
+                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
                           {p.replace('_', ' ')}
                         </button>
                       ))}
@@ -673,27 +673,27 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   {provider === 'openai' && (
                     <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                       <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">OpenAI API Key</label>
-                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-rose-700">Clear Stored</button>}
+                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">OpenAI API Key</label>
+                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
                       </div>
-                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none" />
+                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                     </motion.div>
                   )}
 
                   {provider === 'gemini' && (
                     <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                       <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Gemini API Key</label>
-                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-rose-700">Clear Stored</button>}
+                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Gemini API Key</label>
+                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
                       </div>
-                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none" />
+                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                     </motion.div>
                   )}
 
-                  <div className="space-y-5 pt-6 border-t border-slate-100">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 flex items-start gap-3">
-                      <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                      <p><span className="font-bold text-slate-900">Best practice:</span> use a stronger model for decomposition and a faster model for clarify and evaluation.</p>
+                  <div className="space-y-5 pt-6 border-t border-[var(--rf-border-subtle)]">
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)] flex items-start gap-3">
+                      <Info className="w-4 h-4 text-[var(--rf-brand)] shrink-0 mt-0.5" />
+                      <p><span className="font-bold text-[var(--rf-text)]">Best practice:</span> use a stronger model for decomposition and a faster model for clarify and evaluation.</p>
                     </div>
                     
                     <div className="space-y-4">
@@ -703,8 +703,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         { label: 'Evaluation & Theme', val: evaluateModel, set: setEvaluateModel },
                       ].map((item, i) => (
                         <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <span className="text-sm font-bold text-slate-700">{item.label}</span>
-                          <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 sm:w-[240px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition">
+                          <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
+                          <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[240px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
                             {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                           </select>
                         </div>
@@ -712,17 +712,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="pt-6 border-t border-slate-100 flex items-center gap-4">
+                  <div className="pt-6 border-t border-[var(--rf-border-subtle)] flex items-center gap-4">
                     <motion.button 
                       onClick={testLlmConnection} 
                       disabled={isTestingLlm} 
-                      className="bg-slate-900 hover:bg-black text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg transition-all flex items-center gap-2"
+                      className="bg-[var(--rf-text)] hover:bg-black text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg transition-all flex items-center gap-2"
                       whileTap={{ scale: 0.98 }}
                     >
                        {isTestingLlm ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Test Connection
                     </motion.button>
                     {llmTestResult && (
-                      <div className={`px-4 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-2 border ${llmTestResult.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                      <div className={`px-4 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-2 border ${llmTestResult.ok ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
                          {llmTestResult.ok ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />} {llmTestResult.message}
                       </div>
                     )}
@@ -739,34 +739,34 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 transition={{ duration: 0.3 }}
               >
                 <div className="space-y-1">
-                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Project Setup</h3>
-                  <p className="text-slate-500 text-sm">Sync Jira, select a project, and define its backlog context and optional boosters.</p>
+                  <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Project Setup</h3>
+                  <p className="text-[var(--rf-text-tertiary)] text-sm">Sync Jira, select a project, and define its backlog context and optional boosters.</p>
                 </div>
 
                 <div className="space-y-6">
                   {/* Step 1 */}
-                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="bg-white rounded-2xl p-6 border border-[var(--rf-border)] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="space-y-1">
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step 1</div>
-                      <h4 className="text-lg font-bold text-slate-900">Workspace Jira Discovery</h4>
-                      <p className="text-xs font-medium text-slate-500">Refresh projects and fields before editing project rules.</p>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 1</div>
+                      <h4 className="text-lg font-bold text-[var(--rf-text)]">Workspace Jira Discovery</h4>
+                      <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Refresh projects and fields before editing project rules.</p>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="flex gap-4 mr-2">
                         <div className="text-center">
-                          <div className="text-2xl font-black text-slate-900">{projects.length}</div>
-                          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Projects</div>
+                          <div className="text-2xl font-black text-[var(--rf-text)]">{projects.length}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Projects</div>
                         </div>
                         <div className="w-px bg-slate-200"></div>
                         <div className="text-center">
-                          <div className="text-2xl font-black text-slate-900">{customFields.length}</div>
-                          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Fields</div>
+                          <div className="text-2xl font-black text-[var(--rf-text)]">{customFields.length}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Fields</div>
                         </div>
                       </div>
                       <motion.button 
                         onClick={discoverJira} 
                         disabled={isDiscovering} 
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2 border border-slate-200"
+                        className="bg-[var(--rf-surface-soft)] hover:bg-slate-200 text-[var(--rf-text-secondary)] text-[11px] font-bold uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2 border border-[var(--rf-border)]"
                         whileTap={{ scale: 0.98 }}
                       >
                         <RefreshCw className={`w-4 h-4 ${isDiscovering ? 'animate-spin' : ''}`} /> Sync
@@ -775,15 +775,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   {/* Step 2 Selection */}
-                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="bg-white rounded-2xl p-6 border border-[var(--rf-border)] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="space-y-1">
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step 2</div>
-                      <h4 className="text-lg font-bold text-slate-900">Select Project</h4>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 2</div>
+                      <h4 className="text-lg font-bold text-[var(--rf-text)]">Select Project</h4>
                     </div>
                     <select 
                       value={activeArProj} 
                       onChange={e => setActiveArProj(e.target.value)} 
-                      className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none sm:w-64 transition"
+                      className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none sm:w-64 transition"
                     >
                       <option value="*">Select a project...</option>
                       {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
@@ -805,25 +805,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       onRefreshBacklogCache={handleRefreshBacklogCache}
                     />
                   ) : (
-                    <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-slate-200">
+                    <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-[var(--rf-border)]">
                       <Database className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                      <h4 className="text-lg font-bold text-slate-900">Select a project to configure</h4>
-                      <p className="text-sm font-medium text-slate-500 mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and optional curated examples for the selected project.</p>
+                      <h4 className="text-lg font-bold text-[var(--rf-text)]">Select a project to configure</h4>
+                      <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and optional curated examples for the selected project.</p>
                     </div>
                   )}
 
                   {/* Step 3 WIs */}
-                  <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
+                  <div className="bg-white rounded-2xl p-6 border border-[var(--rf-border)] shadow-sm space-y-6">
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-1">
-                        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step 3</div>
-                        <h4 className="text-lg font-bold text-slate-900">Project Work Instructions</h4>
-                        <p className="text-xs font-medium text-slate-500">Attach PDFs to inform AI generation for this project.</p>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
+                        <h4 className="text-lg font-bold text-[var(--rf-text)]">Project Work Instructions</h4>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Attach PDFs to inform AI generation for this project.</p>
                       </div>
                       <motion.button
                         onClick={() => wiFileInputRef.current?.click()}
                         disabled={activeArProj === '*' || !!wiUploadState}
-                        className="bg-slate-900 hover:bg-black disabled:bg-slate-300 text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg shadow-sm transition-all"
+                        className="bg-[var(--rf-text)] hover:bg-black disabled:bg-slate-300 text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg shadow-sm transition-all"
                         whileTap={{ scale: 0.98 }}
                       >
                         {wiUploadState ? 'Uploading…' : 'Add PDF'}
@@ -832,27 +832,27 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
 
                     {activeArProj === '*' ? (
-                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-medium text-slate-500 text-center">
+                      <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-sm font-medium text-[var(--rf-text-tertiary)] text-center">
                         Select a project first to manage instructions.
                       </div>
                     ) : (
                       <>
                         {(wiUploadState || wiUploadError) && (
-                          <div className={`rounded-xl border p-4 ${wiUploadError ? 'border-rose-200 bg-rose-50' : 'border-blue-200 bg-blue-50'}`}>
+                          <div className={`rounded-xl border p-4 ${wiUploadError ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]' : 'border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]'}`}>
                             {wiUploadState && (
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between gap-3">
                                   <div>
-                                    <div className="text-[10px] font-bold uppercase tracking-widest text-blue-500">Upload In Progress</div>
-                                    <div className="mt-1 text-sm font-bold text-slate-900">{wiUploadState.filename}</div>
+                                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Upload In Progress</div>
+                                    <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadState.filename}</div>
                                   </div>
-                                  <div className="inline-flex items-center gap-2 text-blue-600 text-xs font-bold">
+                                  <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-bold">
                                     <RefreshCw className="w-4 h-4 animate-spin" />
                                     {wiUploadCopy}
                                   </div>
                                 </div>
                                 <div className="h-1.5 overflow-hidden rounded-full bg-blue-100">
-                                  <div className="h-full w-1/2 rounded-full bg-blue-500 animate-pulse" />
+                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand-muted)]0 animate-pulse" />
                                 </div>
                               </div>
                             )}
@@ -860,9 +860,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                               <div className="flex items-center justify-between gap-3">
                                 <div>
                                   <div className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Upload Failed</div>
-                                  <p className="mt-1 text-sm font-bold text-slate-900">{wiUploadError}</p>
+                                  <p className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadError}</p>
                                 </div>
-                                <button type="button" onClick={() => setWiUploadError(null)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-rose-600 border border-rose-200">Dismiss</button>
+                                <button type="button" onClick={() => setWiUploadError(null)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[var(--rf-danger)] border border-[var(--rf-danger-subtle)]">Dismiss</button>
                               </div>
                             )}
                           </div>
@@ -870,23 +870,23 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {wiDocs.length === 0 ? (
-                            <div className="col-span-2 p-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
+                            <div className="col-span-2 p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)]">
                               <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                              <p className="text-sm font-semibold text-slate-500">No work instructions linked to {activeArProj}.</p>
+                              <p className="text-sm font-semibold text-[var(--rf-text-tertiary)]">No work instructions linked to {activeArProj}.</p>
                             </div>
                           ) : (
                             wiDocs.map(doc => (
-                              <div key={doc.docId} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between group hover:border-slate-300 transition-all">
+                              <div key={doc.docId} className="bg-[var(--rf-surface-soft)] p-4 rounded-xl border border-[var(--rf-border)] flex items-center justify-between group hover:border-[var(--rf-border-strong)] transition-all">
                                 <div className="flex items-center gap-3 truncate">
-                                  <div className="shrink-0 w-10 h-10 bg-white rounded-lg border border-slate-200 flex items-center justify-center shadow-sm">
-                                    <FileText className="w-5 h-5 text-blue-500" />
+                                  <div className="shrink-0 w-10 h-10 bg-white rounded-lg border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
+                                    <FileText className="w-5 h-5 text-[var(--rf-brand)]" />
                                   </div>
                                   <div className="truncate">
-                                    <p className="text-sm font-bold text-slate-900 truncate">{doc.filename}</p>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">{doc.chunkCount} chunks</p>
+                                    <p className="text-sm font-bold text-[var(--rf-text)] truncate">{doc.filename}</p>
+                                    <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-widest mt-0.5">{doc.chunkCount} chunks</p>
                                   </div>
                                 </div>
-                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-slate-400 hover:text-rose-500 p-2 rounded-lg hover:bg-rose-50 transition-colors">
+                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-rose-500 p-2 rounded-lg hover:bg-[var(--rf-danger-subtle)] transition-colors">
                                   <Trash className="w-4 h-4" />
                                 </button>
                               </div>
@@ -908,27 +908,27 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 transition={{ duration: 0.3 }}
               >
                 <div className="space-y-1">
-                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Workspace Guidance</h3>
-                  <p className="text-sm font-medium text-slate-500">Global defaults for the workspace. Project-specific rules live in Project Setup.</p>
+                  <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Workspace Guidance</h3>
+                  <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">Global defaults for the workspace. Project-specific rules live in Project Setup.</p>
                 </div>
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200 shadow-sm space-y-8">
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shadow-sm"><Users className="w-6 h-6" /></div>
+                      <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-blue-100 shadow-sm"><Users className="w-6 h-6" /></div>
                       <div>
-                        <h4 className="text-base font-bold text-slate-900">Core persona roles</h4>
-                        <p className="text-xs font-medium text-slate-500">Key stakeholders to consider during generation.</p>
+                        <h4 className="text-base font-bold text-[var(--rf-text)]">Core persona roles</h4>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Key stakeholders to consider during generation.</p>
                       </div>
                     </div>
-                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Product Manager" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-5 py-3.5 text-sm font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition" />
+                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Product Manager" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-5 py-3.5 text-sm font-bold text-[var(--rf-text)] focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition" />
                   </div>
 
-                  <div className="space-y-4 pt-6 border-t border-slate-100">
+                  <div className="space-y-4 pt-6 border-t border-[var(--rf-border-subtle)]">
                     <div>
-                      <h4 className="text-base font-bold text-slate-900">Issue linking default</h4>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Used when a project does not override its Jira issue link type.</p>
+                      <h4 className="text-base font-bold text-[var(--rf-text)]">Issue linking default</h4>
+                      <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Used when a project does not override its Jira issue link type.</p>
                     </div>
-                    <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none w-full max-w-sm transition">
+                    <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-4 py-3 rounded-xl text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none w-full max-w-sm transition">
                       {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
                   </div>
@@ -944,23 +944,23 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 transition={{ duration: 0.3 }}
               >
                 <div className="space-y-1">
-                  <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Billing & Compliance</h3>
+                  <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Billing & Compliance</h3>
                 </div>
 
-                <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="bg-white rounded-2xl p-8 border border-[var(--rf-border)] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
-                    <h4 className="text-3xl font-black text-blue-600 capitalize mt-1">{tier}</h4>
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Current Plan</p>
+                    <h4 className="text-3xl font-black text-[var(--rf-brand)] capitalize mt-1">{tier}</h4>
                   </div>
                   <div className="flex-1 max-w-sm space-y-2">
-                    <div className="flex justify-between text-sm font-bold text-slate-700">
+                    <div className="flex justify-between text-sm font-bold text-[var(--rf-text-secondary)]">
                       <span>Generations this month</span>
-                      <span>{usage?.currentMonth ?? 0} <span className="text-slate-400 font-medium">/ {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span></span>
+                      <span>{usage?.currentMonth ?? 0} <span className="text-[var(--rf-text-tertiary)] font-medium">/ {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span></span>
                     </div>
                     {limits?.generationsPerMonth !== -1 && (
-                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                      <div className="w-full h-2.5 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
                         <div
-                          className="h-full bg-blue-500 transition-all duration-500"
+                          className="h-full bg-[var(--rf-brand-muted)]0 transition-all duration-500"
                           style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
                         />
                       </div>
@@ -977,17 +977,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   ].map(plan => {
                     const isCurrent = tier === plan.key;
                     return (
-                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-blue-500 shadow-md shadow-blue-500/10' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-[var(--rf-brand)] shadow-md shadow-blue-500/10' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}>
                         <div className="mb-4">
                           <div className="flex items-center justify-between">
-                            <div className={`text-lg font-black ${isCurrent ? 'text-blue-600' : 'text-slate-900'}`}>{plan.name}</div>
-                            {isCurrent && <span className="bg-blue-50 text-blue-600 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md border border-blue-100">Current</span>}
+                            <div className={`text-lg font-black ${isCurrent ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text)]'}`}>{plan.name}</div>
+                            {isCurrent && <span className="bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md border border-blue-100">Current</span>}
                           </div>
-                          <div className="text-xs font-semibold text-slate-500 mt-1">{plan.price}</div>
+                          <div className="text-xs font-semibold text-[var(--rf-text-tertiary)] mt-1">{plan.price}</div>
                         </div>
                         <ul className="space-y-2.5 mb-6 flex-1">
                           {plan.highlights.map(item => (
-                            <li key={item} className="text-xs font-medium text-slate-600 flex items-start gap-2">
+                            <li key={item} className="text-xs font-medium text-[var(--rf-text-secondary)] flex items-start gap-2">
                               <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
                               {item}
                             </li>
@@ -999,8 +999,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           rel="noopener noreferrer"
                           className={`mt-auto inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-bold transition ${
                             isCurrent
-                              ? 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-                              : 'border-slate-900 bg-slate-900 text-white hover:bg-black'
+                              ? 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] hover:bg-[var(--rf-surface-soft)]'
+                              : 'border-slate-900 bg-[var(--rf-text)] text-white hover:bg-black'
                           }`}
                         >
                           {isCurrent ? 'Manage Plan' : 'Upgrade'}
@@ -1010,14 +1010,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   })}
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-slate-200 shadow-sm space-y-6">
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <ShieldCheck className="w-5 h-5 text-indigo-600" />
                       <p className="text-[11px] uppercase tracking-widest text-indigo-600 font-bold">Compliance Pack</p>
                     </div>
-                    <h4 className="text-xl font-bold text-slate-900">GDPR + EU AI Act readiness</h4>
-                    <p className="mt-1 text-sm font-medium text-slate-500">
+                    <h4 className="text-xl font-bold text-[var(--rf-text)]">GDPR + EU AI Act readiness</h4>
+                    <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">
                       Enable transparency reports, PII masking, and immutable audits.
                     </p>
                   </div>
@@ -1029,14 +1029,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       { key: 'pii', label: 'PII masking before LLM', value: piiMaskingEnabled, set: setPiiMaskingEnabled },
                       { key: 'audit', label: 'Immutable audit trail', value: auditTrailEnabled, set: setAuditTrailEnabled },
                     ].map(item => (
-                      <label key={item.key} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 cursor-pointer hover:bg-slate-100 transition">
-                        <span className="font-bold text-sm text-slate-700">{item.label}</span>
+                      <label key={item.key} className="flex items-center justify-between rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3.5 cursor-pointer hover:bg-[var(--rf-surface-soft)] transition">
+                        <span className="font-bold text-sm text-[var(--rf-text-secondary)]">{item.label}</span>
                         <input
                           type="checkbox"
                           checked={item.value}
                           onChange={(e) => item.set(e.target.checked)}
                           disabled={!isAdmin}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          className="h-4 w-4 rounded border-[var(--rf-border-strong)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]"
                         />
                       </label>
                     ))}
@@ -1159,17 +1159,17 @@ function ProjectConfigurationManager({
 
   return (
     <div className="space-y-6 animate-in fade-in">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-t border-slate-200 pt-6">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-t border-[var(--rf-border)] pt-6">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-blue-600 mb-1">Editing Project</div>
-          <h4 className="text-xl font-bold text-slate-900">{activeArProj} Configuration</h4>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] mb-1">Editing Project</div>
+          <h4 className="text-xl font-bold text-[var(--rf-text)]">{activeArProj} Configuration</h4>
         </div>
         {isProjectAdmin && (
           <div className="flex flex-wrap gap-2">
             <motion.button 
               onClick={handleSave} 
               disabled={isSavingProject || isRefreshingBacklogCache} 
-              className="bg-white border border-slate-200 hover:bg-slate-50 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 text-slate-700"
+              className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2 text-[var(--rf-text-secondary)]"
               whileTap={{ scale: 0.98 }}
             >
               {isSavingProject ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
@@ -1177,7 +1177,7 @@ function ProjectConfigurationManager({
             <motion.button 
               onClick={handleSaveAndRefresh} 
               disabled={isSavingProject || isRefreshingBacklogCache} 
-              className="bg-slate-900 hover:bg-black text-white text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2"
+              className="bg-[var(--rf-text)] hover:bg-black text-white text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-2"
               whileTap={{ scale: 0.98 }}
             >
               {(isSavingProject || isRefreshingBacklogCache) ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Save & Rebuild
@@ -1187,7 +1187,7 @@ function ProjectConfigurationManager({
       </div>
 
       {projectNotice && (
-        <div className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-2">
+        <div className="text-xs font-bold text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] rounded-xl px-4 py-3 flex items-center gap-2">
           <Check className="w-4 h-4" /> {projectNotice}
         </div>
       )}
@@ -1197,37 +1197,37 @@ function ProjectConfigurationManager({
            <button
              type="button"
              onClick={() => toggleSection('backlog')}
-             className="w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm hover:border-slate-300 transition"
+             className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
            >
              <div className="flex items-center gap-3">
-               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center border border-blue-100"><Database className="w-4 h-4 text-blue-600" /></div>
+               <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-blue-100"><Database className="w-4 h-4 text-[var(--rf-brand)]" /></div>
                <div>
-                 <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                 <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
                    Backlog Context
-                   <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-rose-600 border border-rose-100">Required</span>
+                   <span className="rounded-md bg-[var(--rf-danger-subtle)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-danger)] border border-rose-100">Required</span>
                  </h5>
-                 <p className="text-xs font-medium text-slate-500 mt-0.5">Define Jira statuses for AI context.</p>
+                 <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Define Jira statuses for AI context.</p>
                </div>
              </div>
-             <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${expandedSections.backlog ? 'rotate-90' : ''}`} />
+             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.backlog ? 'rotate-90' : ''}`} />
            </button>
 
            {expandedSections.backlog && (
-           <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-5">
+           <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Indexed Items</div>
-                 <div className="mt-1 text-xl font-black text-slate-900">{backlogCacheInfo?.issueCount ?? 0}</div>
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
+                 <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{backlogCacheInfo?.issueCount ?? 0}</div>
                </div>
-               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Last Built</div>
-                 <div className="mt-1 text-sm font-bold text-slate-700">
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
+                 <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)]">
                    {backlogCacheInfo?.builtAt ? new Date(backlogCacheInfo.builtAt).toLocaleString() : 'Not built yet'}
                  </div>
                </div>
-               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</div>
-                 <div className="mt-1 text-sm font-bold text-slate-700 flex items-center gap-1.5">
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Status</div>
+                 <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)] flex items-center gap-1.5">
                    {backlogCacheInfo?.stale ? <><AlertCircle className="w-4 h-4 text-amber-500"/> Needs refresh</> : <><Check className="w-4 h-4 text-emerald-500"/> Fresh</>}
                  </div>
                </div>
@@ -1235,12 +1235,12 @@ function ProjectConfigurationManager({
 
              <div className="space-y-3 pt-2">
                <div className="flex items-center justify-between">
-                 <div className="text-sm font-bold text-slate-900">
+                 <div className="text-sm font-bold text-[var(--rf-text)]">
                    {effectiveBacklogStatuses.length} status{effectiveBacklogStatuses.length === 1 ? '' : 'es'} in scope
                  </div>
                  <div className="flex gap-2">
-                   <button onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))} className="text-[10px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded">Default</button>
-                   <button onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))} className="text-[10px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded">All</button>
+                   <button onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))} className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] hover:text-blue-800 bg-[var(--rf-brand-muted)] px-2 py-1 rounded">Default</button>
+                   <button onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))} className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] hover:text-blue-800 bg-[var(--rf-brand-muted)] px-2 py-1 rounded">All</button>
                  </div>
                </div>
                <div className="flex flex-wrap gap-2">
@@ -1250,7 +1250,7 @@ function ProjectConfigurationManager({
                      <button
                        key={status.name}
                        onClick={() => updateBacklogStatuses(selected ? effectiveBacklogStatuses.filter((item: string) => item !== status.name) : [...effectiveBacklogStatuses, status.name])}
-                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}
+                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selected ? 'bg-[var(--rf-brand)] text-white border-blue-600 shadow-md shadow-[var(--rf-brand)]/20' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)]'}`}
                      >
                        {status.name}
                      </button>
@@ -1266,23 +1266,23 @@ function ProjectConfigurationManager({
             <button
               type="button"
               onClick={() => toggleSection('guidance')}
-              className="w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm hover:border-slate-300 transition"
+              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
             >
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-100"><Globe className="w-4 h-4 text-indigo-600" /></div>
                 <div>
-                  <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
                     Project Guidance
-                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-slate-500 border border-slate-200">Recommended</span>
+                    <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">Recommended</span>
                   </h5>
-                  <p className="text-xs font-medium text-slate-500 mt-0.5">Rules or context specific to this project.</p>
+                  <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Rules or context specific to this project.</p>
                 </div>
               </div>
-              <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
+              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
             </button>
             {expandedSections.guidance && (
-              <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
-                <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-32 bg-white border border-slate-200 rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition shadow-sm resize-none" />
+              <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)]">
+                <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-32 bg-white border border-[var(--rf-border)] rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none" />
               </div>
             )}
          </div>
@@ -1291,43 +1291,43 @@ function ProjectConfigurationManager({
             <button
               type="button"
               onClick={() => toggleSection('mapping')}
-              className="w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm hover:border-slate-300 transition"
+              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-100"><Layers className="w-4 h-4 text-emerald-600" /></div>
+                <div className="w-8 h-8 rounded-lg bg-[var(--rf-success-subtle)] flex items-center justify-center border border-emerald-100"><Layers className="w-4 h-4 text-[var(--rf-success)]" /></div>
                 <div>
-                  <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
                     AR Field Mapping
-                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-slate-500 border border-slate-200">Advanced</span>
+                    <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">Advanced</span>
                   </h5>
-                  <p className="text-xs font-medium text-slate-500 mt-0.5">Map where Acceptance Criteria go.</p>
+                  <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Map where Acceptance Criteria go.</p>
                 </div>
               </div>
-              <ChevronRight className={`w-5 h-5 text-slate-400 transition-transform ${expandedSections.mapping ? 'rotate-90' : ''}`} />
+              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.mapping ? 'rotate-90' : ''}`} />
             </button>
             {expandedSections.mapping && (
-            <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-5">
-               <div className="flex p-1 bg-white rounded-lg border border-slate-200 shadow-sm max-w-[240px]">
-                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'consolidated' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Consolidated</button>
-                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'iterative' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Iterative</button>
+            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
+               <div className="flex p-1 bg-white rounded-lg border border-[var(--rf-border)] shadow-sm max-w-[240px]">
+                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>Consolidated</button>
+                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'iterative' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>Iterative</button>
                </div>
                
                <div>
                  {currentMapping.mode === 'consolidated' ? (
-                   <div className="flex items-center justify-between gap-4 bg-white p-3 rounded-xl border border-slate-200">
-                     <span className="text-xs font-bold text-slate-700">Storage Field</span>
+                   <div className="flex items-center justify-between gap-4 bg-white p-3 rounded-xl border border-[var(--rf-border)]">
+                     <span className="text-xs font-bold text-[var(--rf-text-secondary)]">Storage Field</span>
                      <FieldSelector value={currentMapping.consolidatedFieldId} onChange={(fid: string) => updateMapping({ consolidatedFieldId: fid })} customFields={customFields} />
                    </div>
                  ) : (
                    <div className="space-y-3">
                      {currentMapping.iterativeFieldIds.map((fid: string, i: number) => (
-                       <div key={i} className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200">
-                         <span className="text-[10px] font-black text-slate-400 min-w-[24px] text-center">#{i+1}</span>
+                       <div key={i} className="flex items-center gap-3 bg-white p-2 rounded-xl border border-[var(--rf-border)]">
+                         <span className="text-[10px] font-black text-[var(--rf-text-tertiary)] min-w-[24px] text-center">#{i+1}</span>
                          <div className="flex-1"><FieldSelector value={fid} onChange={(newF: string) => { const ids = [...currentMapping.iterativeFieldIds]; ids[i] = newF; updateMapping({ iterativeFieldIds: ids }); }} customFields={customFields} /></div>
-                         <button onClick={() => updateMapping({ iterativeFieldIds: currentMapping.iterativeFieldIds.filter((_: any, idx: number) => idx !== i) })} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition"><X className="w-4 h-4"/></button>
+                         <button onClick={() => updateMapping({ iterativeFieldIds: currentMapping.iterativeFieldIds.filter((_: any, idx: number) => idx !== i) })} className="p-1.5 text-[var(--rf-text-tertiary)] hover:text-rose-500 hover:bg-[var(--rf-danger-subtle)] rounded-md transition"><X className="w-4 h-4"/></button>
                        </div>
                      ))}
-                     <button onClick={() => updateMapping({ iterativeFieldIds: [...currentMapping.iterativeFieldIds, ''] })} className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg uppercase tracking-widest transition">+ Add slot</button>
+                     <button onClick={() => updateMapping({ iterativeFieldIds: [...currentMapping.iterativeFieldIds, ''] })} className="text-[10px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg uppercase tracking-widest transition">+ Add slot</button>
                    </div>
                  )}
                </div>
@@ -1360,21 +1360,21 @@ function FieldSelector({ value, onChange, customFields }: any) {
 
   return (
     <div className="relative w-full max-w-[240px]" ref={wrapperRef}>
-      <button type="button" onClick={() => setIsOpen(!isOpen)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-left flex justify-between items-center hover:border-blue-300 transition-all shadow-sm">
-        <span className="truncate text-slate-800">{selected ? selected.name : 'Select Field'}</span>
-        <ChevronRight className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+      <button type="button" onClick={() => setIsOpen(!isOpen)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-bold text-left flex justify-between items-center hover:border-[var(--rf-brand-subtle)] transition-all shadow-sm">
+        <span className="truncate text-[var(--rf-text-secondary)]">{selected ? selected.name : 'Select Field'}</span>
+        <ChevronRight className={`w-3.5 h-3.5 text-[var(--rf-text-tertiary)] transition-transform ${isOpen ? 'rotate-90' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden flex flex-col">
-          <div className="p-2 border-b border-slate-100 bg-slate-50">
-            <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium outline-none focus:border-blue-500" />
+        <div className="absolute z-50 top-full left-0 right-0 mt-1.5 bg-white border border-[var(--rf-border)] rounded-xl shadow-xl overflow-hidden flex flex-col">
+          <div className="p-2 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]">
+            <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-xs font-medium outline-none focus:border-[var(--rf-brand)]" />
           </div>
           <div className="max-h-[200px] overflow-y-auto custom-scrollbar py-1">
             {filtered.map((f: any) => (
-              <button key={f.id} onClick={() => { onChange(f.id); setIsOpen(false); setSearch(''); }} className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-50 transition-colors flex items-center justify-between ${value === f.id ? 'bg-blue-50/50' : ''}`}>
-                <span className={`font-bold truncate ${value === f.id ? 'text-blue-700' : 'text-slate-700'}`}>{f.name}</span>
-                <span className="text-[9px] text-slate-400 font-mono shrink-0 ml-2">{f.id}</span>
+              <button key={f.id} onClick={() => { onChange(f.id); setIsOpen(false); setSearch(''); }} className={`w-full text-left px-3 py-2 text-xs hover:bg-[var(--rf-surface-soft)] transition-colors flex items-center justify-between ${value === f.id ? 'bg-[var(--rf-brand-muted)]/50' : ''}`}>
+                <span className={`font-bold truncate ${value === f.id ? 'text-[var(--rf-brand-hover)]' : 'text-[var(--rf-text-secondary)]'}`}>{f.name}</span>
+                <span className="text-[9px] text-[var(--rf-text-tertiary)] font-mono shrink-0 ml-2">{f.id}</span>
               </button>
             ))}
           </div>

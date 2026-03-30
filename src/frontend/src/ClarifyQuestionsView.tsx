@@ -78,7 +78,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
     <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
       {/* Header */}
       <motion.header
-        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-slate-200 shadow-sm flex items-center justify-between gap-4"
+        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm flex items-center justify-between gap-4"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -87,7 +87,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
           {!sidebarOpen && (
             <motion.button
               onClick={() => setSidebarOpen(true)}
-              className="p-2 -ml-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors"
+              className="p-2 -ml-2 rounded-xl hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] transition-colors"
               title="Open Sidebar"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -96,37 +96,37 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
             </motion.button>
           )}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100 shadow-sm">
-              <Sparkles className="w-5 h-5 text-blue-600" />
+            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center border border-blue-100 shadow-sm">
+              <Sparkles className="w-5 h-5 text-[var(--rf-brand)]" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight">Requirement Discovery</h1>
-              <p className="text-xs font-medium text-slate-500 mt-0.5">{answeredCount} of {questions.length} questions explored</p>
+              <h1 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Requirement Discovery</h1>
+              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">{answeredCount} of {questions.length} questions explored</p>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-4 flex-1 max-w-lg hidden md:flex">
-          <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+          <div className="flex-1 h-2 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+              className="h-full bg-[var(--rf-brand-muted)]0 rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
               style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
             />
           </div>
-          <span className="text-xs font-bold text-slate-500 shrink-0">{answeredCount}/{questions.length}</span>
+          <span className="text-xs font-bold text-[var(--rf-text-tertiary)] shrink-0">{answeredCount}/{questions.length}</span>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
           <motion.button
             onClick={onSkip}
-            className="text-xs font-bold text-slate-500 hover:text-slate-700 transition px-3 py-2 rounded-lg hover:bg-slate-100"
+            className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)]"
             whileTap={{ scale: 0.97 }}
           >
             Skip all
           </motion.button>
           <motion.button
             onClick={handleSubmit}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm shadow-blue-600/20"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-sm shadow-[var(--rf-brand)]/20"
             whileTap={{ scale: 0.98 }}
           >
             Generate Features <ArrowRight className="w-4 h-4" />
@@ -139,27 +139,27 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
         <div className="max-w-3xl mx-auto space-y-8 pb-12">
           {contextMeta && (
             <motion.div
-              className="rounded-2xl border border-slate-200 bg-white/60 backdrop-blur-md p-5 shadow-sm"
+              className="rounded-2xl border border-[var(--rf-border)] bg-white/60 backdrop-blur-md p-5 shadow-sm"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="font-bold text-slate-900 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-blue-500" />
+                  <div className="font-bold text-[var(--rf-text)] flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-[var(--rf-brand)]" />
                     Discovery Context
                   </div>
-                  <div className="flex items-center gap-3 text-slate-500 text-xs font-medium">
-                    <span className="px-2 py-1 bg-slate-100 rounded-md">Project: {contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}</span>
-                    <span className="px-2 py-1 bg-slate-100 rounded-md">Docs: {contextMeta.wiDocsCount ?? 0}</span>
-                    <span className="px-2 py-1 bg-slate-100 rounded-md">Refs: {contextMeta.similarStoriesCount ?? 0}</span>
+                  <div className="flex items-center gap-3 text-[var(--rf-text-tertiary)] text-xs font-medium">
+                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Project: {contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}</span>
+                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Docs: {contextMeta.wiDocsCount ?? 0}</span>
+                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Refs: {contextMeta.similarStoriesCount ?? 0}</span>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowContextDetails(v => !v)}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-700 transition-colors"
+                  className="text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
                 >
                   {showContextDetails ? 'Hide details' : 'Show details'}
                 </button>
@@ -167,26 +167,26 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
 
               {showContextDetails && (
                 <motion.div
-                  className="mt-4 pt-4 border-t border-slate-200/60 space-y-2 text-xs"
+                  className="mt-4 pt-4 border-t border-[var(--rf-border)]/60 space-y-2 text-xs"
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                 >
                   {contextMeta.ambiguityAssessment?.reasons?.length ? (
-                    <div className="text-slate-600 bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                    <div className="text-[var(--rf-text-secondary)] bg-[var(--rf-brand-muted)]/50 p-3 rounded-xl border border-blue-100">
                       <strong className="text-blue-900 mb-1 block">Analysis:</strong>
                       {contextMeta.ambiguityAssessment.reasons.join(' ')}
                     </div>
                   ) : null}
-                  <div className="grid grid-cols-2 gap-2 text-slate-600 mt-2">
-                    <div><strong className="text-slate-900">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
-                    <div><strong className="text-slate-900">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
+                  <div className="grid grid-cols-2 gap-2 text-[var(--rf-text-secondary)] mt-2">
+                    <div><strong className="text-[var(--rf-text)]">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
+                    <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
                     {contextMeta.domainRolesUsed?.length > 0 && (
-                      <div className="col-span-2"><strong className="text-slate-900">Roles:</strong> {contextMeta.domainRolesUsed.join(', ')}</div>
+                      <div className="col-span-2"><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed.join(', ')}</div>
                     )}
                   </div>
                   
                   {contextMeta.tokenUsage && (
-                    <div className="text-slate-400 mt-3 pt-3 border-t border-slate-100">
+                    <div className="text-[var(--rf-text-tertiary)] mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
                       Tokens used: {contextMeta.tokenUsage.total.toLocaleString()} ({contextMeta.tokenUsage.input.toLocaleString()} in / {contextMeta.tokenUsage.output.toLocaleString()} out)
                     </div>
                   )}
@@ -204,7 +204,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
               transition={{ delay: idx * 0.1, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
             >
               <div className="flex items-center gap-4">
-                <span className="inline-flex items-center rounded-lg px-3 py-1 text-[11px] font-bold uppercase tracking-widest bg-slate-900 text-white shadow-sm">
+                <span className="inline-flex items-center rounded-lg px-3 py-1 text-[11px] font-bold uppercase tracking-widest bg-[var(--rf-text)] text-white shadow-sm">
                   {category}
                 </span>
                 <div className="flex-1 h-px bg-slate-200" />
@@ -218,14 +218,14 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                   return (
                     <div
                       key={idx}
-                      className={`rounded-2xl border bg-white shadow-sm transition-all duration-300 overflow-hidden ${isAnswered ? 'border-blue-300 shadow-md shadow-blue-500/5' : 'border-slate-200 hover:border-slate-300 hover:shadow-md'}`}
+                      className={`rounded-2xl border bg-white shadow-sm transition-all duration-300 overflow-hidden ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-blue-500/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
                     >
                       <div className="p-5 flex items-start gap-4">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
                           {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
                         </div>
                         <div className="flex-1 space-y-4">
-                          <p className="text-[15px] font-bold text-slate-900 leading-snug pt-1">{q.question}</p>
+                          <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug pt-1">{q.question}</p>
 
                           {q.suggestions.length > 0 && (
                             <div className="flex flex-wrap gap-2">
@@ -237,8 +237,8 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                                     onClick={() => toggleSuggestion(idx, sug)}
                                     className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
                                       sel
-                                        ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm'
-                                        : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 bg-white hover:bg-slate-50'
+                                        ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border-[var(--rf-brand-subtle)] shadow-sm'
+                                        : 'border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] bg-white hover:bg-[var(--rf-surface-soft)]'
                                     }`}
                                   >
                                     <div className="flex items-center gap-1.5">
@@ -256,7 +256,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                             onChange={e => handleCustomChange(idx, e.target.value)}
                             placeholder={q.suggestions.length > 0 ? 'Click suggestions above or type your own answer\u2026' : 'Type your detailed answer here\u2026'}
                             rows={3}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none placeholder-slate-400"
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-slate-400"
                           />
                         </div>
                       </div>
@@ -275,7 +275,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
           >
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 active:scale-[0.98]"
+              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
             >
               Generate Features <ArrowRight className="w-4 h-4" />
             </button>
