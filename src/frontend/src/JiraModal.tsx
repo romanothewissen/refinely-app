@@ -9,11 +9,12 @@ interface JiraModalProps {
   feature?: any;
   originIssueKey?: string;
   sessionId?: string;
+  defaultProjectKey?: string;
 }
 
 type ModalState = 'form' | 'creating' | 'success' | 'error';
 
-export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionId }: JiraModalProps) {
+export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionId, defaultProjectKey }: JiraModalProps) {
   const [projectKey, setProjectKey] = useState('');
   const [issueType, setIssueType] = useState('Story');
   const [projects, setProjects] = useState<{ key: string; name: string }[]>([]);
@@ -32,12 +33,16 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
         ]);
         if (jiraRes?.success && jiraRes.projects?.length > 0) {
           setProjects(jiraRes.projects);
-          setProjectKey(jiraRes.projects[0]?.key ?? '');
+          const preferredProject =
+            (defaultProjectKey && defaultProjectKey !== '*' && jiraRes.projects.find((p: any) => p.key === defaultProjectKey)?.key) ||
+            jiraRes.projects[0]?.key ||
+            '';
+          setProjectKey(preferredProject);
         }
         if (ctx?.accountId) setAccountId(ctx.accountId);
       } catch {}
     })();
-  }, []);
+  }, [defaultProjectKey]);
 
   const handleCreate = async () => {
     if (!projectKey) return;
