@@ -49,6 +49,7 @@ permissions:
     - read:jira-work
     - write:jira-work
     - read:jira-user
+    - manage:jira-configuration
     - storage:app
   external:
     fetch:
