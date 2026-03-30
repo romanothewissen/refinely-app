@@ -135,6 +135,45 @@
   /* Spin (loading spinner) */
   .spin-slow { animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Primary action ambient shimmer */
+  .brainstorm-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .brainstorm-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.15) 45%,
+      rgba(255, 255, 255, 0.25) 50%,
+      rgba(255, 255, 255, 0.15) 55%,
+      transparent 70%
+    );
+    background-size: 250% 100%;
+    animation: brainstormShimmer 3s ease-in-out infinite;
+    pointer-events: none;
+    border-radius: inherit;
+  }
+  .brainstorm-shimmer:disabled::after {
+    display: none;
+  }
+  @keyframes brainstormShimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Empty state levitation */
+  .levitate {
+    animation: levitate 3.5s ease-in-out infinite;
+  }
+  @keyframes levitate {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-4px); }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

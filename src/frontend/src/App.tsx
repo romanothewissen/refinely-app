@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { requestJira, view } from '@forge/bridge';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './Sidebar';
 import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
@@ -465,15 +466,20 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden text-[var(--rf-text)] font-sans bg-[var(--rf-bg)]">
+    <div className="flex h-screen w-full overflow-hidden text-[#172B4D] font-sans bg-[#F4F5F7]">
       {/* Left Sidebar — animated & resizable */}
-      {(sidebarOpen || sidebarExiting) && (
-        <div 
-          className={sidebarExiting ? 'sidebar-exit' : 'sidebar-enter'}
-          style={{ width: sidebarOpen ? sidebarWidth : 0 }}
-        >
-          <div className="relative h-full w-full flex">
-            <Sidebar
+      <AnimatePresence>
+        {(sidebarOpen || sidebarExiting) && (
+          <motion.div
+            key="sidebar"
+            initial={{ opacity: 0, x: -16, width: 0 }}
+            animate={{ opacity: 1, x: 0, width: sidebarWidth }}
+            exit={{ opacity: 0, x: -16, width: 0 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="shrink-0 overflow-hidden"
+          >
+            <div className="relative h-full w-full flex">
+              <Sidebar
               viewMode={viewMode}
               setViewMode={(mode: 'generate' | 'settings') => {
                 if (mode === 'settings') { openSettings(); }
@@ -516,19 +522,20 @@ export default function App() {
               wiDocs={wiDocs}
               onOpenProjectSettings={openProjectSettings}
             />
-            {/* Resize Handle */}
-            {sidebarOpen && (
-              <div
-                onMouseDown={startResizing}
-                className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-[var(--rf-brand)] group z-50 transition-colors"
-                style={{ cursor: 'col-resize' }}
-              >
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-[var(--rf-border)] group-hover:bg-white rounded-full transition-colors" />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+              {/* Resize Handle */}
+              {sidebarOpen && (
+                <div
+                  onMouseDown={startResizing}
+                  className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-[#0052CC] group z-50 transition-colors"
+                  style={{ cursor: 'col-resize' }}
+                >
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-[#DFE1E6] group-hover:bg-white rounded-full transition-colors" />
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Right Pane / Settings */}
       {viewMode === 'settings' && isAdmin ? (
@@ -538,13 +545,21 @@ export default function App() {
           initialProjectKey={settingsStartProjectKey}
         />
       ) : (
-        <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[var(--rf-bg)]">
-          {generationError && (
-            <div className="w-full bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-b border-red-300 px-6 py-3 text-sm font-medium flex items-start gap-3 z-50">
-              <span className="flex-1">{generationError}</span>
-              <button onClick={() => setGenerationError(null)} className="text-[var(--rf-danger)] hover:text-red-800 font-semibold text-sm leading-none">&times;</button>
-            </div>
-          )}
+        <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#F4F5F7]">
+          <AnimatePresence>
+            {generationError && (
+              <motion.div
+                className="w-full bg-[#FFEBE6] text-[#DE350B] border-b border-red-300 px-6 py-3 text-sm font-medium flex items-start gap-3 z-50"
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <span className="flex-1">{generationError}</span>
+                <button onClick={() => setGenerationError(null)} className="text-[#DE350B] hover:text-red-800 font-semibold text-sm leading-none">&times;</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {clarifyQuestions.length > 0 ? (
             <ClarifyQuestionsView 
               questions={clarifyQuestions} 
