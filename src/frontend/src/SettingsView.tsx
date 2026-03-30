@@ -19,7 +19,7 @@ interface GoldSource {
 }
 interface JiraProject { key: string; name: string }
 interface JiraIssueType { name: string }
-interface JiraStatus { name: string }
+interface JiraStatus { name: string; statusCategory?: { name: string } }
 interface JiraField { id: string; name: string }
 interface ProjectBacklogStatusScope { projectKey: string; statuses: string[] }
 
@@ -167,6 +167,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       const usageRes = await api.getUsage() as any;
       if (usageRes?.usage) setUsage(usageRes.usage);
       if (usageRes?.limits) setLimits(usageRes.limits);
+      const jiraRes = await api.discoverJira() as any;
+      if (jiraRes?.success !== false) {
+        setProjects(jiraRes.projects ?? []);
+        setCustomFields(jiraRes.fields ?? []);
+      }
     } catch (e) { console.error('Error loading config', e); }
   }
 
@@ -224,18 +229,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     }
   }
 
-  async function handleRefreshBacklogCache() {
-    if (!activeArProj || activeArProj === '*') return;
+  async function handleRefreshBacklogCache(projectKey = activeArProj) {
+    if (!projectKey || projectKey === '*') return null;
     setIsRefreshingBacklogCache(true);
     try {
-      const res = await api.refreshBacklogCache(activeArProj) as any;
+      const res = await api.refreshBacklogCache(projectKey) as any;
       if (res?.success) {
-        setBacklogCacheInfo({
+        const nextInfo = {
           projectKey: res.projectKey,
           builtAt: res.builtAt,
           issueCount: res.issueCount ?? 0,
           stale: false,
-        });
+        };
+        setBacklogCacheInfo(nextInfo);
+        return nextInfo;
       } else {
         alert(res?.error || 'Backlog cache refresh failed.');
       }
@@ -244,6 +251,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     } finally {
       setIsRefreshingBacklogCache(false);
     }
+    return null;
   }
 
   async function loadBacklogStatuses(projectKey: string) {
@@ -501,10 +509,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {isAdmin && (
+          {isAdmin && activeTab !== 'jira' && (
             <button onClick={handleSave} disabled={isSaving} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 text-white text-sm font-bold px-6 py-2.5 rounded-2xl shadow-[var(--rf-shadow-md)] transition-all active:scale-[0.98] flex items-center gap-2">
               {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save Config
+              Save Workspace
             </button>
           )}
         </div>
@@ -614,77 +622,92 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Jira Governance</div>
-                    <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Project mapping and source control</h3>
-                    <p className="text-[var(--rf-text-secondary)] text-sm">Fine-tune how Refinely interacts with your Jira projects.</p>
-                  </div>
-                  <div className="rf-panel-soft flex items-center gap-2 p-1.5 rounded-2xl">
-                     <span className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest px-3">Editing Context:</span>
-                     <select value={activeArProj} onChange={e => setActiveArProj(e.target.value)} className="bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2 text-xs font-black text-[var(--rf-brand)] shadow-[var(--rf-shadow-sm)] focus:ring-2 focus:ring-blue-500/20 outline-none min-w-[180px]">
-                        <option value="*">Global Org-Wide</option>
-                        {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
-                      </select>
+                    <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Connect Jira in the right order</h3>
+                    <p className="text-[var(--rf-text-secondary)] text-sm">Start with workspace-wide discovery, then choose one project and configure the backlog, AR mapping, and optional curated examples for that project.</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-8">
                 <div className="rf-panel rounded-[28px] p-8 space-y-8">
-                  <div className="flex items-center justify-between">
-                     <div className="space-y-1">
-                        <h4 className="text-base font-bold text-slate-800">Schema Discovery</h4>
-                        <p className="text-xs text-slate-500">Sync latest projects and custom fields.</p>
-                     </div>
-                     <button onClick={discoverJira} disabled={isDiscovering} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 border border-slate-200 shadow-sm">
-                      {isDiscovering ? <RefreshCw className="w-3.5 h-3.5 animate-spin"/> : <RefreshCw className="w-3.5 h-3.5" />} Sync Now
-                    </button>
-                  </div>
-
-                  {activeArProj !== '*' && (
-                    <div className="rf-panel-soft rounded-[24px] p-5 space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-6">
+                    <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
                       <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Backlog Cache</div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{activeArProj}</div>
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 1</div>
+                          <h4 className="text-base font-bold text-[var(--rf-text)]">Workspace Jira discovery</h4>
+                          <p className="text-xs text-[var(--rf-text-secondary)]">Refresh projects and fields before editing project-specific rules.</p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={handleRefreshBacklogCache}
-                          disabled={isRefreshingBacklogCache}
-                          className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] disabled:opacity-60 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text)] px-4 py-2 rounded-xl shadow-[var(--rf-shadow-sm)]"
-                        >
-                          {isRefreshingBacklogCache ? 'Refreshing…' : 'Refresh Cache'}
+                        <button onClick={discoverJira} disabled={isDiscovering} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 border border-slate-200 shadow-sm">
+                          {isDiscovering ? <RefreshCw className="w-3.5 h-3.5 animate-spin"/> : <RefreshCw className="w-3.5 h-3.5" />} Sync Jira
                         </button>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div className="grid grid-cols-2 gap-3">
                         <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
-                          <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{backlogCacheInfo?.issueCount ?? 0}</div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Projects Found</div>
+                          <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{projects.length}</div>
                         </div>
                         <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
-                            {backlogCacheInfo?.builtAt ? new Date(backlogCacheInfo.builtAt).toLocaleString() : 'Not built yet'}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Refresh Policy</div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
-                            {backlogCacheInfo?.stale ? 'Stale' : 'Fresh'}
-                          </div>
-                          <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">Weekly schedule, manual refresh anytime, up to 1000 recent done issues.</div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Custom Fields</div>
+                          <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{customFields.length}</div>
                         </div>
                       </div>
                     </div>
-                  )}
 
-                  <ProjectConfigurationManager 
-                    projects={projects || []} customFields={customFields || []} arMappings={arMappings || []} setArMappings={setArMappings}
-                    domainContexts={domainContexts || []} setDomainContexts={setDomainContexts} goldSources={goldSources || []} setGoldSources={setGoldSources}
-                    backlogStatusScopes={backlogStatusScopes || []} setBacklogStatusScopes={setBacklogStatusScopes} backlogStatusOptions={backlogStatusOptions || []}
-                    detectDefaultStatuses={detectDefaultStatuses}
-                    activeArProj={activeArProj} setActiveArProj={setActiveArProj} isAdmin={isAdmin} isProjectAdmin={activeProjAdmin}
-                    issueTypes={issueTypes || []} statuses={statuses || []} onProjectSelect={onProjectSelect}
-                    newSource={newSource || {}} setNewSource={setNewSource} addGoldSource={addGoldSource}
-                  />
+                    <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workspace Default</div>
+                        <h4 className="text-base font-bold text-[var(--rf-text)]">Issue linking</h4>
+                        <p className="text-xs text-[var(--rf-text-secondary)]">Used when a project does not override its Jira issue link type.</p>
+                      </div>
+                      <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-white border border-[var(--rf-border)] px-4 py-3 rounded-xl text-sm font-semibold text-[var(--rf-text)] outline-none shadow-[var(--rf-shadow-sm)] w-full">
+                        {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                      {isAdmin && (
+                        <button onClick={handleSave} disabled={isSaving} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all active:scale-[0.98] flex items-center gap-2">
+                          {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Save Workspace Default
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 2</div>
+                      <h4 className="text-base font-bold text-[var(--rf-text)]">Choose the project you want to configure</h4>
+                      <p className="text-xs text-[var(--rf-text-secondary)]">Everything below applies only to this project: backlog cache scope, AR field mapping, project guidance, and optional curated examples.</p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                      <select value={activeArProj} onChange={e => setActiveArProj(e.target.value)} className="bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] shadow-[var(--rf-shadow-sm)] focus:ring-2 focus:ring-blue-500/20 outline-none min-w-[240px]">
+                        <option value="*">Select a project...</option>
+                        {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
+                      </select>
+                      <div className="text-xs text-[var(--rf-text-secondary)]">
+                        {activeArProj !== '*' ? `Currently editing ${activeArProj}.` : 'Pick a Jira project to unlock project-specific setup.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {activeArProj !== '*' ? (
+                    <ProjectConfigurationManager 
+                      projects={projects || []} customFields={customFields || []} arMappings={arMappings || []} setArMappings={setArMappings}
+                      domainContexts={domainContexts || []} setDomainContexts={setDomainContexts} goldSources={goldSources || []} setGoldSources={setGoldSources}
+                      backlogStatusScopes={backlogStatusScopes || []} setBacklogStatusScopes={setBacklogStatusScopes} backlogStatusOptions={backlogStatusOptions || []}
+                      detectDefaultStatuses={detectDefaultStatuses}
+                      activeArProj={activeArProj} setActiveArProj={setActiveArProj} isAdmin={isAdmin} isProjectAdmin={activeProjAdmin}
+                      issueTypes={issueTypes || []} statuses={statuses || []} onProjectSelect={onProjectSelect}
+                      newSource={newSource || {}} setNewSource={setNewSource} addGoldSource={addGoldSource}
+                      backlogCacheInfo={backlogCacheInfo}
+                      isRefreshingBacklogCache={isRefreshingBacklogCache}
+                      onRefreshBacklogCache={handleRefreshBacklogCache}
+                    />
+                  ) : (
+                    <div className="rf-panel-soft rounded-[24px] p-10 text-center border border-dashed border-[var(--rf-border)]">
+                      <Database className="w-10 h-10 text-[var(--rf-text-tertiary)]/40 mx-auto mb-4" />
+                      <h4 className="text-base font-semibold text-[var(--rf-text)]">Select a project to continue</h4>
+                      <p className="text-sm text-[var(--rf-text-secondary)] mt-2">Once a project is selected, you can define which deployed backlog items are indexed, how ARs are read, and whether curated examples should boost the output.</p>
+                    </div>
+                  )}
                 </div>
                 </div>
               </div>
@@ -834,7 +857,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 function ProjectConfigurationManager({ 
   projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts, goldSources, setGoldSources,
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
-  activeArProj, isAdmin, isProjectAdmin, issueTypes, statuses, onProjectSelect, newSource, setNewSource, addGoldSource
+  activeArProj, isAdmin, isProjectAdmin, issueTypes, statuses, onProjectSelect, newSource, setNewSource, addGoldSource,
+  backlogCacheInfo, isRefreshingBacklogCache, onRefreshBacklogCache,
 }: any) {
   const currentMapping = arMappings.find((m: any) => m.projectKey === activeArProj) || {
     projectKey: activeArProj, mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [],
@@ -873,6 +897,7 @@ function ProjectConfigurationManager({
 
   const [isSavingProject, setIsSavingProject] = useState(false);
   const selectedStatuses: string[] = Array.isArray(newSource.statuses) ? newSource.statuses : [];
+  const [projectNotice, setProjectNotice] = useState<string | null>(null);
 
   const toggleStatus = (statusName: string) => {
     const exists = selectedStatuses.includes(statusName);
@@ -884,6 +909,7 @@ function ProjectConfigurationManager({
 
   const handleSave = async () => {
     setIsSavingProject(true);
+    setProjectNotice(null);
     try {
       await api.saveProjectConfig({
         projectKey: activeArProj,
@@ -892,33 +918,159 @@ function ProjectConfigurationManager({
         goldSources: currentGoldSources,
         backlogStatuses: effectiveBacklogStatuses,
       });
-      alert('Project saved.');
+      setProjectNotice('Project configuration saved.');
     } catch (e: any) { alert(e.message); }
     finally { setIsSavingProject(false); }
   };
 
+  const handleSaveAndRefresh = async () => {
+    setIsSavingProject(true);
+    setProjectNotice(null);
+    try {
+      await api.saveProjectConfig({
+        projectKey: activeArProj,
+        arMapping: currentMapping,
+        domainContext: currentContext.context,
+        goldSources: currentGoldSources,
+        backlogStatuses: effectiveBacklogStatuses,
+      });
+      const refreshed = await onRefreshBacklogCache(activeArProj);
+      if (refreshed) {
+        setProjectNotice(
+          refreshed.issueCount > 0
+            ? `Backlog cache rebuilt with ${refreshed.issueCount} issues.`
+            : 'Backlog cache rebuilt, but 0 matching issues were found for the selected statuses.',
+        );
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in">
-      <div className="flex items-center justify-between border-b border-[var(--rf-border-subtle)] pb-6">
+      <div className="flex flex-col gap-4 border-b border-[var(--rf-border-subtle)] pb-6">
         <div>
-          <h4 className="text-lg font-bold text-[var(--rf-text)]">Project configuration</h4>
-          <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-widest mt-0.5">Focus: {activeArProj === '*' ? 'System-Wide Defaults' : activeArProj}</p>
+          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
+          <h4 className="text-lg font-bold text-[var(--rf-text)]">Project setup for {activeArProj}</h4>
+          <p className="text-sm text-[var(--rf-text-secondary)] mt-1">Save the project rules first, then rebuild the backlog cache so the selected statuses and mappings are applied immediately.</p>
         </div>
-        {isProjectAdmin && (
-          <button onClick={handleSave} disabled={isSavingProject} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-[10px] font-bold uppercase tracking-widest px-6 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] active:scale-[0.98] transition-all flex items-center gap-2">
-            {isSavingProject ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save Settings
-          </button>
-        )}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          {projectNotice ? (
+            <div className="text-xs font-semibold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] border border-[rgba(0,82,204,0.12)] rounded-2xl px-4 py-3">
+              {projectNotice}
+            </div>
+          ) : (
+            <div className="text-xs text-[var(--rf-text-secondary)]">
+              Project admins can save project-only changes here without affecting the rest of the workspace.
+            </div>
+          )}
+          {isProjectAdmin && (
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handleSave} disabled={isSavingProject || isRefreshingBacklogCache} className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] text-[10px] font-bold uppercase tracking-widest px-5 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all flex items-center gap-2">
+                {isSavingProject ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save Project
+              </button>
+              <button onClick={handleSaveAndRefresh} disabled={isSavingProject || isRefreshingBacklogCache} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-[10px] font-bold uppercase tracking-widest px-5 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] active:scale-[0.98] transition-all flex items-center gap-2">
+                {(isSavingProject || isRefreshingBacklogCache) ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Save + Rebuild Cache
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+         <div className="col-span-full space-y-4">
+           <div>
+             <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
+               <Database className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Backlog Cache Scope
+             </h5>
+             <p className="text-xs text-[var(--rf-text-secondary)] mt-1">
+               Refinely will index up to 1000 of the most recently updated non-subtask issues in these statuses. This is the primary Jira context pool used for clarifying questions and feature generation.
+             </p>
+           </div>
+
+           <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
+                 <div className="mt-1 text-lg font-semibold text-[var(--rf-text)]">{backlogCacheInfo?.issueCount ?? 0}</div>
+               </div>
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
+                 <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
+                   {backlogCacheInfo?.builtAt ? new Date(backlogCacheInfo.builtAt).toLocaleString() : 'Not built yet'}
+                 </div>
+               </div>
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Refresh Policy</div>
+                 <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
+                   {backlogCacheInfo?.stale ? 'Needs refresh' : 'Fresh'}
+                 </div>
+                 <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">Weekly scheduled rebuild plus manual refresh anytime.</div>
+               </div>
+             </div>
+
+             <div className="flex items-center justify-between gap-3">
+               <div className="text-xs font-semibold text-[var(--rf-text)]">
+                 {effectiveBacklogStatuses.length} status{effectiveBacklogStatuses.length === 1 ? '' : 'es'} currently in scope
+               </div>
+               <div className="flex items-center gap-2">
+                 <button
+                   type="button"
+                   onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))}
+                   className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
+                 >
+                   Reset to done-like defaults
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))}
+                   className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
+                 >
+                   Select all
+                 </button>
+               </div>
+             </div>
+
+             <div className="flex flex-wrap gap-2">
+               {backlogStatusOptions.map((status: any) => {
+                 const selected = effectiveBacklogStatuses.includes(status.name);
+                 const categoryLabel = status.statusCategory?.name || '';
+                 return (
+                   <button
+                     key={status.name}
+                     type="button"
+                     onClick={() => updateBacklogStatuses(
+                       selected
+                         ? effectiveBacklogStatuses.filter((item: string) => item !== status.name)
+                         : [...effectiveBacklogStatuses, status.name],
+                     )}
+                     className={`px-3 py-2 rounded-2xl text-left text-xs font-semibold border transition-colors ${selected ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.14)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}
+                   >
+                     <span className="block">{status.name}</span>
+                     {categoryLabel ? <span className="block text-[10px] opacity-70 mt-0.5">{categoryLabel}</span> : null}
+                   </button>
+                 );
+               })}
+             </div>
+
+             <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-[11px] text-[var(--rf-text-secondary)]">
+               If you click <span className="font-semibold text-[var(--rf-text)]">Save + Rebuild Cache</span>, the current project settings are saved first and then the cache is rebuilt immediately using the selected statuses.
+             </div>
+           </div>
+         </div>
+
          <div className="space-y-3">
-            <h5 className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">Local Project Guidelines</h5>
+            <h5 className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">Project Guidance</h5>
+            <p className="text-xs text-[var(--rf-text-secondary)]">Optional writing or process instructions that should apply only to this project.</p>
             <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
          </div>
 
          <div className="space-y-6">
             <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> AR Field Mapping</h5>
+            <p className="text-xs text-[var(--rf-text-secondary)]">Tell Refinely where acceptance requirements live on completed Jira issues so the backlog cache can read them correctly.</p>
             <div className="rf-panel-soft rounded-[24px] p-6 space-y-6">
                <div className="flex p-1 bg-white rounded-2xl border border-[var(--rf-border-subtle)] shadow-[var(--rf-shadow-sm)] max-w-[240px]">
                  <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-md' : 'text-[var(--rf-text-tertiary)]'}`}>Consolidated</button>
@@ -955,72 +1107,11 @@ function ProjectConfigurationManager({
             </div>
          </div>
 
-         {activeArProj !== '*' && (
-           <div className="col-span-full space-y-4">
-             <div>
-               <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
-                 <Database className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Backlog Statuses In Scope
-               </h5>
-               <p className="text-xs text-[var(--rf-text-secondary)] mt-1">
-                 These statuses define which Jira issues are indexed into the project backlog cache. If you leave them untouched, we default to done-like statuses in this workflow.
-               </p>
-             </div>
-
-             <div className="rf-panel-soft rounded-[24px] p-6 space-y-4">
-               <div className="flex items-center justify-between gap-3">
-                 <div className="text-xs font-semibold text-[var(--rf-text)]">
-                   {effectiveBacklogStatuses.length} status{effectiveBacklogStatuses.length === 1 ? '' : 'es'} currently indexed
-                 </div>
-                 <div className="flex items-center gap-2">
-                   <button
-                     type="button"
-                     onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))}
-                     className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
-                   >
-                     Reset to defaults
-                   </button>
-                   <button
-                     type="button"
-                     onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))}
-                     className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
-                   >
-                     Select all
-                   </button>
-                 </div>
-               </div>
-
-               <div className="flex flex-wrap gap-2">
-                 {backlogStatusOptions.map((status: any) => {
-                   const selected = effectiveBacklogStatuses.includes(status.name);
-                   return (
-                     <button
-                       key={status.name}
-                       type="button"
-                       onClick={() => updateBacklogStatuses(
-                         selected
-                           ? effectiveBacklogStatuses.filter((item: string) => item !== status.name)
-                           : [...effectiveBacklogStatuses, status.name],
-                       )}
-                       className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${selected ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.14)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}
-                     >
-                       {status.name}
-                     </button>
-                   );
-                 })}
-               </div>
-
-               <div className="text-[11px] text-[var(--rf-text-secondary)]">
-                 Current fallback: Jira issues in status category <span className="font-semibold text-[var(--rf-text)]">Done</span>. Typical examples include Done, Closed, Resolved, Released, and Deployed, depending on the workflow.
-               </div>
-             </div>
-           </div>
-         )}
-
          <div className="col-span-full space-y-6 pt-8 border-t border-[var(--rf-border-subtle)] animate-in fade-in slide-in-from-bottom-2 duration-500">
              <div className="flex items-center justify-between">
                 <div>
-                  <h5 className="text-[11px] font-black text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Golden Example Sources</h5>
-                  <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Defaults are auto-detected. You can override project, issue type, and statuses anytime.</p>
+                  <h5 className="text-[11px] font-black text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Optional Curated Examples</h5>
+                  <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Backlog cache is now the primary Jira context source. Use curated examples only if you want to boost especially strong reference stories.</p>
                 </div>
              </div>
              

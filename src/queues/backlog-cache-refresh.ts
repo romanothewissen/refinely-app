@@ -16,6 +16,9 @@ function collectKnownProjectKeys(config: Awaited<ReturnType<typeof getConfig>>):
       if (target && target !== '*') keys.add(target);
     }
   }
+  for (const scope of config.backlogStatusScopes ?? []) {
+    if (scope.projectKey && scope.projectKey !== '*') keys.add(scope.projectKey);
+  }
 
   return Array.from(keys);
 }
