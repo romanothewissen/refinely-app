@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
-  Users, FileText, ChevronRight, Check, Trash, Layout, Layers, Zap, Info, Shield, ArrowRight
+  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info
 } from 'lucide-react';
 import { api } from './hooks/useForge';
-import { UsageMeter } from './UsageMeter';
 import { REDACTED } from './types';
 
 interface GoldSource {
   key: string;
   project: string;
   issuetype: string;
-  status: string;
+  status?: string;
+  statuses?: string[];
   maxItems: number;
   requirementsFieldId: string | null;
   arFieldIds: string[];
@@ -58,7 +58,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [issueLinkType, setIssueLinkType] = useState('Relates to');
   const [projects, setProjects] = useState<JiraProject[]>([]);
   const [goldSources, setGoldSources] = useState<GoldSource[]>([]);
-  const [newSource, setNewSource] = useState<Partial<GoldSource>>({});
+  const [newSource, setNewSource] = useState<Partial<GoldSource>>({ statuses: [] });
   const [issueTypes, setIssueTypes] = useState<JiraIssueType[]>([]);
   const [statuses, setStatuses] = useState<JiraStatus[]>([]);
   const [customFields, setCustomFields] = useState<JiraField[]>([]);
@@ -85,6 +85,24 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
     loadInitialConfig();
   }, []);
 
+  function detectDefaultIssueType(types: JiraIssueType[]): string | undefined {
+    if (!types.length) return undefined;
+    const preferred = ['story', 'feature', 'task'];
+    const found = preferred
+      .map(name => types.find(t => t.name.toLowerCase() === name))
+      .find(Boolean);
+    return found?.name ?? types[0]?.name;
+  }
+
+  function detectDefaultStatuses(statuses: JiraStatus[]): string[] {
+    if (!statuses.length) return [];
+    const doneKeywords = ['done', 'completed', 'deployed', 'released', 'closed', 'resolved'];
+    const matches = statuses
+      .map(s => s.name)
+      .filter(name => doneKeywords.some(k => name.toLowerCase().includes(k)));
+    return matches.length ? [...new Set(matches)] : [statuses[0].name];
+  }
+
   async function loadInitialConfig() {
     api.discoverLinkTypes().then((res: any) => {
       // Logic for available link types was removed
@@ -108,11 +126,18 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         if (gc.openaiBaseUrl) setOpenaiBaseUrl(gc.openaiBaseUrl);
 
         if (existingConfig.goldSources) {
-          setGoldSources(existingConfig.goldSources.map((gs: any) => ({ 
-            ...gs, 
-            arFieldIds: Array.isArray(gs.arFieldIds) && gs.arFieldIds.length > 0 ? gs.arFieldIds : (gs.requirementsFieldId ? [gs.requirementsFieldId] : []),
-            requirementsFieldId: null 
-          })));
+          setGoldSources(existingConfig.goldSources.map((gs: any) => {
+            const normalizedStatuses = Array.isArray(gs.statuses) && gs.statuses.length
+              ? gs.statuses
+              : (gs.status ? [gs.status] : []);
+            return {
+              ...gs,
+              statuses: normalizedStatuses,
+              status: normalizedStatuses[0],
+              arFieldIds: Array.isArray(gs.arFieldIds) && gs.arFieldIds.length > 0 ? gs.arFieldIds : (gs.requirementsFieldId ? [gs.requirementsFieldId] : []),
+              requirementsFieldId: null,
+            };
+          }));
         }
         if (existingConfig.domainContext) setDomainContext(existingConfig.domainContext);
         if (existingConfig.domainRoles) setDomainRoles((existingConfig.domainRoles as string[]).join(', '));
@@ -256,7 +281,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   }
 
   async function onProjectSelect(projectKey: string) {
-    setNewSource(prev => ({ ...prev, project: projectKey }));
+    setNewSource(prev => ({ ...prev, project: projectKey, statuses: [] }));
     try {
       const [it, st] = await Promise.all([api.discoverIssueTypes(projectKey) as Promise<any>, api.discoverStatuses(projectKey) as Promise<any>]);
       const fetchedTypes = it.issueTypes ?? [];
@@ -264,36 +289,33 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       setIssueTypes(fetchedTypes);
       setStatuses(fetchedStatuses);
 
-      // Auto-select sensible defaults so the admin doesn't have to hunt for them
-      const doneKeywords = ['done', 'completed', 'deployed', 'released', 'closed'];
-      const autoStatus = fetchedStatuses.find((s: JiraStatus) =>
-        doneKeywords.includes(s.name.toLowerCase())
-      );
-      const autoType = fetchedTypes.find((t: JiraIssueType) =>
-        t.name.toLowerCase() === 'story'
-      ) ?? fetchedTypes[0];
+      const autoType = detectDefaultIssueType(fetchedTypes);
+      const autoStatuses = detectDefaultStatuses(fetchedStatuses);
 
       setNewSource(prev => ({
         ...prev,
-        ...(autoStatus ? { status: autoStatus.name } : {}),
-        ...(autoType ? { issuetype: autoType.name } : {}),
+        statuses: autoStatuses,
+        ...(autoStatuses[0] ? { status: autoStatuses[0] } : {}),
+        ...(autoType ? { issuetype: autoType } : {}),
       }));
     } catch {}
   }
 
   function addGoldSource() {
-    if (!newSource.project || !newSource.issuetype || !newSource.status) return;
+    const pickedStatuses = Array.isArray(newSource.statuses) ? newSource.statuses : [];
+    if (!newSource.project || !newSource.issuetype || pickedStatuses.length === 0) return;
     setGoldSources(prev => [...prev, {
       key: `src${goldSources.length + 1}`,
       project: newSource.project!,
       issuetype: newSource.issuetype!,
-      status: newSource.status!,
+      statuses: pickedStatuses,
+      status: pickedStatuses[0],
       maxItems: 50,
       requirementsFieldId: null,
       arFieldIds: newSource.arFieldIds ?? [],
       targetProjects: [activeArProj],
     }]);
-    setNewSource({}); setIssueTypes([]); setStatuses([]);
+    setNewSource({ statuses: [] }); setIssueTypes([]); setStatuses([]);
   }
 
   useEffect(() => {
@@ -376,8 +398,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden flex bg-white/40">
-          <div className="w-72 shrink-0 border-r border-slate-200 p-6 flex flex-col gap-1.5">
+      <div className="flex-1 overflow-hidden flex bg-slate-50/40">
+          <div className="w-72 shrink-0 border-r border-slate-200 bg-white/70 p-6 flex flex-col gap-2">
             {[
               { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'LLM & API Keys' },
               { id: 'jira', label: 'Jira Governance', icon: Database, sub: 'Mappings & Linking' },
@@ -387,8 +409,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                  activeTab === tab.id ? 'bg-blue-50 text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
+                  activeTab === tab.id ? 'bg-blue-50 text-blue-700 border-blue-100 shadow-sm' : 'text-slate-600 border-transparent hover:bg-slate-100'
                 }`}
               >
                 <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`} />
@@ -399,12 +421,12 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
               </button>
             ))}
             
-            <div className="mt-auto px-4 py-6 border-t border-slate-100">
-               <div className="bg-slate-900 rounded-3xl p-5 text-white shadow-sm relative overflow-hidden">
-                 <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">Active Subscription</div>
-                 <div className="text-lg font-bold capitalize">{tier} tier</div>
-                 <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
-                   <div className="bg-blue-500 h-full" style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }} />
+            <div className="mt-auto px-3 py-5 border-t border-slate-100">
+               <div className="bg-slate-50 rounded-2xl p-4 text-slate-700 border border-slate-200">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Current Plan</div>
+                 <div className="text-base font-bold capitalize">{tier}</div>
+                 <div className="text-xs text-slate-500 mt-1">
+                   {usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0} generations
                  </div>
                </div>
             </div>
@@ -577,51 +599,40 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
               <div className="max-w-4xl space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <h3 className="text-2xl font-black text-slate-900 tracking-tight">Plan & Usage</h3>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                   <div className="bg-slate-900 rounded-[40px] p-10 text-white relative overflow-hidden group">
-                      <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-[100px] -mr-32 -mt-32" />
-                      <div className="relative z-10 space-y-10 flex flex-col h-full justify-between">
-                         <div className="space-y-4">
-                           <div className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400">Current tier</div>
-                           <div className="flex items-center gap-3">
-                              <h4 className="text-5xl font-black capitalize tracking-tighter">{tier}</h4>
-                              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                           </div>
-                         </div>
-                         <div className="space-y-6">
-                            <div className="flex justify-between items-end text-[10px] font-black uppercase tracking-widest text-slate-400">
-                              <span>Consumption</span>
-                              <span>{usage?.currentMonth} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth}</span>
-                            </div>
-                            <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
-                               <div className="bg-blue-500 h-full transition-all duration-1000" style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }} />
-                            </div>
-                         </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-6">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
+                      <h4 className="text-3xl font-black text-slate-900 capitalize mt-2">{tier}</h4>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm font-semibold text-slate-700">
+                        <span>Generations this month</span>
+                        <span>{usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span>
                       </div>
-                   </div>
-
-                   <div className="flex flex-col gap-8 justify-between">
-                      <div className="bg-white border border-slate-200/80 rounded-[32px] p-8 shadow-sm">
-                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Service Overview</h4>
-                         <div className="space-y-6">
-                            {[
-                              { label: 'Cloud Status', value: 'Healthy', icon: Zap, color: 'text-green-500' },
-                              { label: 'Security Layer', value: 'Encrypted', icon: Shield, color: 'text-blue-500' },
-                              { label: 'Active Mappings', value: arMappings.length, icon: Layers, color: 'text-purple-500' },
-                            ].map((stat, i) => (
-                              <div key={i} className="flex items-center justify-between group">
-                                <div className="flex items-center gap-4">
-                                  <stat.icon className={`w-5 h-5 ${stat.color} group-hover:scale-110 transition-transform`} />
-                                  <span className="text-sm font-bold text-slate-600">{stat.label}</span>
-                                </div>
-                                <span className="text-sm font-black text-slate-900">{stat.value}</span>
-                              </div>
-                            ))}
-                         </div>
-                      </div>
-                      {isAdmin && (
-                        <button onClick={handleResetUsage} className="py-5 text-[10px] font-black uppercase tracking-[0.3em] text-red-500 hover:text-white border-2 border-red-50/50 hover:bg-red-500 hover:border-red-500 rounded-3xl transition-all active:scale-95">Reset Counter ⚠️</button>
+                      {limits?.generationsPerMonth !== -1 && (
+                        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 transition-all duration-500"
+                            style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
+                          />
+                        </div>
                       )}
-                   </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-6">
+                    <h4 className="text-sm font-bold text-slate-800">Environment Overview</h4>
+                    <div className="space-y-4 text-sm">
+                      <div className="flex items-center justify-between"><span className="text-slate-600">Cloud Status</span><span className="font-semibold text-green-600">Healthy</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-600">Security Layer</span><span className="font-semibold text-blue-600">Encrypted</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-600">Active Mappings</span><span className="font-semibold text-slate-900">{arMappings.length}</span></div>
+                    </div>
+                    {isAdmin && (
+                      <button onClick={handleResetUsage} className="w-full py-3 text-xs font-bold uppercase tracking-widest text-red-600 hover:text-white border border-red-200 hover:bg-red-600 rounded-xl transition-all">
+                        Reset Usage Counter
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -655,6 +666,16 @@ function ProjectConfigurationManager({
   };
 
   const [isSavingProject, setIsSavingProject] = useState(false);
+  const selectedStatuses: string[] = Array.isArray(newSource.statuses) ? newSource.statuses : [];
+
+  const toggleStatus = (statusName: string) => {
+    const exists = selectedStatuses.includes(statusName);
+    const next = exists
+      ? selectedStatuses.filter(s => s !== statusName)
+      : [...selectedStatuses, statusName];
+    setNewSource((p: any) => ({ ...p, statuses: next, status: next[0] || '' }));
+  };
+
   const handleSave = async () => {
     setIsSavingProject(true);
     try {
@@ -668,7 +689,7 @@ function ProjectConfigurationManager({
     <div className="space-y-8 animate-in fade-in">
       <div className="flex items-center justify-between border-b border-slate-100 pb-6">
         <div>
-          <h4 className="text-lg font-bold text-slate-800">Override Context</h4>
+          <h4 className="text-lg font-bold text-slate-800">Project Configuration</h4>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Focus: {activeArProj === '*' ? 'System-Wide Defaults' : activeArProj}</p>
         </div>
         {isProjectAdmin && (
@@ -681,12 +702,12 @@ function ProjectConfigurationManager({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
          <div className="space-y-3">
             <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">Local Project Guidelines</h5>
-            <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm font-medium outline-none" />
+            <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-white border border-slate-200 rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
          </div>
 
          <div className="space-y-6">
             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-purple-500" /> AR Field Mapping</h5>
-            <div className="bg-slate-50 rounded-[28px] p-8 space-y-6 border border-slate-100/50 shadow-inner">
+            <div className="bg-slate-50 rounded-[20px] p-6 space-y-6 border border-slate-200/60">
                <div className="flex p-1 bg-white rounded-2xl border border-slate-100 shadow-sm max-w-[240px]">
                  <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>Consolidated</button>
                  <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'iterative' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>Iterative</button>
@@ -722,75 +743,105 @@ function ProjectConfigurationManager({
             </div>
          </div>
 
-         <div className="col-span-full space-y-8 pt-8 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
+         <div className="col-span-full space-y-6 pt-8 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
              <div className="flex items-center justify-between">
-                <h5 className="text-[11px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-blue-500" /> AI Generation Reference Standards</h5>
-                {activeArProj !== '*' && (
-                   <button onClick={() => onProjectSelect(activeArProj)} className="text-[9px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors">
-                     Quick Add {activeArProj} Standard
-                   </button>
-                )}
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-blue-500" /> Golden Example Sources</h5>
+                  <p className="text-xs text-slate-500 mt-1">Defaults are auto-detected. You can override project, issue type, and statuses anytime.</p>
+                </div>
              </div>
              
              {activeArProj !== '*' && (
-                <div className="bg-slate-900 rounded-[32px] p-8 text-white shadow-xl relative overflow-hidden group">
-                   <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform duration-700"><Database className="w-32 h-32" /></div>
-                   <div className="mb-6 max-w-lg">
-                      <p className="text-sm font-bold text-blue-400 mb-1">Source Configuration</p>
-                      <p className="text-xs text-slate-400 font-medium leading-relaxed">Define which project's high-quality stories the AI should look at. You can pick the current project below to set its own "Gold Standard".</p>
-                   </div>
-                   
-                   <div className="flex flex-wrap gap-4 items-end relative z-10">
-                     <div className="space-y-1.5 min-w-[180px]">
-                        <span className="text-[9px] font-black text-slate-500 uppercase ml-1">Select Source Project</span>
-                        <select className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white outline-none w-full hover:bg-white/10 transition-colors" onChange={e => onProjectSelect(e.target.value)} value={newSource.project || ''}>
-                           <option value="">Choose Project...</option>
-                           {projects.map((p: any) => <option key={p.key} value={p.key}>{p.key}{p.key === activeArProj ? ' (Local)' : ''}</option>)}
-                        </select>
-                     </div>
-                     <div className="space-y-1.5">
-                        <span className="text-[9px] font-black text-slate-500 uppercase ml-1">Issue Type</span>
-                        <select className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white outline-none w-40 hover:bg-white/10 transition-colors" onChange={e => setNewSource((p: any) => ({...p, issuetype: e.target.value}))} value={newSource.issuetype || ''}>
-                           <option value="">All Types</option>
-                           {issueTypes.map((it: any) => <option key={it.name} value={it.name}>{it.name}</option>)}
-                        </select>
-                     </div>
-                     <div className="space-y-1.5">
-                        <span className="text-[9px] font-black text-slate-500 uppercase ml-1">Target Status</span>
-                        <select className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white outline-none w-40 hover:bg-white/10 transition-colors" onChange={e => setNewSource((p: any) => ({...p, status: e.target.value}))} value={newSource.status || ''}>
-                           <option value="">All Done</option>
-                           {statuses.map((st: any) => <option key={st.name} value={st.name}>{st.name}</option>)}
-                        </select>
-                     </div>
-                     <button onClick={addGoldSource} disabled={!newSource.project} className="bg-white text-slate-900 text-xs font-black px-10 py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all disabled:opacity-20 flex items-center gap-2">
-                        {newSource.project === activeArProj ? <Layers className="w-4 h-4" /> : <Globe className="w-4 h-4" />} {newSource.project === activeArProj ? 'Set Local Standard' : 'Link Knowledge Bridge'}
-                     </button>
-                   </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+                  <div className="flex flex-wrap gap-4">
+                    <div className="space-y-1.5 min-w-[220px]">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Source Project</span>
+                      <select
+                        className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none w-full"
+                        onChange={e => onProjectSelect(e.target.value)}
+                        value={newSource.project || ''}
+                      >
+                        <option value="">Select Project...</option>
+                        {projects.map((p: any) => <option key={p.key} value={p.key}>{p.key}{p.key === activeArProj ? ' (Local)' : ''}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5 min-w-[220px]">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Issue Type</span>
+                      <select
+                        className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none w-full"
+                        onChange={e => setNewSource((p: any) => ({ ...p, issuetype: e.target.value }))}
+                        value={newSource.issuetype || ''}
+                      >
+                        <option value="">Select Type...</option>
+                        {issueTypes.map((it: any) => <option key={it.name} value={it.name}>{it.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Statuses In Scope</span>
+                      <button
+                        type="button"
+                        onClick={() => setNewSource((p: any) => ({ ...p, statuses: statuses.map((s: any) => s.name), status: statuses[0]?.name || '' }))}
+                        className="text-[10px] font-bold text-blue-600 hover:text-blue-700"
+                      >
+                        Select All
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {statuses.map((st: any) => {
+                        const selected = selectedStatuses.includes(st.name);
+                        return (
+                          <button
+                            key={st.name}
+                            type="button"
+                            onClick={() => toggleStatus(st.name)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${selected ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                          >
+                            {st.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={addGoldSource}
+                      disabled={!newSource.project || !newSource.issuetype || selectedStatuses.length === 0}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-xs font-bold px-6 py-2.5 rounded-xl shadow-sm transition-all"
+                    >
+                      Add Golden Source
+                    </button>
+                  </div>
                 </div>
              )}
              
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-12">
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-6">
                 {currentGoldSources.length === 0 ? (
-                  <div className="col-span-full py-24 text-center border-2 border-dashed border-slate-100 rounded-[40px] bg-slate-50/20">
+                  <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/40">
                      <BrainCircuit className="w-12 h-12 text-slate-100 mx-auto mb-4" />
-                     <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Active Standards Linked</p>
-                     <p className="text-[11px] text-slate-400 mt-2">The AI will use global defaults if no project standards are set.</p>
+                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No Active Golden Sources</p>
+                     <p className="text-[11px] text-slate-500 mt-2">The AI will use global defaults if no project sources are configured.</p>
                   </div>
                 ) : (
                   currentGoldSources.map((s: any, idx: number) => (
-                    <div key={idx} className="bg-white border border-slate-100 p-7 rounded-[32px] shadow-sm flex items-center justify-between group hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-                       <div className="flex gap-4 items-center">
-                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${s.project === activeArProj ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
-                             {s.project === activeArProj ? <Layers className="w-6 h-6" /> : <Globe className="w-6 h-6" />}
-                          </div>
-                          <div>
-                             <div className="text-sm font-black text-slate-900 flex items-center gap-2">
-                               {s.project} {s.project === activeArProj && <span className="bg-blue-600 text-[8px] text-white px-2 py-0.5 rounded-full uppercase tracking-tighter">Local</span>}
-                             </div>
-                             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{s.issuetype} • {s.status}</div>
-                          </div>
+                    <div key={idx} className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex items-start justify-between gap-4">
+                       <div className="space-y-2">
+                         <div className="text-sm font-bold text-slate-900">{s.project} <span className="text-slate-500">/ {s.issuetype}</span></div>
+                         <div className="flex flex-wrap gap-1.5">
+                           {(Array.isArray(s.statuses) && s.statuses.length ? s.statuses : [s.status]).filter(Boolean).map((statusName: string) => (
+                             <span key={statusName} className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700">
+                               {statusName}
+                             </span>
+                           ))}
+                         </div>
                        </div>
-                       <button onClick={() => setGoldSources((p: any) => p.filter((x: any) => x !== s))} className="p-3 bg-slate-50 text-slate-200 hover:bg-red-50 hover:text-red-500 rounded-2xl transition-all duration-300 opacity-0 group-hover:opacity-100"><Trash className="w-4 h-4" /></button>
+                       <button onClick={() => setGoldSources((p: any) => p.filter((x: any) => x !== s))} className="p-2 bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all">
+                         <Trash className="w-4 h-4" />
+                       </button>
                     </div>
                   ))
                 )}

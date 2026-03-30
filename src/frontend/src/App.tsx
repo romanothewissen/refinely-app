@@ -407,7 +407,7 @@ export default function App() {
       {viewMode === 'settings' && isAdmin ? (
         <SettingsView onClose={() => { setViewMode('generate'); setSidebarOpen(true); }} />
       ) : (
-        <div className="rf-grid-bg flex-1 flex flex-col h-full relative overflow-hidden">
+        <div className="rf-canvas-bg flex-1 flex flex-col h-full relative overflow-hidden">
           {generationError && (
             <div className="w-full bg-red-600 text-white px-6 py-4 text-sm font-semibold flex items-start gap-3 z-50 shadow-lg">
               <span className="flex-1">{generationError}</span>

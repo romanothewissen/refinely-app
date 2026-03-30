@@ -108,8 +108,12 @@ async function fetchFromSource(source: GoldSource, limit: number): Promise<GoldI
   const labelFilter = source.labels?.length
     ? ` AND labels in (${source.labels.map(l => `"${l}"`).join(', ')})`
     : '';
+  const statuses = getSourceStatuses(source);
+  const statusFilter = statuses.length
+    ? `status in (${statuses.map(s => `"${s}"`).join(', ')})`
+    : 'statusCategory = Done';
 
-  const jql = `project = ${source.project} AND issuetype = "${source.issuetype}" AND status = "${source.status}"${labelFilter} ORDER BY updated DESC`;
+  const jql = `project = ${source.project} AND issuetype = "${source.issuetype}" AND ${statusFilter}${labelFilter} ORDER BY updated DESC`;
 
   const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
     method: 'POST',
@@ -130,8 +134,12 @@ async function fetchFromSourcePaginated(source: GoldSource, maxItems: number): P
   const labelFilter = source.labels?.length
     ? ` AND labels in (${source.labels.map(l => `"${l}"`).join(', ')})`
     : '';
+  const statuses = getSourceStatuses(source);
+  const statusFilter = statuses.length
+    ? `status in (${statuses.map(s => `"${s}"`).join(', ')})`
+    : 'statusCategory = Done';
 
-  const jql = `project = ${source.project} AND issuetype = "${source.issuetype}" AND status = "${source.status}"${labelFilter} ORDER BY updated DESC`;
+  const jql = `project = ${source.project} AND issuetype = "${source.issuetype}" AND ${statusFilter}${labelFilter} ORDER BY updated DESC`;
 
   const results: GoldItem[] = [];
   let startAt = 0;
@@ -171,6 +179,16 @@ function buildFieldList(source: GoldSource): string[] {
     }
   }
   return fields;
+}
+
+function getSourceStatuses(source: GoldSource): string[] {
+  if (Array.isArray(source.statuses) && source.statuses.length) {
+    return source.statuses.filter(Boolean);
+  }
+  if (source.status) {
+    return [source.status];
+  }
+  return [];
 }
 
 // ─── Jira response parsing ────────────────────────────────────────────────────

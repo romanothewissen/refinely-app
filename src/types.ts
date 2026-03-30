@@ -7,7 +7,9 @@ export interface GoldSource {
   key: string;              // unique identifier e.g. "proj1"
   project: string;          // Jira project key e.g. "MYPROJ"
   issuetype: string;        // e.g. "Story", "Feature"
-  status: string;           // e.g. "Done", "Released"
+  /** @deprecated Prefer statuses — kept for backward compatibility */
+  status?: string;           // e.g. "Done", "Released"
+  statuses?: string[];       // e.g. ["Done", "Released"]
   maxItems: number;
   /** @deprecated Prefer arFieldIds — kept for backward compatibility */
   requirementsFieldId: string | null;

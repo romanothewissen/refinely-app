@@ -80,10 +80,12 @@ async function searchJira(themes: string[], sources: GoldSource[]): Promise<Simi
 
   // 2. Build JQL search
   const projectList = [...new Set(sources.map(s => s.project))].join(', ');
-  const statusList = [...new Set(sources.map(s => `"${s.status}"`))] .join(', ');
+  const statusNames = sources.flatMap(s => getSourceStatuses(s));
+  const statusList = [...new Set(statusNames.map(s => `"${s}"`))].join(', ');
   const searchText = themes.slice(0, 3).map(t => `"${t}"`).join(' ');
 
-  const jql = `project in (${projectList}) AND status in (${statusList}) AND text ~ ${searchText} ORDER BY updated DESC`;
+  const statusFilter = statusList ? `status in (${statusList})` : 'statusCategory = Done';
+  const jql = `project in (${projectList}) AND ${statusFilter} AND text ~ ${searchText} ORDER BY updated DESC`;
 
   try {
     const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
@@ -123,6 +125,16 @@ async function searchJira(themes: string[], sources: GoldSource[]): Promise<Simi
     console.warn('[similar-stories] JQL search failed:', err);
     return [];
   }
+}
+
+function getSourceStatuses(source: GoldSource): string[] {
+  if (Array.isArray(source.statuses) && source.statuses.length) {
+    return source.statuses.filter(Boolean);
+  }
+  if (source.status) {
+    return [source.status];
+  }
+  return [];
 }
 
 function extractText(value: unknown): string {
