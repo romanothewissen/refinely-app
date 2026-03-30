@@ -93,14 +93,22 @@ export async function handler(event: { body: GenerationEvent }) {
     result.similarStories = similarStories;
     result.sessionId = sessionId;
     const generationContext: GenerationContextMeta = {
+      projectKey,
       domainRolesUsed: config.domainRoles ?? [],
+      domainContextApplied: Boolean(config.domainContext?.trim()),
+      attachmentIncluded: Boolean(attachmentText?.trim()),
       goldExamplesCount: goldItems.length,
       referencedGoldExamples: goldItems.slice(0, 15).map(item => ({
         key: item.key,
         source: item.source,
         summary: item.summary,
       })),
-      projectKey,
+      similarStoriesCount: similarStories.length,
+      referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
+        key: item.key,
+        summary: item.summary,
+        relevanceScore: item.relevanceScore,
+      })),
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
         docId: doc.docId,

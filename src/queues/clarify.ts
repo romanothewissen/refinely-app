@@ -8,7 +8,7 @@
  * Result is stored in Forge Storage; the frontend polls getClarifyResult.
  */
 
-import { ClarifyEvent } from '../types';
+import { ClarifyContextMeta, ClarifyEvent } from '../types';
 import { generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { getEffectiveTier } from '../services/billing';
@@ -40,10 +40,25 @@ export async function handler(event: { body: ClarifyEvent }) {
       config,
     });
 
+    const clarifyContext: ClarifyContextMeta = {
+      projectKey,
+      domainRolesUsed: config.domainRoles ?? [],
+      domainContextApplied: Boolean(config.domainContext?.trim()),
+      attachmentIncluded: Boolean(attachmentText?.trim()),
+      wiDocsCount: wiContext.docs.length,
+      referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
+        docId: doc.docId,
+        filename: doc.filename,
+        chunkCount: doc.chunkCount,
+      })),
+      usesGoldenExamples: false,
+      usesSimilarStories: false,
+    };
+
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'complete',
       questions,
-      wiDocs: wiContext.docs,
+      contextMeta: clarifyContext,
       updatedAt: Date.now(),
     });
   } catch (err) {

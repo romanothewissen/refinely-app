@@ -168,8 +168,12 @@ interface MainContentProps {
     goldExamplesCount: number;
     referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
     projectKey: string;
+    domainContextApplied?: boolean;
+    attachmentIncluded?: boolean;
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+    similarStoriesCount?: number;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
   } | null;
   projectKey: string;
 }
@@ -495,6 +499,12 @@ export function MainContent({
                   <div className="text-[var(--rf-text-secondary)]">
                     Project: {generationContext.projectKey === '*' ? 'Standalone workspace' : generationContext.projectKey}
                   </div>
+                  <div className="text-[var(--rf-text-secondary)]">
+                    Domain guidance: {generationContext.domainContextApplied ? 'Included' : 'Not configured'}
+                  </div>
+                  <div className="text-[var(--rf-text-secondary)]">
+                    Attachment: {generationContext.attachmentIncluded ? 'Included' : 'None'}
+                  </div>
                   {generationContext.domainRolesUsed?.length > 0 && (
                     <div className="text-[var(--rf-text-secondary)]">
                       Roles: {generationContext.domainRolesUsed.join(', ')}
@@ -525,6 +535,20 @@ export function MainContent({
                       </div>
                     ) : (
                       <div className="text-[var(--rf-text-tertiary)]">No project docs were matched for this run.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    <div className="font-semibold text-[var(--rf-text)]">
+                      Similar backlog stories used: {generationContext.similarStoriesCount ?? 0}
+                    </div>
+                    {generationContext.referencedSimilarStories?.length ? (
+                      <div className="text-[var(--rf-text-secondary)]">
+                        {generationContext.referencedSimilarStories.map(story => story.key).join(', ')}
+                      </div>
+                    ) : (
+                      <div className="text-[var(--rf-text-tertiary)]">No similar backlog stories were used for this run.</div>
                     )}
                   </div>
                 </div>

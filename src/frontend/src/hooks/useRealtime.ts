@@ -18,7 +18,7 @@ const CLARIFY_TIMEOUT_MS = 180000; // 3 min — generous for Pro thinking mode
 
 export function useClarifyRealtime(
   sessionId: string | null,
-  onComplete: (questions: unknown[]) => void,
+  onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
   onFallthrough: () => void,
 ) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -37,7 +37,7 @@ export function useClarifyRealtime(
       try {
         const res = await invoke('getClarifyResult', { sessionId }) as {
           success: boolean;
-          result?: { type: string; questions?: unknown[]; updatedAt?: number };
+          result?: { type: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number };
         };
         const result = res.result;
 
@@ -55,7 +55,7 @@ export function useClarifyRealtime(
           console.log('[useClarifyRealtime] session complete with', result.questions.length, 'questions');
           clearInterval(timerRef.current!);
           timerRef.current = null;
-          onCompleteRef.current(result.questions);
+          onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
           console.warn('[useClarifyRealtime] complete but no questions found — falling through to generate');
           clearInterval(timerRef.current!);

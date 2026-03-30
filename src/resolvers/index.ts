@@ -638,7 +638,16 @@ resolver.define('getUsage', async ({ context }) => {
   const usage = await getUsage();
   const limits = getLimits(config.tier);
   const license = context?.license ?? { active: true, licenseType: 'COMMERCIAL' }; // Default to active for dev/staging
-  return { success: true, usage, limits, tier: config.tier, license };
+  return {
+    success: true,
+    usage: {
+      currentMonth: usage.generations,
+      month: usage.month,
+    },
+    limits,
+    tier: config.tier,
+    license,
+  };
 });
 
 resolver.define('resetUsage', async ({ context }) => {

@@ -8,11 +8,21 @@ interface ClarifyProps {
   questions: Question[];
   onComplete: (answers: Answer[]) => void;
   onSkip: () => void;
+  contextMeta?: {
+    projectKey: string;
+    domainRolesUsed: string[];
+    domainContextApplied?: boolean;
+    attachmentIncluded?: boolean;
+    wiDocsCount?: number;
+    referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+    usesGoldenExamples: false;
+    usesSimilarStories: false;
+  } | null;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
 }
 
-export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpen, setSidebarOpen }: ClarifyProps) {
+export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMeta, sidebarOpen, setSidebarOpen }: ClarifyProps) {
   const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
@@ -99,6 +109,48 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
       {/* All questions */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6">
         <div className="max-w-4xl mx-auto space-y-6">
+          {contextMeta && (
+            <div className="rounded-lg border border-[var(--rf-border)] bg-white p-4 shadow-[var(--rf-shadow-sm)]">
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <div className="font-semibold text-[var(--rf-text)]">Context used for clarifying questions</div>
+                <div className="text-[var(--rf-text-secondary)]">
+                  Project: {contextMeta.projectKey === '*' ? 'Standalone workspace' : contextMeta.projectKey}
+                </div>
+                <div className="text-[var(--rf-text-secondary)]">
+                  Domain guidance: {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}
+                </div>
+                <div className="text-[var(--rf-text-secondary)]">
+                  Attachment: {contextMeta.attachmentIncluded ? 'Included' : 'None'}
+                </div>
+                <div className="text-[var(--rf-text-secondary)]">
+                  Golden examples: Not used in clarify
+                </div>
+                <div className="text-[var(--rf-text-secondary)]">
+                  Similar stories: Not used in clarify
+                </div>
+              </div>
+              {contextMeta.domainRolesUsed?.length > 0 && (
+                <div className="mt-2 text-xs text-[var(--rf-text-secondary)]">
+                  Roles: {contextMeta.domainRolesUsed.join(', ')}
+                </div>
+              )}
+              <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <div className="font-semibold text-[var(--rf-text)]">
+                    Work instructions used: {contextMeta.wiDocsCount ?? 0}
+                  </div>
+                  {contextMeta.referencedWiDocs?.length ? (
+                    <div className="text-[var(--rf-text-secondary)]">
+                      {contextMeta.referencedWiDocs.map(doc => doc.filename).join(', ')}
+                    </div>
+                  ) : (
+                    <div className="text-[var(--rf-text-tertiary)]">No project docs were matched for clarifying questions.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {Object.entries(categories).map(([category, items]) => (
             <div key={category} className="space-y-3">
               <div className="flex items-center gap-3">

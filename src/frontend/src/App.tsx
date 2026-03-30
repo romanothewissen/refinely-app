@@ -36,6 +36,23 @@ interface GenerationContextMeta {
   goldExamplesCount: number;
   referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
   projectKey: string;
+  domainContextApplied?: boolean;
+  attachmentIncluded?: boolean;
+  wiDocsCount?: number;
+  referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+  similarStoriesCount?: number;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+}
+
+interface ClarifyContextMeta {
+  projectKey: string;
+  domainRolesUsed: string[];
+  domainContextApplied?: boolean;
+  attachmentIncluded?: boolean;
+  wiDocsCount?: number;
+  referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+  usesGoldenExamples: false;
+  usesSimilarStories: false;
 }
 
 /** Recursively extract plain text from an Atlassian Document Format node */
@@ -55,6 +72,7 @@ export default function App() {
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
+  const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
     try { return crypto.randomUUID(); } 
@@ -259,8 +277,9 @@ export default function App() {
 
   useClarifyRealtime(
     pendingClarifySessionId,
-    (questions: any[]) => {
+    ({ questions, contextMeta }) => {
       setPendingClarifySessionId(null);
+      setClarifyContext((contextMeta as ClarifyContextMeta | undefined) ?? null);
       if (questions.length > 0) {
         setClarifyQuestions(questions);
         setIsWorking(false);
@@ -281,6 +300,7 @@ export default function App() {
     setGenerationError(null);
     setFeatures([]);
     setGenerationContext(null);
+    setClarifyContext(null);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -480,6 +500,7 @@ export default function App() {
               onSkip={() => {
                 startGeneration(requirement, []);
               }}
+              contextMeta={clarifyContext}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
             />

@@ -163,13 +163,31 @@ export interface ReferencedGoldExample {
   summary: string;
 }
 
-export interface GenerationContextMeta {
-  domainRolesUsed: string[];
-  goldExamplesCount: number;
-  referencedGoldExamples: ReferencedGoldExample[];
+export interface ReferencedSimilarStory {
+  key: string;
+  summary: string;
+  relevanceScore?: number;
+}
+
+export interface ContextSourceMeta {
   projectKey: string;
+  domainRolesUsed: string[];
+  domainContextApplied?: boolean;
+  attachmentIncluded?: boolean;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+}
+
+export interface ClarifyContextMeta extends ContextSourceMeta {
+  usesGoldenExamples: false;
+  usesSimilarStories: false;
+}
+
+export interface GenerationContextMeta extends ContextSourceMeta {
+  goldExamplesCount: number;
+  referencedGoldExamples: ReferencedGoldExample[];
+  similarStoriesCount?: number;
+  referencedSimilarStories?: ReferencedSimilarStory[];
 }
 
 export interface GenerationResult {
@@ -213,6 +231,7 @@ export interface ConversationTurn {
   features: Feature[];
   similarStories: SimilarStory[];
   generationContext?: GenerationContextMeta;
+  clarifyContext?: ClarifyContextMeta;
   feedback?: string;
   model: string;
   timestamp: string;
