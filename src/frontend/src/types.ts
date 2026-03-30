@@ -137,6 +137,9 @@ export interface GenerationContextMeta {
   domainRolesUsed: string[];
   goldExamplesCount: number;
   referencedGoldExamples: ReferencedGoldExample[];
+  projectKey: string;
+  wiDocsCount?: number;
+  referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
 }
 
 export interface GenerationResult {
@@ -211,6 +214,7 @@ export interface WiDoc {
   revision: string;
   chunkCount: number;
   uploadedAt: string;
+  targetProjects?: string[];
 }
 
 // ─── Clarify Queue Event ──────────────────────────────────────────────────────

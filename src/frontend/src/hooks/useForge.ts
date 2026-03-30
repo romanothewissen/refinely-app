@@ -20,11 +20,12 @@ export const api = {
     requirement: string;
     clarifyAnswers?: unknown[];
     attachmentText?: string;
+    projectKey?: string;
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)
-  startClarify: (sessionId: string, requirement: string, attachmentText?: string) =>
-    invoke('startClarify', { sessionId, requirement, attachmentText }),
+  startClarify: (sessionId: string, requirement: string, attachmentText?: string, projectKey?: string) =>
+    invoke('startClarify', { sessionId, requirement, attachmentText, projectKey }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
   evaluateSufficiency: (requirement: string, answers: unknown[]) =>
@@ -58,9 +59,9 @@ export const api = {
   discoverLinkTypes: () => invoke('discoverLinkTypes'),
 
   // Work Instructions
-  uploadWi: (filename: string, fileBase64: string, revision?: string) =>
-    invoke('uploadWi', { filename, fileBase64, revision }),
-  listWiDocs: () => invoke('listWiDocs'),
+  uploadWi: (filename: string, fileBase64: string, revision?: string, projectKey?: string) =>
+    invoke('uploadWi', { filename, fileBase64, revision, projectKey }),
+  listWiDocs: (projectKey?: string) => invoke('listWiDocs', { projectKey }),
   removeWiDoc: (docId: string) => invoke('removeWiDoc', { docId }),
 
   // Cache

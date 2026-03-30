@@ -56,15 +56,16 @@ export async function handler(event: { body: GenerationEvent }) {
 
   try {
     const goldCount = relevantGoldSources.length;
-    await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectKey}. initializing…`);
+    const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
+    await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectLabel}. initializing…`);
 
     const [goldItems, wiContext, similarStories] = await Promise.all([
       goldCount
         ? fetchGoldExamples(config.goldSources, 8)
         : Promise.resolve([]),
       config.wiConfig.enabled
-        ? retrieveWiContext(requirement, config.wiConfig.topKChunks, config.wiConfig.maxChars)
-        : Promise.resolve(''),
+        ? retrieveWiContext(requirement, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
+        : Promise.resolve({ text: '', docs: [] }),
       config.tier !== 'free'
         ? findSimilarStories(requirement, config)
         : Promise.resolve([]),
@@ -82,7 +83,7 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentText,
       goldExamplesText,
       similarStoriesText,
-      wiContextText: wiContext,
+      wiContextText: wiContext.text,
       config,
       onPass1Complete: async (featureCount) => {
         await sendProgress(sessionId, `Writing acceptance criteria for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
@@ -98,6 +99,13 @@ export async function handler(event: { body: GenerationEvent }) {
         key: item.key,
         source: item.source,
         summary: item.summary,
+      })),
+      projectKey,
+      wiDocsCount: wiContext.docs.length,
+      referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
+        docId: doc.docId,
+        filename: doc.filename,
+        chunkCount: doc.chunkCount,
       })),
     };
     result.generationContext = generationContext;

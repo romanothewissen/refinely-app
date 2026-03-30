@@ -30,19 +30,20 @@ export async function handler(event: { body: ClarifyEvent }) {
 
   try {
     const wiContext = config.wiConfig.enabled
-      ? await retrieveWiContext(requirement, 4, 20000)
-      : '';
+      ? await retrieveWiContext(requirement, 4, 20000, projectKey)
+      : { text: '', docs: [] };
 
     const questions = await generateClarifyingQuestions({
       requirement,
       attachmentText,
-      wiContextText: wiContext,
+      wiContextText: wiContext.text,
       config,
     });
 
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'complete',
       questions,
+      wiDocs: wiContext.docs,
       updatedAt: Date.now(),
     });
   } catch (err) {

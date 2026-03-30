@@ -35,6 +35,7 @@ interface GenerationContextMeta {
   domainRolesUsed: string[];
   goldExamplesCount: number;
   referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
+  projectKey: string;
 }
 
 /** Recursively extract plain text from an Atlassian Document Format node */
@@ -48,6 +49,8 @@ function extractAdfText(node: unknown): string {
 
 export default function App() {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>('generate');
+  const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
+  const [settingsStartProjectKey, setSettingsStartProjectKey] = useState<string>('*');
   const [requirement, setRequirement] = useState('');
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
@@ -93,6 +96,10 @@ export default function App() {
   
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
+  const [projectKey, setProjectKey] = useState<string>('*');
+  const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
+  const [goldSources, setGoldSources] = useState<any[]>([]);
+  const [wiDocs, setWiDocs] = useState<any[]>([]);
 
   // History
   const [conversations, setConversations] = useState<any[]>([]);
@@ -112,6 +119,11 @@ export default function App() {
       setAccountId(aid);
 
       const issueKey = ctx.extension?.issue?.key as string | undefined;
+      const ctxProjectKey =
+        (ctx.extension?.project?.key as string | undefined) ||
+        (ctx.extension?.projectKey as string | undefined) ||
+        (issueKey ? issueKey.split('-')[0] : undefined);
+      if (ctxProjectKey) setProjectKey(ctxProjectKey);
 
       if (issueKey) {
         setOriginIssueKey(issueKey);
@@ -144,6 +156,34 @@ export default function App() {
       }
     }).catch(err => console.error('Context error', err));
   }, []); // eslint-disable-line
+
+  useEffect(() => {
+    api.discoverJira()
+      .then((res: any) => {
+        const projects = Array.isArray(res?.projects) ? res.projects : [];
+        setAvailableProjects(projects);
+        if (projectKey === '*' && projects.length === 1) {
+          setProjectKey(projects[0].key);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line
+
+  useEffect(() => {
+    api.getConfig()
+      .then((res: any) => {
+        setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line
+
+  useEffect(() => {
+    api.listWiDocs(projectKey)
+      .then((res: any) => {
+        setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
+      })
+      .catch(() => {});
+  }, [projectKey]);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
@@ -248,7 +288,7 @@ export default function App() {
     }
 
     try {
-      const res = await api.startClarify(sessionId, requirement) as any;
+      const res = await api.startClarify(sessionId, requirement, undefined, projectKey) as any;
       if (res.success) {
         setPendingClarifySessionId(sessionId);
       } else {
@@ -285,7 +325,8 @@ export default function App() {
       const res = await api.startGeneration({
         sessionId: sid,
         requirement: req,
-        clarifyAnswers
+        clarifyAnswers,
+        projectKey,
       }) as any;
 
       if (res?.success) {
@@ -345,6 +386,12 @@ export default function App() {
     if (sidebarOpen) closeSidebar();
   };
 
+  const openProjectSettings = (tab: 'models' | 'jira' | 'domain' | 'billing', projectKeyForSettings: string) => {
+    setSettingsStartTab(tab);
+    setSettingsStartProjectKey(projectKeyForSettings);
+    openSettings();
+  };
+
   return (
     <div className="rf-shell flex h-screen w-full overflow-hidden text-slate-800 font-sans">
       {/* Left Sidebar — animated & resizable */}
@@ -388,6 +435,12 @@ export default function App() {
               limits={limits}
               width={sidebarWidth}
               originIssueKey={originIssueKey}
+              projectKey={projectKey}
+              setProjectKey={setProjectKey}
+              availableProjects={availableProjects}
+              goldSources={goldSources}
+              wiDocs={wiDocs}
+              onOpenProjectSettings={openProjectSettings}
             />
             {/* Resize Handle */}
             {sidebarOpen && (
@@ -405,7 +458,11 @@ export default function App() {
 
       {/* Main Right Pane / Settings */}
       {viewMode === 'settings' && isAdmin ? (
-        <SettingsView onClose={() => { setViewMode('generate'); setSidebarOpen(true); }} />
+        <SettingsView
+          onClose={() => { setViewMode('generate'); setSidebarOpen(true); }}
+          initialTab={settingsStartTab}
+          initialProjectKey={settingsStartProjectKey}
+        />
       ) : (
         <div className="rf-canvas-bg flex-1 flex flex-col h-full relative overflow-hidden">
           {generationError && (
@@ -445,6 +502,7 @@ export default function App() {
               usage={usage}
               limits={limits}
               generationContext={generationContext}
+              projectKey={projectKey}
             />
           )}
         </div>

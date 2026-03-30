@@ -167,14 +167,18 @@ interface MainContentProps {
     domainRolesUsed: string[];
     goldExamplesCount: number;
     referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
+    projectKey: string;
+    wiDocsCount?: number;
+    referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   } | null;
+  projectKey: string;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({ 
   features, setFeatures, onPushFeature, isGenerating, progress, 
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  tier, usage, limits, generationContext
+  tier, usage, limits, generationContext, projectKey
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -387,6 +391,12 @@ export function MainContent({
               <p className="text-[11px] text-slate-500 mt-1 max-w-[38rem]">
                 Review, refine, and push backlog-ready features without losing the thread.
               </p>
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 shadow-sm">
+                Project scope:
+                <span className="text-slate-800">
+                  {projectKey === '*' ? 'Standalone workspace' : projectKey}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -494,6 +504,9 @@ export function MainContent({
                   <div className="font-semibold text-slate-800">
                     Context used: {generationContext.goldExamplesCount} golden example{generationContext.goldExamplesCount !== 1 ? 's' : ''}
                   </div>
+                  <div className="text-slate-600">
+                    Project: {generationContext.projectKey === '*' ? 'Standalone workspace' : generationContext.projectKey}
+                  </div>
                   {generationContext.domainRolesUsed?.length > 0 && (
                     <div className="text-slate-600">
                       Roles: {generationContext.domainRolesUsed.join(', ')}
@@ -513,6 +526,20 @@ export function MainContent({
                     ))}
                   </div>
                 )}
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    <div className="font-semibold text-slate-800">
+                      Work instructions used: {generationContext.wiDocsCount ?? 0}
+                    </div>
+                    {generationContext.referencedWiDocs?.length ? (
+                      <div className="text-slate-600">
+                        {generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')}
+                      </div>
+                    ) : (
+                      <div className="text-slate-500">No project docs were matched for this run.</div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 

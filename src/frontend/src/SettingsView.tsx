@@ -30,8 +30,8 @@ interface WiDocRow {
   uploadedAt: string;
 }
 
-export function SettingsView({ onClose }: { onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
+export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'billing'; initialProjectKey?: string }) {
+  const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialTab);
   const [isSaving, setIsSaving] = useState(false);
 
   // Models State
@@ -64,7 +64,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [customFields, setCustomFields] = useState<JiraField[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [arMappings, setArMappings] = useState<any[]>([]);
-  const [activeArProj, setActiveArProj] = useState('*'); // Global context selector
+  const [activeArProj, setActiveArProj] = useState(initialProjectKey); // Global context selector
 
   // Domain State
   const [domainContext, setDomainContext] = useState('');
@@ -84,6 +84,14 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     loadInitialConfig();
   }, []);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (initialProjectKey) setActiveArProj(initialProjectKey);
+  }, [initialProjectKey]);
 
   function detectDefaultIssueType(types: JiraIssueType[]): string | undefined {
     if (!types.length) return undefined;
@@ -171,14 +179,14 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
 
   async function loadWiDocs() {
     try {
-      const res = await api.listWiDocs() as any;
+      const res = await api.listWiDocs(activeArProj) as any;
       if (res.success !== false) setWiDocs(res.docs ?? []);
     } catch (e: any) { console.error('Could not list documents', e); }
   }
 
   useEffect(() => {
     if (activeTab === 'domain') loadWiDocs();
-  }, [activeTab]);
+  }, [activeTab, activeArProj]);
 
   async function handleWiPdfDrop(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -195,7 +203,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         reader.onerror = () => reject(new Error('Read failed'));
         reader.readAsDataURL(file);
       });
-      const res = await api.uploadWi(file.name, base64) as any;
+      const res = await api.uploadWi(file.name, base64, undefined, activeArProj) as any;
       if (res.success !== false && !res.duplicate) await loadWiDocs();
     } catch (err: any) { console.error('Upload failed', err); }
   }

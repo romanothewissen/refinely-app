@@ -15,12 +15,18 @@ interface WiCache {
   chunks: WiChunk[];
 }
 
+interface WiContextResult {
+  text: string;
+  docs: WiDoc[];
+}
+
 // ─── Ingest ───────────────────────────────────────────────────────────────────
 
 export async function ingestPdf(opts: {
   filename: string;
   buffer: Buffer;
   revision?: string;
+  targetProjects?: string[];
 }): Promise<{ docId: string; chunkCount: number; duplicate: boolean }> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require('pdf-parse');
@@ -52,6 +58,7 @@ export async function ingestPdf(opts: {
     revision,
     chunkCount: chunks.length,
     uploadedAt: new Date().toISOString(),
+    targetProjects: opts.targetProjects?.length ? opts.targetProjects : ['*'],
   });
 
   cache.chunks.push(...chunks);
@@ -66,24 +73,35 @@ export async function retrieveWiContext(
   query: string,
   topK = 8,
   maxChars = 100000,
-): Promise<string> {
+  projectKey: string = '*',
+): Promise<WiContextResult> {
   const cache = await loadCache();
-  if (!cache.chunks.length) return '';
+  if (!cache.chunks.length) return { text: '', docs: [] };
 
-  const scored = bm25Score(query, cache.chunks);
+  const allowedDocIds = new Set(
+    cache.docs
+      .filter(doc => docMatchesProject(doc, projectKey))
+      .map(doc => doc.docId),
+  );
+  const scopedChunks = cache.chunks.filter(chunk => allowedDocIds.has(chunk.docId));
+  if (!scopedChunks.length) return { text: '', docs: [] };
+
+  const scored = bm25Score(query, scopedChunks);
   const top = scored.slice(0, topK);
   const parts = top.map(c => c.text);
+  const referencedDocIds = new Set(top.map(c => c.docId));
+  const docs = cache.docs.filter(doc => referencedDocIds.has(doc.docId) && docMatchesProject(doc, projectKey));
 
   let result = parts.join('\n\n---\n\n');
   if (result.length > maxChars) result = result.slice(0, maxChars);
-  return result;
+  return { text: result, docs };
 }
 
 // ─── Document management ──────────────────────────────────────────────────────
 
-export async function listDocs(): Promise<WiDoc[]> {
+export async function listDocs(projectKey: string = '*'): Promise<WiDoc[]> {
   const cache = await loadCache();
-  return cache.docs;
+  return cache.docs.filter(doc => docMatchesProject(doc, projectKey));
 }
 
 export async function removeDoc(docId: string): Promise<void> {
@@ -167,6 +185,11 @@ async function loadCache(): Promise<WiCache> {
 async function saveCache(cache: WiCache): Promise<void> {
   await objectWrite(KEYS.wiChunks, cache);
   await entitySet(KEYS.wiDocs, cache.docs.map(d => ({ docId: d.docId, filename: d.filename, chunkCount: d.chunkCount })));
+}
+
+function docMatchesProject(doc: WiDoc, projectKey: string): boolean {
+  const targets = doc.targetProjects?.length ? doc.targetProjects : ['*'];
+  return targets.includes('*') || targets.includes(projectKey);
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

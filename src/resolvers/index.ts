@@ -275,13 +275,13 @@ resolver.define('ask', async ({ payload, context }) => {
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
 
   const [wiContext, similarItems] = await Promise.all([
-    config.wiConfig.enabled ? retrieveWiContext(payload.message, 4, 20000) : Promise.resolve(''),
+    config.wiConfig.enabled ? retrieveWiContext(payload.message, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
     findSimilarStories(payload.message, config),
   ]);
 
   const systemPrompt = buildAskSystemPrompt({
     domainContext: config.domainContext,
-    wiContext,
+    wiContext: wiContext.text,
     similarItems: similarItems.map(s => `${s.key}: ${s.summary}`).join('\n'),
   });
 
@@ -427,13 +427,14 @@ resolver.define('uploadWi', async ({ payload, context }) => {
     filename: payload.filename,
     buffer,
     revision: payload.revision,
+    targetProjects: payload.projectKey ? [payload.projectKey] : ['*'],
   });
 
   return { success: true, ...result };
 });
 
-resolver.define('listWiDocs', async () => {
-  const docs = await listDocs();
+resolver.define('listWiDocs', async ({ payload }) => {
+  const docs = await listDocs(payload?.projectKey);
   return { success: true, docs };
 });
 
