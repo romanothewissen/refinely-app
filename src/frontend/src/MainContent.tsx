@@ -62,7 +62,7 @@ function RefinePopup({ feature, onClose, onResult }: {
       if (res.success && res.feature) {
         onResult(res.feature);
       } else {
-        setError('Refinement failed — please try again.');
+        setError('Refinement failed \u2014 please try again.');
         setLoading(false);
       }
     } catch (e: any) {
@@ -73,57 +73,57 @@ function RefinePopup({ feature, onClose, onResult }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={!loading ? onClose : undefined} />
-      <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-[0_24px_64px_-12px_rgba(0,0,0,0.18)] flex flex-col overflow-hidden slide-up border border-slate-100">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div className="absolute inset-0 bg-black/20" onClick={!loading ? onClose : undefined} />
+      <div className="relative bg-white w-full max-w-lg rounded-lg shadow-[var(--rf-shadow-lg)] flex flex-col overflow-hidden slide-up border border-[var(--rf-border)]">
+        <div className="px-5 py-3.5 border-b border-[var(--rf-border)] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-500" />
-            <span className="font-semibold text-slate-800 text-sm">AI Refine</span>
-            <span className="text-slate-400 text-xs ml-1 line-clamp-1 max-w-[200px]">— {feature.title || feature.summary}</span>
+            <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" />
+            <span className="font-semibold text-[var(--rf-text)] text-sm">AI Refine</span>
+            <span className="text-[var(--rf-text-tertiary)] text-xs ml-1 line-clamp-1 max-w-[200px]">\u2014 {feature.title || feature.summary}</span>
           </div>
           {!loading && (
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-100 text-slate-400 rounded-lg transition"><X className="w-4 h-4" /></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-[var(--rf-bg)] text-[var(--rf-text-tertiary)] rounded-md transition"><X className="w-4 h-4" /></button>
           )}
         </div>
 
         <div className="px-5 py-5">
           {loading ? (
             <div className="flex flex-col items-center py-8 gap-4">
-              <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center">
-                <div className="w-7 h-7 border-[3px] border-blue-200 border-t-blue-600 rounded-full spin-slow" />
+              <div className="w-10 h-10 rounded-lg bg-[var(--rf-brand-subtle)] flex items-center justify-center">
+                <div className="w-6 h-6 border-[2.5px] border-blue-200 border-t-[var(--rf-brand)] rounded-full spin-slow" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-slate-800 text-sm">Refining feature…</p>
-                <p className="text-xs text-slate-400 mt-1">The AI is working on your request</p>
+                <p className="font-semibold text-[var(--rf-text)] text-sm">Refining feature\u2026</p>
+                <p className="text-xs text-[var(--rf-text-tertiary)] mt-1">The AI is working on your request</p>
               </div>
-              <div className="dot-bounce text-blue-400"><span /><span /><span /></div>
+              <div className="dot-bounce text-[var(--rf-brand)]"><span /><span /><span /></div>
             </div>
           ) : (
-            <div className="space-y-4">
-              <p className="text-xs text-slate-500">Describe what you want changed — e.g. "Add an AR for invalid password", "Tighten the scope to mobile only"</p>
+            <div className="space-y-3">
+              <p className="text-xs text-[var(--rf-text-secondary)]">Describe what you want changed \u2014 e.g. "Add an AR for invalid password", "Tighten the scope to mobile only"</p>
               <textarea
                 rows={4}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSend(); }}
-                placeholder="Your refinement instructions…"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none"
+                placeholder="Your refinement instructions\u2026"
+                className="w-full bg-[var(--rf-bg)] border border-[var(--rf-border)] rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)] focus:border-[var(--rf-brand)] transition resize-none"
                 autoFocus
               />
-              {error && <p className="text-xs text-red-500">{error}</p>}
+              {error && <p className="text-xs text-[var(--rf-danger)]">{error}</p>}
             </div>
           )}
         </div>
 
         {!loading && (
-          <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
-            <span className="text-[11px] text-slate-400">⌘ + Enter to send</span>
+          <div className="px-5 py-3.5 border-t border-[var(--rf-border)] flex items-center justify-between gap-3 bg-[var(--rf-bg)]">
+            <span className="text-[11px] text-[var(--rf-text-tertiary)]">\u2318 + Enter to send</span>
             <div className="flex gap-2">
-              <button onClick={onClose} className="px-3 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition">Cancel</button>
+              <button onClick={onClose} className="px-3 py-1.5 text-xs font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)] rounded-md hover:bg-white transition bg-white">Cancel</button>
               <button
                 onClick={handleSend}
                 disabled={!input.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-900 disabled:opacity-40 rounded-lg transition active:scale-[0.97]"
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-40 rounded-md transition active:scale-[0.98]"
               >
                 <Send className="w-3.5 h-3.5" /> Refine
               </button>
@@ -175,8 +175,8 @@ interface MainContentProps {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export function MainContent({ 
-  features, setFeatures, onPushFeature, isGenerating, progress, 
+export function MainContent({
+  features, setFeatures, onPushFeature, isGenerating, progress,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   tier, usage, limits, generationContext, projectKey
 }: MainContentProps) {
@@ -184,10 +184,7 @@ export function MainContent({
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
   const [refinePopupIdx, setRefinePopupIdx] = useState<number | null>(null);
 
-  // Diff mode: redline (with highlights) or blackline (final result)
   const [diffMode, setDiffMode] = useState<'redline' | 'blackline'>('redline');
-
-  // Collapsible state: store indices of EXPANDED features. Default empty = all collapsed.
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
 
   const toggleExpand = (idx: number) => {
@@ -201,7 +198,6 @@ export function MainContent({
 
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
-  // Bulk Refine state
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
@@ -211,11 +207,11 @@ export function MainContent({
   const cancelEditing = () => { setEditingIdx(null); setEditDraft(null); };
   const saveEditing   = () => {
     if (editingIdx !== null && editDraft) {
-      setFeatures(prev => { 
-        const n = [...prev]; 
-        n[editingIdx] = editDraft; 
+      setFeatures(prev => {
+        const n = [...prev];
+        n[editingIdx] = editDraft;
         api.updateConversationFeatures(sessionId, n);
-        return n; 
+        return n;
       });
     }
     cancelEditing();
@@ -241,7 +237,6 @@ export function MainContent({
       const n = [...prev];
       if (n[idx].pendingRefinement) n[idx] = { ...n[idx].pendingRefinement!, pendingRefinement: undefined, pendingRemoval: undefined };
       else if (n[idx].pendingRemoval) {
-        // Confirm removal: remove from array
         const next = n.filter((_, i) => i !== idx);
         api.updateConversationFeatures(sessionId, next);
         return next;
@@ -251,19 +246,19 @@ export function MainContent({
     });
   };
   const rejectRefinement = (idx: number) => {
-    setFeatures(prev => { 
-      const n = [...prev]; 
-      n[idx] = { ...n[idx], pendingRefinement: undefined, pendingRemoval: undefined }; 
+    setFeatures(prev => {
+      const n = [...prev];
+      n[idx] = { ...n[idx], pendingRefinement: undefined, pendingRemoval: undefined };
       api.updateConversationFeatures(sessionId, n);
-      return n; 
+      return n;
     });
   };
   const toggleAccepted = (idx: number) => {
-    setFeatures(prev => { 
-      const n = [...prev]; 
-      n[idx] = { ...n[idx], isAccepted: !n[idx].isAccepted }; 
+    setFeatures(prev => {
+      const n = [...prev];
+      n[idx] = { ...n[idx], isAccepted: !n[idx].isAccepted };
       api.updateConversationFeatures(sessionId, n);
-      return n; 
+      return n;
     });
   };
 
@@ -279,9 +274,6 @@ export function MainContent({
           return prev.map((f, i) => {
             const r = refined[i];
             if (!r) {
-              // If backend returned fewer items than before, mark the rest as pending removal
-              // assuming the order was perfectly maintained.
-              // (Usually the backend is instructed to return 1-for-1 or matches by ID)
               return { ...f, pendingRemoval: true };
             }
             return {
@@ -324,12 +316,12 @@ export function MainContent({
         .filter(f => !f.pendingRemoval)
         .map(f => {
           if (!f.pendingRefinement) return f;
-          return { 
-            ...f, 
-            ...f.pendingRefinement, 
+          return {
+            ...f,
+            ...f.pendingRefinement,
             pendingRefinement: undefined,
             pendingRemoval: undefined,
-            isAccepted: true 
+            isAccepted: true
           };
         });
       api.updateConversationFeatures(sessionId, next);
@@ -339,30 +331,29 @@ export function MainContent({
 
   // ── Generating skeleton ──────────────────────────────────────────────────
   const GeneratingSkeleton = () => (
-    <div className="w-full px-6 md:px-12 py-8 space-y-6 fade-in h-full flex flex-col pt-12">
-      {/* Moved progress to top as requested */}
-      <div className="flex flex-col items-center gap-4 mb-4 zoom-in">
-        <div className="w-14 h-14 rounded-[20px] bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_18px_42px_-18px_rgba(37,99,235,0.68)] flex items-center justify-center animate-pulse">
-          <Sparkles className="w-6 h-6 text-white" />
+    <div className="w-full max-w-4xl mx-auto px-6 py-8 space-y-5 fade-in h-full flex flex-col pt-12">
+      <div className="flex flex-col items-center gap-3 mb-4 zoom-in">
+        <div className="w-10 h-10 rounded-lg bg-[var(--rf-brand-subtle)] flex items-center justify-center">
+          <Sparkles className="w-5 h-5 text-[var(--rf-brand)]" />
         </div>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight">Refinely at work</h2>
-          <p className="text-sm text-slate-500 font-medium mt-1">{progress || 'Processing your request…'}</p>
+          <h2 className="text-lg font-semibold text-[var(--rf-text)]">Generating features</h2>
+          <p className="text-sm text-[var(--rf-text-secondary)] mt-0.5">{progress || 'Processing your request\u2026'}</p>
         </div>
-        <div className="dot-bounce text-blue-400 mt-2"><span /><span /><span /></div>
+        <div className="dot-bounce text-[var(--rf-brand)] mt-1"><span /><span /><span /></div>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
         {[1, 2, 3].map(i => (
-          <div key={i} className="rf-surface rounded-[24px] overflow-hidden" style={{ animationDelay: `${i * 0.12}s` }}>
+          <div key={i} className="rounded-lg border border-[var(--rf-border)] bg-white overflow-hidden shadow-[var(--rf-shadow-sm)]" style={{ animationDelay: `${i * 0.12}s` }}>
             <div className="flex">
-              <div className="w-2 shimmer shrink-0" />
-              <div className="flex-1 p-6 space-y-4">
-                <div className="shimmer h-5 w-2/5 rounded-lg" />
-                <div className="shimmer h-3.5 w-full rounded" />
-                <div className="shimmer h-3.5 w-4/5 rounded" />
+              <div className="w-1 shrink-0 bg-[var(--rf-border)]" />
+              <div className="flex-1 p-5 space-y-3">
+                <div className="shimmer h-4 w-2/5 rounded" />
+                <div className="shimmer h-3 w-full rounded" />
+                <div className="shimmer h-3 w-4/5 rounded" />
                 <div className="space-y-2 pt-2">
-                  {[1,2,3].map(j => <div key={j} className="shimmer h-3 rounded" style={{ width: `${60 + j * 10}%` }} />)}
+                  {[1,2,3].map(j => <div key={j} className="shimmer h-2.5 rounded" style={{ width: `${60 + j * 10}%` }} />)}
                 </div>
               </div>
             </div>
@@ -373,76 +364,73 @@ export function MainContent({
   );
 
   return (
-    <main className="flex-1 flex flex-col h-full relative overflow-hidden">
+    <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-[var(--rf-bg)]">
       {/* Header */}
-      <header className="relative shrink-0 border-b border-slate-200/80 bg-white/76 backdrop-blur-xl px-8 py-5 z-10 sticky top-0">
-        <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-blue-200/80 to-transparent" />
-        <div className="flex flex-wrap items-start justify-between gap-6">
-          <div className="flex items-start gap-4 min-w-0">
+      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white px-6 py-4 z-10 sticky top-0">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
             {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)} className="p-2.5 -ml-2 rounded-xl hover:bg-white text-slate-500 transition border border-slate-200/80 shadow-sm" title="Open Sidebar">
+              <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-1 rounded-md hover:bg-[var(--rf-bg)] text-[var(--rf-text-secondary)] transition border border-[var(--rf-border)]" title="Open Sidebar">
                 <Menu className="w-4 h-4" />
               </button>
             )}
             <div className="min-w-0">
-              <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                Feature Canvas
-              </span>
-              <p className="text-[11px] text-slate-500 mt-1 max-w-[38rem]">
+              <h2 className="text-sm font-semibold text-[var(--rf-text)]">Feature Canvas</h2>
+              <p className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">
                 Review, refine, and push backlog-ready features without losing the thread.
               </p>
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 shadow-sm">
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)]">
                 Project scope:
-                <span className="text-slate-800">
+                <span className="font-semibold text-[var(--rf-text)]">
                   {projectKey === '*' ? 'Standalone workspace' : projectKey}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="shrink-0 rounded-2xl border border-slate-200 bg-white/88 px-3 py-2 shadow-sm">
+          <div className="shrink-0">
             <UsageMeter usage={usage} limits={limits} tier={tier} isCompact />
           </div>
         </div>
 
         {hasFeatures && (
-          <div className="mt-5 space-y-4">
+          <div className="mt-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/86 px-3.5 py-2.5 shadow-sm">
-                <div className="px-3 py-1 bg-blue-50 text-blue-700 text-xs font-bold uppercase rounded-full tracking-wider flex items-center gap-2">
-                  <span>{features.length} Features</span>
-                  <span className="w-1 h-1 bg-blue-300 rounded-full" />
-                  <span>{totalArCount} Acceptance Requirements</span>
-                </div>
-                <div className="text-xs text-slate-500">
+              <div className="inline-flex items-center gap-2">
+                <span className="inline-flex items-center rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text)]">
+                  {features.length} Features
+                  <span className="mx-1.5 text-[var(--rf-border)]">|</span>
+                  {totalArCount} ARs
+                </span>
+                <span className="text-[11px] text-[var(--rf-text-tertiary)]">
                   {features.filter(f => f.isAccepted).length} accepted
-                </div>
+                </span>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 {features.some(f => f.pendingRefinement) && (
                   <>
-                    <button onClick={discardAllProposed} className="px-3 py-2 text-[11px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl hover:text-red-500 hover:border-red-200 transition">Discard All</button>
-                    <button onClick={acceptAllProposed} className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold rounded-xl transition shadow-sm">Accept All Changes</button>
+                    <button onClick={discardAllProposed} className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-md hover:text-[var(--rf-danger)] hover:border-red-300 transition">Discard All</button>
+                    <button onClick={acceptAllProposed} className="px-2.5 py-1.5 bg-[var(--rf-success)] hover:bg-green-700 text-white text-[11px] font-semibold rounded-md transition">Accept All Changes</button>
                   </>
                 )}
 
                 <div className="relative">
-                  <button 
-                    onClick={() => setShowBulkRefine(!showBulkRefine)} 
-                    className={`flex items-center gap-2 px-3 py-2 rounded-2xl border text-xs font-semibold transition-all ${showBulkRefine ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700 shadow-sm'}`}
+                  <button
+                    onClick={() => setShowBulkRefine(!showBulkRefine)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold transition ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]'}`}
                   >
-                    <Sparkles className={`w-3.5 h-3.5 ${showBulkRefine ? 'animate-pulse' : ''}`} />
+                    <Sparkles className="w-3.5 h-3.5" />
                     Refine All
                   </button>
 
                   {showBulkRefine && (
-                    <div className="absolute right-0 top-full mt-3 w-[400px] rf-glass-strong rounded-[24px] p-4 z-50 slide-down">
-                      <div className="flex items-center justify-between mb-3 px-1">
-                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                           <Sparkles className="w-3.5 h-3.5 text-purple-500" /> Advanced Bulk Refine
+                    <div className="absolute right-0 top-full mt-2 w-[380px] bg-white rounded-lg border border-[var(--rf-border)] p-4 z-50 shadow-[var(--rf-shadow-lg)] slide-up">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-[11px] font-semibold text-[var(--rf-text-secondary)] uppercase tracking-wide flex items-center gap-1.5">
+                           <Sparkles className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Bulk Refine
                         </h4>
-                        <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-slate-100 rounded-md transition text-slate-400"><X className="w-4 h-4" /></button>
+                        <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-bg)] rounded-md transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
                       </div>
                       <textarea
                         autoFocus
@@ -454,18 +442,18 @@ export function MainContent({
                             handleBulkRefine();
                           }
                         }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm min-h-[100px] outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition resize-none mb-3"
+                        className="w-full bg-[var(--rf-bg)] border border-[var(--rf-border)] rounded-md p-3 text-sm min-h-[100px] outline-none focus:ring-1 focus:ring-[var(--rf-brand)] focus:border-[var(--rf-brand)] transition resize-none mb-3"
                       />
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-[10px] text-slate-400">⌘ + Enter to apply</span>
-                        <button 
+                        <span className="text-[10px] text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
+                        <button
                           onClick={handleBulkRefine}
                           disabled={!bulkInput.trim() || isBulkRefining}
-                          className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition shadow-lg active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                          className="px-4 py-1.5 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-xs font-semibold rounded-md transition active:scale-[0.98] disabled:opacity-50 flex items-center gap-1.5"
                         >
                           {isBulkRefining ? (
                             <>
-                              <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                               Refining...
                             </>
                           ) : (
@@ -490,35 +478,35 @@ export function MainContent({
           <GeneratingSkeleton />
         ) : !hasFeatures ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center fade-in max-w-md mx-auto p-6">
-            <div className="w-[72px] h-[72px] bg-white/80 rounded-[24px] flex items-center justify-center mb-6 shadow-[0_24px_52px_-28px_rgba(37,99,235,0.5)] border border-white/80 p-4">
-              <Sparkles className="w-8 h-8 text-blue-400" />
+            <div className="w-14 h-14 bg-[var(--rf-brand-subtle)] rounded-lg flex items-center justify-center mb-5">
+              <Sparkles className="w-6 h-6 text-[var(--rf-brand)]" />
             </div>
-            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight mb-2">Ready to generate</h2>
-            <p className="text-slate-500 text-sm leading-relaxed">Describe your requirement in the sidebar, answer the clarifying questions, and your features will appear here.</p>
+            <h2 className="text-xl font-semibold text-[var(--rf-text)] mb-2">Ready to generate</h2>
+            <p className="text-[var(--rf-text-secondary)] text-sm leading-relaxed">Describe your requirement in the sidebar, answer the clarifying questions, and your features will appear here.</p>
           </div>
         ) : (
-          <div className="w-full px-6 md:px-12 py-8 space-y-4 fade-in flex-1">
+          <div className="w-full max-w-4xl mx-auto px-6 py-6 space-y-3 fade-in flex-1">
             {generationContext && (
-              <div className="rf-surface rounded-[24px] p-5">
+              <div className="rounded-lg border border-[var(--rf-border)] bg-white p-4 shadow-[var(--rf-shadow-sm)]">
                 <div className="flex flex-wrap items-center gap-4 text-xs">
-                  <div className="font-semibold text-slate-800">
+                  <div className="font-semibold text-[var(--rf-text)]">
                     Context used: {generationContext.goldExamplesCount} golden example{generationContext.goldExamplesCount !== 1 ? 's' : ''}
                   </div>
-                  <div className="text-slate-600">
+                  <div className="text-[var(--rf-text-secondary)]">
                     Project: {generationContext.projectKey === '*' ? 'Standalone workspace' : generationContext.projectKey}
                   </div>
                   {generationContext.domainRolesUsed?.length > 0 && (
-                    <div className="text-slate-600">
+                    <div className="text-[var(--rf-text-secondary)]">
                       Roles: {generationContext.domainRolesUsed.join(', ')}
                     </div>
                   )}
                 </div>
                 {generationContext.referencedGoldExamples?.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
                     {generationContext.referencedGoldExamples.map((example, i) => (
                       <span
                         key={`${example.source}-${example.key}-${i}`}
-                        className="rf-chip inline-flex items-center gap-1 rounded-full text-blue-700 px-2.5 py-1 text-[11px] font-medium"
+                        className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200"
                         title={example.summary}
                       >
                         {example.source}: {example.key}
@@ -526,17 +514,17 @@ export function MainContent({
                     ))}
                   </div>
                 )}
-                <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
                   <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <div className="font-semibold text-slate-800">
+                    <div className="font-semibold text-[var(--rf-text)]">
                       Work instructions used: {generationContext.wiDocsCount ?? 0}
                     </div>
                     {generationContext.referencedWiDocs?.length ? (
-                      <div className="text-slate-600">
+                      <div className="text-[var(--rf-text-secondary)]">
                         {generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')}
                       </div>
                     ) : (
-                      <div className="text-slate-500">No project docs were matched for this run.</div>
+                      <div className="text-[var(--rf-text-tertiary)]">No project docs were matched for this run.</div>
                     )}
                   </div>
                 </div>
@@ -548,234 +536,236 @@ export function MainContent({
               const draft = editDraft;
 
               return (
-                <div key={feature.id || idx} className={`rf-surface rounded-[24px] transition-all duration-300 overflow-hidden ${feature.pendingRemoval ? 'border-red-400 opacity-80' : feature.isAccepted ? 'border-green-300 ring-1 ring-green-100' : 'border-slate-200/80'}`}>
-                  {/* Accent bar */}
-                  <div className={`h-1.5 ${feature.pendingRemoval ? 'bg-red-500' : feature.isAccepted ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 'bg-gradient-to-r from-blue-500 via-sky-500 to-indigo-500'}`} />
+                <div key={feature.id || idx} className={`rounded-lg border bg-white shadow-[var(--rf-shadow-sm)] transition-all duration-200 overflow-hidden ${feature.pendingRemoval ? 'border-red-400 opacity-80' : feature.isAccepted ? 'border-green-400' : 'border-[var(--rf-border)]'}`}>
+                  {/* Left accent — thin solid line */}
+                  <div className="flex">
+                    <div className={`w-1 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger)]' : feature.isAccepted ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-brand)]'}`} />
 
-                  <div className="p-5">
-                    {/* Title row */}
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={draft?.title || draft?.summary || ''}
-                          onChange={e => setEditDraft(d => d ? { ...d, summary: e.target.value, title: e.target.value } : null)}
-                          className="flex-1 text-base font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none"
-                        />
-                      ) : (
-                        <div className="flex-1 flex items-center gap-3 cursor-pointer group/title" onClick={() => toggleExpand(idx)}>
-                          <h2 className="text-base font-semibold tracking-tight text-slate-800">
-                            {feature.title || feature.summary || 'Untitled Feature'}
-                          </h2>
-                          <div className="px-2 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-full group-hover/title:bg-blue-50 group-hover/title:text-blue-600 transition-colors">
-                            {feature.acceptanceRequirements?.length || 0} ARs
+                    <div className="flex-1 p-5">
+                      {/* Title row */}
+                      <div className="flex items-start justify-between gap-4 mb-2">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={draft?.title || draft?.summary || ''}
+                            onChange={e => setEditDraft(d => d ? { ...d, summary: e.target.value, title: e.target.value } : null)}
+                            className="flex-1 text-sm font-semibold text-[var(--rf-text)] bg-white border border-[var(--rf-border)] rounded-md px-3 py-1.5 focus:ring-1 focus:ring-[var(--rf-brand)] outline-none"
+                          />
+                        ) : (
+                          <div className="flex-1 flex items-center gap-2 cursor-pointer group/title" onClick={() => toggleExpand(idx)}>
+                            <h3 className="text-sm font-semibold text-[var(--rf-text)]">
+                              {feature.title || feature.summary || 'Untitled Feature'}
+                            </h3>
+                            <span className="inline-flex items-center rounded px-1.5 py-0.5 bg-[var(--rf-bg)] text-[var(--rf-text-tertiary)] text-[10px] font-medium border border-[var(--rf-border-subtle)]">
+                              {feature.acceptanceRequirements?.length || 0} ARs
+                            </span>
+                            <ChevronDown className={`w-3.5 h-3.5 text-[var(--rf-text-tertiary)] transition-transform duration-200 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
                           </div>
-                          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
+                        )}
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isEditing ? (
+                            <>
+                              <button onClick={cancelEditing} className="px-2 py-1 text-xs font-medium text-[var(--rf-text-secondary)] bg-[var(--rf-bg)] hover:bg-gray-200 rounded-md transition">Cancel</button>
+                              <button onClick={saveEditing} className="px-2 py-1 text-xs font-medium text-white bg-[var(--rf-success)] hover:bg-green-700 rounded-md transition flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Save</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => startEditing(idx)} className="px-2 py-1 text-[11px] font-medium text-[var(--rf-text-secondary)] hover:bg-[var(--rf-bg)] border border-transparent hover:border-[var(--rf-border)] rounded-md transition flex items-center gap-1"><Edit2 className="w-3 h-3" /> Edit</button>
+                              <button onClick={() => setRefinePopupIdx(idx)} className="px-2 py-1 text-[11px] font-medium text-[var(--rf-text-secondary)] hover:bg-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] border border-transparent hover:border-blue-200 rounded-md transition flex items-center gap-1"><Sparkles className="w-3 h-3" /> Refine</button>
+                              <button onClick={() => toggleAccepted(idx)} className={`px-2 py-1 text-[11px] font-medium rounded-md transition border flex items-center gap-1 ${feature.isAccepted ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-green-300' : 'text-[var(--rf-text-secondary)] border-transparent hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-green-300'}`}>
+                                <Check className="w-3 h-3" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
+                              </button>
+                              {feature.jiraIssueKey ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
+                                    className="px-2 py-1 text-[11px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] border border-blue-200 rounded-md transition flex items-center gap-1 hover:bg-blue-100"
+                                  >
+                                    <Check className="w-3 h-3" /> {feature.jiraIssueKey}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (window.confirm(`Safety Warning: This feature has already been pushed to Jira as issue ${feature.jiraIssueKey}.\n\nAre you sure you want to push it again and create a duplicate issue?`)) {
+                                        onPushFeature(idx);
+                                      }
+                                    }}
+                                    title="Push a duplicate to Jira"
+                                    className="px-1.5 py-1 text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-bg)] border border-transparent hover:border-[var(--rf-border)] rounded-md transition"
+                                  >
+                                    <Upload className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => onPushFeature(idx)}
+                                  disabled={!feature.isAccepted}
+                                  title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
+                                  className="px-2 py-1 text-[11px] font-medium text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-40 disabled:cursor-not-allowed rounded-md transition flex items-center gap-1"
+                                >
+                                  <Upload className="w-3 h-3" /> Push to Jira
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {feature.pendingRemoval && (
+                        <div className="mb-3 p-2.5 rounded-md bg-[var(--rf-danger-subtle)] border border-red-300 flex items-center justify-between">
+                           <div className="flex items-center gap-1.5 text-[var(--rf-danger)] font-semibold text-xs">
+                             <Trash2 className="w-3.5 h-3.5" /> Proposed for Removal
+                           </div>
+                           <div className="flex items-center gap-1.5">
+                             <button onClick={() => setFeatures(prev => prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false } : f))} className="px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-bg)] rounded-md">Keep Instead</button>
+                             <button onClick={() => setFeatures(prev => prev.filter((_, i) => i !== idx))} className="px-2 py-1 text-[10px] font-medium text-white bg-[var(--rf-danger)] hover:bg-red-700 rounded-md">Confirm Removal</button>
+                           </div>
                         </div>
                       )}
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {isEditing ? (
-                          <>
-                            <button onClick={cancelEditing} className="px-2.5 py-1 text-xs font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-md transition">Cancel</button>
-                            <button onClick={saveEditing} className="px-2.5 py-1 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Save</button>
-                          </>
-                        ) : (
-                          <>
-                            <button onClick={() => startEditing(idx)} className="px-2.5 py-1 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-blue-50 hover:text-blue-600 border border-slate-200 rounded-md transition flex items-center gap-1"><Edit2 className="w-3.5 h-3.5" /> Edit</button>
-                            <button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-purple-50 hover:text-purple-600 border border-slate-200 rounded-md transition flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" /> Refine</button>
-                            <button onClick={() => toggleAccepted(idx)} className={`px-2.5 py-1 text-xs font-semibold rounded-md transition border flex items-center gap-1 ${feature.isAccepted ? 'text-green-700 bg-green-100 border-green-200' : 'text-slate-600 bg-slate-50 hover:bg-green-50 hover:text-green-600 hover:border-green-200 border-slate-200'}`}>
-                              <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
-                            </button>
-                            {feature.jiraIssueKey ? (
-                              <div className="flex items-center gap-1">
-                                <button 
-                                  onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
-                                  className="px-2.5 py-1 text-xs font-semibold text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition flex items-center gap-1"
-                                >
-                                  <Check className="w-3.5 h-3.5" /> Pushed: {feature.jiraIssueKey}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (window.confirm(`Safety Warning: This feature has already been pushed to Jira as issue ${feature.jiraIssueKey}.\n\nAre you sure you want to push it again and create a duplicate issue?`)) {
-                                      onPushFeature(idx);
-                                    }
-                                  }}
-                                  title="Push a duplicate to Jira"
-                                  className="px-2 py-1 text-xs text-slate-400 bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:text-slate-600 rounded-md transition flex items-center justify-center"
-                                >
-                                  <Upload className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <button 
-                                onClick={() => onPushFeature(idx)} 
-                                disabled={!feature.isAccepted}
-                                title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
-                                className="px-2.5 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition flex items-center gap-1 shadow-sm"
-                              >
-                                <Upload className="w-3.5 h-3.5" /> Push to Jira
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {feature.pendingRemoval && (
-                      <div className="mb-3 p-3 rounded-lg bg-red-50 border border-red-200 flex items-center justify-between">
-                         <div className="flex items-center gap-2 text-red-800 font-bold text-xs">
-                           <Trash2 className="w-3.5 h-3.5" /> Proposed for Removal
-                         </div>
-                         <div className="flex items-center gap-2">
-                           <button onClick={() => setFeatures(prev => prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false } : f))} className="px-2 py-1 text-[10px] font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md">Keep Instead</button>
-                           <button onClick={() => setFeatures(prev => prev.filter((_, i) => i !== idx))} className="px-2 py-1 text-[10px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm">Confirm Removal</button>
-                         </div>
-                      </div>
-                    )}
-
-                    {/* Pending refinement diff view */}
-                    {feature.pendingRefinement && (() => {
-                      const proposed = feature.pendingRefinement!;
-                      const origTitle = feature.title || feature.summary || '';
-                      const propTitle = proposed.title || proposed.summary || '';
-                      const origDesc = feature.description || feature.markdown || '';
-                      const propDesc = proposed.description || proposed.markdown || '';
-                      return (
-                        <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                          <div className="flex items-center justify-between mb-2">
-                            <h3 className="text-amber-800 font-bold text-xs flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> AI Suggested Refinements</h3>
-                            
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center bg-white/60 p-0.5 rounded-md border border-amber-200">
-                                <button 
-                                  onClick={() => setDiffMode('redline')}
-                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition-all ${diffMode === 'redline' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                >
-                                  Redline
-                                </button>
-                                <button 
-                                  onClick={() => setDiffMode('blackline')}
-                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition-all ${diffMode === 'blackline' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                >
-                                  Blackline
-                                </button>
-                              </div>
+                      {/* Pending refinement diff view */}
+                      {feature.pendingRefinement && (() => {
+                        const proposed = feature.pendingRefinement!;
+                        const origTitle = feature.title || feature.summary || '';
+                        const propTitle = proposed.title || proposed.summary || '';
+                        const origDesc = feature.description || feature.markdown || '';
+                        const propDesc = proposed.description || proposed.markdown || '';
+                        return (
+                          <div className="mb-3 p-3 rounded-md bg-[var(--rf-warning-subtle)] border border-amber-300">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-amber-800 font-semibold text-xs flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> AI Suggested Refinements</h4>
 
                               <div className="flex items-center gap-2">
-                                <button onClick={() => rejectRefinement(idx)} className="px-2 py-1 text-[10px] font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md shadow-sm">Reject</button>
-                                <button onClick={() => acceptRefinement(idx)} className="px-2 py-1 text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-sm flex items-center gap-1"><Check className="w-3 h-3" /> Accept</button>
+                                <div className="flex items-center bg-white p-0.5 rounded border border-amber-200">
+                                  <button
+                                    onClick={() => setDiffMode('redline')}
+                                    className={`px-2 py-0.5 text-[9px] font-semibold rounded transition ${diffMode === 'redline' ? 'bg-[var(--rf-bg)] text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                                  >
+                                    Redline
+                                  </button>
+                                  <button
+                                    onClick={() => setDiffMode('blackline')}
+                                    className={`px-2 py-0.5 text-[9px] font-semibold rounded transition ${diffMode === 'blackline' ? 'bg-[var(--rf-bg)] text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                                  >
+                                    Blackline
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  <button onClick={() => rejectRefinement(idx)} className="px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-bg)] rounded-md">Reject</button>
+                                  <button onClick={() => acceptRefinement(idx)} className="px-2 py-1 text-[10px] font-medium text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] rounded-md flex items-center gap-1"><Check className="w-3 h-3" /> Accept</button>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              <div className="bg-white p-3 rounded-md border border-[var(--rf-border)]">
+                                <div className="text-[9px] font-semibold text-[var(--rf-text-tertiary)] uppercase tracking-wide mb-1">Original</div>
+                                <h4 className="text-xs font-semibold text-[var(--rf-text)] mb-1">{origTitle}</h4>
+                                <div className="text-[11px] text-[var(--rf-text-secondary)] mb-2 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
+                                <div className="space-y-1">
+                                  {feature.acceptanceRequirements.map((ar, i) => (
+                                    <div key={i} className="bg-[var(--rf-bg)] border border-[var(--rf-border-subtle)] p-1.5 rounded text-[10px] text-[var(--rf-text-secondary)]">
+                                      {ar.given && <div><strong>Given</strong> {ar.given}</div>}
+                                      {ar.when && <div><strong>When</strong> {ar.when}</div>}
+                                      <div><strong>Then</strong> {ar.then}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="bg-[var(--rf-brand-subtle)] p-3 rounded-md border border-blue-200">
+                                <div className="text-[9px] font-semibold text-[var(--rf-brand)] uppercase tracking-wide mb-1">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
+                                <h4 className="text-xs font-semibold text-[var(--rf-text)] mb-1"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
+                                <div className="text-[11px] text-[var(--rf-text-secondary)] mb-2 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
+                                <div className="space-y-1.5">
+                                  {proposed.acceptanceRequirements.map((ar, i) => {
+                                    const oldAr = feature.acceptanceRequirements[i];
+                                    const isNew = !oldAr;
+                                    return (
+                                      <div key={i} className={`p-2 rounded text-[11px] text-[var(--rf-text)] border ${isNew ? 'bg-[var(--rf-success-subtle)] border-green-300' : 'bg-white border-blue-100'}`}>
+                                        {isNew && <div className="text-[9px] font-semibold text-[var(--rf-success)] uppercase tracking-wide mb-1">New AR</div>}
+                                        {ar.given && <div><strong className="text-[var(--rf-brand)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
+                                        {ar.when && <div><strong className="text-[var(--rf-brand)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
+                                        <div><strong className="text-[var(--rf-brand)]">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             </div>
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-slate-200">
-                              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Original</div>
-                              <h4 className="text-xs font-bold text-slate-800 mb-1">{origTitle}</h4>
-                              <div className="text-[11px] text-slate-600 mb-2 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
-                              <div className="space-y-1">
-                                {feature.acceptanceRequirements.map((ar, i) => (
-                                  <div key={i} className="bg-slate-50 border border-slate-100 p-1.5 rounded text-[10px] text-slate-600">
-                                    {ar.given && <div><strong>Given</strong> {ar.given}</div>}
-                                    {ar.when && <div><strong>When</strong> {ar.when}</div>}
-                                    <div><strong>Then</strong> {ar.then}</div>
+                        );
+                      })()}
+
+                      {/* Feature body */}
+                      {(expandedIndices.has(idx) || isEditing) && (
+                        <div className={`mt-2 ${feature.pendingRefinement ? 'opacity-60 pointer-events-none' : ''}`}>
+                          {isEditing ? (
+                            <textarea
+                              value={draft?.description || ''}
+                              onChange={e => setEditDraft(d => d ? { ...d, description: e.target.value } : null)}
+                              className="w-full text-[var(--rf-text-secondary)] text-sm bg-white border border-[var(--rf-border)] rounded-md px-3 py-2 min-h-[100px] mb-4 focus:ring-1 focus:ring-[var(--rf-brand)] outline-none resize-y"
+                            />
+                          ) : (
+                            <div className="text-[var(--rf-text)] text-sm mb-4 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-border)] pl-4">
+                              {feature.markdown || feature.description}
+                            </div>
+                          )}
+
+                          {/* Acceptance Criteria */}
+                          {((isEditing && draft?.acceptanceRequirements) || (!isEditing && feature.acceptanceRequirements?.length > 0)) && (
+                            <div className="mt-2 text-sm">
+                              <div className="flex items-center justify-between mb-2 border-b border-[var(--rf-border-subtle)] pb-2">
+                                <h4 className="text-[11px] font-semibold text-[var(--rf-text-tertiary)] uppercase tracking-wide">Acceptance Criteria</h4>
+                                {isEditing && (
+                                  <button onClick={addDraftAr} className="text-xs font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] hover:bg-blue-100 px-2 py-1 rounded-md transition flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add AR</button>
+                                )}
+                              </div>
+                              <div className="space-y-1.5">
+                                {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
+                                  <div key={i} className="bg-[var(--rf-bg)] rounded-md p-3 border border-[var(--rf-border-subtle)] relative group">
+                                    {isEditing && (
+                                      <button onClick={() => deleteDraftAr(i)} className="absolute top-2 right-2 p-1 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-md transition opacity-0 group-hover:opacity-100"><Trash2 className="w-3.5 h-3.5" /></button>
+                                    )}
+                                    {isEditing ? (
+                                      <div className="space-y-2 pr-8">
+                                        {(['given', 'when', 'then'] as const).map(field => (
+                                          <div key={field} className="flex items-start gap-2">
+                                            <strong className="text-[var(--rf-text-secondary)] w-12 pt-1.5 text-xs uppercase tracking-wide">{field}</strong>
+                                            {field === 'then'
+                                              ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-[var(--rf-border)] rounded-md px-2 py-1 text-sm outline-none focus:border-[var(--rf-brand)] resize-none" />
+                                              : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-[var(--rf-border)] rounded-md px-2 py-1 text-sm outline-none focus:border-[var(--rf-brand)]" />
+                                            }
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-1 text-sm">
+                                        {ar.given?.trim() && (
+                                          <div className="flex gap-3">
+                                            <div className="w-10 shrink-0 text-[10px] font-semibold text-[var(--rf-text-tertiary)] uppercase pt-0.5">Given</div>
+                                            <div className="text-[var(--rf-text)] leading-normal">{ar.given}</div>
+                                          </div>
+                                        )}
+                                        {ar.when?.trim() && (
+                                          <div className="flex gap-3">
+                                            <div className="w-10 shrink-0 text-[10px] font-semibold text-[var(--rf-text-tertiary)] uppercase pt-0.5">When</div>
+                                            <div className="text-[var(--rf-text)] leading-normal">{ar.when}</div>
+                                          </div>
+                                        )}
+                                        <div className="flex gap-3">
+                                          <div className="w-10 shrink-0 text-[10px] font-semibold text-[var(--rf-text-tertiary)] uppercase pt-0.5">Then</div>
+                                          <div className="text-[var(--rf-text)] leading-normal whitespace-pre-wrap">{ar.then}</div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
                             </div>
-                            <div className="bg-blue-50/30 p-4 rounded-lg border border-blue-200 shadow-sm ring-1 ring-blue-100">
-                              <div className="text-[9px] font-bold text-blue-500 uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
-                              <h4 className="text-sm font-bold text-slate-800 mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
-                              <div className="text-xs text-slate-600 mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
-                              <div className="space-y-2">
-                                {proposed.acceptanceRequirements.map((ar, i) => {
-                                  const oldAr = feature.acceptanceRequirements[i];
-                                  const isNew = !oldAr;
-                                  return (
-                                    <div key={i} className={`p-2 rounded text-[11px] text-slate-700 shadow-sm border ${isNew ? 'bg-green-50 border-green-200' : 'bg-white border-blue-100'}`}>
-                                      {isNew && <div className="text-[9px] font-bold text-green-700 uppercase tracking-wide mb-1">★ New AR</div>}
-                                      {ar.given && <div><strong className="text-blue-600">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
-                                      {ar.when && <div><strong className="text-blue-600">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
-                                      <div><strong className="text-blue-600">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
+                          )}
                         </div>
-                      );
-                    })()}
-
-                    {/* Feature body */}
-                    {(expandedIndices.has(idx) || isEditing) && (
-                      <div className={`mt-2 ${feature.pendingRefinement ? 'opacity-60 pointer-events-none' : ''}`}>
-                        {isEditing ? (
-                          <textarea
-                            value={draft?.description || ''}
-                            onChange={e => setEditDraft(d => d ? { ...d, description: e.target.value } : null)}
-                            className="w-full text-slate-600 text-[15px] bg-white border border-slate-300 rounded-lg px-3 py-2 min-h-[100px] mb-4 focus:ring-2 focus:ring-blue-500 outline-none resize-y"
-                          />
-                        ) : (
-                          <div className="text-slate-800 text-[15px] mb-4 whitespace-pre-wrap leading-relaxed border-l-2 border-slate-200 pl-4">
-                            {feature.markdown || feature.description}
-                          </div>
-                        )}
-
-                        {/* Acceptance Criteria */}
-                        {((isEditing && draft?.acceptanceRequirements) || (!isEditing && feature.acceptanceRequirements?.length > 0)) && (
-                          <div className="mt-2 text-sm">
-                            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
-                              <h3 className="text-[12px] font-bold text-slate-400 uppercase tracking-widest">Acceptance Criteria</h3>
-                              {isEditing && (
-                                <button onClick={addDraftAr} className="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add AR</button>
-                              )}
-                            </div>
-                            <div className="space-y-2">
-                              {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
-                                <div key={i} className="bg-slate-50/50 rounded-xl p-3 border border-slate-100/60 shadow-sm relative group">
-                                  {isEditing && (
-                                    <button onClick={() => deleteDraftAr(i)} className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
-                                  )}
-                                  {isEditing ? (
-                                    <div className="space-y-2 pr-8">
-                                      {(['given', 'when', 'then'] as const).map(field => (
-                                        <div key={field} className="flex items-start gap-2">
-                                          <strong className="text-slate-700 w-12 pt-1.5 text-xs uppercase tracking-wider">{field}</strong>
-                                          {field === 'then'
-                                            ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-sm outline-none focus:border-blue-400 resize-none" />
-                                            : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-sm outline-none focus:border-blue-400" />
-                                          }
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div className="space-y-1.5 text-sm">
-                                      {ar.given?.trim() && (
-                                        <div className="flex gap-4">
-                                          <div className="w-10 shrink-0 text-[10px] font-bold text-slate-400 uppercase pt-0.5 tracking-tight">Given</div>
-                                          <div className="text-slate-800 leading-normal">{ar.given}</div>
-                                        </div>
-                                      )}
-                                      {ar.when?.trim() && (
-                                        <div className="flex gap-4">
-                                          <div className="w-10 shrink-0 text-[10px] font-bold text-slate-400 uppercase pt-0.5 tracking-tight">When</div>
-                                          <div className="text-slate-800 leading-normal">{ar.when}</div>
-                                        </div>
-                                      )}
-                                      <div className="flex gap-4">
-                                        <div className="w-10 shrink-0 text-[10px] font-bold text-slate-400 uppercase pt-0.5 tracking-tight">Then</div>
-                                        <div className="text-slate-800 leading-normal whitespace-pre-wrap">{ar.then}</div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               );

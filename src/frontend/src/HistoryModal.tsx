@@ -65,9 +65,9 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
-      
-      <div className="relative bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden slide-up border border-slate-100">
+      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
+
+      <div className="relative bg-white w-full max-w-4xl h-[85vh] rounded-lg shadow-[var(--rf-shadow-lg)] flex flex-col overflow-hidden slide-up border border-[var(--rf-border)]">
         
         {/* Header */}
         <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-4 bg-slate-50/50">

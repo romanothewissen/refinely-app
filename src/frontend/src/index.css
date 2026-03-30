@@ -4,20 +4,31 @@
 
 @layer base {
   :root {
-    --rf-bg: #eef3f8;
-    --rf-panel: rgba(255, 255, 255, 0.9);
-    --rf-panel-strong: rgba(255, 255, 255, 0.96);
-    --rf-line: rgba(15, 23, 42, 0.08);
-    --rf-line-strong: rgba(15, 23, 42, 0.14);
-    --rf-text: #0f172a;
-    --rf-muted: #5b6b82;
-    --rf-brand: #1d4ed8;
-    --rf-brand-soft: rgba(29, 78, 216, 0.12);
-    --rf-glow: rgba(59, 130, 246, 0.22);
-    --rf-shadow-lg: 0 28px 60px -28px rgba(15, 23, 42, 0.24);
-    --rf-shadow-md: 0 18px 36px -24px rgba(15, 23, 42, 0.18);
-    --rf-radius-xl: 24px;
-    --rf-radius-lg: 18px;
+    /* Flat corporate palette — Atlassian-adjacent */
+    --rf-bg: #f4f5f7;
+    --rf-surface: #ffffff;
+    --rf-surface-raised: #ffffff;
+    --rf-border: #dfe1e6;
+    --rf-border-subtle: #ebecf0;
+    --rf-text: #172b4d;
+    --rf-text-secondary: #626f86;
+    --rf-text-tertiary: #8993a4;
+    --rf-brand: #0052cc;
+    --rf-brand-hover: #0747a6;
+    --rf-brand-subtle: #deebff;
+    --rf-success: #00875a;
+    --rf-success-subtle: #e3fcef;
+    --rf-warning: #ff8b00;
+    --rf-warning-subtle: #fffae6;
+    --rf-danger: #de350b;
+    --rf-danger-subtle: #ffebe6;
+    --rf-shadow-sm: 0 1px 2px rgba(9, 30, 66, 0.08);
+    --rf-shadow-md: 0 4px 12px rgba(9, 30, 66, 0.08), 0 1px 3px rgba(9, 30, 66, 0.04);
+    --rf-shadow-lg: 0 8px 24px rgba(9, 30, 66, 0.1), 0 2px 6px rgba(9, 30, 66, 0.04);
+    --rf-radius-sm: 4px;
+    --rf-radius-md: 6px;
+    --rf-radius-lg: 8px;
+    --rf-radius-xl: 12px;
   }
 
   html, body {
@@ -25,12 +36,10 @@
     margin: 0;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background:
-      radial-gradient(circle at 14% 12%, rgba(37, 99, 235, 0.12), transparent 20%),
-      radial-gradient(circle at 88% 10%, rgba(14, 165, 233, 0.10), transparent 18%),
-      radial-gradient(circle at 50% 100%, rgba(15, 23, 42, 0.04), transparent 26%),
-      linear-gradient(180deg, #fcfbf8 0%, #edf2f7 100%);
+    background: var(--rf-bg);
     color: var(--rf-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   #root {
@@ -47,135 +56,45 @@
 
   .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-  .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
-  .rf-shell {
-    position: relative;
-    isolation: isolate;
-  }
-
-  .rf-shell::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.14)),
-      radial-gradient(circle at 14% 10%, rgba(255, 255, 255, 0.78), transparent 18%),
-      radial-gradient(circle at 84% 16%, rgba(219, 234, 254, 0.42), transparent 20%);
-    z-index: -2;
-  }
-
-  .rf-shell::after {
-    content: "";
-    position: absolute;
-    inset: 18px;
-    border-radius: 28px;
-    border: 1px solid rgba(255, 255, 255, 0.42);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  .rf-glass {
-    background: var(--rf-panel);
-    border: 1px solid var(--rf-line);
-    box-shadow: var(--rf-shadow-md);
-    backdrop-filter: blur(18px);
-  }
-
-  .rf-glass-strong {
-    background: var(--rf-panel-strong);
-    border: 1px solid var(--rf-line-strong);
-    box-shadow: var(--rf-shadow-lg);
-    backdrop-filter: blur(22px);
-  }
-
-  .rf-surface {
-    position: relative;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.94)),
-      rgba(255, 255, 255, 0.88);
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    box-shadow:
-      0 22px 44px -30px rgba(15, 23, 42, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  }
-
-  .rf-surface::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.58), transparent 28%);
-  }
-
-  .rf-canvas-bg {
-    background:
-      radial-gradient(circle at 18% 20%, rgba(37, 99, 235, 0.09), transparent 20%),
-      radial-gradient(circle at 84% 16%, rgba(14, 165, 233, 0.07), transparent 18%),
-      radial-gradient(circle at 50% 100%, rgba(15, 23, 42, 0.04), transparent 26%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(244, 247, 250, 0.3));
-  }
-
-  .rf-chip {
-    border: 1px solid rgba(59, 130, 246, 0.14);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(240, 247, 255, 0.94));
-    box-shadow: 0 12px 26px -22px rgba(29, 78, 216, 0.42);
-  }
-
-  .rf-button-primary {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 58%, #153b96 100%);
-    box-shadow:
-      0 16px 34px -18px rgba(37, 99, 235, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.24);
-  }
-
-  .rf-button-primary:hover {
-    box-shadow:
-      0 20px 38px -18px rgba(37, 99, 235, 0.62),
-      0 0 0 6px rgba(29, 78, 216, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.24);
-  }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 10px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #a5adba; }
 
   /* Fade in (content) */
-  .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+  .fade-in { animation: fadeIn 0.3s ease-out forwards; }
   @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
+    from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
   }
 
   /* Zoom in (modals / cards) */
-  .zoom-in { animation: zoomIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .zoom-in { animation: zoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
   @keyframes zoomIn {
-    from { opacity: 0; transform: scale(0.95); }
+    from { opacity: 0; transform: scale(0.97); }
     to   { opacity: 1; transform: scale(1); }
   }
 
   /* Slide up (popup dialogs) */
-  .slide-up { animation: slideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .slide-up { animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
   @keyframes slideUp {
-    from { opacity: 0; transform: translateY(18px) scale(0.97); }
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 
   /* Sidebar slide transition */
-  .sidebar-enter { animation: sidebarIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-  .sidebar-exit  { animation: sidebarOut 0.28s ease-in forwards; }
+  .sidebar-enter { animation: sidebarIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .sidebar-exit  { animation: sidebarOut 0.2s ease-in forwards; }
   @keyframes sidebarIn {
-    from { opacity: 0; transform: translateX(-24px); }
+    from { opacity: 0; transform: translateX(-16px); }
     to   { opacity: 1; transform: translateX(0); }
   }
   @keyframes sidebarOut {
     from { opacity: 1; transform: translateX(0); }
-    to   { opacity: 0; transform: translateX(-24px); }
+    to   { opacity: 0; transform: translateX(-16px); }
   }
 
   /* Loading shimmer skeleton */
   .shimmer {
-    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background: linear-gradient(90deg, #f4f5f7 25%, #ebecf0 50%, #f4f5f7 75%);
     background-size: 200% 100%;
     animation: shimmer 1.4s infinite;
   }
@@ -187,19 +106,19 @@
   /* Bouncing dots for inline loading */
   .dot-bounce { display: inline-flex; gap: 4px; align-items: center; }
   .dot-bounce span {
-    width: 6px; height: 6px; border-radius: 50%;
+    width: 5px; height: 5px; border-radius: 50%;
     background: currentColor; display: inline-block;
     animation: dotBounce 1.2s ease-in-out infinite;
   }
   .dot-bounce span:nth-child(2) { animation-delay: 0.2s; }
   .dot-bounce span:nth-child(3) { animation-delay: 0.4s; }
   @keyframes dotBounce {
-    0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
     40%           { transform: scale(1);   opacity: 1; }
   }
 
   /* Spin (loading spinner) */
-  .spin-slow { animation: spin 1.6s linear infinite; }
+  .spin-slow { animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 }
 

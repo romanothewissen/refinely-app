@@ -13,7 +13,6 @@ interface ClarifyProps {
 }
 
 export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpen, setSidebarOpen }: ClarifyProps) {
-  // Each entry: { selected: string[], custom: string }
   const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
@@ -29,13 +28,11 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
       ? existing.selected.filter(s => s !== sug)
       : [...existing.selected, sug];
 
-    // Sync custom textarea: rebuild from selected list
     const newCustom = newSelected.join('; ');
     setAnswers(prev => ({ ...prev, [qIdx]: { selected: newSelected, custom: newCustom } }));
   }
 
   function handleCustomChange(qIdx: number, val: string) {
-    // On manual edit, keep selected in sync (we just update custom freely)
     setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), custom: val } }));
   }
 
@@ -49,7 +46,6 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
     onComplete(result);
   }
 
-  // Group questions by category for visual organisation
   const categories: Record<string, { idx: number; q: Question }[]> = {};
   questions.forEach((q, i) => {
     if (!categories[q.category]) categories[q.category] = [];
@@ -57,62 +53,60 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
   });
 
   return (
-    <div className="rf-grid-bg flex-1 flex flex-col h-full overflow-hidden fade-in">
+    <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-[var(--rf-bg)]">
       {/* Header */}
-      <header className="h-[84px] shrink-0 border-b border-white/60 bg-white/68 shadow-sm backdrop-blur-xl flex items-center justify-between px-8 gap-4 sticky top-0 z-20">
-        <div className="flex items-center gap-4">
+      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white flex items-center justify-between px-6 py-4 gap-4 sticky top-0 z-20">
+        <div className="flex items-center gap-3">
           {!sidebarOpen && (
-            <button onClick={() => setSidebarOpen(true)} className="p-2.5 rounded-xl hover:bg-white text-slate-500 transition border border-slate-200 shadow-sm" title="Open Sidebar">
+            <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-md hover:bg-[var(--rf-bg)] text-[var(--rf-text-secondary)] transition border border-[var(--rf-border)]" title="Open Sidebar">
               <Menu className="w-4 h-4" />
             </button>
           )}
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-[18px] bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_18px_40px_-18px_rgba(37,99,235,0.68)] flex items-center justify-center animate-pulse">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="w-9 h-9 rounded-lg bg-[var(--rf-brand-subtle)] flex items-center justify-center">
+              <Sparkles className="w-4.5 h-4.5 text-[var(--rf-brand)]" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-slate-900 tracking-tight leading-tight">Requirement Discovery</h1>
-              <p className="text-[11px] text-slate-500 font-medium leading-tight mt-0.5">{answeredCount} of {questions.length} questions explored</p>
+              <h1 className="text-sm font-semibold text-[var(--rf-text)]">Requirement Discovery</h1>
+              <p className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{answeredCount} of {questions.length} questions explored</p>
             </div>
           </div>
         </div>
 
-        {/* Progress bar + actions */}
         <div className="flex items-center gap-4 flex-1 max-w-lg">
-          <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div className="flex-1 h-1.5 bg-[var(--rf-border-subtle)] rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-500"
+              className="h-full bg-[var(--rf-brand)] rounded-full transition-all duration-500"
               style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
             />
           </div>
-          <span className="text-xs font-semibold text-slate-400 shrink-0">{answeredCount}/{questions.length}</span>
+          <span className="text-[11px] font-medium text-[var(--rf-text-tertiary)] shrink-0">{answeredCount}/{questions.length}</span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onSkip} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition px-3 py-1.5 rounded-lg hover:bg-slate-100">
+          <button onClick={onSkip} className="text-xs font-medium text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-1.5 rounded-md hover:bg-[var(--rf-bg)]">
             Skip all
           </button>
           <button
             onClick={handleSubmit}
-            className="rf-button-primary flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition active:scale-[0.98]"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition active:scale-[0.98]"
           >
             Generate Features <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* All questions — scrollable */}
+      {/* All questions */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6">
-        <div className="max-w-5xl mx-auto space-y-8">
+        <div className="max-w-4xl mx-auto space-y-6">
           {Object.entries(categories).map(([category, items]) => (
-            <div key={category} className="space-y-4">
-              {/* Category header */}
+            <div key={category} className="space-y-3">
               <div className="flex items-center gap-3">
-                <span className="rf-chip text-[10px] font-bold uppercase tracking-widest text-blue-700 px-2.5 py-1 rounded-full">{category}</span>
-                <div className="flex-1 h-px bg-slate-200" />
+                <span className="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200">{category}</span>
+                <div className="flex-1 h-px bg-[var(--rf-border-subtle)]" />
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {items.map(({ idx, q }) => {
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.custom.trim().length > 0 || ans.selected.length > 0;
@@ -120,29 +114,27 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
                   return (
                     <div
                       key={idx}
-                      className={`rf-surface rounded-[24px] transition-all duration-200 overflow-hidden ${isAnswered ? 'border-blue-200 shadow-sm shadow-blue-100/50' : 'border-slate-200/80'}`}
+                      className={`rounded-lg border bg-white shadow-[var(--rf-shadow-sm)] transition-all duration-200 overflow-hidden ${isAnswered ? 'border-blue-300' : 'border-[var(--rf-border)]'}`}
                     >
-                      {/* Question */}
-                      <div className="px-5 pt-4 pb-3 flex items-start gap-3">
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 transition-all ${isAnswered ? 'bg-blue-600 text-white shadow-[0_10px_24px_-12px_rgba(37,99,235,0.7)]' : 'bg-slate-100 text-slate-400'}`}>
-                          {isAnswered ? <Check className="w-3.5 h-3.5" /> : <span className="text-[10px] font-bold">{idx + 1}</span>}
+                      <div className="px-4 pt-3.5 pb-2.5 flex items-start gap-3">
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 transition-all text-xs font-semibold ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-bg)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
+                          {isAnswered ? <Check className="w-3.5 h-3.5" /> : <span className="text-[10px]">{idx + 1}</span>}
                         </div>
-                        <p className="text-sm font-medium text-slate-800 leading-relaxed">{q.question}</p>
+                        <p className="text-sm font-medium text-[var(--rf-text)] leading-relaxed">{q.question}</p>
                       </div>
 
-                      {/* Suggestion chips */}
                       {q.suggestions.length > 0 && (
-                        <div className="px-5 pb-3 flex flex-wrap gap-2">
+                        <div className="px-4 pb-2.5 flex flex-wrap gap-1.5">
                           {q.suggestions.map((sug, si) => {
                             const sel = ans.selected.includes(sug);
                             return (
                               <button
                                 key={si}
                                 onClick={() => toggleSuggestion(idx, sug)}
-                                className={`px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
+                                className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
                                   sel
-                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                    : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:-translate-y-0.5'
+                                    ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)]'
+                                    : 'border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)]'
                                 }`}
                               >
                                 {sel && <Check className="w-3 h-3 inline mr-1" />}
@@ -153,14 +145,13 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
                         </div>
                       )}
 
-                      {/* Answer textarea — pre-filled when chips clicked */}
-                      <div className="px-5 pb-4">
+                      <div className="px-4 pb-3.5">
                         <textarea
                           value={ans.custom}
                           onChange={e => handleCustomChange(idx, e.target.value)}
-                          placeholder={q.suggestions.length > 0 ? 'Click suggestions above or type your own answer…' : 'Type your answer…'}
+                          placeholder={q.suggestions.length > 0 ? 'Click suggestions above or type your own answer\u2026' : 'Type your answer\u2026'}
                           rows={2}
-                          className="w-full bg-white/80 border border-slate-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none"
+                          className="w-full bg-[var(--rf-bg)] border border-[var(--rf-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)] focus:border-[var(--rf-brand)] transition resize-none"
                         />
                       </div>
                     </div>
@@ -170,11 +161,10 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
             </div>
           ))}
 
-          {/* Bottom CTA  */}
           <div className="flex justify-end pt-2 pb-8">
             <button
               onClick={handleSubmit}
-              className="rf-button-primary flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-semibold text-white transition active:scale-[0.98]"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-semibold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition active:scale-[0.98]"
             >
               Generate Features <ArrowRight className="w-4 h-4" />
             </button>

@@ -393,7 +393,7 @@ export default function App() {
   };
 
   return (
-    <div className="rf-shell flex h-screen w-full overflow-hidden text-slate-800 font-sans">
+    <div className="flex h-screen w-full overflow-hidden text-[var(--rf-text)] font-sans bg-[var(--rf-bg)]">
       {/* Left Sidebar — animated & resizable */}
       {(sidebarOpen || sidebarExiting) && (
         <div 
@@ -446,10 +446,10 @@ export default function App() {
             {sidebarOpen && (
               <div
                 onMouseDown={startResizing}
-                className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-blue-400 group z-50 transition-colors"
+                className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-[var(--rf-brand)] group z-50 transition-colors"
                 style={{ cursor: 'col-resize' }}
               >
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-slate-200 group-hover:bg-white rounded-full transition-colors" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-[var(--rf-border)] group-hover:bg-white rounded-full transition-colors" />
               </div>
             )}
           </div>
@@ -464,11 +464,11 @@ export default function App() {
           initialProjectKey={settingsStartProjectKey}
         />
       ) : (
-        <div className="rf-canvas-bg flex-1 flex flex-col h-full relative overflow-hidden">
+        <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[var(--rf-bg)]">
           {generationError && (
-            <div className="w-full bg-red-600 text-white px-6 py-4 text-sm font-semibold flex items-start gap-3 z-50 shadow-lg">
+            <div className="w-full bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-b border-red-300 px-6 py-3 text-sm font-medium flex items-start gap-3 z-50">
               <span className="flex-1">{generationError}</span>
-              <button onClick={() => setGenerationError(null)} className="text-white/70 hover:text-white font-bold text-lg leading-none">✕</button>
+              <button onClick={() => setGenerationError(null)} className="text-[var(--rf-danger)] hover:text-red-800 font-semibold text-sm leading-none">&times;</button>
             </div>
           )}
           {clarifyQuestions.length > 0 ? (

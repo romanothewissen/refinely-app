@@ -379,7 +379,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden font-sans">
-      <header className="h-20 shrink-0 border-b border-slate-200/60 bg-white/70 backdrop-blur-md flex items-center justify-between px-8 z-30 sticky top-0 shadow-sm">
+      <header className="h-16 shrink-0 border-b border-[var(--rf-border)] bg-white flex items-center justify-between px-6 z-30 sticky top-0">
         <div className="flex items-center gap-5">
           <button onClick={onClose} className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-800 transition-all group">
              <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5" />
@@ -585,7 +585,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         </div>
                       ) : (
                         wiDocs.map(doc => (
-                          <div key={doc.docId} className="bg-slate-50/50 border border-slate-200 p-5 rounded-[24px] flex items-center justify-between group hover:bg-white transition-all duration-300">
+                          <div key={doc.docId} className="bg-slate-50/50 border border-slate-200 p-5 rounded-lg flex items-center justify-between group hover:bg-white transition-all duration-300">
                              <div className="flex items-center gap-4 truncate">
                                <div className="shrink-0 w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><FileText className="w-5 h-5 text-slate-400 font-light" /></div>
                                <div className="truncate">
@@ -715,7 +715,7 @@ function ProjectConfigurationManager({
 
          <div className="space-y-6">
             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-purple-500" /> AR Field Mapping</h5>
-            <div className="bg-slate-50 rounded-[20px] p-6 space-y-6 border border-slate-200/60">
+            <div className="bg-slate-50 rounded-lg p-6 space-y-6 border border-slate-200/60">
                <div className="flex p-1 bg-white rounded-2xl border border-slate-100 shadow-sm max-w-[240px]">
                  <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>Consolidated</button>
                  <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'iterative' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>Iterative</button>
@@ -887,7 +887,7 @@ function FieldSelector({ value, onChange, customFields }: any) {
       </button>
 
       {isOpen && (
-        <div className="absolute z-[100] top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-[28px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col">
+        <div className="absolute z-[100] top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col">
           <div className="p-3 border-b border-slate-50 bg-slate-50/50"><input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-2 text-xs outline-none" /></div>
           <div className="max-h-[240px] overflow-y-auto custom-scrollbar">
             {filtered.map((f: any) => (
