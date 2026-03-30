@@ -371,89 +371,96 @@ export function MainContent({
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden">
       {/* Header */}
-      <header className="h-[74px] shrink-0 border-b border-white/60 bg-white/65 backdrop-blur-xl flex items-center justify-between px-8 z-10 sticky top-0">
-        <div className="flex items-center gap-4">
-          {!sidebarOpen && (
-            <button onClick={() => setSidebarOpen(true)} className="p-2.5 -ml-2 rounded-xl hover:bg-white text-slate-500 transition border border-slate-200/80 shadow-sm" title="Open Sidebar">
-              <Menu className="w-4 h-4" />
-            </button>
-          )}
-          <div>
-            <span className="font-semibold text-slate-800 text-sm tracking-[0.08em] uppercase">Feature Canvas</span>
-            <p className="text-[11px] text-slate-500 mt-0.5">Review, refine, and push backlog-ready features.</p>
-          </div>
-          
-          <UsageMeter usage={usage} limits={limits} tier={tier} isCompact />
-        </div>
-        {hasFeatures && (
-          <div className="flex items-center gap-4">
-            {features.some(f => f.pendingRefinement) && (
-              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
-                <button onClick={discardAllProposed} className="text-[11px] font-bold text-slate-400 hover:text-red-500 transition">Discard All</button>
-                <button onClick={acceptAllProposed} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold rounded-lg transition shadow-sm">Accept All Changes</button>
-              </div>
-            )}
-
-            <div className="relative">
-              <button 
-                onClick={() => setShowBulkRefine(!showBulkRefine)} 
-                className={`flex items-center gap-2 px-3 py-2 rounded-2xl border text-xs font-semibold transition-all ${showBulkRefine ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white/85 text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700 shadow-sm'}`}
-              >
-                <Sparkles className={`w-3.5 h-3.5 ${showBulkRefine ? 'animate-pulse' : ''}`} />
-                Refine All
+      <header className="shrink-0 border-b border-slate-200/80 bg-white/72 backdrop-blur-xl px-8 py-4 z-10 sticky top-0">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-4 min-w-0">
+            {!sidebarOpen && (
+              <button onClick={() => setSidebarOpen(true)} className="p-2.5 -ml-2 rounded-xl hover:bg-white text-slate-500 transition border border-slate-200/80 shadow-sm" title="Open Sidebar">
+                <Menu className="w-4 h-4" />
               </button>
-
-              {showBulkRefine && (
-                <div className="absolute right-0 top-full mt-3 w-[400px] rf-glass-strong rounded-[24px] p-4 z-50 slide-down">
-                  <div className="flex items-center justify-between mb-3 px-1">
-                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                       <Sparkles className="w-3.5 h-3.5 text-purple-500" /> Advanced Bulk Refine
-                    </h4>
-                    <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-slate-100 rounded-md transition text-slate-400"><X className="w-4 h-4" /></button>
-                  </div>
-                  <textarea
-                    autoFocus
-                    placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
-                    value={bulkInput}
-                    onChange={(e) => setBulkInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        handleBulkRefine();
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm min-h-[100px] outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition resize-none mb-3"
-                  />
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-[10px] text-slate-400">⌘ + Enter to apply</span>
-                    <button 
-                      onClick={handleBulkRefine}
-                      disabled={!bulkInput.trim() || isBulkRefining}
-                      className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition shadow-lg active:scale-95 disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {isBulkRefining ? (
-                        <>
-                          <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                          Refining...
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-3.5 h-3.5" /> Apply to All
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
+            )}
+            <div className="min-w-0">
+              <span className="font-semibold text-slate-800 text-sm tracking-[0.08em] uppercase">Feature Canvas</span>
+              <p className="text-[11px] text-slate-500 mt-0.5">Review, refine, and push backlog-ready features.</p>
             </div>
+          </div>
 
-            <div className="flex items-center gap-3 ml-2 border-l border-slate-200 pl-4">
+          <div className="shrink-0">
+            <UsageMeter usage={usage} limits={limits} tier={tier} isCompact />
+          </div>
+        </div>
+
+        {hasFeatures && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/85 px-3 py-2 shadow-sm">
               <div className="px-3 py-1 bg-blue-50 text-blue-700 text-xs font-bold uppercase rounded-full tracking-wider flex items-center gap-2">
                 <span>{features.length} Features</span>
                 <span className="w-1 h-1 bg-blue-300 rounded-full" />
                 <span>{totalArCount} Acceptance Requirements</span>
               </div>
-              <div className="text-xs text-slate-400">
+              <div className="text-xs text-slate-500">
                 {features.filter(f => f.isAccepted).length} accepted
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
+              {features.some(f => f.pendingRefinement) && (
+                <>
+                  <button onClick={discardAllProposed} className="px-3 py-2 text-[11px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl hover:text-red-500 hover:border-red-200 transition">Discard All</button>
+                  <button onClick={acceptAllProposed} className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold rounded-xl transition shadow-sm">Accept All Changes</button>
+                </>
+              )}
+
+              <div className="relative">
+                <button 
+                  onClick={() => setShowBulkRefine(!showBulkRefine)} 
+                  className={`flex items-center gap-2 px-3 py-2 rounded-2xl border text-xs font-semibold transition-all ${showBulkRefine ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700 shadow-sm'}`}
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${showBulkRefine ? 'animate-pulse' : ''}`} />
+                  Refine All
+                </button>
+
+                {showBulkRefine && (
+                  <div className="absolute right-0 top-full mt-3 w-[400px] rf-glass-strong rounded-[24px] p-4 z-50 slide-down">
+                    <div className="flex items-center justify-between mb-3 px-1">
+                      <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                         <Sparkles className="w-3.5 h-3.5 text-purple-500" /> Advanced Bulk Refine
+                      </h4>
+                      <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-slate-100 rounded-md transition text-slate-400"><X className="w-4 h-4" /></button>
+                    </div>
+                    <textarea
+                      autoFocus
+                      placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
+                      value={bulkInput}
+                      onChange={(e) => setBulkInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          handleBulkRefine();
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm min-h-[100px] outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition resize-none mb-3"
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[10px] text-slate-400">⌘ + Enter to apply</span>
+                      <button 
+                        onClick={handleBulkRefine}
+                        disabled={!bulkInput.trim() || isBulkRefining}
+                        className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition shadow-lg active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {isBulkRefining ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                            Refining...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" /> Apply to All
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -628,7 +635,7 @@ export function MainContent({
                             </div>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 opacity-60">
+                            <div className="bg-white p-3 rounded-lg border border-slate-200">
                               <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Original</div>
                               <h4 className="text-xs font-bold text-slate-800 mb-1">{origTitle}</h4>
                               <div className="text-[11px] text-slate-600 mb-2 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
@@ -668,7 +675,7 @@ export function MainContent({
 
                     {/* Feature body */}
                     {(expandedIndices.has(idx) || isEditing) && (
-                      <div className={`mt-2 ${feature.pendingRefinement ? 'opacity-30 pointer-events-none' : ''}`}>
+                      <div className={`mt-2 ${feature.pendingRefinement ? 'opacity-60 pointer-events-none' : ''}`}>
                         {isEditing ? (
                           <textarea
                             value={draft?.description || ''}
@@ -676,7 +683,7 @@ export function MainContent({
                             className="w-full text-slate-600 text-[15px] bg-white border border-slate-300 rounded-lg px-3 py-2 min-h-[100px] mb-4 focus:ring-2 focus:ring-blue-500 outline-none resize-y"
                           />
                         ) : (
-                          <div className="text-slate-600 text-[15px] mb-4 whitespace-pre-wrap leading-relaxed border-l-2 border-slate-100 pl-4">
+                          <div className="text-slate-800 text-[15px] mb-4 whitespace-pre-wrap leading-relaxed border-l-2 border-slate-200 pl-4">
                             {feature.markdown || feature.description}
                           </div>
                         )}
@@ -713,18 +720,18 @@ export function MainContent({
                                       {ar.given?.trim() && (
                                         <div className="flex gap-4">
                                           <div className="w-10 shrink-0 text-[10px] font-bold text-slate-400 uppercase pt-0.5 tracking-tight">Given</div>
-                                          <div className="text-slate-600 leading-normal">{ar.given}</div>
+                                          <div className="text-slate-800 leading-normal">{ar.given}</div>
                                         </div>
                                       )}
                                       {ar.when?.trim() && (
                                         <div className="flex gap-4">
                                           <div className="w-10 shrink-0 text-[10px] font-bold text-slate-400 uppercase pt-0.5 tracking-tight">When</div>
-                                          <div className="text-slate-600 leading-normal">{ar.when}</div>
+                                          <div className="text-slate-800 leading-normal">{ar.when}</div>
                                         </div>
                                       )}
                                       <div className="flex gap-4">
                                         <div className="w-10 shrink-0 text-[10px] font-bold text-slate-400 uppercase pt-0.5 tracking-tight">Then</div>
-                                        <div className="text-slate-600 leading-normal whitespace-pre-wrap">{ar.then}</div>
+                                        <div className="text-slate-800 leading-normal whitespace-pre-wrap">{ar.then}</div>
                                       </div>
                                     </div>
                                   )}

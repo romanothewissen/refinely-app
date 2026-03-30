@@ -347,8 +347,6 @@ export default function App() {
 
   return (
     <div className="rf-shell flex h-screen w-full overflow-hidden text-slate-800 font-sans">
-      <div className="rf-floating-orb top-[-60px] left-[-40px] h-48 w-48 bg-blue-200/70" />
-      <div className="rf-floating-orb bottom-[-80px] right-[8%] h-56 w-56 bg-sky-200/60" style={{ animationDelay: '1.8s' }} />
       {/* Left Sidebar — animated & resizable */}
       {(sidebarOpen || sidebarExiting) && (
         <div 

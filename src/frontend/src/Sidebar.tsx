@@ -49,7 +49,7 @@ export function Sidebar({
 
   return (
     <aside 
-      className="rf-glass-strong h-full flex flex-col shrink-0 overflow-hidden rounded-r-[28px] border-r border-white/60"
+      className="rf-glass-strong h-full flex flex-col shrink-0 overflow-hidden rounded-r-[24px] border-r border-white/60"
       style={{ width: width ?? 380 }}
     >
       {/* Header */}
@@ -85,42 +85,40 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto w-full p-6 space-y-5 no-scrollbar">
+      <div className="flex-1 min-h-0 flex flex-col w-full p-5 gap-4">
         {/* Mode Toggle removed as requested */}
 
         {/* Input Scope */}
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="rf-surface rounded-[26px] p-5 flex-1 flex flex-col space-y-3 min-h-0 overflow-hidden">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.22em] pl-0.5">Requirement Scope</label>
-                <p className="mt-1 text-xs text-slate-500">Describe the outcome, constraints, edge cases, and business context.</p>
-              </div>
-              <div className="rf-chip rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
-                {originIssueKey ? `From ${originIssueKey}` : 'New brief'}
-              </div>
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.22em] pl-0.5">Requirement Scope</label>
+              <p className="mt-1 text-xs text-slate-500">Describe the outcome, constraints, edge cases, and business context.</p>
             </div>
-            <div className="flex-1 min-h-[280px] relative rounded-[20px] border border-slate-200/80 bg-white/70 focus-within:ring-2 focus-within:ring-blue-500/15 focus-within:border-blue-500/40 transition-all p-4 shadow-inner flex flex-col">
-              <textarea
-                value={requirement}
-                onChange={(e) => setRequirement(e.target.value)}
-                placeholder="Describe your feature requirement in detail... e.g. 'As a user, I want to be able to reset my password using an email link...'"
-                disabled={isWorking}
-                className="flex-1 w-full bg-transparent border-none text-slate-700 placeholder-slate-400 focus:outline-none text-[15px] leading-relaxed resize-none disabled:opacity-50"
-              />
-              <div className="pt-3 flex justify-between items-center border-t border-slate-200/70 mt-3 shrink-0">
-                <button title="Attach doc (PDF/TXT)" className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-500 hover:bg-slate-50 hover:text-blue-700 rounded-xl transition-colors text-xs font-medium">
-                  <Paperclip className="w-3.5 h-3.5" />
-                  <span>Attach Context</span>
-                </button>
-                <div className="text-[10px] text-slate-400 font-medium">{requirement.trim().split(/\s+/).filter(Boolean).length} words</div>
-              </div>
+            <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.16em]">
+              {originIssueKey ? `From ${originIssueKey}` : 'New brief'}
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 relative rounded-[20px] border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-blue-500/15 focus-within:border-blue-500/40 transition-all px-4 py-4 shadow-inner flex flex-col">
+            <textarea
+              value={requirement}
+              onChange={(e) => setRequirement(e.target.value)}
+              placeholder="Describe your feature requirement in detail... e.g. 'As a user, I want to be able to reset my password using an email link...'"
+              disabled={isWorking}
+              className="flex-1 min-h-[360px] w-full bg-transparent border-none text-slate-800 placeholder-slate-400 focus:outline-none text-[15px] leading-relaxed resize-none disabled:opacity-50"
+            />
+            <div className="pt-3 flex justify-between items-center border-t border-slate-200/70 mt-3 shrink-0">
+              <button title="Attach doc (PDF/TXT)" className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-500 hover:bg-slate-50 hover:text-blue-700 rounded-xl transition-colors text-xs font-medium">
+                <Paperclip className="w-3.5 h-3.5" />
+                <span>Attach Context</span>
+              </button>
+              <div className="text-[10px] text-slate-400 font-medium">{requirement.trim().split(/\s+/).filter(Boolean).length} words</div>
             </div>
           </div>
         </div>
 
         {/* Action Area */}
-        <div className="space-y-3 pt-1">
+        <div className="space-y-3 shrink-0">
           <button
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
@@ -143,14 +141,14 @@ export function Sidebar({
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={onNewSession}
-              className="rf-surface rounded-2xl px-3 py-3 text-slate-700 text-[11px] font-bold uppercase tracking-[0.18em] transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
+              className="bg-white border border-slate-200 rounded-2xl px-3 py-3 text-slate-700 text-[11px] font-bold uppercase tracking-[0.12em] transition-all hover:bg-slate-50 flex items-center justify-center gap-2"
             >
               <Plus className="w-3.5 h-3.5" />
               New
             </button>
             <button
               onClick={onOpenHistory}
-              className="rf-surface rounded-2xl px-3 py-3 text-slate-700 text-[11px] font-bold uppercase tracking-[0.18em] transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
+              className="bg-white border border-slate-200 rounded-2xl px-3 py-3 text-slate-700 text-[11px] font-bold uppercase tracking-[0.12em] transition-all hover:bg-slate-50 flex items-center justify-center gap-2"
             >
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               History
@@ -161,7 +159,7 @@ export function Sidebar({
 
       {/* Footer / Usage Meter */}
       {showUsage && (
-        <div className="p-6 border-t border-slate-200/70 bg-white/40 relative group">
+        <div className="px-5 py-4 border-t border-slate-200/70 bg-white/30 relative group shrink-0">
           <button 
             onClick={() => setShowUsage(false)}
             className="absolute top-2 right-2 p-1.5 rounded-full text-slate-300 hover:text-slate-500 hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition-all z-20"
@@ -170,9 +168,7 @@ export function Sidebar({
             <X className="w-3.5 h-3.5" />
             <span className="sr-only">Hide</span>
           </button>
-          <div className="rf-surface rounded-[22px] p-4">
-            <UsageMeter usage={usage} limits={limits} tier={tier} />
-          </div>
+          <UsageMeter usage={usage} limits={limits} tier={tier} />
         </div>
       )}
     </aside>
