@@ -13,10 +13,13 @@ interface ClarifyProps {
     domainRolesUsed: string[];
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
+    goldExamplesCount?: number;
+    referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
+    similarStoriesCount?: number;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-    usesGoldenExamples: false;
-    usesSimilarStories: false;
+    tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
@@ -123,12 +126,25 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                   Attachment: {contextMeta.attachmentIncluded ? 'Included' : 'None'}
                 </div>
                 <div className="text-[var(--rf-text-secondary)]">
-                  Golden examples: Not used in clarify
+                  Golden examples used: {contextMeta.goldExamplesCount ?? 0}
                 </div>
                 <div className="text-[var(--rf-text-secondary)]">
-                  Similar stories: Not used in clarify
+                  Similar backlog stories used: {contextMeta.similarStoriesCount ?? 0}
                 </div>
               </div>
+              {(contextMeta.referencedGoldExamples?.length ?? 0) > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {contextMeta.referencedGoldExamples?.map((example, i) => (
+                    <span
+                      key={`${example.source}-${example.key}-${i}`}
+                      className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200"
+                      title={example.summary}
+                    >
+                      {example.source}: {example.key}
+                    </span>
+                  ))}
+                </div>
+              )}
               {contextMeta.domainRolesUsed?.length > 0 && (
                 <div className="mt-2 text-xs text-[var(--rf-text-secondary)]">
                   Roles: {contextMeta.domainRolesUsed.join(', ')}
@@ -148,6 +164,25 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                   )}
                 </div>
               </div>
+              <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <div className="font-semibold text-[var(--rf-text)]">
+                    Similar backlog stories used: {contextMeta.similarStoriesCount ?? 0}
+                  </div>
+                  {contextMeta.referencedSimilarStories?.length ? (
+                    <div className="text-[var(--rf-text-secondary)]">
+                      {contextMeta.referencedSimilarStories.map(story => story.key).join(', ')}
+                    </div>
+                  ) : (
+                    <div className="text-[var(--rf-text-tertiary)]">No similar backlog stories were matched for clarifying questions.</div>
+                  )}
+                </div>
+              </div>
+              {contextMeta.tokenUsage && (
+                <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-xs text-[var(--rf-text-secondary)]">
+                  Tokens used for clarify: {contextMeta.tokenUsage.total.toLocaleString()} ({contextMeta.tokenUsage.input.toLocaleString()} in / {contextMeta.tokenUsage.output.toLocaleString()} out)
+                </div>
+              )}
             </div>
           )}
 

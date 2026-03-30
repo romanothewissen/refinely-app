@@ -46,7 +46,7 @@ function DiffText({ oldText, newText, fullHighlight = false, mode = 'redline' }:
 function RefinePopup({ feature, onClose, onResult }: {
   feature: Feature;
   onClose: () => void;
-  onResult: (refined: Feature) => void;
+  onResult: (refined: Feature, tokenUsage?: { input: number; output: number; total: number }) => void;
 }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -60,7 +60,7 @@ function RefinePopup({ feature, onClose, onResult }: {
     try {
       const res = await api.refineSingleFeature(feature, feedback) as any;
       if (res.success && res.feature) {
-        onResult(res.feature);
+        onResult(res.feature, res.tokenUsage);
       } else {
         setError('Refinement failed \u2014 please try again.');
         setLoading(false);
@@ -174,6 +174,7 @@ interface MainContentProps {
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+    tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   projectKey: string;
 }
@@ -205,6 +206,7 @@ export function MainContent({
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
+  const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
 
   // ── Edit helpers ─────────────────────────────────────────────────────────
   const startEditing  = (idx: number) => { setEditingIdx(idx); setEditDraft(JSON.parse(JSON.stringify(features[idx]))); };
@@ -274,6 +276,9 @@ export function MainContent({
       const res = await api.refineFeatures(sessionId, requirement, features, bulkInput) as any;
       if (res.success && Array.isArray(res.features)) {
         const refined = res.features;
+        if (res.tokenUsage) {
+          setLastAiTokenUsage({ label: 'Bulk refine', ...res.tokenUsage });
+        }
         setFeatures(prev => {
           return prev.map((f, i) => {
             const r = refined[i];
@@ -409,6 +414,11 @@ export function MainContent({
                 <span className="text-[11px] text-[var(--rf-text-tertiary)]">
                   {features.filter(f => f.isAccepted).length} accepted
                 </span>
+                {lastAiTokenUsage && (
+                  <span className="text-[11px] text-[var(--rf-text-tertiary)]">
+                    {lastAiTokenUsage.label}: {lastAiTokenUsage.total.toLocaleString()} tokens
+                  </span>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -552,6 +562,11 @@ export function MainContent({
                     )}
                   </div>
                 </div>
+                {generationContext.tokenUsage && (
+                  <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-xs text-[var(--rf-text-secondary)]">
+                    Tokens used for generation: {generationContext.tokenUsage.total.toLocaleString()} ({generationContext.tokenUsage.input.toLocaleString()} in / {generationContext.tokenUsage.output.toLocaleString()} out)
+                  </div>
+                )}
               </div>
             )}
 
@@ -803,12 +818,15 @@ export function MainContent({
         <RefinePopup
           feature={features[refinePopupIdx]}
           onClose={() => setRefinePopupIdx(null)}
-          onResult={(refined) => {
+          onResult={(refined, tokenUsage) => {
             setFeatures(prev => {
               const n = [...prev];
               n[refinePopupIdx] = { ...n[refinePopupIdx], pendingRefinement: refined };
               return n;
             });
+            if (tokenUsage) {
+              setLastAiTokenUsage({ label: 'Single refine', ...tokenUsage });
+            }
             setRefinePopupIdx(null);
           }}
         />

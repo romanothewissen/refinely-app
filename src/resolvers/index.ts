@@ -230,7 +230,7 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
 resolver.define('refineFeatures', async ({ payload, context }) => {
   try {
     const config = await getConfig();
-    const features = await refineFeatures({
+    const result = await refineFeatures({
       requirement: payload.requirement,
       features: payload.features as Feature[],
       feedback: payload.feedback,
@@ -238,9 +238,9 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
     });
 
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-    await updateLatestTurnFeatures(payload.sessionId, accountId, features, 'refine', payload.feedback);
+    await updateLatestTurnFeatures(payload.sessionId, accountId, result.features, 'refine', payload.feedback, result.tokenUsage);
 
-    return { success: true, features };
+    return { success: true, features: result.features, tokenUsage: result.tokenUsage };
   } catch (err: any) {
     console.error('refineFeatures failed:', err);
     return { success: false, error: err?.message || 'Unknown error' };
@@ -250,12 +250,12 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
 resolver.define('refineSingleFeature', async ({ payload, context }) => {
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
-  const feature = await refineSingleFeature({
+  const result = await refineSingleFeature({
     feature: payload.feature as Feature,
     feedback: payload.feedback,
     config,
   });
-  return { success: true, feature };
+  return { success: true, feature: result.feature, tokenUsage: result.tokenUsage };
 });
 
 resolver.define('checkRefineFeedback', async ({ payload, context }) => {
@@ -276,7 +276,7 @@ resolver.define('ask', async ({ payload, context }) => {
 
   const [wiContext, similarItems] = await Promise.all([
     config.wiConfig.enabled ? retrieveWiContext(payload.message, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
-    findSimilarStories(payload.message, config),
+    findSimilarStories(payload.message, config, payload.projectKey || '*'),
   ]);
 
   const systemPrompt = buildAskSystemPrompt({
@@ -664,6 +664,7 @@ async function updateLatestTurnFeatures(
   features: Feature[],
   turnType: 'refine',
   feedback: string,
+  tokenUsage?: any,
 ) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
@@ -673,6 +674,7 @@ async function updateLatestTurnFeatures(
         turnType,
         features,
         feedback,
+        tokenUsage,
         timestamp: new Date().toISOString(),
       });
       await entitySet(key, existing);

@@ -7,7 +7,7 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { GenerationContextMeta, GenerationEvent, SimilarStory } from '../types';
+import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
 import { generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
@@ -34,6 +34,19 @@ async function sendProgress(sessionId: string, message: string, pass?: 1 | 2) {
   } as RealtimeEvent);
 }
 
+function resolveRelevantGoldSources(
+  sources: GenerationEvent['config']['goldSources'],
+  projectKey: string,
+) {
+  const exact = sources.filter(s => s.targetProjects?.includes(projectKey));
+  const global = sources.filter(s => s.targetProjects?.includes('*'));
+  if (projectKey === '*') return global;
+
+  const deduped = new Map<string, (typeof sources)[number]>();
+  [...exact, ...global].forEach(source => deduped.set(source.key, source));
+  return Array.from(deduped.values());
+}
+
 export async function handler(event: { body: GenerationEvent }) {
   const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
@@ -43,9 +56,7 @@ export async function handler(event: { body: GenerationEvent }) {
     || { context: eventConfig.domainContext || '' };
     
   // STRICT PROJECT-LEVEL: Only sources that explicitly target this project. No global fallback.
-  const relevantGoldSources = eventConfig.goldSources.filter(s => 
-    s.targetProjects?.includes(projectKey)
-  );
+  const relevantGoldSources = resolveRelevantGoldSources(eventConfig.goldSources, projectKey);
   
   const config = { 
     ...eventConfig, 
@@ -67,7 +78,7 @@ export async function handler(event: { body: GenerationEvent }) {
         ? retrieveWiContext(requirement, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
         : Promise.resolve({ text: '', docs: [] }),
       config.tier !== 'free'
-        ? findSimilarStories(requirement, config)
+        ? findSimilarStories(requirement, config, projectKey)
         : Promise.resolve([]),
     ]);
 
@@ -109,6 +120,7 @@ export async function handler(event: { body: GenerationEvent }) {
         summary: item.summary,
         relevanceScore: item.relevanceScore,
       })),
+      tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
         docId: doc.docId,
@@ -130,6 +142,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStories,
       config.generatorConfig.arModel,
       generationContext,
+      result.tokenUsage,
     );
 
     // Generate session title (non-critical; should not fail the generation run)
@@ -170,6 +183,7 @@ async function saveConversationTurn(
   similarStories: unknown[],
   model: string,
   generationContext?: GenerationContextMeta,
+  tokenUsage?: TokenUsageSummary,
 ) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
@@ -180,6 +194,7 @@ async function saveConversationTurn(
       features,
       similarStories,
       generationContext,
+      tokenUsage,
       model,
       timestamp: new Date().toISOString(),
     });

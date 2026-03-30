@@ -179,8 +179,11 @@ export interface ContextSourceMeta {
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {
-  usesGoldenExamples: false;
-  usesSimilarStories: false;
+  goldExamplesCount?: number;
+  referencedGoldExamples?: ReferencedGoldExample[];
+  similarStoriesCount?: number;
+  referencedSimilarStories?: ReferencedSimilarStory[];
+  tokenUsage?: TokenUsageSummary;
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
@@ -188,6 +191,7 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   referencedGoldExamples: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  tokenUsage?: TokenUsageSummary;
 }
 
 export interface GenerationResult {
@@ -196,7 +200,14 @@ export interface GenerationResult {
   similarStories: SimilarStory[];
   sessionId: string;
   generationContext?: GenerationContextMeta;
-  tokenUsage?: { input: number; output: number };
+  tokenUsage?: TokenUsageSummary;
+}
+
+export interface TokenUsageSummary {
+  input: number;
+  output: number;
+  total: number;
+  byStage?: Record<string, { input: number; output: number; total: number }>;
 }
 
 // ─── Similar Stories ─────────────────────────────────────────────────────────
@@ -232,6 +243,7 @@ export interface ConversationTurn {
   similarStories: SimilarStory[];
   generationContext?: GenerationContextMeta;
   clarifyContext?: ClarifyContextMeta;
+  tokenUsage?: TokenUsageSummary;
   feedback?: string;
   model: string;
   timestamp: string;

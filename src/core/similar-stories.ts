@@ -1,186 +1,292 @@
 /**
- * Similar story search — fully Forge-native using Jira JQL + Claude reranking.
+ * Project backlog retrieval with project-level cached indexing.
  *
- * Replaces the Python cosine-similarity approach (impractical in Forge for 50K vectors).
- * Jira's own full-text search handles relevance; Claude reranks for business intent.
+ * Uses deployed Jira issues from the selected project as the main context pool.
+ * Retrieval is cheap-first: cached lexical scoring, then optional LLM rerank on
+ * a small shortlist only.
  */
 
 import { asApp, assumeTrustedRoute } from '@forge/api';
 import { callLlmJson } from './llm';
-import { buildThemeExtractionPrompt, buildRerankPrompt } from './prompts';
-import { GoldSource, SimilarStory, TenantConfig } from '../types';
+import { buildRerankPrompt } from './prompts';
+import { SimilarStory, TenantConfig } from '../types';
+import { objectRead, objectWrite, KEYS } from '../services/cache';
+
+interface BacklogDoc {
+  key: string;
+  summary: string;
+  description: string;
+  acceptanceCriteria: string;
+  updated: string;
+  combinedText: string;
+  scoreHints: {
+    summaryTerms: string[];
+    arTerms: string[];
+  };
+}
+
+interface BacklogIndexCache {
+  projectKey: string;
+  builtAt: string;
+  issueCount: number;
+  docs: BacklogDoc[];
+}
+
+const INDEX_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_INDEX_ITEMS = 300;
 
 export async function findSimilarStories(
   requirement: string,
   config: TenantConfig,
+  projectKey = '*',
 ): Promise<SimilarStory[]> {
-  if (!config.similarityConfig.useLlmRerank && !config.goldSources.length) {
+  if (!projectKey || projectKey === '*') {
     return [];
   }
 
   try {
-    // Step 1: Extract searchable themes from the requirement (Haiku — cheap)
-    const themes = await extractThemes(requirement, config.generatorConfig.themeModel);
-    if (!themes.length) return [];
+    const index = await ensureBacklogIndex(projectKey, config);
+    if (!index.docs.length) return [];
 
-    // Step 2: JQL search across all configured gold sources
-    const candidates = await searchJira(themes, config.goldSources);
+    const candidates = lexicalRetrieve(requirement, index.docs).slice(0, 24);
     if (!candidates.length) return [];
 
-    // Step 3: Claude reranking for business intent relevance
+    let ranked = candidates;
     if (config.similarityConfig.useLlmRerank && candidates.length > 5) {
-      return await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
+      ranked = await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
     }
-    
-    return candidates.slice(0, 15);
+
+    const baseUrl = await getJiraBaseUrl();
+    return ranked.slice(0, 12).map(item => ({
+      key: item.key,
+      summary: item.summary,
+      description: item.description,
+      acceptanceCriteria: item.acceptanceCriteria,
+      relevanceScore: item.relevanceScore,
+      url: `${baseUrl}/browse/${item.key}`,
+    }));
   } catch (err) {
-    console.warn('[similar-stories] Search failed:', err);
+    console.warn('[similar-stories] Backlog retrieval failed:', err);
     return [];
   }
 }
 
-// ─── Theme Extraction ─────────────────────────────────────────────────────────
-
-async function extractThemes(requirement: string, model: string): Promise<string[]> {
-  try {
-    const themes = await callLlmJson<string[]>({
-      model,
-      systemPrompt: 'Extract searchable business themes from the requirement. Output a JSON array of short phrases only.',
-      userMessage: buildThemeExtractionPrompt(requirement),
-      maxTokens: 256,
-    });
-    return Array.isArray(themes) ? themes.filter(t => typeof t === 'string').slice(0, 5) : [];
-  } catch {
-    // Fallback: simple keyword extraction
-    return extractKeywords(requirement);
-  }
-}
-
-function extractKeywords(text: string): string[] {
-  const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'is', 'are', 'was', 'be', 'been', 'with', 'that', 'this', 'from', 'by', 'as']);
-  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/);
-  return words.filter(w => w.length > 3 && !stopWords.has(w)).slice(0, 5);
-}
-
-// ─── Jira JQL Search ──────────────────────────────────────────────────────────
-
-async function searchJira(themes: string[], sources: GoldSource[]): Promise<SimilarStory[]> {
-  if (!sources.length) return [];
-
-  // 1. Gather all potential description and AR field IDs across all sources
-  const allFieldIds = new Set<string>(['summary', 'status', 'updated', 'description']);
-  for (const s of sources) {
-    if (s.requirementsFieldId) allFieldIds.add(s.requirementsFieldId);
-    if (s.arFieldIds) {
-      for (const aid of s.arFieldIds) {
-        if (aid) allFieldIds.add(aid);
-      }
-    }
+async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Promise<BacklogIndexCache> {
+  const cacheKey = KEYS.backlogIndex(projectKey);
+  const cached = await objectRead<BacklogIndexCache>(cacheKey);
+  if (cached?.builtAt && Date.now() - new Date(cached.builtAt).getTime() < INDEX_TTL_MS && cached.docs?.length) {
+    return cached;
   }
 
-  // 2. Build JQL search
-  const projectList = [...new Set(sources.map(s => s.project))].join(', ');
-  const statusNames = sources.flatMap(s => getSourceStatuses(s));
-  const statusList = [...new Set(statusNames.map(s => `"${s}"`))].join(', ');
-  const searchText = themes.slice(0, 3).map(t => `"${t}"`).join(' ');
+  const refreshed = await buildBacklogIndex(projectKey, config);
+  await objectWrite(cacheKey, refreshed);
+  return refreshed;
+}
 
-  const statusFilter = statusList ? `status in (${statusList})` : 'statusCategory = Done';
-  const jql = `project in (${projectList}) AND ${statusFilter} AND text ~ ${searchText} ORDER BY updated DESC`;
+async function buildBacklogIndex(projectKey: string, config: TenantConfig): Promise<BacklogIndexCache> {
+  const fields = buildFieldList(config, projectKey);
+  const docs: BacklogDoc[] = [];
+  let startAt = 0;
+  const pageSize = 50;
 
-  try {
+  while (docs.length < MAX_INDEX_ITEMS) {
     const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        jql,
-        maxResults: 30, // Get a larger candidate pool for rerank
-        fields: Array.from(allFieldIds),
+        jql: `project = ${projectKey} AND statusCategory = Done AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
+        maxResults: pageSize,
+        startAt,
+        fields,
       }),
     });
 
-    const data = await response.json() as { issues?: Array<{ key: string; fields: Record<string, any> }> };
-    const baseUrl = await getJiraBaseUrl();
+    const data = await response.json() as { issues?: Array<{ key: string; fields: Record<string, unknown> }>; total?: number };
+    const issues = data.issues ?? [];
+    if (!issues.length) break;
 
-    return (data.issues ?? []).map(issue => {
-      // Find source to identify its specific AR fields
-      const pId = issue.key.split('-')[0];
-      const src = sources.find(s => s.project === pId) || sources[0];
-      
-      // Extraction (borrowing same ADF parsing logic as gold-standard.ts)
-      const desc = extractText(issue.fields.description);
-      const acParts = (src.arFieldIds || []).concat(src.requirementsFieldId || [])
-        .filter(Boolean)
-        .map(id => extractText(issue.fields[id]))
-        .filter(Boolean);
-        
-      return {
-        key: issue.key,
-        summary: String(issue.fields.summary ?? ''),
-        description: desc,
-        acceptanceCriteria: acParts.join('\n\n'),
-        url: `${baseUrl}/browse/${issue.key}`,
-      };
-    });
-  } catch (err) {
-    console.warn('[similar-stories] JQL search failed:', err);
-    return [];
+    for (const issue of issues) {
+      const doc = issueToBacklogDoc(issue, config, projectKey);
+      if (doc.summary || doc.description || doc.acceptanceCriteria) {
+        docs.push(doc);
+      }
+      if (docs.length >= MAX_INDEX_ITEMS) break;
+    }
+
+    startAt += issues.length;
+    if (startAt >= (data.total ?? 0)) break;
   }
+
+  return {
+    projectKey,
+    builtAt: new Date().toISOString(),
+    issueCount: docs.length,
+    docs,
+  };
 }
 
-function getSourceStatuses(source: GoldSource): string[] {
-  if (Array.isArray(source.statuses) && source.statuses.length) {
-    return source.statuses.filter(Boolean);
+function buildFieldList(config: TenantConfig, projectKey: string): string[] {
+  const mapping = config.arMappings?.find(m => m.projectKey === projectKey)
+    || config.arMappings?.find(m => m.projectKey === '*');
+  const fieldIds = new Set<string>(['summary', 'description', 'updated']);
+
+  if (mapping?.mode === 'consolidated' && mapping.consolidatedFieldId && mapping.consolidatedFieldId !== 'description') {
+    fieldIds.add(mapping.consolidatedFieldId);
   }
-  if (source.status) {
-    return [source.status];
+  for (const fieldId of mapping?.iterativeFieldIds ?? []) {
+    if (fieldId) fieldIds.add(fieldId);
   }
-  return [];
+
+  return Array.from(fieldIds);
+}
+
+function issueToBacklogDoc(
+  issue: { key: string; fields: Record<string, unknown> },
+  config: TenantConfig,
+  projectKey: string,
+): BacklogDoc {
+  const mapping = config.arMappings?.find(m => m.projectKey === projectKey)
+    || config.arMappings?.find(m => m.projectKey === '*');
+
+  const summary = String(issue.fields.summary ?? '').trim();
+  const description = extractText(issue.fields.description).trim();
+  const acceptanceCriteria = extractAcceptanceCriteria(issue.fields, mapping).trim();
+  const combinedText = [summary, description, acceptanceCriteria].filter(Boolean).join('\n\n');
+
+  return {
+    key: issue.key,
+    summary,
+    description,
+    acceptanceCriteria,
+    updated: String(issue.fields.updated ?? ''),
+    combinedText,
+    scoreHints: {
+      summaryTerms: tokenize(summary),
+      arTerms: tokenize(acceptanceCriteria),
+    },
+  };
+}
+
+function extractAcceptanceCriteria(fields: Record<string, unknown>, mapping?: TenantConfig['arMappings'][number]): string {
+  if (!mapping) return '';
+
+  const parts: string[] = [];
+  if (mapping.mode === 'consolidated') {
+    const fieldId = mapping.consolidatedFieldId;
+    if (fieldId && fieldId !== 'description') {
+      const text = extractText(fields[fieldId]);
+      if (text) parts.push(text);
+    }
+  } else {
+    for (const fieldId of mapping.iterativeFieldIds ?? []) {
+      const text = extractText(fields[fieldId]);
+      if (text) parts.push(text);
+    }
+  }
+  return parts.join('\n\n');
 }
 
 function extractText(value: unknown): string {
   if (!value) return '';
   if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    return value.map(extractText).filter(Boolean).join('\n');
+  if (Array.isArray(value)) return value.map(extractText).filter(Boolean).join('\n');
+  if (typeof value === 'object') {
+    const obj = value as { text?: string; content?: unknown[] };
+    if (obj.text) return obj.text;
+    if (obj.content) return obj.content.map(extractText).filter(Boolean).join('\n');
   }
-  if (typeof value === 'object' && value !== null) {
-    const adf = value as { type?: string; content?: unknown[]; text?: string };
-    if (adf.text) return adf.text;
-    if (adf.content) return adf.content.map(extractText).join('\n');
-  }
-  return String(value);
+  return '';
 }
 
-// ─── Claude Reranking ─────────────────────────────────────────────────────────
+function lexicalRetrieve(requirement: string, docs: BacklogDoc[]): Array<BacklogDoc & { relevanceScore: number }> {
+  const terms = buildQueryTerms(requirement);
+  if (!terms.length) return [];
+
+  const avgLen = docs.reduce((sum, doc) => sum + tokenize(doc.combinedText).length, 0) / Math.max(docs.length, 1);
+  const scored = docs.map(doc => {
+    const docTerms = tokenize(doc.combinedText);
+    const freq = buildTermFreq(docTerms);
+    const docLen = Math.max(docTerms.length, 1);
+    let score = 0;
+
+    for (const term of terms) {
+      const tf = freq[term] ?? 0;
+      if (!tf) continue;
+      const docFreq = docs.filter(d => tokenize(d.combinedText).includes(term)).length || 1;
+      const idf = Math.log((docs.length + 1) / docFreq);
+      score += idf * ((tf * 2.5) / (tf + 1.5 * (1 - 0.75 + 0.75 * (docLen / Math.max(avgLen, 1)))));
+    }
+
+    const summaryBoost = terms.filter(term => doc.scoreHints.summaryTerms.includes(term)).length * 1.2;
+    const arBoost = terms.filter(term => doc.scoreHints.arTerms.includes(term)).length * 0.9;
+    return { ...doc, relevanceScore: score + summaryBoost + arBoost };
+  });
+
+  return scored
+    .filter(doc => doc.relevanceScore > 0)
+    .sort((a, b) => b.relevanceScore - a.relevanceScore);
+}
+
+function buildQueryTerms(requirement: string): string[] {
+  const baseTerms = tokenize(requirement);
+  const phrases = requirement
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  const bigrams: string[] = [];
+  for (let i = 0; i < phrases.length - 1; i++) {
+    const left = phrases[i];
+    const right = phrases[i + 1];
+    if (left.length > 2 && right.length > 2) {
+      bigrams.push(`${left} ${right}`);
+    }
+  }
+
+  return [...new Set([...baseTerms.slice(0, 10), ...bigrams.slice(0, 4)])];
+}
+
+function tokenize(text: string): string[] {
+  const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'is', 'are', 'was', 'be', 'been', 'with', 'that', 'this', 'from', 'by', 'as', 'it', 'its', 'into', 'then']);
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !stopWords.has(word));
+}
+
+function buildTermFreq(terms: string[]): Record<string, number> {
+  const freq: Record<string, number> = {};
+  for (const term of terms) {
+    freq[term] = (freq[term] ?? 0) + 1;
+  }
+  return freq;
+}
 
 async function rerankWithClaude(
   requirement: string,
-  candidates: SimilarStory[],
+  candidates: Array<BacklogDoc & { relevanceScore: number }>,
   model: string,
-): Promise<SimilarStory[]> {
+): Promise<Array<BacklogDoc & { relevanceScore: number }>> {
   try {
     const summaries = candidates.map(c => `${c.key}: ${c.summary}`);
     const prompt = buildRerankPrompt(requirement, summaries);
 
     const ranked = await callLlmJson<number[]>({
       model,
-      systemPrompt: 'Rank the Jira issues by relevance to the requirement. Output a JSON array of 1-based indices.',
+      systemPrompt: 'Rank the Jira backlog items by relevance to the requirement. Output a JSON array of 1-based indices.',
       userMessage: prompt,
       maxTokens: 256,
     });
 
-    if (!Array.isArray(ranked)) return candidates.slice(0, 15);
-
+    if (!Array.isArray(ranked)) return candidates;
     return ranked
-      .slice(0, 15)
-      .map(idx => candidates[idx - 1])
-      .filter((c): c is SimilarStory => !!c);
+      .map(index => candidates[index - 1])
+      .filter((candidate): candidate is BacklogDoc & { relevanceScore: number } => !!candidate);
   } catch {
-    return candidates.slice(0, 5);
+    return candidates;
   }
 }
-
-// ─── Jira base URL helper ─────────────────────────────────────────────────────
 
 async function getJiraBaseUrl(): Promise<string> {
   try {
@@ -192,17 +298,15 @@ async function getJiraBaseUrl(): Promise<string> {
   }
 }
 
-export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 15): string {
+export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): string {
   if (!items.length) return '';
   return items
     .slice(0, maxItems)
-    .map((item, i) => {
-      return [
-        `--- Backlog Item ${i + 1} (${item.key}) ---`,
-        `Summary: ${item.summary}`,
-        item.description ? `Description: ${item.description.slice(0, 1000)}` : '',
-        item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1500)}` : '',
-      ].filter(Boolean).join('\n');
-    })
+    .map((item, index) => ([
+      `--- Backlog Reference ${index + 1} (${item.key}) ---`,
+      `Summary: ${item.summary}`,
+      item.description ? `Description: ${item.description.slice(0, 900)}` : '',
+      item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1400)}` : '',
+    ].filter(Boolean).join('\n')))
     .join('\n\n');
 }

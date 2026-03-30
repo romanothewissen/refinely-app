@@ -67,6 +67,13 @@ export function buildDecompositionSystemPrompt(opts: {
   domainRoles: string[];
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
+  featurePlan?: {
+    min: number;
+    max: number;
+    target: number;
+    shape: 'narrow' | 'balanced' | 'broad';
+    complexity: 'low' | 'medium' | 'high';
+  };
 }): string {
   const roleList = opts.domainRoles.length
     ? `Roles in this domain: ${opts.domainRoles.join(', ')}.`
@@ -79,6 +86,15 @@ export function buildDecompositionSystemPrompt(opts: {
   const processRule = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? '- Each feature MUST include a process_code from the taxonomy above (never invent a code)'
     : '- Omit process_code from output';
+
+  const planningGuidance = opts.featurePlan
+    ? `OUTPUT CALIBRATION:
+- The requirement shape appears: ${opts.featurePlan.shape.toUpperCase()}
+- The requirement complexity appears: ${opts.featurePlan.complexity.toUpperCase()}
+- Aim for ${opts.featurePlan.min}-${opts.featurePlan.max} features (target ${opts.featurePlan.target})
+- If the requirement is narrow, do NOT split into trivial or UI-level features
+- If the requirement is broad, include supporting capabilities only when they are independently deliverable`
+    : '';
 
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
@@ -104,6 +120,7 @@ RULES:
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
 ${processRule}
+${planningGuidance ? `\n${planningGuidance}` : ''}
 
 ${taxonomySection}
 
@@ -115,7 +132,21 @@ Think step by step about the full scope of this requirement, then output JSON:
 
 export function buildArSystemPrompt(opts: {
   domainContext: string;
+  arPlan?: {
+    min: number;
+    max: number;
+    target: number;
+    depth: 'lean' | 'standard' | 'thorough';
+  };
 }): string {
+  const arGuidance = opts.arPlan
+    ? `AR CALIBRATION:
+- Target ${opts.arPlan.min}-${opts.arPlan.max} acceptance requirements per feature (target ${opts.arPlan.target})
+- Depth should be ${opts.arPlan.depth.toUpperCase()}
+- Do not under-specify broad or risky features
+- Do not over-specify very small, straightforward features`
+    : '';
+
   return `You are a principal QA lead and business analyst writing acceptance requirements for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
 For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that capture:
@@ -135,6 +166,7 @@ COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
 - Never reference internal system concepts or admin configurations as preconditions
 - Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
+${arGuidance ? `\n${arGuidance}` : ''}
 
 OUTPUT FORMAT (strict):
 - Return a single JSON object: {"features":[...]} — same number of features as input, same order and same "summary" strings.
@@ -172,6 +204,8 @@ CLARITY ASSESSMENT:
 - Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} clarifying questions (target ${opts.questionPlan.target}).
 - If the requirement is very clear and specific, stay near the lower bound.
 - If the requirement is vague or underspecified, stay near the upper bound.
+- Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
+- Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected

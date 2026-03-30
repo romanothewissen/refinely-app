@@ -60,6 +60,7 @@ export const KEYS = {
   tenantConfig: 'tenant_config',
   goldStandards: 'gold_standards',
   goldCacheInfo: 'gold_cache_info',
+  backlogIndex: (projectKey: string) => `backlog_index_${projectKey}`,
   wiChunks: 'wi_chunks',
   wiDocs: 'wi_docs',
   usageCurrentMonth: 'usage_current_month',

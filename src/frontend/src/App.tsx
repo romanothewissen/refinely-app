@@ -42,6 +42,7 @@ interface GenerationContextMeta {
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   similarStoriesCount?: number;
   referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+  tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
 interface ClarifyContextMeta {
@@ -49,10 +50,13 @@ interface ClarifyContextMeta {
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
+  goldExamplesCount?: number;
+  referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
+  similarStoriesCount?: number;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-  usesGoldenExamples: false;
-  usesSimilarStories: false;
+  tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
 /** Recursively extract plain text from an Atlassian Document Format node */
@@ -537,6 +541,7 @@ export default function App() {
           feature={features[activePushFeatureIdx]}
           originIssueKey={originIssueKey ?? undefined}
           sessionId={sessionId}
+          defaultProjectKey={projectKey}
         />
       )}
 

@@ -11,8 +11,23 @@
 import { ClarifyContextMeta, ClarifyEvent } from '../types';
 import { generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
+import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
+import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entitySet, KEYS } from '../services/cache';
+
+function resolveRelevantGoldSources(
+  sources: ClarifyEvent['config']['goldSources'],
+  projectKey: string,
+) {
+  const exact = sources.filter(s => s.targetProjects?.includes(projectKey));
+  const global = sources.filter(s => s.targetProjects?.includes('*'));
+  if (projectKey === '*') return global;
+
+  const deduped = new Map<string, (typeof sources)[number]>();
+  [...exact, ...global].forEach(source => deduped.set(source.key, source));
+  return Array.from(deduped.values());
+}
 
 export async function handler(event: { body: ClarifyEvent }) {
   const { sessionId, requirement, attachmentText, license, config: eventConfig, projectKey } = event.body;
@@ -25,18 +40,29 @@ export async function handler(event: { body: ClarifyEvent }) {
   const config = { 
     ...eventConfig, 
     domainContext: relevantContext.context,
+    goldSources: resolveRelevantGoldSources(eventConfig.goldSources, projectKey),
     tier: getEffectiveTier(eventConfig, { license }) 
   };
 
   try {
-    const wiContext = config.wiConfig.enabled
-      ? await retrieveWiContext(requirement, 4, 20000, projectKey)
-      : { text: '', docs: [] };
+    const [wiContext, goldItems, similarStories] = await Promise.all([
+      config.wiConfig.enabled
+        ? retrieveWiContext(requirement, 4, 20000, projectKey)
+        : Promise.resolve({ text: '', docs: [] }),
+      config.goldSources.length
+        ? fetchGoldExamples(config.goldSources, 6)
+        : Promise.resolve([]),
+      config.tier !== 'free'
+        ? findSimilarStories(requirement, config, projectKey)
+        : Promise.resolve([]),
+    ]);
 
-    const questions = await generateClarifyingQuestions({
+    const { questions, tokenUsage } = await generateClarifyingQuestions({
       requirement,
       attachmentText,
       wiContextText: wiContext.text,
+      goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
+      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
     });
 
@@ -45,14 +71,25 @@ export async function handler(event: { body: ClarifyEvent }) {
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
+      goldExamplesCount: goldItems.length,
+      referencedGoldExamples: goldItems.slice(0, 12).map(item => ({
+        key: item.key,
+        source: item.source,
+        summary: item.summary,
+      })),
+      similarStoriesCount: similarStories.length,
+      referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
+        key: item.key,
+        summary: item.summary,
+        relevanceScore: item.relevanceScore,
+      })),
+      tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
         docId: doc.docId,
         filename: doc.filename,
         chunkCount: doc.chunkCount,
       })),
-      usesGoldenExamples: false,
-      usesSimilarStories: false,
     };
 
     await entitySet(KEYS.clarifyProgress(sessionId), {

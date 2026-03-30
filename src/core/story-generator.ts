@@ -15,8 +15,9 @@ import {
   TenantConfig,
   GenerationResult,
   ValidationViolation,
+  TokenUsageSummary,
 } from '../types';
-import { callLlm, callLlmJson } from './llm';
+import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
 import {
   buildDecompositionSystemPrompt,
@@ -50,24 +51,55 @@ interface ClarifyQuestionPlan {
   clarity: 'clear' | 'medium' | 'vague';
 }
 
-function inferClarifyQuestionPlan(input: {
+interface FeaturePlan {
+  min: number;
+  max: number;
+  target: number;
+  shape: 'narrow' | 'balanced' | 'broad';
+  complexity: 'low' | 'medium' | 'high';
+}
+
+interface ArPlan {
+  min: number;
+  max: number;
+  target: number;
+  depth: 'lean' | 'standard' | 'thorough';
+}
+
+interface RequirementAssessment {
+  questionPlan: ClarifyQuestionPlan;
+  featurePlan: FeaturePlan;
+  arPlan: ArPlan;
+}
+
+function assessRequirement(input: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
-}): ClarifyQuestionPlan {
+  goldExamplesText?: string;
+  similarStoriesText?: string;
+  clarifyAnswers?: ClarifyAnswer[];
+}): RequirementAssessment {
   const requirement = input.requirement?.trim() ?? '';
   const attachment = input.attachmentText?.trim() ?? '';
   const wi = input.wiContextText?.trim() ?? '';
+  const gold = input.goldExamplesText?.trim() ?? '';
+  const similar = input.similarStoriesText?.trim() ?? '';
+  const answers = input.clarifyAnswers ?? [];
 
   const reqWords = requirement ? requirement.split(/\s+/).length : 0;
   const reqSentences = requirement
     ? requirement.split(/[.!?]\s+/).map(s => s.trim()).filter(Boolean).length
     : 0;
-  const hasRichContext = attachment.length > 250 || wi.length > 250;
+  const hasRichContext = attachment.length > 250 || wi.length > 250 || gold.length > 250 || similar.length > 250 || answers.length >= 4;
   const hasConstraints = /(must|should|cannot|can't|only|except|unless|sla|kpi|compliance|permission|role|workflow|edge case|error|fallback|validation|audit|security)/i
     .test(requirement);
   const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|better|faster|enhance|fix this|update this|handle this|do it)/i
     .test(requirement);
+  const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception)/i
+    .test(requirement);
+  const roleMentions = (requirement.match(/\b(admin|manager|planner|dispatcher|technician|agent|user|customer|analyst|qa|developer|operator)\b/ig) ?? []).length;
+  const exceptionMentions = (requirement.match(/\b(error|fail|exception|edge|invalid|conflict|fallback|retry|permission|duplicate)\b/ig) ?? []).length;
 
   const clarityScore =
     (reqWords >= 45 ? 1 : 0) +
@@ -76,13 +108,74 @@ function inferClarifyQuestionPlan(input: {
     (hasConstraints ? 1 : 0) -
     (hasAmbiguousTokens ? 1 : 0);
 
-  if (clarityScore >= 3) {
-    return { min: 5, max: 6, target: 6, clarity: 'clear' };
-  }
-  if (clarityScore <= 1) {
-    return { min: 11, max: 15, target: 13, clarity: 'vague' };
-  }
-  return { min: 7, max: 10, target: 8, clarity: 'medium' };
+  const complexityScore =
+    (hasConstraints ? 1 : 0) +
+    (exceptionMentions >= 2 ? 1 : 0) +
+    (answers.length >= 5 ? 1 : 0) +
+    (roleMentions >= 2 ? 1 : 0) +
+    (hasBroadScopeSignals ? 1 : 0);
+
+  const shapeScore =
+    (hasBroadScopeSignals ? 1 : 0) +
+    (reqWords >= 60 ? 1 : 0) +
+    (reqSentences >= 4 ? 1 : 0) +
+    (answers.length >= 5 ? 1 : 0);
+
+  const questionPlan: ClarifyQuestionPlan =
+    clarityScore >= 4
+      ? { min: 4, max: 6, target: 5, clarity: 'clear' }
+      : clarityScore <= 1
+        ? { min: 10, max: 14, target: 12, clarity: 'vague' }
+        : { min: 6, max: 9, target: 7, clarity: 'medium' };
+
+  const featurePlan: FeaturePlan =
+    shapeScore >= 3
+      ? {
+          min: complexityScore >= 4 ? 5 : 4,
+          max: complexityScore >= 4 ? 8 : 6,
+          target: complexityScore >= 4 ? 6 : 5,
+          shape: 'broad',
+          complexity: complexityScore >= 4 ? 'high' : 'medium',
+        }
+      : shapeScore <= 1
+        ? {
+            min: 1,
+            max: complexityScore >= 3 ? 4 : 3,
+            target: complexityScore >= 3 ? 3 : 2,
+            shape: 'narrow',
+            complexity: complexityScore >= 3 ? 'medium' : 'low',
+          }
+        : {
+            min: 2,
+            max: complexityScore >= 4 ? 6 : 5,
+            target: complexityScore >= 4 ? 5 : 4,
+            shape: 'balanced',
+            complexity: complexityScore >= 4 ? 'high' : 'medium',
+          };
+
+  const arPlan: ArPlan =
+    featurePlan.complexity === 'high'
+      ? { min: 4, max: 6, target: 5, depth: 'thorough' }
+      : featurePlan.complexity === 'low'
+        ? { min: 2, max: 3, target: 2, depth: 'lean' }
+        : { min: 3, max: 5, target: 4, depth: 'standard' };
+
+  return {
+    questionPlan,
+    featurePlan,
+    arPlan,
+  };
+}
+
+function inferClarifyQuestionPlan(input: {
+  requirement: string;
+  attachmentText: string;
+  wiContextText: string;
+  goldExamplesText?: string;
+  similarStoriesText?: string;
+  clarifyAnswers?: ClarifyAnswer[];
+}): ClarifyQuestionPlan {
+  return assessRequirement(input).questionPlan;
 }
 
 // ─── Main Generation ──────────────────────────────────────────────────────────
@@ -99,6 +192,14 @@ export async function generateFeatures(opts: {
 }): Promise<GenerationResult> {
   const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete } = opts;
   const { generatorConfig } = config;
+  const assessment = assessRequirement({
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+  });
   const providerOpts = {
     provider: generatorConfig.provider,
     geminiApiKey: generatorConfig.geminiApiKey,
@@ -139,9 +240,10 @@ export async function generateFeatures(opts: {
     domainRoles: config.domainRoles,
     processTaxonomy: config.processTaxonomy,
     processTaxonomyEnabled: config.processTaxonomyEnabled,
+    featurePlan: assessment.featurePlan,
   });
 
-  const pass1Result = await callLlmJson<{ features: RawFeature[] }>({
+  const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(generatorConfig.decompositionModel, config.tier),
     systemPrompt: pass1System,
     userMessage,
@@ -149,7 +251,7 @@ export async function generateFeatures(opts: {
     ...providerOpts,
   });
 
-  const pass1Features = pass1Result.features ?? [];
+  const pass1Features = pass1Result.data.features ?? [];
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
@@ -157,6 +259,7 @@ export async function generateFeatures(opts: {
   // ── Pass 2: Acceptance Requirements ──
   const pass2System = buildArSystemPrompt({
     domainContext: config.domainContext,
+    arPlan: assessment.arPlan,
   });
 
   const pass2UserMessage = `${userMessage}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
@@ -164,7 +267,7 @@ export async function generateFeatures(opts: {
   // Pass 2 often needs more output tokens than pass 1 (many GWT strings per feature).
   const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 16384);
 
-  const pass2Result = await callLlmJson<{ features: RawFeature[] }>({
+  const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(generatorConfig.arModel, config.tier),
     systemPrompt: pass2System,
     userMessage: pass2UserMessage,
@@ -173,18 +276,29 @@ export async function generateFeatures(opts: {
   });
 
   // Merge: use pass2 ARs; fall back to pass1 if pass2 missing or empty
-  const rawFeatures = pass2Result.features?.length
-    ? mergeFeatures(pass1Features, pass2Result.features)
+  const rawFeatures = pass2Result.data.features?.length
+    ? mergeFeatures(pass1Features, pass2Result.data.features)
     : pass1Features;
 
   const features = rawFeatures.map(normaliseFeature);
   const violations = validateFeatures(features, config);
+
+  const tokenUsage: TokenUsageSummary = {
+    input: pass1Result.usage.input + pass2Result.usage.input,
+    output: pass1Result.usage.output + pass2Result.usage.output,
+    total: pass1Result.usage.input + pass1Result.usage.output + pass2Result.usage.input + pass2Result.usage.output,
+    byStage: {
+      decomposition: toStageUsage(pass1Result.usage),
+      acceptanceRequirements: toStageUsage(pass2Result.usage),
+    },
+  };
 
   return {
     features,
     violations,
     similarStories: [],   // filled in by the caller after this returns
     sessionId: uuidv4(),
+    tokenUsage,
   };
 }
 
@@ -194,14 +308,18 @@ export async function generateClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
+  goldExamplesText: string;
+  similarStoriesText: string;
   config: TenantConfig;
-}): Promise<ClarifyQuestion[]> {
-  const { requirement, attachmentText, wiContextText, config } = opts;
+}): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary }> {
+  const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config } = opts;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
-  const questionPlan = inferClarifyQuestionPlan({ requirement, attachmentText, wiContextText });
+  if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, 5000)}`);
+  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
+  const questionPlan = inferClarifyQuestionPlan({ requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText });
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
@@ -209,7 +327,7 @@ export async function generateClarifyingQuestions(opts: {
     questionPlan,
   });
 
-  const raw = await callLlmJson<ClarifyQuestion[]>({
+  const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
@@ -220,19 +338,28 @@ export async function generateClarifyingQuestions(opts: {
 
   // Validate: must be array OR object with a questions array
   let questions: any[] = [];
-  if (Array.isArray(raw)) {
-    questions = raw;
-  } else if (raw && typeof raw === 'object' && Array.isArray((raw as any).questions)) {
-    questions = (raw as any).questions;
-  } else if (raw && typeof raw === 'object' && Array.isArray((raw as any).features)) {
+  if (Array.isArray(raw.data)) {
+    questions = raw.data;
+  } else if (raw.data && typeof raw.data === 'object' && Array.isArray((raw.data as any).questions)) {
+    questions = (raw.data as any).questions;
+  } else if (raw.data && typeof raw.data === 'object' && Array.isArray((raw.data as any).features)) {
      // fallback for models confusing decomposition with clarify
-     questions = (raw as any).features;
+     questions = (raw.data as any).features;
   }
 
-  // Final validation: must be array of objects with "question" key
-  return questions
+  const filteredQuestions = questions
     .filter(x => typeof x === 'object' && x !== null && 'question' in x)
     .slice(0, questionPlan.max);
+
+  return {
+    questions: filteredQuestions,
+    tokenUsage: {
+      input: raw.usage.input,
+      output: raw.usage.output,
+      total: raw.usage.input + raw.usage.output,
+      byStage: { clarify: toStageUsage(raw.usage) },
+    },
+  };
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
@@ -267,7 +394,7 @@ export async function refineFeatures(opts: {
   features: Feature[];
   feedback: string;
   config: TenantConfig;
-}): Promise<Feature[]> {
+}): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
   const { requirement, features, feedback, config } = opts;
 
   const system = buildRefineSystemPrompt({
@@ -283,7 +410,7 @@ export async function refineFeatures(opts: {
     `CURRENT FEATURES:\n${JSON.stringify(features, null, 2)}`,
   ].join('\n\n');
 
-  const result = await callLlmJson<{ features: RawFeature[] }>({
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
     systemPrompt: system,
     userMessage,
@@ -293,7 +420,15 @@ export async function refineFeatures(opts: {
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
   });
 
-  return (result.features ?? []).map(normaliseFeature);
+  return {
+    features: (result.data.features ?? []).map(normaliseFeature),
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: { refine: toStageUsage(result.usage) },
+    },
+  };
 }
 
 // ─── Single Feature Refinement ────────────────────────────────────────────────
@@ -302,7 +437,7 @@ export async function refineSingleFeature(opts: {
   feature: Feature;
   feedback: string;
   config: TenantConfig;
-}): Promise<Feature> {
+}): Promise<{ feature: Feature; tokenUsage: TokenUsageSummary }> {
   const { feature, feedback, config } = opts;
 
   const system = buildSingleFeatureRefineSystemPrompt({
@@ -313,7 +448,7 @@ export async function refineSingleFeature(opts: {
 
   const userMessage = `FEATURE:\n${JSON.stringify(feature, null, 2)}\n\nFEEDBACK: ${feedback}`;
 
-  const result = await callLlmJson<{ features: RawFeature[] }>({
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
     systemPrompt: system,
     userMessage,
@@ -323,8 +458,16 @@ export async function refineSingleFeature(opts: {
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
   });
 
-  const refined = result.features?.[0];
-  return refined ? normaliseFeature(refined) : feature;
+  const refined = result.data.features?.[0];
+  return {
+    feature: refined ? normaliseFeature(refined) : feature,
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: { refineSingle: toStageUsage(result.usage) },
+    },
+  };
 }
 
 // ─── Refine Feedback Sufficiency ──────────────────────────────────────────────
@@ -485,3 +628,11 @@ function mergeFeatures(pass1: RawFeature[], pass2: RawFeature[]): RawFeature[] {
 }
 
 export { formatGoldExample };
+
+function toStageUsage(usage: { input: number; output: number }) {
+  return {
+    input: usage.input,
+    output: usage.output,
+    total: usage.input + usage.output,
+  };
+}

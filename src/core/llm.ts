@@ -245,12 +245,35 @@ export async function callLlmJson<T>(opts: {
   openaiBaseUrl?: string;
   noFallback?: boolean;
 }): Promise<T> {
+  const result = await callLlmJsonWithUsage<T>(opts);
+  return result.data;
+}
+
+export async function callLlmJsonWithUsage<T>(opts: {
+  model: string;
+  systemPrompt: string;
+  userMessage: string;
+  maxTokens?: number;
+  provider?: 'forge_llms' | 'gemini' | 'openai';
+  geminiApiKey?: string;
+  geminiBaseUrl?: string;
+  openaiApiKey?: string;
+  openaiBaseUrl?: string;
+  noFallback?: boolean;
+}): Promise<{ data: T; usage: { input: number; output: number } }> {
   let lastError: Error | null = null;
+  let totalInput = 0;
+  let totalOutput = 0;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await callLlm(opts);
+    totalInput += res.inputTokens ?? 0;
+    totalOutput += res.outputTokens ?? 0;
     try {
-      return extractJson<T>(res.text);
+      return {
+        data: extractJson<T>(res.text),
+        usage: { input: totalInput, output: totalOutput },
+      };
     } catch (err) {
       lastError = err as Error;
       if (attempt === 0) {
