@@ -15,6 +15,7 @@ import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
+import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
 
 function resolveRelevantGoldSources(
   sources: ClarifyEvent['config']['goldSources'],
@@ -45,21 +46,24 @@ export async function handler(event: { body: ClarifyEvent }) {
   };
 
   try {
+    const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+    const maskedRequirement = maskPiiText(requirement, piiEnabled);
+    const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const [wiContext, goldItems, similarStories] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveWiContext(requirement, 4, 20000, projectKey)
+        ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
         : Promise.resolve({ text: '', docs: [] }),
       config.goldSources.length
         ? fetchGoldExamples(config.goldSources, 6)
         : Promise.resolve([]),
       config.tier !== 'free'
-        ? findSimilarStories(requirement, config, projectKey)
+        ? findSimilarStories(maskedRequirement.text, config, projectKey)
         : Promise.resolve([]),
     ]);
 
     const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
-      requirement,
-      attachmentText,
+      requirement: maskedRequirement.text,
+      attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
       goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
@@ -96,7 +100,44 @@ export async function handler(event: { body: ClarifyEvent }) {
       })),
     };
 
-    await saveClarifyTurn(sessionId, accountId, requirement, clarifyContext);
+    await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext);
+    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId,
+        turnType: 'clarify',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: config.generatorConfig.clarifyModel,
+        projectKey,
+        requirementExcerpt: maskedRequirement.text.slice(0, 240),
+        decisionSummary: [
+          `Generated ${questions.length} clarifying questions for ${ambiguityAssessment.level} ambiguity input.`,
+          `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
+        ],
+        contextUsage: {
+          goldExamplesCount: goldItems.length,
+          similarStoriesCount: similarStories.length,
+          wiDocsCount: wiContext.docs.length,
+          ambiguityScore: ambiguityAssessment.score,
+        },
+        tokenUsage,
+        piiMasking: {
+          enabled: piiEnabled,
+          totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions,
+          byType: {
+            ...maskedRequirement.stats.byType,
+            ...maskedAttachment.stats.byType,
+          },
+        },
+      });
+    }
+    await appendComplianceAuditEvent({
+      actorAccountId: accountId,
+      category: 'runtime',
+      action: 'CLARIFY_WORKFLOW_EXECUTED',
+      details: { sessionId, projectKey, model: config.generatorConfig.clarifyModel },
+      enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+    });
 
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'complete',

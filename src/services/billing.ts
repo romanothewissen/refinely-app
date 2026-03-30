@@ -18,8 +18,8 @@ export function getEffectiveTier(config: TenantConfig, context?: any): TenantCon
   const license = context.license;
   if (!license.active) return 'free';
 
-  // If active, they are at least 'standard'. 
-  // Only allow 'premium' if they have a commercial license or explicitly marked in config
+  // If active, they are at least 'standard'.
+  if (config.tier === 'enterprise') return 'enterprise';
   if (config.tier === 'premium') return 'premium';
   return 'standard';
 }
@@ -32,7 +32,7 @@ export function getTierModel(
   requestedModel: string,
   tier: TenantConfig['tier']
 ): string {
-  if (tier === 'premium') return requestedModel; // Premium can use anything
+  if (tier === 'premium' || tier === 'enterprise') return requestedModel; // Top tiers can use anything
 
   // Define "Safe/Mini" models for Free/Standard
   const MINI_MODELS: Record<string, string> = {

@@ -40,6 +40,25 @@ interface WiDocRow {
   uploadedAt: string;
 }
 
+interface ComplianceAuditEvent {
+  eventId: string;
+  timestamp: string;
+  category: 'config' | 'security' | 'prompt' | 'runtime';
+  action: string;
+  details: Record<string, unknown>;
+}
+
+interface TransparencyReportRow {
+  reportId: string;
+  createdAt: string;
+  turnType: 'generate' | 'clarify' | 'refine' | 'ask';
+  projectKey?: string;
+  model?: string;
+  decisionSummary: string[];
+  piiMasking: { enabled: boolean; totalRedactions: number };
+  tokenUsage?: { total: number };
+}
+
 const CLAUDE_MODELS = [
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fastest)' },
   { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet (Balanced)' },
@@ -103,7 +122,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   // Domain State
   const [domainContext, setDomainContext] = useState('');
   const [domainRoles, setDomainRoles] = useState('');
-  const [tier, setTier] = useState<'free' | 'standard' | 'premium'>('free');
+  const [tier, setTier] = useState<'free' | 'standard' | 'premium' | 'enterprise'>('free');
+  const [complianceEnabled, setComplianceEnabled] = useState(false);
+  const [transparencyEnabled, setTransparencyEnabled] = useState(false);
+  const [piiMaskingEnabled, setPiiMaskingEnabled] = useState(false);
+  const [auditTrailEnabled, setAuditTrailEnabled] = useState(false);
+  const [complianceEvents, setComplianceEvents] = useState<ComplianceAuditEvent[]>([]);
+  const [transparencyReports, setTransparencyReports] = useState<TransparencyReportRow[]>([]);
+  const [jiraAuditRecords, setJiraAuditRecords] = useState<Array<Record<string, unknown>>>([]);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
@@ -192,6 +218,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (existingConfig.domainContext) setDomainContext(existingConfig.domainContext);
         if (existingConfig.domainRoles) setDomainRoles((existingConfig.domainRoles as string[]).join(', '));
         if (existingConfig.tier) setTier(existingConfig.tier);
+        setComplianceEnabled(Boolean(existingConfig.compliance?.enabled));
+        setTransparencyEnabled(Boolean(existingConfig.compliance?.transparencyReportsEnabled));
+        setPiiMaskingEnabled(Boolean(existingConfig.compliance?.piiMaskingEnabled));
+        setAuditTrailEnabled(Boolean(existingConfig.compliance?.auditTrailEnabled));
         if (existingConfig.wiConfig?.enabled !== undefined) setWiEnabled(existingConfig.wiConfig.enabled);
         if (existingConfig.issueLinkType) setIssueLinkType(existingConfig.issueLinkType);
         if (existingConfig.arMappings) setArMappings(existingConfig.arMappings);
@@ -207,6 +237,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         setProjects(jiraRes.projects ?? []);
         setCustomFields(jiraRes.fields ?? []);
       }
+      const [auditRes, reportRes, jiraAuditRes] = await Promise.all([
+        api.listComplianceAuditEvents(30) as Promise<any>,
+        api.listTransparencyReports({ limit: 30 }) as Promise<any>,
+        api.getJiraAuditRecords(20) as Promise<any>,
+      ]);
+      setComplianceEvents(Array.isArray(auditRes?.events) ? auditRes.events : []);
+      setTransparencyReports(Array.isArray(reportRes?.reports) ? reportRes.reports : []);
+      setJiraAuditRecords(Array.isArray(jiraAuditRes?.records) ? jiraAuditRes.records : []);
     } catch (e) { console.error('Error loading config', e); }
   }
 
@@ -385,6 +423,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         domainContexts,
         domainRoles: domainRoles.split(',').map((r: any) => r.trim()).filter(Boolean),
         wiConfig: { enabled: wiEnabled, topKChunks: 8, maxChars: 100000 },
+        compliance: {
+          enabled: complianceEnabled,
+          transparencyReportsEnabled: transparencyEnabled,
+          piiMaskingEnabled,
+          auditTrailEnabled,
+        },
         issueLinkType,
         arMappings,
         backlogStatusScopes,
@@ -888,7 +932,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
                   {[
                     {
                       key: 'free',
@@ -907,6 +951,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       name: 'Premium',
                       price: 'For advanced workflows',
                       highlights: ['Unlimited generations', 'Full automation support', 'Best fit for enterprise rollout'],
+                    },
+                    {
+                      key: 'enterprise',
+                      name: 'Enterprise',
+                      price: 'Regulated industries',
+                      highlights: ['Compliance Pack', 'PII masking and transparency reports', 'Immutable audit trail + Jira audit visibility'],
                     },
                   ].map(plan => {
                     const isCurrent = tier === plan.key;
@@ -947,6 +997,101 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </div>
                     );
                   })}
+                </div>
+
+                <div className="rf-panel rounded-[28px] p-8 space-y-6">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Compliance Pack</p>
+                    <h4 className="text-2xl font-black text-slate-900 mt-2">GDPR + EU AI Act readiness</h4>
+                    <p className="mt-2 text-sm text-[var(--rf-text-secondary)]">
+                      Enable transparency reports, data minimization through PII masking, and immutable compliance audits.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {[
+                      { key: 'enabled', label: 'Compliance mode', value: complianceEnabled, set: setComplianceEnabled },
+                      { key: 'transparency', label: 'Transparency reports', value: transparencyEnabled, set: setTransparencyEnabled },
+                      { key: 'pii', label: 'PII masking before LLM calls', value: piiMaskingEnabled, set: setPiiMaskingEnabled },
+                      { key: 'audit', label: 'Immutable audit trail', value: auditTrailEnabled, set: setAuditTrailEnabled },
+                    ].map(item => (
+                      <label key={item.key} className="flex items-center justify-between rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm">
+                        <span className="font-medium text-[var(--rf-text)]">{item.label}</span>
+                        <input
+                          type="checkbox"
+                          checked={item.value}
+                          onChange={(e) => item.set(e.target.checked)}
+                          disabled={!isAdmin}
+                          className="h-4 w-4 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <div className="rf-panel rounded-[24px] p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-[var(--rf-text)]">Transparency reports</h4>
+                      <span className="text-xs text-[var(--rf-text-tertiary)]">{transparencyReports.length} recent</span>
+                    </div>
+                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                      {transparencyReports.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-[var(--rf-border)] px-4 py-6 text-xs text-[var(--rf-text-tertiary)]">
+                          No reports yet.
+                        </div>
+                      ) : (
+                        transparencyReports.map((report) => (
+                          <div key={report.reportId} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold text-[var(--rf-text)] uppercase">{report.turnType}</div>
+                              <div className="text-[10px] text-[var(--rf-text-tertiary)]">{new Date(report.createdAt).toLocaleString()}</div>
+                            </div>
+                            <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">
+                              {(report.decisionSummary || []).slice(0, 1).join(' ') || 'No summary'}
+                            </div>
+                            <div className="mt-1 text-[10px] text-[var(--rf-text-tertiary)]">
+                              PII redactions: {report.piiMasking?.totalRedactions ?? 0} • Tokens: {report.tokenUsage?.total ?? 0}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rf-panel rounded-[24px] p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-[var(--rf-text)]">Compliance audit trail</h4>
+                      <span className="text-xs text-[var(--rf-text-tertiary)]">{complianceEvents.length} recent</span>
+                    </div>
+                    <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                      {complianceEvents.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-[var(--rf-border)] px-4 py-6 text-xs text-[var(--rf-text-tertiary)]">
+                          No audit events yet.
+                        </div>
+                      ) : (
+                        complianceEvents.map((event) => (
+                          <div key={event.eventId} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold text-[var(--rf-text)]">{event.action}</div>
+                              <div className="text-[10px] text-[var(--rf-text-tertiary)]">{new Date(event.timestamp).toLocaleString()}</div>
+                            </div>
+                            <div className="mt-1 text-[10px] uppercase tracking-wide text-[var(--rf-text-tertiary)]">{event.category}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rf-panel rounded-[24px] p-6 space-y-3">
+                  <h4 className="text-sm font-bold text-[var(--rf-text)]">Atlassian audit correlation</h4>
+                  <p className="text-xs text-[var(--rf-text-secondary)]">
+                    Recent Jira audit records are shown here for security/compliance teams to cross-check with app-level audit events.
+                  </p>
+                  <div className="text-xs text-[var(--rf-text-tertiary)]">
+                    Jira audit records fetched: {jiraAuditRecords.length}
+                  </div>
                 </div>
 
                 {isAdmin && (

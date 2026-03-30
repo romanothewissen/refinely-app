@@ -94,6 +94,10 @@ export const api = {
   // Usage
   getUsage: () => invoke('getUsage'),
   resetUsage: () => invoke('resetUsage'),
+  listComplianceAuditEvents: (limit?: number) => invoke('listComplianceAuditEvents', { limit }),
+  listTransparencyReports: (payload?: { sessionId?: string; turnType?: 'generate' | 'clarify' | 'refine' | 'ask'; limit?: number }) =>
+    invoke('listTransparencyReports', payload || {}),
+  getJiraAuditRecords: (limit?: number) => invoke('getJiraAuditRecords', { limit }),
 
   // LLM config
   checkIsAdmin: (payload?: any) => invoke('checkIsAdmin', payload),

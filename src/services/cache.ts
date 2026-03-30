@@ -74,4 +74,7 @@ export const KEYS = {
   // per-user scoped
   userConversations: (accountId: string, sessionId: string) => `u_${accountId}_conv_${sessionId}`,
   userConversationIndex: (accountId: string) => `u_${accountId}_conv_index`,
+  complianceAuditTrail: 'compliance_audit_trail',
+  transparencyReports: 'transparency_reports',
+  complianceRuntimeVersion: 'compliance_runtime_version',
 } as const;

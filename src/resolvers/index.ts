@@ -13,6 +13,15 @@ import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
+import {
+  appendComplianceAuditEvent,
+  listComplianceAuditEvents,
+  listTransparencyReports,
+  fetchRecentJiraAuditRecords,
+  maskPiiText,
+  maskPiiInAnswers,
+  saveTransparencyReport,
+} from '../services/compliance';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolver: any = new Resolver();
@@ -70,6 +79,26 @@ async function ensureAdmin(context: any, projectKey?: string) {
   }
 }
 
+async function recordRuntimeVersionIfChanged(actorAccountId?: string, auditEnabled?: boolean) {
+  if (!auditEnabled) return;
+  const runtimeVersion =
+    process.env.FORGE_DEPLOYMENT_ID ||
+    process.env.FORGE_APP_VERSION ||
+    process.env.FORGE_ENV ||
+    'runtime-unknown';
+  const previous = await entityGet<string>(KEYS.complianceRuntimeVersion);
+  if (previous !== runtimeVersion) {
+    await entitySet(KEYS.complianceRuntimeVersion, runtimeVersion);
+    await appendComplianceAuditEvent({
+      actorAccountId,
+      category: 'runtime',
+      action: 'APP_AUTO_UPDATE_DETECTED',
+      details: { previousVersion: previous ?? null, currentVersion: runtimeVersion },
+      enabled: true,
+    });
+  }
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 resolver.define('checkIsAdmin', async ({ context, payload }) => {
@@ -83,6 +112,7 @@ resolver.define('checkIsAdmin', async ({ context, payload }) => {
 resolver.define('getConfig', async ({ context }) => {
   const config = await getConfig();
   const isAdmin = await checkAdmin(context);
+  await recordRuntimeVersionIfChanged((context as { accountId?: string })?.accountId, Boolean(config.compliance?.auditTrailEnabled));
   
   if (config.generatorConfig) {
     const gc = config.generatorConfig;
@@ -106,12 +136,63 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
   
   await saveConfig(payload);
+
+  const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const modelFields = ['decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'themeModel'];
+  const changedModelFields = modelFields.filter((field) => {
+    return ngc[field] !== undefined && ngc[field] !== egc[field];
+  });
+  const apiKeyRotated = Boolean(
+    (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
+    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey),
+  );
+  const auditEnabled = Boolean(existingConfig.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled);
+  if (changedModelFields.length > 0) {
+    await appendComplianceAuditEvent({
+      actorAccountId,
+      category: 'prompt',
+      action: 'PROMPT_LOGIC_UPDATED',
+      details: { changedModelFields },
+      enabled: auditEnabled,
+    });
+  }
+  if (apiKeyRotated) {
+    await appendComplianceAuditEvent({
+      actorAccountId,
+      category: 'security',
+      action: 'API_KEY_ROTATED',
+      details: {
+        providerKeysUpdated: [
+          ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
+          ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
+        ].filter(Boolean),
+      },
+      enabled: auditEnabled,
+    });
+  }
+  await appendComplianceAuditEvent({
+    actorAccountId,
+    category: 'config',
+    action: 'CONFIG_UPDATED',
+    details: { topLevelKeys: Object.keys(payload ?? {}) },
+    enabled: auditEnabled,
+  });
   return { success: true };
 });
 
 resolver.define('patchConfig', async ({ payload, context }) => {
   await ensureAdmin(context);
-  return patchConfig(payload);
+  const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const current = await getConfig();
+  const result = await patchConfig(payload);
+  await appendComplianceAuditEvent({
+    actorAccountId,
+    category: 'config',
+    action: 'CONFIG_PATCHED',
+    details: { keys: Object.keys(payload ?? {}) },
+    enabled: Boolean(current.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled),
+  });
+  return result;
 });
 
 resolver.define('testLlmConnection', async ({ payload, context }) => {
@@ -232,15 +313,46 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
 resolver.define('refineFeatures', async ({ payload, context }) => {
   try {
     const config = await getConfig();
+    const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+    const maskedRequirement = maskPiiText(payload.requirement ?? '', piiEnabled);
+    const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
     const result = await refineFeatures({
-      requirement: payload.requirement,
+      requirement: maskedRequirement.text,
       features: payload.features as Feature[],
-      feedback: payload.feedback,
+      feedback: maskedFeedback.text,
       config,
     });
 
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     await updateLatestTurnFeatures(payload.sessionId, accountId, result.features, 'refine', payload.feedback, result.tokenUsage);
+    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId: payload.sessionId,
+        turnType: 'refine',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: config.generatorConfig.refineModel,
+        projectKey: payload.projectKey || '*',
+        requirementExcerpt: String(payload.requirement ?? '').slice(0, 240),
+        decisionSummary: [
+          'Refinement applied based on explicit user feedback.',
+          'Feature content preserved where feedback did not request structural changes.',
+        ],
+        contextUsage: {
+          featureCount: Array.isArray(payload.features) ? payload.features.length : 0,
+          feedbackLength: String(payload.feedback ?? '').length,
+        },
+        tokenUsage: result.tokenUsage,
+        piiMasking: {
+          enabled: piiEnabled,
+          totalRedactions: maskedRequirement.stats.totalRedactions + maskedFeedback.stats.totalRedactions,
+          byType: {
+            ...maskedRequirement.stats.byType,
+            ...maskedFeedback.stats.byType,
+          },
+        },
+      });
+    }
 
     return { success: true, features: result.features, tokenUsage: result.tokenUsage };
   } catch (err: any) {
@@ -252,9 +364,11 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
 resolver.define('refineSingleFeature', async ({ payload, context }) => {
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+  const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
   const result = await refineSingleFeature({
     feature: payload.feature as Feature,
-    feedback: payload.feedback,
+    feedback: maskedFeedback.text,
     config,
   });
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : '';
@@ -268,6 +382,27 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
       payload.feedback,
       result.tokenUsage,
     );
+    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId,
+        turnType: 'refine',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: config.generatorConfig.refineModel,
+        projectKey: payload.projectKey || '*',
+        requirementExcerpt: String(payload.feature?.summary ?? '').slice(0, 240),
+        decisionSummary: [
+          'Single-feature refinement generated from direct feedback.',
+          'Summary/description/story points remain stable unless feedback explicitly targets them.',
+        ],
+        contextUsage: {
+          featureId: payload.feature?.id,
+          feedbackLength: String(payload.feedback ?? '').length,
+        },
+        tokenUsage: result.tokenUsage,
+        piiMasking: maskedFeedback.stats,
+      });
+    }
   }
   return { success: true, feature: result.feature, tokenUsage: result.tokenUsage };
 });
@@ -287,10 +422,19 @@ resolver.define('checkRefineFeedback', async ({ payload, context }) => {
 resolver.define('ask', async ({ payload, context }) => {
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+  const maskedPrompt = maskPiiText(payload.message ?? '', piiEnabled);
+  const maskedHistory = maskPiiInAnswers(
+    (payload.history ?? []).map((item: any) => ({
+      question: String(item?.role ?? ''),
+      answer: String(item?.content ?? ''),
+    })),
+    piiEnabled,
+  );
 
   const [wiContext, similarItems] = await Promise.all([
-    config.wiConfig.enabled ? retrieveWiContext(payload.message, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
-    findSimilarStories(payload.message, config, payload.projectKey || '*'),
+    config.wiConfig.enabled ? retrieveWiContext(maskedPrompt.text, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
+    findSimilarStories(maskedPrompt.text, config, payload.projectKey || '*'),
   ]);
 
   const systemPrompt = buildAskSystemPrompt({
@@ -300,11 +444,42 @@ resolver.define('ask', async ({ payload, context }) => {
   });
 
   const reply = await askQuestion({
-    message: payload.message,
-    history: payload.history ?? [],
+    message: maskedPrompt.text,
+    history: (payload.history ?? []).map((h: any, idx: number) => ({
+      role: h.role,
+      content: maskedHistory.answers[idx]?.answer ?? h.content,
+    })),
     systemPrompt,
     config,
   });
+
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+    await saveTransparencyReport({
+      sessionId: String(payload.sessionId ?? 'chat'),
+      turnType: 'ask',
+      actorAccountId: accountId,
+      provider: config.generatorConfig.provider,
+      model: config.generatorConfig.arModel,
+      projectKey: payload.projectKey || '*',
+      requirementExcerpt: String(payload.message ?? '').slice(0, 240),
+      decisionSummary: [
+        'Response grounded in domain context, work instructions, and retrieved backlog examples.',
+      ],
+      contextUsage: {
+        similarItemsCount: similarItems.length,
+        wiContextChars: wiContext.text.length,
+      },
+      piiMasking: {
+        enabled: piiEnabled,
+        totalRedactions: maskedPrompt.stats.totalRedactions + maskedHistory.stats.totalRedactions,
+        byType: {
+          ...maskedPrompt.stats.byType,
+          ...maskedHistory.stats.byType,
+        },
+      },
+    });
+  }
 
   return { success: true, reply, similarItems };
 });
@@ -524,7 +699,44 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
   }
   
   const result = await saveConfig(current);
+  await appendComplianceAuditEvent({
+    actorAccountId: (context as { accountId?: string })?.accountId ?? 'unknown',
+    category: 'config',
+    action: 'PROJECT_CONFIG_UPDATED',
+    details: {
+      projectKey,
+      updated: {
+        arMapping: !!arMapping,
+        domainContext: domainContext !== undefined,
+        goldSources: !!goldSources,
+        backlogStatuses: Array.isArray(backlogStatuses),
+      },
+    },
+    enabled: Boolean(current.compliance?.auditTrailEnabled),
+  });
   return { success: result };
+});
+
+resolver.define('listComplianceAuditEvents', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  const events = await listComplianceAuditEvents(payload?.limit ?? 100);
+  return { success: true, events };
+});
+
+resolver.define('listTransparencyReports', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  const reports = await listTransparencyReports({
+    sessionId: payload?.sessionId,
+    turnType: payload?.turnType,
+    limit: payload?.limit ?? 100,
+  });
+  return { success: true, reports };
+});
+
+resolver.define('getJiraAuditRecords', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  const records = await fetchRecentJiraAuditRecords(payload?.limit ?? 50);
+  return { success: true, records };
 });
 
 resolver.define('removeWiDoc', async ({ payload, context }) => {

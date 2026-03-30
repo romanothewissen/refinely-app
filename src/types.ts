@@ -82,7 +82,13 @@ export interface TenantConfig {
     topKChunks: number;
     maxChars: number;
   };
-  tier: 'free' | 'standard' | 'premium';
+  tier: 'free' | 'standard' | 'premium' | 'enterprise';
+  compliance: {
+    enabled: boolean;
+    transparencyReportsEnabled: boolean;
+    piiMaskingEnabled: boolean;
+    auditTrailEnabled: boolean;
+  };
   issueLinkType: string;  // default: 'Relates to'
   arMappings: ProjectArMapping[];
   domainContexts: ProjectDomainContext[];
@@ -121,6 +127,12 @@ export const DEFAULT_CONFIG: TenantConfig = {
     maxChars: 100000,
   },
   tier: 'free',
+  compliance: {
+    enabled: false,
+    transparencyReportsEnabled: false,
+    piiMaskingEnabled: false,
+    auditTrailEnabled: false,
+  },
   issueLinkType: 'Relates to',
   arMappings: [
     {
@@ -263,6 +275,39 @@ export interface ConversationTurn {
   timestamp: string;
 }
 
+export interface PiiMaskingStats {
+  enabled: boolean;
+  totalRedactions: number;
+  byType: Record<string, number>;
+}
+
+export interface TransparencyReport {
+  reportId: string;
+  sessionId: string;
+  turnType: 'generate' | 'clarify' | 'refine' | 'ask';
+  actorAccountId?: string;
+  provider?: string;
+  model?: string;
+  projectKey?: string;
+  requirementExcerpt?: string;
+  decisionSummary: string[];
+  contextUsage?: Record<string, unknown>;
+  tokenUsage?: TokenUsageSummary;
+  piiMasking: PiiMaskingStats;
+  createdAt: string;
+}
+
+export interface ComplianceAuditEvent {
+  eventId: string;
+  timestamp: string;
+  actorAccountId?: string;
+  category: 'config' | 'security' | 'prompt' | 'runtime';
+  action: string;
+  details: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+}
+
 export interface Conversation {
   sessionId: string;
   title: string;
@@ -355,6 +400,16 @@ export const TIER_LIMITS: Record<TenantConfig['tier'], TierLimits> = {
     maxUsers: 50,
   },
   premium: {
+    generationsPerMonth: -1,
+    maxGoldSources: -1,
+    maxWiDocs: -1,
+    similarStories: true,
+    exportExcel: true,
+    customBranding: true,
+    processTaxonomy: true,
+    maxUsers: -1,
+  },
+  enterprise: {
     generationsPerMonth: -1,
     maxGoldSources: -1,
     maxWiDocs: -1,

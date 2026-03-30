@@ -49,8 +49,8 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
     <div className={`space-y-2.5 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className={`p-1 rounded ${tier === 'premium' ? 'bg-purple-100 text-purple-600' : tier === 'standard' ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'bg-[var(--rf-bg)] text-[var(--rf-text-secondary)]'}`}>
-            {tier === 'premium' ? <ShieldCheck className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
+          <div className={`p-1 rounded ${(tier === 'premium' || tier === 'enterprise') ? 'bg-purple-100 text-purple-600' : tier === 'standard' ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'bg-[var(--rf-bg)] text-[var(--rf-text-secondary)]'}`}>
+            {(tier === 'premium' || tier === 'enterprise') ? <ShieldCheck className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
           </div>
           <div>
             <h4 className="text-xs font-semibold text-[var(--rf-text)] leading-tight">{tierName} Plan</h4>

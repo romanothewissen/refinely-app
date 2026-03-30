@@ -6,11 +6,14 @@
  */
 
 import { chat } from '@forge/llm';
+import { PiiMaskingStats } from '../types';
+import { maskPiiText } from '../services/compliance';
 
 export interface LlmResponse {
   text: string;
   inputTokens?: number;
   outputTokens?: number;
+  piiMasking?: PiiMaskingStats;
 }
 
 export interface LlmCallOptions {
@@ -25,22 +28,42 @@ export interface LlmCallOptions {
   openaiBaseUrl?: string;
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
   noFallback?: boolean;
+  piiMaskingEnabled?: boolean;
 }
 
 export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
+  const maskedSystem = maskPiiText(opts.systemPrompt, !!opts.piiMaskingEnabled);
+  const maskedUser = maskPiiText(opts.userMessage, !!opts.piiMaskingEnabled);
+  const piiMasking: PiiMaskingStats = {
+    enabled: !!opts.piiMaskingEnabled,
+    totalRedactions: maskedSystem.stats.totalRedactions + maskedUser.stats.totalRedactions,
+    byType: Object.entries({ ...maskedSystem.stats.byType, ...maskedUser.stats.byType }).reduce((acc, [k]) => {
+      acc[k] = (maskedSystem.stats.byType[k] ?? 0) + (maskedUser.stats.byType[k] ?? 0);
+      return acc;
+    }, {} as Record<string, number>),
+  };
+
+  const effectiveOpts: LlmCallOptions = {
+    ...opts,
+    systemPrompt: maskedSystem.text,
+    userMessage: maskedUser.text,
+  };
+
   if (opts.provider === 'gemini') {
-    return callGemini(opts);
+    const result = await callGemini(effectiveOpts);
+    return { ...result, piiMasking };
   }
   if (opts.provider === 'openai') {
-    return callOpenAI(opts);
+    const result = await callOpenAI(effectiveOpts);
+    return { ...result, piiMasking };
   }
 
   try {
     const response = await chat({
       model: opts.model,
       messages: [
-        { role: 'system', content: opts.systemPrompt },
-        { role: 'user', content: opts.userMessage },
+        { role: 'system', content: effectiveOpts.systemPrompt },
+        { role: 'user', content: effectiveOpts.userMessage },
       ],
       max_completion_tokens: opts.maxTokens ?? 8192,
     });
@@ -52,6 +75,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
       text: text.trim(),
       inputTokens: response.usage?.input_tokens,
       outputTokens: response.usage?.output_tokens,
+      piiMasking,
     };
   } catch (err) {
     if (opts.noFallback || !shouldFallbackToGemini(err)) {
@@ -59,9 +83,11 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     }
     // Fallback to whichever external provider has an API key configured
     if (opts.openaiApiKey || process.env.OPENAI_API_KEY) {
-      return callOpenAI(opts);
+      const result = await callOpenAI(effectiveOpts);
+      return { ...result, piiMasking };
     }
-    return callGemini(opts);
+    const result = await callGemini(effectiveOpts);
+    return { ...result, piiMasking };
   }
 }
 
@@ -244,6 +270,7 @@ export async function callLlmJson<T>(opts: {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   noFallback?: boolean;
+  piiMaskingEnabled?: boolean;
 }): Promise<T> {
   const result = await callLlmJsonWithUsage<T>(opts);
   return result.data;
@@ -260,19 +287,29 @@ export async function callLlmJsonWithUsage<T>(opts: {
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   noFallback?: boolean;
-}): Promise<{ data: T; usage: { input: number; output: number } }> {
+  piiMaskingEnabled?: boolean;
+}): Promise<{ data: T; usage: { input: number; output: number }; piiMasking?: PiiMaskingStats }> {
   let lastError: Error | null = null;
   let totalInput = 0;
   let totalOutput = 0;
+  const piiMaskingTotals: PiiMaskingStats = { enabled: !!opts.piiMaskingEnabled, totalRedactions: 0, byType: {} };
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await callLlm(opts);
     totalInput += res.inputTokens ?? 0;
     totalOutput += res.outputTokens ?? 0;
+    if (res.piiMasking?.enabled) {
+      piiMaskingTotals.enabled = true;
+      piiMaskingTotals.totalRedactions += res.piiMasking.totalRedactions;
+      Object.entries(res.piiMasking.byType).forEach(([k, v]) => {
+        piiMaskingTotals.byType[k] = (piiMaskingTotals.byType[k] ?? 0) + v;
+      });
+    }
     try {
       return {
         data: extractJson<T>(res.text),
         usage: { input: totalInput, output: totalOutput },
+        piiMasking: piiMaskingTotals,
       };
     } catch (err) {
       lastError = err as Error;

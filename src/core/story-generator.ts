@@ -321,6 +321,9 @@ export async function generateFeatures(opts: {
     provider: generatorConfig.provider,
     geminiApiKey: generatorConfig.geminiApiKey,
     geminiBaseUrl: generatorConfig.geminiBaseUrl,
+    openaiApiKey: generatorConfig.openaiApiKey,
+    openaiBaseUrl: generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
 
   // Build user message — include all context
@@ -452,6 +455,9 @@ export async function generateClarifyingQuestions(opts: {
     provider: config.generatorConfig.provider,
     geminiApiKey: config.generatorConfig.geminiApiKey,
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   });
 
   let totalInputTokens = raw.usage.input;
@@ -474,6 +480,9 @@ export async function generateClarifyingQuestions(opts: {
       provider: config.generatorConfig.provider,
       geminiApiKey: config.generatorConfig.geminiApiKey,
       geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+      openaiApiKey: config.generatorConfig.openaiApiKey,
+      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+      piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
     });
     totalInputTokens += topUpRaw.usage.input;
     totalOutputTokens += topUpRaw.usage.output;
@@ -532,6 +541,9 @@ export async function evaluateSufficiency(opts: {
     provider: opts.config.generatorConfig.provider,
     geminiApiKey: opts.config.generatorConfig.geminiApiKey,
     geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
   });
 
   return result;
@@ -568,6 +580,9 @@ export async function refineFeatures(opts: {
     provider: config.generatorConfig.provider,
     geminiApiKey: config.generatorConfig.geminiApiKey,
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   });
 
   return {
@@ -606,6 +621,9 @@ export async function refineSingleFeature(opts: {
     provider: config.generatorConfig.provider,
     geminiApiKey: config.generatorConfig.geminiApiKey,
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   });
 
   const refined = result.data.features?.[0];
@@ -654,6 +672,9 @@ export async function checkRefineFeedbackSufficiency(opts: {
     provider: opts.config.generatorConfig.provider,
     geminiApiKey: opts.config.generatorConfig.geminiApiKey,
     geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
   });
 
   return result;
@@ -670,6 +691,9 @@ export async function generateSessionTitle(requirement: string, config: TenantCo
     provider: config.generatorConfig.provider,
     geminiApiKey: config.generatorConfig.geminiApiKey,
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   });
   return res.text.replace(/^["']|["']$/g, '').trim() || requirement.slice(0, 60);
 }
@@ -699,6 +723,9 @@ export async function askQuestion(opts: {
     provider: opts.config.generatorConfig.provider,
     geminiApiKey: opts.config.generatorConfig.geminiApiKey,
     geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
+    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
   });
 
   return res.text;

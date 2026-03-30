@@ -68,7 +68,13 @@ export interface TenantConfig {
     topKChunks: number;
     maxChars: number;
   };
-  tier: 'free' | 'team' | 'enterprise';
+  tier: 'free' | 'standard' | 'premium' | 'enterprise';
+  compliance: {
+    enabled: boolean;
+    transparencyReportsEnabled: boolean;
+    piiMaskingEnabled: boolean;
+    auditTrailEnabled: boolean;
+  };
   issueLinkType: string;  // default: 'Relates to'
   backlogStatusScopes: ProjectBacklogStatusScope[];
 }
@@ -105,6 +111,12 @@ export const DEFAULT_CONFIG: TenantConfig = {
     maxChars: 100000,
   },
   tier: 'free',
+  compliance: {
+    enabled: false,
+    transparencyReportsEnabled: false,
+    piiMaskingEnabled: false,
+    auditTrailEnabled: false,
+  },
   issueLinkType: 'Relates to',
   backlogStatusScopes: [],
 };
@@ -299,24 +311,34 @@ export interface TierLimits {
 
 export const TIER_LIMITS: Record<TenantConfig['tier'], TierLimits> = {
   free: {
-    generationsPerMonth: 20,
+    generationsPerMonth: 5,
     maxGoldSources: 1,
     maxWiDocs: 2,
     similarStories: false,
     exportExcel: false,
     customBranding: false,
     processTaxonomy: false,
-    maxUsers: 3,
+    maxUsers: 5,
   },
-  team: {
-    generationsPerMonth: 200,
-    maxGoldSources: 3,
-    maxWiDocs: 10,
-    similarStories: true,
+  standard: {
+    generationsPerMonth: 250,
+    maxGoldSources: 5,
+    maxWiDocs: 15,
+    similarStories: false,
     exportExcel: true,
     customBranding: false,
     processTaxonomy: false,
-    maxUsers: 25,
+    maxUsers: 50,
+  },
+  premium: {
+    generationsPerMonth: -1,
+    maxGoldSources: -1,
+    maxWiDocs: -1,
+    similarStories: true,
+    exportExcel: true,
+    customBranding: true,
+    processTaxonomy: true,
+    maxUsers: -1,
   },
   enterprise: {
     generationsPerMonth: -1,

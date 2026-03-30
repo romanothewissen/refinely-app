@@ -15,6 +15,7 @@ import { retrieveWiContext } from '../core/wi-ingestion';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { getConfig } from '../services/tenant-config';
 import { entityGet, entitySet, KEYS } from '../services/cache';
+import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error';
@@ -66,6 +67,10 @@ export async function handler(event: { body: GenerationEvent }) {
   };
 
   try {
+    const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+    const maskedRequirement = maskPiiText(requirement, piiEnabled);
+    const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
+    const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
     const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
     await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectLabel}. initializing…`);
@@ -75,10 +80,10 @@ export async function handler(event: { body: GenerationEvent }) {
         ? fetchGoldExamples(config.goldSources, 8)
         : Promise.resolve([]),
       config.wiConfig.enabled
-        ? retrieveWiContext(requirement, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
+        ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
         : Promise.resolve({ text: '', docs: [] }),
       config.tier !== 'free'
-        ? findSimilarStories(requirement, config, projectKey)
+        ? findSimilarStories(maskedRequirement.text, config, projectKey)
         : Promise.resolve([]),
     ]);
 
@@ -90,8 +95,8 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const result = await generateFeatures({
       requirement,
-      clarifyAnswers,
-      attachmentText,
+      clarifyAnswers: maskedAnswers.answers,
+      attachmentText: maskedAttachment.text,
       goldExamplesText,
       similarStoriesText,
       wiContextText: wiContext.text,
@@ -137,7 +142,7 @@ export async function handler(event: { body: GenerationEvent }) {
     await saveConversationTurn(
       sessionId,
       accountId,
-      requirement,
+      maskedRequirement.text,
       result.features,
       similarStories,
       config.generatorConfig.arModel,
@@ -145,9 +150,53 @@ export async function handler(event: { body: GenerationEvent }) {
       result.tokenUsage,
     );
 
+    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId,
+        turnType: 'generate',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: config.generatorConfig.arModel,
+        projectKey,
+        requirementExcerpt: maskedRequirement.text.slice(0, 240),
+        decisionSummary: [
+          `Generated features using ${goldItems.length} curated examples and ${similarStories.length} backlog references.`,
+          `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
+          'Acceptance requirements were produced in a dedicated second pass for consistency.',
+        ],
+        contextUsage: {
+          goldExamplesCount: goldItems.length,
+          similarStoriesCount: similarStories.length,
+          wiDocsCount: wiContext.docs.length,
+          domainRolesCount: config.domainRoles?.length ?? 0,
+        },
+        tokenUsage: result.tokenUsage,
+        piiMasking: {
+          enabled: piiEnabled,
+          totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions + maskedAnswers.stats.totalRedactions,
+          byType: {
+            ...maskedRequirement.stats.byType,
+            ...maskedAttachment.stats.byType,
+            ...maskedAnswers.stats.byType,
+          },
+        },
+      });
+    }
+    await appendComplianceAuditEvent({
+      actorAccountId: accountId,
+      category: 'runtime',
+      action: 'GENERATION_WORKFLOW_EXECUTED',
+      details: {
+        sessionId,
+        projectKey,
+        model: config.generatorConfig.arModel,
+      },
+      enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+    });
+
     // Generate session title (non-critical; should not fail the generation run)
     try {
-      const title = await generateSessionTitle(requirement, config);
+      const title = await generateSessionTitle(maskedRequirement.text, config);
       await updateConversationTitle(sessionId, accountId, title);
     } catch (titleErr) {
       console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
