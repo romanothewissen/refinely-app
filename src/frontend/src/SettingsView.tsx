@@ -22,6 +22,15 @@ interface JiraIssueType { name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
 interface JiraField { id: string; name: string }
 interface ProjectBacklogStatusScope { projectKey: string; statuses: string[] }
+interface BacklogDiagnostics {
+  projectKey: string;
+  configuredStatuses: string[];
+  jqlUsed: string;
+  totalProjectIssues: number;
+  doneCategoryIssues: number;
+  matchingScopeIssues: number;
+  likelyReason: string;
+}
 
 interface WiDocRow {
   docId: string;
@@ -69,6 +78,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [backlogStatusScopes, setBacklogStatusScopes] = useState<ProjectBacklogStatusScope[]>([]);
   const [activeArProj, setActiveArProj] = useState(initialProjectKey); // Global context selector
   const [backlogCacheInfo, setBacklogCacheInfo] = useState<{ projectKey: string; builtAt?: string; issueCount: number; stale: boolean } | null>(null);
+  const [backlogDiagnostics, setBacklogDiagnostics] = useState<BacklogDiagnostics | null>(null);
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
 
   // Domain State
@@ -111,6 +121,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   function detectDefaultStatuses(statuses: JiraStatus[]): string[] {
     if (!statuses.length) return [];
+    const byCategory = statuses
+      .filter(s => (s.statusCategory?.name || '').toLowerCase() === 'done')
+      .map(s => s.name);
+    if (byCategory.length) {
+      return [...new Set(byCategory)];
+    }
     const doneKeywords = ['done', 'completed', 'deployed', 'released', 'closed', 'resolved'];
     const matches = statuses
       .map(s => s.name)
@@ -182,8 +198,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   useEffect(() => {
     if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
       loadBacklogCacheInfo(activeArProj);
+      loadBacklogDiagnostics(activeArProj);
     } else {
       setBacklogCacheInfo(null);
+      setBacklogDiagnostics(null);
     }
   }, [activeTab, activeArProj]);
 
@@ -229,6 +247,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     }
   }
 
+  async function loadBacklogDiagnostics(projectKey: string) {
+    try {
+      const res = await api.diagnoseBacklogCache(projectKey) as any;
+      if (res?.success) {
+        setBacklogDiagnostics(res.diagnostics ?? null);
+      } else {
+        setBacklogDiagnostics(null);
+      }
+    } catch (e) {
+      console.error('Could not load backlog diagnostics', e);
+      setBacklogDiagnostics(null);
+    }
+  }
+
   async function handleRefreshBacklogCache(projectKey = activeArProj) {
     if (!projectKey || projectKey === '*') return null;
     setIsRefreshingBacklogCache(true);
@@ -242,7 +274,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           stale: false,
         };
         setBacklogCacheInfo(nextInfo);
-        return nextInfo;
+        setBacklogDiagnostics(res.diagnostics ?? null);
+        return { ...nextInfo, diagnostics: res.diagnostics ?? null };
       } else {
         alert(res?.error || 'Backlog cache refresh failed.');
       }
@@ -698,6 +731,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       issueTypes={issueTypes || []} statuses={statuses || []} onProjectSelect={onProjectSelect}
                       newSource={newSource || {}} setNewSource={setNewSource} addGoldSource={addGoldSource}
                       backlogCacheInfo={backlogCacheInfo}
+                      backlogDiagnostics={backlogDiagnostics}
                       isRefreshingBacklogCache={isRefreshingBacklogCache}
                       onRefreshBacklogCache={handleRefreshBacklogCache}
                     />
@@ -858,7 +892,7 @@ function ProjectConfigurationManager({
   projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts, goldSources, setGoldSources,
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
   activeArProj, isAdmin, isProjectAdmin, issueTypes, statuses, onProjectSelect, newSource, setNewSource, addGoldSource,
-  backlogCacheInfo, isRefreshingBacklogCache, onRefreshBacklogCache,
+  backlogCacheInfo, backlogDiagnostics, isRefreshingBacklogCache, onRefreshBacklogCache,
 }: any) {
   const currentMapping = arMappings.find((m: any) => m.projectKey === activeArProj) || {
     projectKey: activeArProj, mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [],
@@ -936,11 +970,13 @@ function ProjectConfigurationManager({
       });
       const refreshed = await onRefreshBacklogCache(activeArProj);
       if (refreshed) {
-        setProjectNotice(
-          refreshed.issueCount > 0
-            ? `Backlog cache rebuilt with ${refreshed.issueCount} issues.`
-            : 'Backlog cache rebuilt, but 0 matching issues were found for the selected statuses.',
-        );
+        if (refreshed.issueCount > 0) {
+          setProjectNotice(`Backlog cache rebuilt with ${refreshed.issueCount} issues.`);
+        } else if (refreshed.diagnostics?.likelyReason) {
+          setProjectNotice(`Backlog cache rebuilt, but returned 0 items. ${refreshed.diagnostics.likelyReason}`);
+        } else {
+          setProjectNotice('Backlog cache rebuilt, but 0 matching issues were found for the selected statuses.');
+        }
       }
     } catch (e: any) {
       alert(e.message);
@@ -1011,6 +1047,28 @@ function ProjectConfigurationManager({
                  <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">Weekly scheduled rebuild plus manual refresh anytime.</div>
                </div>
              </div>
+
+             {backlogDiagnostics && (
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-4 space-y-2">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Why This Count</div>
+                 <div className="text-xs text-[var(--rf-text-secondary)]">{backlogDiagnostics.likelyReason}</div>
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                   <div className="rounded-xl bg-[var(--rf-surface-soft)] px-3 py-2">
+                     <div className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Project Issues</div>
+                     <div className="mt-1 font-semibold text-[var(--rf-text)]">{backlogDiagnostics.totalProjectIssues}</div>
+                   </div>
+                   <div className="rounded-xl bg-[var(--rf-surface-soft)] px-3 py-2">
+                     <div className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Done Category</div>
+                     <div className="mt-1 font-semibold text-[var(--rf-text)]">{backlogDiagnostics.doneCategoryIssues}</div>
+                   </div>
+                   <div className="rounded-xl bg-[var(--rf-surface-soft)] px-3 py-2">
+                     <div className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Matches Scope</div>
+                     <div className="mt-1 font-semibold text-[var(--rf-text)]">{backlogDiagnostics.matchingScopeIssues}</div>
+                   </div>
+                 </div>
+                 <div className="text-[11px] text-[var(--rf-text-tertiary)] font-mono break-all">JQL: {backlogDiagnostics.jqlUsed}</div>
+               </div>
+             )}
 
              <div className="flex items-center justify-between gap-3">
                <div className="text-xs font-semibold text-[var(--rf-text)]">

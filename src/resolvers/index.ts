@@ -28,7 +28,7 @@ import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
 import { refreshGoldCache, getCacheInfo } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
-import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache } from '../core/similar-stories';
+import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm } from '../core/llm';
 import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
@@ -532,6 +532,18 @@ resolver.define('getBacklogCacheInfo', async ({ payload }) => {
   return { success: true, ...info };
 });
 
+resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const eventConfig = await getConfig();
+  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const projectKey = payload?.projectKey || '*';
+  if (!projectKey || projectKey === '*') {
+    return { success: false, error: 'Select a project before diagnosing the backlog cache.' };
+  }
+  const diagnostics = await diagnoseBacklogCache(projectKey, config);
+  return { success: true, diagnostics };
+});
+
 resolver.define('refreshCache', async ({ context }) => {
   await ensureAdmin(context);
   const eventConfig = await getConfig();
@@ -553,7 +565,8 @@ resolver.define('refreshBacklogCache', async ({ payload, context }) => {
     return { success: false, error: 'Select a project before refreshing the backlog cache.' };
   }
   const cache = await refreshBacklogCache(projectKey, config);
-  return { success: true, ...cache };
+  const diagnostics = await diagnoseBacklogCache(projectKey, config);
+  return { success: true, ...cache, diagnostics };
 });
 
 // ─── Conversation History ─────────────────────────────────────────────────────

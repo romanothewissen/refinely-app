@@ -70,6 +70,7 @@ export const api = {
   getCacheInfo: () => invoke('getCacheInfo'),
   refreshCache: () => invoke('refreshCache'),
   getBacklogCacheInfo: (projectKey: string) => invoke('getBacklogCacheInfo', { projectKey }),
+  diagnoseBacklogCache: (projectKey: string) => invoke('diagnoseBacklogCache', { projectKey }),
   refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),
 
   // History

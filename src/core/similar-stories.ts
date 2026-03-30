@@ -32,6 +32,16 @@ interface BacklogIndexCache {
   docs: BacklogDoc[];
 }
 
+export interface BacklogCacheDiagnostics {
+  projectKey: string;
+  configuredStatuses: string[];
+  jqlUsed: string;
+  totalProjectIssues: number;
+  doneCategoryIssues: number;
+  matchingScopeIssues: number;
+  likelyReason: string;
+}
+
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_INDEX_ITEMS = 1000;
 
@@ -131,18 +141,12 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
   const pageSize = 50;
 
   while (docs.length < MAX_INDEX_ITEMS) {
-    const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jql: `project = ${projectKey} AND ${statusClause} AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
-        maxResults: pageSize,
-        startAt,
-        fields,
-      }),
+    const data = await runSearchJql({
+      jql: `project = ${projectKey} AND ${statusClause} AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
+      maxResults: pageSize,
+      startAt,
+      fields,
     });
-
-    const data = await response.json() as { issues?: Array<{ key: string; fields: Record<string, unknown> }>; total?: number };
     const issues = data.issues ?? [];
     if (!issues.length) break;
 
@@ -166,9 +170,42 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
   };
 }
 
+export async function diagnoseBacklogCache(projectKey: string, config: TenantConfig): Promise<BacklogCacheDiagnostics> {
+  const configuredStatuses = getConfiguredBacklogStatuses(config, projectKey);
+  const statusClause = buildBacklogStatusClause(config, projectKey);
+  const baseJql = `project = ${projectKey} AND issuetype not in subTaskIssueTypes()`;
+  const jqlUsed = `${baseJql} AND ${statusClause}`;
+
+  const [totalProjectIssues, doneCategoryIssues, matchingScopeIssues] = await Promise.all([
+    countIssues(baseJql),
+    countIssues(`${baseJql} AND statusCategory = Done`),
+    countIssues(jqlUsed),
+  ]);
+
+  let likelyReason = 'Backlog cache scope matches issues.';
+  if (totalProjectIssues === 0) {
+    likelyReason = 'No issues are visible to the app for this project, or the project has no issues.';
+  } else if (doneCategoryIssues === 0) {
+    likelyReason = 'This project has no issues in status category Done.';
+  } else if (matchingScopeIssues === 0 && configuredStatuses.length > 0) {
+    likelyReason = 'Selected backlog statuses do not match any issues in this project.';
+  } else if (matchingScopeIssues === 0) {
+    likelyReason = 'No issues match the active backlog scope filter.';
+  }
+
+  return {
+    projectKey,
+    configuredStatuses,
+    jqlUsed,
+    totalProjectIssues,
+    doneCategoryIssues,
+    matchingScopeIssues,
+    likelyReason,
+  };
+}
+
 function buildBacklogStatusClause(config: TenantConfig, projectKey: string): string {
-  const scopedStatuses = config.backlogStatusScopes?.find(scope => scope.projectKey === projectKey)?.statuses ?? [];
-  const uniqueStatuses = [...new Set(scopedStatuses.map(status => String(status).trim()).filter(Boolean))];
+  const uniqueStatuses = getConfiguredBacklogStatuses(config, projectKey);
   if (!uniqueStatuses.length) {
     return 'statusCategory = Done';
   }
@@ -178,6 +215,45 @@ function buildBacklogStatusClause(config: TenantConfig, projectKey: string): str
     .join(', ');
 
   return `status in (${quotedStatuses})`;
+}
+
+function getConfiguredBacklogStatuses(config: TenantConfig, projectKey: string): string[] {
+  const scopedStatuses = config.backlogStatusScopes?.find(scope => scope.projectKey === projectKey)?.statuses ?? [];
+  return [...new Set(scopedStatuses.map(status => String(status).trim()).filter(Boolean))];
+}
+
+async function countIssues(jql: string): Promise<number> {
+  const data = await runSearchJql({
+    jql,
+    maxResults: 0,
+    startAt: 0,
+    fields: ['key'],
+  });
+  return data.total ?? 0;
+}
+
+async function runSearchJql(payload: {
+  jql: string;
+  maxResults: number;
+  startAt: number;
+  fields: string[];
+}): Promise<{ issues?: Array<{ key: string; fields: Record<string, unknown> }>; total?: number }> {
+  const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Jira search failed (${response.status}): ${raw.slice(0, 280)}`);
+  }
+
+  try {
+    return JSON.parse(raw) as { issues?: Array<{ key: string; fields: Record<string, unknown> }>; total?: number };
+  } catch {
+    throw new Error('Jira search returned non-JSON response.');
+  }
 }
 
 function buildFieldList(config: TenantConfig, projectKey: string): string[] {
