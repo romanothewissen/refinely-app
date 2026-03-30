@@ -4,22 +4,18 @@
 
 @layer base {
   :root {
-    /* Corporate palette with restrained depth */
-    --rf-bg: #f6f8fb;
-    --rf-bg-accent: #eef4fb;
-    --rf-surface: rgba(255, 255, 255, 0.96);
+    /* Flat corporate palette — Atlassian-adjacent */
+    --rf-bg: #f4f5f7;
+    --rf-surface: #ffffff;
     --rf-surface-raised: #ffffff;
-    --rf-surface-soft: #f8fbff;
-    --rf-border: #d9e2ec;
-    --rf-border-subtle: #e8edf3;
-    --rf-border-strong: #b7c5d6;
+    --rf-border: #dfe1e6;
+    --rf-border-subtle: #ebecf0;
     --rf-text: #172b4d;
     --rf-text-secondary: #626f86;
     --rf-text-tertiary: #8993a4;
     --rf-brand: #0052cc;
     --rf-brand-hover: #0747a6;
     --rf-brand-subtle: #deebff;
-    --rf-brand-muted: #edf4ff;
     --rf-success: #00875a;
     --rf-success-subtle: #e3fcef;
     --rf-warning: #ff8b00;
@@ -27,8 +23,8 @@
     --rf-danger: #de350b;
     --rf-danger-subtle: #ffebe6;
     --rf-shadow-sm: 0 1px 2px rgba(9, 30, 66, 0.08);
-    --rf-shadow-md: 0 10px 28px rgba(9, 30, 66, 0.08), 0 1px 3px rgba(9, 30, 66, 0.04);
-    --rf-shadow-lg: 0 18px 40px rgba(9, 30, 66, 0.12), 0 4px 12px rgba(9, 30, 66, 0.05);
+    --rf-shadow-md: 0 4px 12px rgba(9, 30, 66, 0.08), 0 1px 3px rgba(9, 30, 66, 0.04);
+    --rf-shadow-lg: 0 8px 24px rgba(9, 30, 66, 0.1), 0 2px 6px rgba(9, 30, 66, 0.04);
     --rf-radius-sm: 4px;
     --rf-radius-md: 6px;
     --rf-radius-lg: 8px;
@@ -40,9 +36,7 @@
     margin: 0;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background:
-      radial-gradient(circle at top left, rgba(38, 132, 255, 0.08), transparent 24%),
-      linear-gradient(180deg, #f9fbff 0%, var(--rf-bg) 52%, var(--rf-bg-accent) 100%);
+    background: var(--rf-bg);
     color: var(--rf-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -57,69 +51,6 @@
 }
 
 @layer utilities {
-  .rf-shell {
-    position: relative;
-  }
-
-  .rf-shell::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0)),
-      linear-gradient(90deg, rgba(9, 30, 66, 0.03), transparent 18%, transparent 82%, rgba(9, 30, 66, 0.03));
-    opacity: 0.85;
-  }
-
-  .rf-sidebar-surface {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.95));
-    backdrop-filter: blur(12px);
-  }
-
-  .rf-panel {
-    background: var(--rf-surface);
-    border: 1px solid rgba(183, 197, 214, 0.76);
-    box-shadow: var(--rf-shadow-md);
-  }
-
-  .rf-panel-soft {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.92));
-    border: 1px solid rgba(183, 197, 214, 0.7);
-    box-shadow: var(--rf-shadow-sm);
-  }
-
-  .rf-focus-ring {
-    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-  }
-
-  .rf-focus-ring:focus-within {
-    border-color: rgba(38, 132, 255, 0.4);
-    box-shadow: 0 0 0 3px rgba(38, 132, 255, 0.12), var(--rf-shadow-sm);
-  }
-
-  .rf-canvas-surface {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(249, 251, 254, 0.94)),
-      linear-gradient(135deg, rgba(222, 235, 255, 0.42), rgba(255, 255, 255, 0));
-  }
-
-  .rf-subtle-grid {
-    position: relative;
-  }
-
-  .rf-subtle-grid::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-image:
-      linear-gradient(rgba(9, 30, 66, 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(9, 30, 66, 0.025) 1px, transparent 1px);
-    background-size: 26px 26px;
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.04));
-  }
-
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
