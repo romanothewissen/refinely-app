@@ -515,6 +515,7 @@ export default function App() {
           onCreate={handleCreateJiraFeature}
           feature={features[activePushFeatureIdx]}
           originIssueKey={originIssueKey ?? undefined}
+          sessionId={sessionId}
         />
       )}
 

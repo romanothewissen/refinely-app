@@ -8,11 +8,12 @@ interface JiraModalProps {
   onCreate: (formData: Record<string, any>) => void;
   feature?: any;
   originIssueKey?: string;
+  sessionId?: string;
 }
 
 type ModalState = 'form' | 'creating' | 'success' | 'error';
 
-export function JiraModal({ onClose, onCreate, feature, originIssueKey }: JiraModalProps) {
+export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionId }: JiraModalProps) {
   const [projectKey, setProjectKey] = useState('');
   const [issueType, setIssueType] = useState('Story');
   const [projects, setProjects] = useState<{ key: string; name: string }[]>([]);
@@ -44,10 +45,12 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey }: JiraMo
     try {
       const res = await api.createIssue({
         feature,
+        featureId: feature?.id,
         projectKey,
         issueType,
         reporterAccountId: accountId || undefined,
         originIssueKey,
+        sessionId,
       }) as any;
 
       if (res.success) {

@@ -46,11 +46,13 @@ export const api = {
   // Jira
   createIssue: (payload: {
     feature: unknown;
+    featureId?: string;
     projectKey: string;
     issueType: string;
     reporterAccountId?: string;
     assigneeAccountId?: string;
     originIssueKey?: string;
+    sessionId?: string;
   }) => invoke('createIssue', p(payload)),
   searchUsers: (query: string) => invoke('searchUsers', { query }),
   discoverJira: (projectKey?: string) => invoke('discoverJira', { projectKey }),

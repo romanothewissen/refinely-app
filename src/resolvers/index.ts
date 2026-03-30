@@ -350,6 +350,30 @@ resolver.define('createIssue', async ({ payload, context }) => {
       }
     }
 
+    if (payload.sessionId && payload.featureId) {
+      try {
+        const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+        const convKey = KEYS.userConversations(accountId, payload.sessionId);
+        const existing = await entityGet<{ turns: Array<Record<string, any>> }>(convKey);
+        if (existing?.turns?.length) {
+          const lastTurn = existing.turns[existing.turns.length - 1];
+          if (Array.isArray(lastTurn.features)) {
+            lastTurn.features = lastTurn.features.map((feature: Record<string, any>) => {
+              if (feature?.id !== payload.featureId) return feature;
+              return {
+                ...feature,
+                jiraIssueKey: result.issueKey,
+                jiraIssueUrl: result.issueUrl,
+              };
+            });
+            await entitySet(convKey, existing);
+          }
+        }
+      } catch (persistErr) {
+        console.warn('[createIssue] Failed to persist Jira issue key on generated feature:', persistErr);
+      }
+    }
+
     return { success: true, ...result, linkedTo, linkError };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
