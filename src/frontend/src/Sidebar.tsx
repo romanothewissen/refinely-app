@@ -67,6 +67,10 @@ export function Sidebar({
       ? `${activeGoldSources.length} active golden-example connector${activeGoldSources.length !== 1 ? 's' : ''}`
       : 'No golden-example connector is active for this project';
   const activeWiDocs = wiDocs.filter(doc => (doc.targetProjects ?? ['*']).includes('*') || (doc.targetProjects ?? []).includes(projectKey));
+  const availableProject = availableProjects.find(p => p.key === projectKey);
+  const projectTitle = projectKey === '*'
+    ? 'Standalone workspace'
+    : `${projectKey}${availableProject?.name ? ` · ${availableProject.name}` : ''}`;
 
   return (
     <aside 
@@ -113,28 +117,28 @@ export function Sidebar({
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.22em] pl-0.5">Requirement Scope</label>
             <p className="mt-1 text-xs text-slate-500 max-w-[26ch]">Describe the outcome, constraints, edge cases, and business context.</p>
           </div>
-          <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 shadow-sm">
+          <button
+            type="button"
+            onClick={() => onOpenProjectSettings('jira', projectKey)}
+            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
+          >
             {originIssueKey ? `From ${originIssueKey}` : 'New brief'}
-          </div>
+          </button>
         </div>
 
-        <div className="rf-surface relative overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_14px_28px_-24px_rgba(15,23,42,0.24)]">
-          <div className="flex items-start justify-between gap-3">
+        <div className="rf-surface rounded-[28px] border border-slate-200/80 bg-white/96 p-4 shadow-[0_18px_42px_-30px_rgba(15,23,42,0.24)]">
+          <div className="flex items-start justify-between gap-3 pb-4">
             <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Project scope</div>
-              <div className="mt-1 text-sm font-semibold text-slate-800">
-                {projectKey === '*'
-                  ? 'Standalone workspace'
-                  : `${projectKey}${availableProjects.find(p => p.key === projectKey)?.name ? ` • ${availableProjects.find(p => p.key === projectKey)?.name}` : ''}`}
-              </div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Project Context</div>
+              <div className="mt-1 text-sm font-semibold text-slate-800">{projectTitle}</div>
               <p className="mt-1 text-[11px] text-slate-500">
-                Choose the Jira project whose golden examples and rules should be used.
+                Choose the Jira project whose golden examples and instructions should power this run.
               </p>
             </div>
             <select
               value={projectKey}
               onChange={(e) => setProjectKey(e.target.value)}
-              className="shrink-0 min-w-[150px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15"
+              className="shrink-0 min-w-[160px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15"
             >
               <option value="*">No project selected</option>
               {availableProjects.map(project => (
@@ -144,72 +148,71 @@ export function Sidebar({
               ))}
             </select>
           </div>
+
           {projectKey === '*' && availableProjects.length > 0 && (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-              Select a project to unlock project-scoped golden examples. Until then, generation runs in generic mode.
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+              Select a project to unlock project-scoped golden examples and work instructions.
             </div>
           )}
-        </div>
 
-        <button
-          type="button"
-          onClick={() => onOpenProjectSettings('jira', projectKey)}
-          className="rf-surface relative overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_14px_28px_-24px_rgba(15,23,42,0.24)] text-left transition-all hover:border-blue-200 hover:shadow-[0_18px_36px_-26px_rgba(37,99,235,0.32)] focus:outline-none focus:ring-2 focus:ring-blue-500/15"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Connector health</div>
-              <div className="mt-1 text-sm font-semibold text-slate-800">{matchedConnectorLabel}</div>
-              <p className="mt-1 text-[11px] text-slate-500">
-                This is what the generator will use for golden examples right now.
-              </p>
-            </div>
-            <div className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] border ${activeGoldSources.length > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-              {activeGoldSources.length > 0 ? 'Connected' : 'Not connected'}
-            </div>
-          </div>
-          {activeGoldSources.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {activeGoldSources.slice(0, 4).map(source => (
-                <span key={source.key} className="rf-chip inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium text-blue-700" title={`${source.project ?? 'Unknown project'} • ${source.issuetype ?? 'Unknown type'}`}>
-                  {source.key}
-                </span>
-              ))}
-            </div>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onOpenProjectSettings('domain', projectKey)}
-          className="rf-surface relative overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_14px_28px_-24px_rgba(15,23,42,0.24)] text-left transition-all hover:border-blue-200 hover:shadow-[0_18px_36px_-26px_rgba(37,99,235,0.32)] focus:outline-none focus:ring-2 focus:ring-blue-500/15"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Work instructions</div>
-              <div className="mt-1 text-sm font-semibold text-slate-800">
-                {activeWiDocs.length > 0
-                  ? `${activeWiDocs.length} reference document${activeWiDocs.length !== 1 ? 's' : ''} active`
-                  : 'No reference documents active'}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => onOpenProjectSettings('jira', projectKey)}
+              className="rounded-2xl border border-slate-200 bg-white/92 px-4 py-3 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/15"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Connector Health</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-800">{matchedConnectorLabel}</div>
+                </div>
+                <div className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] border ${activeGoldSources.length > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                  {activeGoldSources.length > 0 ? 'Connected' : 'Not connected'}
+                </div>
               </div>
-              <p className="mt-1 text-[11px] text-slate-500">
-                These are the docs that can be pulled into the model for this project.
-              </p>
-            </div>
-            <div className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] border ${activeWiDocs.length > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-              {activeWiDocs.length > 0 ? 'Ingested' : 'Empty'}
-            </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {activeGoldSources.length > 0 ? (
+                  activeGoldSources.slice(0, 3).map(source => (
+                    <span key={source.key} className="rf-chip inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                      {source.key}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-slate-500">Open settings to wire the selected project to golden examples.</span>
+                )}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenProjectSettings('domain', projectKey)}
+              className="rounded-2xl border border-slate-200 bg-white/92 px-4 py-3 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/15"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Work Instructions</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-800">
+                    {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
+                  </div>
+                </div>
+                <div className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] border ${activeWiDocs.length > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                  {activeWiDocs.length > 0 ? 'Ingested' : 'Empty'}
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {activeWiDocs.length > 0 ? (
+                  activeWiDocs.slice(0, 3).map(doc => (
+                    <span key={doc.docId} className="rf-chip inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                      {doc.filename}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-slate-500">Open settings to upload or map project docs.</span>
+                )}
+              </div>
+            </button>
           </div>
-          {activeWiDocs.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {activeWiDocs.slice(0, 4).map(doc => (
-                <span key={doc.docId} className="rf-chip inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium text-blue-700" title={`${doc.chunkCount} chunks`}>
-                  {doc.filename}
-                </span>
-              ))}
-            </div>
-          )}
-        </button>
+        </div>
 
         <div className="rf-surface relative overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 px-4 py-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.24)]">
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 via-sky-400 to-cyan-300" />
