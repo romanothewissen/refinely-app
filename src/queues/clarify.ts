@@ -14,7 +14,7 @@ import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
-import { entitySet, KEYS } from '../services/cache';
+import { entityGet, entitySet, KEYS } from '../services/cache';
 
 function resolveRelevantGoldSources(
   sources: ClarifyEvent['config']['goldSources'],
@@ -30,7 +30,7 @@ function resolveRelevantGoldSources(
 }
 
 export async function handler(event: { body: ClarifyEvent }) {
-  const { sessionId, requirement, attachmentText, license, config: eventConfig, projectKey } = event.body;
+  const { sessionId, accountId, requirement, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
   // Resolve project-specific context
   const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
@@ -57,7 +57,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         : Promise.resolve([]),
     ]);
 
-    const { questions, tokenUsage } = await generateClarifyingQuestions({
+    const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
       requirement,
       attachmentText,
       wiContextText: wiContext.text,
@@ -83,6 +83,10 @@ export async function handler(event: { body: ClarifyEvent }) {
         summary: item.summary,
         relevanceScore: item.relevanceScore,
       })),
+      ambiguityAssessment: {
+        ...ambiguityAssessment,
+        generatedQuestions: questions.length,
+      },
       tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
@@ -91,6 +95,8 @@ export async function handler(event: { body: ClarifyEvent }) {
         chunkCount: doc.chunkCount,
       })),
     };
+
+    await saveClarifyTurn(sessionId, accountId, requirement, clarifyContext);
 
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'complete',
@@ -105,5 +111,29 @@ export async function handler(event: { body: ClarifyEvent }) {
       error: err instanceof Error ? err.message : 'Clarify failed',
       updatedAt: Date.now(),
     });
+  }
+}
+
+async function saveClarifyTurn(
+  sessionId: string,
+  accountId: string,
+  requirement: string,
+  clarifyContext: ClarifyContextMeta,
+) {
+  try {
+    const key = KEYS.userConversations(accountId, sessionId);
+    const existing = await entityGet<{ turns: unknown[] }>(key) ?? { turns: [] };
+    existing.turns.push({
+      turnType: 'clarify',
+      requirement,
+      features: [],
+      similarStories: [],
+      clarifyContext,
+      tokenUsage: clarifyContext.tokenUsage,
+      timestamp: new Date().toISOString(),
+    });
+    await entitySet(key, existing);
+  } catch (err) {
+    console.warn('[clarify-queue] Failed to save clarify turn:', err);
   }
 }

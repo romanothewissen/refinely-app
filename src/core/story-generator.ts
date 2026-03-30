@@ -70,6 +70,16 @@ interface RequirementAssessment {
   questionPlan: ClarifyQuestionPlan;
   featurePlan: FeaturePlan;
   arPlan: ArPlan;
+  ambiguityScore: number;
+  ambiguityReasons: string[];
+}
+
+interface ClarifyAmbiguityAssessment {
+  level: 'clear' | 'medium' | 'vague';
+  score: number;
+  reasons: string[];
+  questionPlan: { min: number; max: number; target: number };
+  generatedQuestions: number;
 }
 
 function assessRequirement(input: {
@@ -94,19 +104,27 @@ function assessRequirement(input: {
   const hasRichContext = attachment.length > 250 || wi.length > 250 || gold.length > 250 || similar.length > 250 || answers.length >= 4;
   const hasConstraints = /(must|should|cannot|can't|only|except|unless|sla|kpi|compliance|permission|role|workflow|edge case|error|fallback|validation|audit|security)/i
     .test(requirement);
-  const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|better|faster|enhance|fix this|update this|handle this|do it)/i
+  const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|optimal|better|faster|enhance|fix this|update this|handle this|do it)/i
     .test(requirement);
   const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception)/i
     .test(requirement);
-  const roleMentions = (requirement.match(/\b(admin|manager|planner|dispatcher|technician|agent|user|customer|analyst|qa|developer|operator)\b/ig) ?? []).length;
+  const roleMentions = (requirement.match(/\b(admin|manager|planner|dispatcher|technician|fse|field service engineer|agent|user|customer|analyst|qa|developer|operator)\b/ig) ?? []).length;
   const exceptionMentions = (requirement.match(/\b(error|fail|exception|edge|invalid|conflict|fallback|retry|permission|duplicate)\b/ig) ?? []).length;
+
+  const ambiguityPenalty =
+    (reqWords <= 25 ? 1 : 0) +
+    (reqSentences <= 1 ? 1 : 0) +
+    (hasAmbiguousTokens ? 1 : 0) +
+    (hasBroadScopeSignals ? 1 : 0) +
+    (roleMentions === 0 ? 1 : 0) +
+    (exceptionMentions === 0 ? 1 : 0);
 
   const clarityScore =
     (reqWords >= 45 ? 1 : 0) +
     (reqSentences >= 3 ? 1 : 0) +
     (hasRichContext ? 1 : 0) +
     (hasConstraints ? 1 : 0) -
-    (hasAmbiguousTokens ? 1 : 0);
+    (ambiguityPenalty >= 3 ? 1 : 0);
 
   const complexityScore =
     (hasConstraints ? 1 : 0) +
@@ -158,24 +176,123 @@ function assessRequirement(input: {
       ? { min: 4, max: 6, target: 5, depth: 'thorough' }
       : featurePlan.complexity === 'low'
         ? { min: 2, max: 3, target: 2, depth: 'lean' }
-        : { min: 3, max: 5, target: 4, depth: 'standard' };
+      : { min: 3, max: 5, target: 4, depth: 'standard' };
+
+  const ambiguityReasons: string[] = [];
+  if (reqWords <= 25) ambiguityReasons.push('Requirement is short and likely underspecified.');
+  if (reqSentences <= 1) ambiguityReasons.push('Requirement is expressed as a single sentence without decomposition clues.');
+  if (!hasRichContext) ambiguityReasons.push('No attachment, work-instruction context, or prior Q&A was available.');
+  if (hasBroadScopeSignals) ambiguityReasons.push('Request implies multiple dimensions (priority, due dates, skills, or dependencies).');
+  if (roleMentions === 0) ambiguityReasons.push('Primary role is not explicit.');
+  if (exceptionMentions === 0) ambiguityReasons.push('Edge cases and failure handling are not defined.');
+  if (!hasConstraints) ambiguityReasons.push('Business constraints are still implicit.');
 
   return {
     questionPlan,
     featurePlan,
     arPlan,
+    ambiguityScore: Math.max(0, ambiguityPenalty - (hasConstraints ? 1 : 0)),
+    ambiguityReasons,
   };
 }
 
-function inferClarifyQuestionPlan(input: {
+function inferClarifyAssessment(input: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
   goldExamplesText?: string;
   similarStoriesText?: string;
   clarifyAnswers?: ClarifyAnswer[];
-}): ClarifyQuestionPlan {
-  return assessRequirement(input).questionPlan;
+}): { questionPlan: ClarifyQuestionPlan; ambiguityScore: number; ambiguityReasons: string[] } {
+  const assessed = assessRequirement(input);
+  return {
+    questionPlan: assessed.questionPlan,
+    ambiguityScore: assessed.ambiguityScore,
+    ambiguityReasons: assessed.ambiguityReasons,
+  };
+}
+
+function normaliseQuestionKey(question: string): string {
+  return question
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
+  let candidates: any[] = [];
+  if (Array.isArray(rawData)) {
+    candidates = rawData;
+  } else if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).questions)) {
+    candidates = (rawData as any).questions;
+  } else if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).features)) {
+    candidates = (rawData as any).features;
+  }
+
+  return candidates
+    .filter(x => typeof x === 'object' && x !== null && typeof (x as any).question === 'string')
+    .map(x => ({
+      category: String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow',
+      question: String((x as any).question ?? '').trim(),
+      suggestions: Array.isArray((x as any).suggestions)
+        ? (x as any).suggestions.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 5)
+        : [],
+    }))
+    .filter(q => q.question.length > 0);
+}
+
+function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
+  const seen = new Set<string>();
+  const result: ClarifyQuestion[] = [];
+  for (const q of questions) {
+    const key = normaliseQuestionKey(q.question);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(q);
+  }
+  return result;
+}
+
+function buildFallbackQuestions(requirement: string, needed: number): ClarifyQuestion[] {
+  const templates: ClarifyQuestion[] = [
+    {
+      category: 'Roles & Personas',
+      question: 'Which role is responsible for accepting, reordering, or overriding the proposed schedule?',
+      suggestions: ['Dispatcher', 'Team lead', 'Field service engineer (FSE)', 'No one; fully automatic'],
+    },
+    {
+      category: 'Functional Flow',
+      question: 'How should criticality and due date be weighted when they conflict for two jobs?',
+      suggestions: ['Criticality always wins', 'Due date always wins', 'Configurable weighted score', 'Tie-break by travel time'],
+    },
+    {
+      category: 'Business Rules & Exceptions',
+      question: 'What should happen when the optimal slot violates skill, parts, or availability constraints?',
+      suggestions: ['Skip and pick next best', 'Escalate for manual assignment', 'Allow temporary override', 'Flag as unschedulable'],
+    },
+    {
+      category: 'Trigger & Context',
+      question: 'When should schedules be generated or recalculated?',
+      suggestions: ['Nightly batch', 'On each new request', 'On demand by dispatcher', 'On request update events'],
+    },
+    {
+      category: 'Success & Measurement',
+      question: 'What defines an optimal schedule outcome for this process?',
+      suggestions: ['Max SLA compliance', 'Highest critical jobs completed first', 'Balanced utilization', 'Minimum overdue work'],
+    },
+  ];
+
+  const seed = requirement.toLowerCase().includes('schedule')
+    ? templates
+    : templates.map((q, idx) => ({
+        ...q,
+        question: idx === 0
+          ? 'Which user role owns the final decision for this requirement?'
+          : q.question,
+      }));
+
+  return seed.slice(0, Math.max(0, needed));
 }
 
 // ─── Main Generation ──────────────────────────────────────────────────────────
@@ -311,7 +428,7 @@ export async function generateClarifyingQuestions(opts: {
   goldExamplesText: string;
   similarStoriesText: string;
   config: TenantConfig;
-}): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary }> {
+}): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
   const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config } = opts;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
@@ -319,7 +436,8 @@ export async function generateClarifyingQuestions(opts: {
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
   if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, 5000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
-  const questionPlan = inferClarifyQuestionPlan({ requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText });
+  const assessment = inferClarifyAssessment({ requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText });
+  const questionPlan = assessment.questionPlan;
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
@@ -336,28 +454,60 @@ export async function generateClarifyingQuestions(opts: {
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
   });
 
-  // Validate: must be array OR object with a questions array
-  let questions: any[] = [];
-  if (Array.isArray(raw.data)) {
-    questions = raw.data;
-  } else if (raw.data && typeof raw.data === 'object' && Array.isArray((raw.data as any).questions)) {
-    questions = (raw.data as any).questions;
-  } else if (raw.data && typeof raw.data === 'object' && Array.isArray((raw.data as any).features)) {
-     // fallback for models confusing decomposition with clarify
-     questions = (raw.data as any).features;
+  let totalInputTokens = raw.usage.input;
+  let totalOutputTokens = raw.usage.output;
+  let filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
+
+  if (filteredQuestions.length < questionPlan.min) {
+    const needed = questionPlan.min - filteredQuestions.length;
+    const topUpUserMessage = [
+      contextParts.join('\n\n'),
+      `ALREADY GENERATED QUESTIONS (do not repeat):\n${filteredQuestions.map((q, idx) => `${idx + 1}. ${q.question}`).join('\n') || '(none)'}`,
+      `Generate exactly ${needed} additional clarifying questions that are non-overlapping with the existing list.`,
+      'Return JSON array only in this shape: [{"category":"...","question":"...","suggestions":["..."]}]',
+    ].join('\n\n---\n\n');
+
+    const topUpRaw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
+      model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+      systemPrompt: system,
+      userMessage: topUpUserMessage,
+      provider: config.generatorConfig.provider,
+      geminiApiKey: config.generatorConfig.geminiApiKey,
+      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    });
+    totalInputTokens += topUpRaw.usage.input;
+    totalOutputTokens += topUpRaw.usage.output;
+
+    filteredQuestions = dedupeQuestions([
+      ...filteredQuestions,
+      ...parseQuestionCandidates(topUpRaw.data),
+    ]).slice(0, questionPlan.max);
   }
 
-  const filteredQuestions = questions
-    .filter(x => typeof x === 'object' && x !== null && 'question' in x)
-    .slice(0, questionPlan.max);
+  if (filteredQuestions.length < questionPlan.min) {
+    const needed = questionPlan.min - filteredQuestions.length;
+    filteredQuestions = dedupeQuestions([
+      ...filteredQuestions,
+      ...buildFallbackQuestions(requirement, needed),
+    ]).slice(0, questionPlan.max);
+  }
+
+  const totalTokens = totalInputTokens + totalOutputTokens;
 
   return {
     questions: filteredQuestions,
     tokenUsage: {
-      input: raw.usage.input,
-      output: raw.usage.output,
-      total: raw.usage.input + raw.usage.output,
-      byStage: { clarify: toStageUsage(raw.usage) },
+      input: totalInputTokens,
+      output: totalOutputTokens,
+      total: totalTokens,
+      byStage: { clarify: { input: totalInputTokens, output: totalOutputTokens, total: totalTokens } },
+    },
+    ambiguityAssessment: {
+      level: questionPlan.clarity,
+      score: assessment.ambiguityScore,
+      reasons: assessment.ambiguityReasons.slice(0, 4),
+      questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
+      generatedQuestions: filteredQuestions.length,
     },
   };
 }
@@ -459,8 +609,26 @@ export async function refineSingleFeature(opts: {
   });
 
   const refined = result.data.features?.[0];
+  const feedbackLower = feedback.toLowerCase();
+  const touchesSummary = /(summary|title|name|rename)/i.test(feedbackLower);
+  const touchesDescription = /(description|as a|so that|reword|rewrite)/i.test(feedbackLower);
+  const touchesStoryPoints = /(story point|story points|estimate|estimation|sizing|size)/i.test(feedbackLower);
+  const touchesProcessCode = /(process code|process_code|taxonomy|code)/i.test(feedbackLower);
+  const candidate = refined ? normaliseFeature(refined) : feature;
+  const stableResult: Feature = {
+    ...feature,
+    id: feature.id,
+    summary: touchesSummary ? candidate.summary : feature.summary,
+    description: touchesDescription ? candidate.description : feature.description,
+    acceptanceRequirements: candidate.acceptanceRequirements?.length
+      ? candidate.acceptanceRequirements
+      : feature.acceptanceRequirements,
+    storyPoints: touchesStoryPoints ? (candidate.storyPoints ?? feature.storyPoints) : feature.storyPoints,
+    processCode: touchesProcessCode ? (candidate.processCode ?? feature.processCode) : feature.processCode,
+  };
+
   return {
-    feature: refined ? normaliseFeature(refined) : feature,
+    feature: stableResult,
     tokenUsage: {
       input: result.usage.input,
       output: result.usage.output,

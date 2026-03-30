@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown } from 'lucide-react';
 import { api } from './hooks/useForge';
-import { UsageMeter } from './UsageMeter';
 import { router } from '@forge/bridge';
 
 // ─── Word-level diff utility ──────────────────────────────────────────────────
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
+type AcceptanceRequirement = { given: string; when: string; then: string };
 
 function wordDiff(oldText: string, newText: string): DiffToken[] {
   const oldWords = (oldText || '').split(/\b/);
@@ -42,9 +42,72 @@ function DiffText({ oldText, newText, fullHighlight = false, mode = 'redline' }:
   );
 }
 
+function normaliseWhitespace(text: string): string {
+  return (text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function tokenSet(text: string): Set<string> {
+  const tokens = normaliseWhitespace(text)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2);
+  return new Set(tokens);
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size && !b.size) return 1;
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) intersection += 1;
+  }
+  const union = new Set([...a, ...b]).size;
+  return union ? intersection / union : 0;
+}
+
+function arSimilarity(left: AcceptanceRequirement, right: AcceptanceRequirement): number {
+  const leftText = `${left.given} ${left.when} ${left.then}`.trim();
+  const rightText = `${right.given} ${right.when} ${right.then}`.trim();
+  const exact = normaliseWhitespace(leftText) === normaliseWhitespace(rightText);
+  if (exact) return 1;
+  return jaccard(tokenSet(leftText), tokenSet(rightText));
+}
+
+function alignAcceptanceRequirements(
+  original: AcceptanceRequirement[],
+  proposed: AcceptanceRequirement[],
+): Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> {
+  const usedOriginalIndices = new Set<number>();
+  const rows: Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> = [];
+
+  for (const nextAr of proposed) {
+    let bestIndex = -1;
+    let bestScore = 0;
+
+    for (let i = 0; i < original.length; i += 1) {
+      if (usedOriginalIndices.has(i)) continue;
+      const score = arSimilarity(original[i], nextAr);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    const matched = bestIndex >= 0 && bestScore >= 0.45;
+    if (matched) {
+      usedOriginalIndices.add(bestIndex);
+      rows.push({ proposed: nextAr, oldAr: original[bestIndex], oldIndex: bestIndex, isNew: false });
+    } else {
+      rows.push({ proposed: nextAr, isNew: true });
+    }
+  }
+
+  return rows;
+}
+
 // ─── AI Refine Popup ──────────────────────────────────────────────────────────
-function RefinePopup({ feature, onClose, onResult }: {
+function RefinePopup({ feature, sessionId, onClose, onResult }: {
   feature: Feature;
+  sessionId: string;
   onClose: () => void;
   onResult: (refined: Feature, tokenUsage?: { input: number; output: number; total: number }) => void;
 }) {
@@ -58,7 +121,7 @@ function RefinePopup({ feature, onClose, onResult }: {
     setLoading(true);
     setError('');
     try {
-      const res = await api.refineSingleFeature(feature, feedback) as any;
+      const res = await api.refineSingleFeature(feature, feedback, sessionId) as any;
       if (res.success && res.feature) {
         onResult(res.feature, res.tokenUsage);
       } else {
@@ -142,7 +205,7 @@ interface Feature {
   summary: string;
   description: string;
   markdown?: string;
-  acceptanceRequirements: Array<{ given: string; when: string; then: string }>;
+  acceptanceRequirements: AcceptanceRequirement[];
   isAccepted?: boolean;
   pendingRefinement?: Feature;
   pendingRemoval?: boolean;
@@ -160,9 +223,6 @@ interface MainContentProps {
   setSidebarOpen: (o: boolean) => void;
   sessionId: string;
   requirement: string;
-  tier: string;
-  usage: { currentMonth: number } | null;
-  limits: { generationsPerMonth: number } | null;
   generationContext?: {
     domainRolesUsed: string[];
     goldExamplesCount: number;
@@ -177,13 +237,14 @@ interface MainContentProps {
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   projectKey: string;
+  onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  tier, usage, limits, generationContext, projectKey
+  generationContext, projectKey, onWorkflowTokenUsage
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -278,6 +339,7 @@ export function MainContent({
         const refined = res.features;
         if (res.tokenUsage) {
           setLastAiTokenUsage({ label: 'Bulk refine', ...res.tokenUsage });
+          onWorkflowTokenUsage?.(res.tokenUsage);
         }
         setFeatures(prev => {
           return prev.map((f, i) => {
@@ -375,21 +437,18 @@ export function MainContent({
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-[var(--rf-bg)]">
       {/* Header */}
-      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white px-6 py-4 z-10 sticky top-0">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3 min-w-0">
+      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white px-5 py-3 z-10 sticky top-0">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
             {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-1 rounded-md hover:bg-[var(--rf-bg)] text-[var(--rf-text-secondary)] transition border border-[var(--rf-border)]" title="Open Sidebar">
+              <button onClick={() => setSidebarOpen(true)} className="p-1.5 -ml-0.5 rounded-md hover:bg-[var(--rf-bg)] text-[var(--rf-text-secondary)] transition border border-[var(--rf-border)]" title="Open Sidebar">
                 <Menu className="w-4 h-4" />
               </button>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold text-[var(--rf-text)]">Feature Canvas</h2>
-              <p className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">
-                Review, refine, and push backlog-ready features without losing the thread.
-              </p>
-              <div className="mt-2 inline-flex items-center gap-1.5 rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)]">
-                Project scope:
+              <div className="inline-flex items-center gap-1 rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--rf-text-secondary)]">
+                <span className="text-[var(--rf-text-tertiary)]">Scope</span>
                 <span className="font-semibold text-[var(--rf-text)]">
                   {projectKey === '*' ? 'Standalone workspace' : projectKey}
                 </span>
@@ -397,89 +456,84 @@ export function MainContent({
             </div>
           </div>
 
-          <div className="shrink-0">
-            <UsageMeter usage={usage} limits={limits} tier={tier} isCompact />
-          </div>
         </div>
 
         {hasFeatures && (
-          <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2">
-                <span className="inline-flex items-center rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text)]">
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2.5">
+            <div className="inline-flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text)]">
                   {features.length} Features
                   <span className="mx-1.5 text-[var(--rf-border)]">|</span>
                   {totalArCount} ARs
-                </span>
+              </span>
+              <span className="text-[11px] text-[var(--rf-text-tertiary)]">
+                {features.filter(f => f.isAccepted).length} accepted
+              </span>
+              {lastAiTokenUsage && (
                 <span className="text-[11px] text-[var(--rf-text-tertiary)]">
-                  {features.filter(f => f.isAccepted).length} accepted
+                  {lastAiTokenUsage.label}: {lastAiTokenUsage.total.toLocaleString()} tokens
                 </span>
-                {lastAiTokenUsage && (
-                  <span className="text-[11px] text-[var(--rf-text-tertiary)]">
-                    {lastAiTokenUsage.label}: {lastAiTokenUsage.total.toLocaleString()} tokens
-                  </span>
-                )}
-              </div>
+              )}
+            </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                {features.some(f => f.pendingRefinement) && (
-                  <>
-                    <button onClick={discardAllProposed} className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-md hover:text-[var(--rf-danger)] hover:border-red-300 transition">Discard All</button>
-                    <button onClick={acceptAllProposed} className="px-2.5 py-1.5 bg-[var(--rf-success)] hover:bg-green-700 text-white text-[11px] font-semibold rounded-md transition">Accept All Changes</button>
-                  </>
-                )}
+            <div className="flex flex-wrap items-center gap-2">
+              {features.some(f => f.pendingRefinement) && (
+                <>
+                  <button onClick={discardAllProposed} className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-md hover:text-[var(--rf-danger)] hover:border-red-300 transition">Discard All</button>
+                  <button onClick={acceptAllProposed} className="px-2.5 py-1.5 bg-[var(--rf-success)] hover:bg-green-700 text-white text-[11px] font-semibold rounded-md transition">Accept All</button>
+                </>
+              )}
 
-                <div className="relative">
-                  <button
-                    onClick={() => setShowBulkRefine(!showBulkRefine)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold transition ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]'}`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Refine All
-                  </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowBulkRefine(!showBulkRefine)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold transition ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]'}`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Refine All
+                </button>
 
-                  {showBulkRefine && (
-                    <div className="absolute right-0 top-full mt-2 w-[380px] bg-white rounded-lg border border-[var(--rf-border)] p-4 z-50 shadow-[var(--rf-shadow-lg)] slide-up">
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-[11px] font-semibold text-[var(--rf-text-secondary)] uppercase tracking-wide flex items-center gap-1.5">
-                           <Sparkles className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Bulk Refine
-                        </h4>
-                        <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-bg)] rounded-md transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
-                      </div>
-                      <textarea
-                        autoFocus
-                        placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
-                        value={bulkInput}
-                        onChange={(e) => setBulkInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                            handleBulkRefine();
-                          }
-                        }}
-                        className="w-full bg-[var(--rf-bg)] border border-[var(--rf-border)] rounded-md p-3 text-sm min-h-[100px] outline-none focus:ring-1 focus:ring-[var(--rf-brand)] focus:border-[var(--rf-brand)] transition resize-none mb-3"
-                      />
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[10px] text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
-                        <button
-                          onClick={handleBulkRefine}
-                          disabled={!bulkInput.trim() || isBulkRefining}
-                          className="px-4 py-1.5 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-xs font-semibold rounded-md transition active:scale-[0.98] disabled:opacity-50 flex items-center gap-1.5"
-                        >
-                          {isBulkRefining ? (
-                            <>
-                              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                              Refining...
-                            </>
-                          ) : (
-                            <>
-                              <Send className="w-3.5 h-3.5" /> Apply to All
-                            </>
-                          )}
-                        </button>
-                      </div>
+                {showBulkRefine && (
+                  <div className="absolute right-0 top-full mt-2 w-[380px] bg-white rounded-lg border border-[var(--rf-border)] p-4 z-50 shadow-[var(--rf-shadow-lg)] slide-up">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-[11px] font-semibold text-[var(--rf-text-secondary)] uppercase tracking-wide flex items-center gap-1.5">
+                         <Sparkles className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Bulk Refine
+                      </h4>
+                      <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-bg)] rounded-md transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
                     </div>
-                  )}
-                </div>
+                    <textarea
+                      autoFocus
+                      placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
+                      value={bulkInput}
+                      onChange={(e) => setBulkInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          handleBulkRefine();
+                        }
+                      }}
+                      className="w-full bg-[var(--rf-bg)] border border-[var(--rf-border)] rounded-md p-3 text-sm min-h-[100px] outline-none focus:ring-1 focus:ring-[var(--rf-brand)] focus:border-[var(--rf-brand)] transition resize-none mb-3"
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[10px] text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
+                      <button
+                        onClick={handleBulkRefine}
+                        disabled={!bulkInput.trim() || isBulkRefining}
+                        className="px-4 py-1.5 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-xs font-semibold rounded-md transition active:scale-[0.98] disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {isBulkRefining ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Refining...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" /> Apply to All
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -669,6 +723,10 @@ export function MainContent({
                         const propTitle = proposed.title || proposed.summary || '';
                         const origDesc = feature.description || feature.markdown || '';
                         const propDesc = proposed.description || proposed.markdown || '';
+                        const arDiffRows = alignAcceptanceRequirements(
+                          feature.acceptanceRequirements || [],
+                          proposed.acceptanceRequirements || [],
+                        );
                         return (
                           <div className="mb-3 p-3 rounded-md bg-[var(--rf-warning-subtle)] border border-amber-300">
                             <div className="flex items-center justify-between mb-2">
@@ -716,11 +774,12 @@ export function MainContent({
                                 <h4 className="text-xs font-semibold text-[var(--rf-text)] mb-1"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
                                 <div className="text-[11px] text-[var(--rf-text-secondary)] mb-2 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
                                 <div className="space-y-1.5">
-                                  {proposed.acceptanceRequirements.map((ar, i) => {
-                                    const oldAr = feature.acceptanceRequirements[i];
-                                    const isNew = !oldAr;
+                                  {arDiffRows.map((row, i) => {
+                                    const ar = row.proposed;
+                                    const oldAr = row.oldAr;
+                                    const isNew = row.isNew;
                                     return (
-                                      <div key={i} className={`p-2 rounded text-[11px] text-[var(--rf-text)] border ${isNew ? 'bg-[var(--rf-success-subtle)] border-green-300' : 'bg-white border-blue-100'}`}>
+                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2 rounded text-[11px] text-[var(--rf-text)] border ${isNew ? 'bg-[var(--rf-success-subtle)] border-green-300' : 'bg-white border-blue-100'}`}>
                                         {isNew && <div className="text-[9px] font-semibold text-[var(--rf-success)] uppercase tracking-wide mb-1">New AR</div>}
                                         {ar.given && <div><strong className="text-[var(--rf-brand)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
                                         {ar.when && <div><strong className="text-[var(--rf-brand)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
@@ -817,6 +876,7 @@ export function MainContent({
       {refinePopupIdx !== null && (
         <RefinePopup
           feature={features[refinePopupIdx]}
+          sessionId={sessionId}
           onClose={() => setRefinePopupIdx(null)}
           onResult={(refined, tokenUsage) => {
             setFeatures(prev => {
@@ -826,6 +886,7 @@ export function MainContent({
             });
             if (tokenUsage) {
               setLastAiTokenUsage({ label: 'Single refine', ...tokenUsage });
+              onWorkflowTokenUsage?.(tokenUsage);
             }
             setRefinePopupIdx(null);
           }}

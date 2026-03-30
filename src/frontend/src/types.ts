@@ -160,6 +160,13 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  ambiguityAssessment?: {
+    level: 'clear' | 'medium' | 'vague';
+    score: number;
+    reasons: string[];
+    questionPlan: { min: number; max: number; target: number };
+    generatedQuestions: number;
+  };
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
@@ -258,6 +265,7 @@ export interface WiDoc {
 
 export interface ClarifyEvent {
   sessionId: string;
+  accountId: string;
   requirement: string;
   attachmentText: string;
   config: TenantConfig;

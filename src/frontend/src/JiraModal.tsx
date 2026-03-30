@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, LayoutDashboard, UserPlus, UserCircle, Type, Activity, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { X, LayoutDashboard, Type, Activity, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { api } from './hooks/useForge';
 import { view, router } from '@forge/bridge';
 

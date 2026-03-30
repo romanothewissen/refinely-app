@@ -192,8 +192,10 @@ resolver.define('startClarify', async ({ payload, context }) => {
   try {
     const config = await getConfig();
     const clarifyQueue = new Queue({ key: 'clarify-queue' });
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     const event: ClarifyEvent = {
       sessionId: payload.sessionId,
+      accountId,
       requirement: payload.requirement,
       attachmentText: payload.attachmentText ?? '',
       config,
@@ -255,6 +257,18 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
     feedback: payload.feedback,
     config,
   });
+  const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : '';
+  if (sessionId) {
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    await updateLatestTurnFeatures(
+      sessionId,
+      accountId,
+      [result.feature],
+      'refine',
+      payload.feedback,
+      result.tokenUsage,
+    );
+  }
   return { success: true, feature: result.feature, tokenUsage: result.tokenUsage };
 });
 

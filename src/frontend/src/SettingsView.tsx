@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
   Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info
@@ -39,6 +39,25 @@ interface WiDocRow {
   chunkCount: number;
   uploadedAt: string;
 }
+
+const CLAUDE_MODELS = [
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fastest)' },
+  { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet (Balanced)' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus (Best logic)' },
+];
+const GEMINI_MODELS = [
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+  { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+];
+const OPENAI_MODELS = [
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast)' },
+  { id: 'gpt-4o', label: 'GPT-4o (Strong)' },
+  { id: 'gpt-4.5-preview', label: 'GPT-4.5 (Top logic)' },
+  { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
+  { id: 'o1-preview', label: 'o1 Preview' },
+];
 
 export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'billing'; initialProjectKey?: string }) {
   const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialTab);
@@ -191,9 +210,27 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     } catch (e) { console.error('Error loading config', e); }
   }
 
+  const checkProjectAdmin = useCallback(async () => {
+    if (!activeArProj || activeArProj === '*') {
+      setActiveProjAdmin(!!isAdmin);
+      return;
+    }
+    try {
+      const res = await api.checkIsAdmin({ projectKey: activeArProj }) as any;
+      if (res?.success) setActiveProjAdmin(!!res.isProjectAdmin);
+    } catch { setActiveProjAdmin(false); }
+  }, [activeArProj, isAdmin]);
+
+  const loadWiDocs = useCallback(async () => {
+    try {
+      const res = await api.listWiDocs(activeArProj) as any;
+      if (res.success !== false) setWiDocs(res.docs ?? []);
+    } catch (e: any) { console.error('Could not list documents', e); }
+  }, [activeArProj]);
+
   useEffect(() => {
     checkProjectAdmin();
-  }, [activeArProj]);
+  }, [checkProjectAdmin]);
 
   useEffect(() => {
     if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
@@ -212,24 +249,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       setBacklogStatusOptions([]);
     }
   }, [activeTab, activeArProj]);
-
-  async function checkProjectAdmin() {
-    if (!activeArProj || activeArProj === '*') {
-      setActiveProjAdmin(!!isAdmin);
-      return;
-    }
-    try {
-      const res = await api.checkIsAdmin({ projectKey: activeArProj }) as any;
-      if (res?.success) setActiveProjAdmin(!!res.isProjectAdmin);
-    } catch { setActiveProjAdmin(false); }
-  }
-
-  async function loadWiDocs() {
-    try {
-      const res = await api.listWiDocs(activeArProj) as any;
-      if (res.success !== false) setWiDocs(res.docs ?? []);
-    } catch (e: any) { console.error('Could not list documents', e); }
-  }
 
   async function loadBacklogCacheInfo(projectKey: string) {
     try {
@@ -299,7 +318,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   useEffect(() => {
     if (activeTab === 'domain') loadWiDocs();
-  }, [activeTab, activeArProj]);
+  }, [activeTab, loadWiDocs]);
 
   async function handleWiPdfDrop(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -479,25 +498,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (themeModel.startsWith('gemini-') || themeModel.startsWith('gpt-')) setThemeModel('claude-haiku-4-5-20251001');
     }
   }, [provider]); // eslint-disable-line
-
-  const CLAUDE_MODELS = [
-    { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fastest)' },
-    { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet (Balanced)' },
-    { id: 'claude-opus-4-6', label: 'Claude Opus (Best logic)' },
-  ];
-  const GEMINI_MODELS = [
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
-  ];
-  const OPENAI_MODELS = [
-    { id: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast)' },
-    { id: 'gpt-4o', label: 'GPT-4o (Strong)' },
-    { id: 'gpt-4.5-preview', label: 'GPT-4.5 (Top logic)' },
-    { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
-    { id: 'o1-preview', label: 'o1 Preview' },
-  ];
 
   const availableModels = useMemo(() => {
     if (provider === 'forge_llms') return CLAUDE_MODELS;

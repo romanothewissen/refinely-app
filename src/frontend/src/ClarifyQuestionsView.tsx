@@ -17,6 +17,13 @@ interface ClarifyProps {
     referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+    ambiguityAssessment?: {
+      level: 'clear' | 'medium' | 'vague';
+      score: number;
+      reasons: string[];
+      questionPlan: { min: number; max: number; target: number };
+      generatedQuestions: number;
+    };
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
@@ -27,6 +34,7 @@ interface ClarifyProps {
 
 export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMeta, sidebarOpen, setSidebarOpen }: ClarifyProps) {
   const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
+  const [showContextDetails, setShowContextDetails] = useState(false);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
 
@@ -82,6 +90,12 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
             <div>
               <h1 className="text-sm font-semibold text-[var(--rf-text)]">Requirement Discovery</h1>
               <p className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{answeredCount} of {questions.length} questions explored</p>
+              {contextMeta?.ambiguityAssessment && (
+                <p className="text-[11px] text-[var(--rf-text-secondary)] mt-0.5">
+                  {contextMeta.ambiguityAssessment.level === 'vague' ? 'Input appears unclear' : contextMeta.ambiguityAssessment.level === 'medium' ? 'Input appears partially clear' : 'Input appears clear'}.
+                  Asking {contextMeta.ambiguityAssessment.questionPlan.min}-{contextMeta.ambiguityAssessment.questionPlan.max} questions (generated {contextMeta.ambiguityAssessment.generatedQuestions}).
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -113,74 +127,58 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
       <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6">
         <div className="max-w-4xl mx-auto space-y-6">
           {contextMeta && (
-            <div className="rounded-lg border border-[var(--rf-border)] bg-white p-4 shadow-[var(--rf-shadow-sm)]">
-              <div className="flex flex-wrap items-center gap-4 text-xs">
-                <div className="font-semibold text-[var(--rf-text)]">Context used for clarifying questions</div>
-                <div className="text-[var(--rf-text-secondary)]">
-                  Project: {contextMeta.projectKey === '*' ? 'Standalone workspace' : contextMeta.projectKey}
-                </div>
-                <div className="text-[var(--rf-text-secondary)]">
-                  Domain guidance: {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}
-                </div>
-                <div className="text-[var(--rf-text-secondary)]">
-                  Attachment: {contextMeta.attachmentIncluded ? 'Included' : 'None'}
-                </div>
-                <div className="text-[var(--rf-text-secondary)]">
-                  Golden examples used: {contextMeta.goldExamplesCount ?? 0}
-                </div>
-                <div className="text-[var(--rf-text-secondary)]">
-                  Similar backlog stories used: {contextMeta.similarStoriesCount ?? 0}
-                </div>
-              </div>
-              {(contextMeta.referencedGoldExamples?.length ?? 0) > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {contextMeta.referencedGoldExamples?.map((example, i) => (
-                    <span
-                      key={`${example.source}-${example.key}-${i}`}
-                      className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200"
-                      title={example.summary}
-                    >
-                      {example.source}: {example.key}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {contextMeta.domainRolesUsed?.length > 0 && (
-                <div className="mt-2 text-xs text-[var(--rf-text-secondary)]">
-                  Roles: {contextMeta.domainRolesUsed.join(', ')}
-                </div>
-              )}
-              <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
-                <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <div className="font-semibold text-[var(--rf-text)]">
-                    Work instructions used: {contextMeta.wiDocsCount ?? 0}
+            <div className="rounded-lg border border-[var(--rf-border)] bg-white px-4 py-3 shadow-[var(--rf-shadow-sm)]">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="font-semibold text-[var(--rf-text)]">Context references available</div>
+                  <div className="text-[var(--rf-text-secondary)]">
+                    Project: {contextMeta.projectKey === '*' ? 'Standalone workspace' : contextMeta.projectKey}
                   </div>
+                  <div className="text-[var(--rf-text-secondary)]">Docs: {contextMeta.wiDocsCount ?? 0}</div>
+                  <div className="text-[var(--rf-text-secondary)]">Backlog refs: {contextMeta.similarStoriesCount ?? 0}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowContextDetails(v => !v)}
+                  className="text-[11px] font-medium text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
+                >
+                  {showContextDetails ? 'Hide details' : 'Show details'}
+                </button>
+              </div>
+
+              {showContextDetails && (
+                <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] space-y-2 text-xs">
+                  {contextMeta.ambiguityAssessment?.reasons?.length ? (
+                    <div className="text-[var(--rf-text-secondary)]">
+                      Why more questions: {contextMeta.ambiguityAssessment.reasons.join(' ')}
+                    </div>
+                  ) : null}
+                  <div className="text-[var(--rf-text-secondary)]">
+                    Domain guidance: {contextMeta.domainContextApplied ? 'Included' : 'Not configured'} | Attachment: {contextMeta.attachmentIncluded ? 'Included' : 'None'}
+                  </div>
+                  {contextMeta.domainRolesUsed?.length > 0 && (
+                    <div className="text-[var(--rf-text-secondary)]">Roles: {contextMeta.domainRolesUsed.join(', ')}</div>
+                  )}
+                  {(contextMeta.referencedGoldExamples?.length ?? 0) > 0 && (
+                    <div className="text-[var(--rf-text-secondary)]">
+                      Golden examples: {contextMeta.referencedGoldExamples?.map(example => `${example.source}:${example.key}`).join(', ')}
+                    </div>
+                  )}
                   {contextMeta.referencedWiDocs?.length ? (
                     <div className="text-[var(--rf-text-secondary)]">
-                      {contextMeta.referencedWiDocs.map(doc => doc.filename).join(', ')}
+                      Work instruction docs: {contextMeta.referencedWiDocs.map(doc => doc.filename).join(', ')}
                     </div>
-                  ) : (
-                    <div className="text-[var(--rf-text-tertiary)]">No project docs were matched for clarifying questions.</div>
-                  )}
-                </div>
-              </div>
-              <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
-                <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <div className="font-semibold text-[var(--rf-text)]">
-                    Similar backlog stories used: {contextMeta.similarStoriesCount ?? 0}
-                  </div>
+                  ) : null}
                   {contextMeta.referencedSimilarStories?.length ? (
                     <div className="text-[var(--rf-text-secondary)]">
-                      {contextMeta.referencedSimilarStories.map(story => story.key).join(', ')}
+                      Similar backlog stories: {contextMeta.referencedSimilarStories.map(story => story.key).join(', ')}
                     </div>
-                  ) : (
-                    <div className="text-[var(--rf-text-tertiary)]">No similar backlog stories were matched for clarifying questions.</div>
+                  ) : null}
+                  {contextMeta.tokenUsage && (
+                    <div className="text-[var(--rf-text-secondary)]">
+                      Tokens used for clarify: {contextMeta.tokenUsage.total.toLocaleString()} ({contextMeta.tokenUsage.input.toLocaleString()} in / {contextMeta.tokenUsage.output.toLocaleString()} out)
+                    </div>
                   )}
-                </div>
-              </div>
-              {contextMeta.tokenUsage && (
-                <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-xs text-[var(--rf-text-secondary)]">
-                  Tokens used for clarify: {contextMeta.tokenUsage.total.toLocaleString()} ({contextMeta.tokenUsage.input.toLocaleString()} in / {contextMeta.tokenUsage.output.toLocaleString()} out)
                 </div>
               )}
             </div>

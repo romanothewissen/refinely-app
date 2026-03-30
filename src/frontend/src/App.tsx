@@ -59,6 +59,12 @@ interface ClarifyContextMeta {
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
+interface WorkflowTokenUsage {
+  input: number;
+  output: number;
+  total: number;
+}
+
 /** Recursively extract plain text from an Atlassian Document Format node */
 function extractAdfText(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
@@ -66,6 +72,38 @@ function extractAdfText(node: unknown): string {
   if (typeof n.text === 'string') return n.text;
   if (Array.isArray(n.content)) return n.content.map(extractAdfText).filter(Boolean).join(' ');
   return '';
+}
+
+function addTokenUsage(
+  base: WorkflowTokenUsage | null,
+  next?: { input: number; output: number; total: number } | null,
+): WorkflowTokenUsage | null {
+  if (!next) return base;
+  return {
+    input: (base?.input ?? 0) + (next.input ?? 0),
+    output: (base?.output ?? 0) + (next.output ?? 0),
+    total: (base?.total ?? 0) + (next.total ?? 0),
+  };
+}
+
+function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  let total: WorkflowTokenUsage | null = null;
+
+  turns.forEach((turn: any) => {
+    if (turn?.tokenUsage) {
+      total = addTokenUsage(total, turn.tokenUsage);
+      return;
+    }
+    if (turn?.clarifyContext?.tokenUsage) {
+      total = addTokenUsage(total, turn.clarifyContext.tokenUsage);
+    }
+    if (turn?.generationContext?.tokenUsage) {
+      total = addTokenUsage(total, turn.generationContext.tokenUsage);
+    }
+  });
+
+  return total;
 }
 
 export default function App() {
@@ -77,6 +115,7 @@ export default function App() {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
+  const [workflowTokenUsage, setWorkflowTokenUsage] = useState<WorkflowTokenUsage | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
     try { return crypto.randomUUID(); } 
@@ -97,24 +136,24 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(window.innerWidth / 2);
   const isResizing = useRef(false);
 
-  const startResizing = React.useCallback((e: React.MouseEvent) => {
-    isResizing.current = true;
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', endResizing);
-  }, []);
-
-  const handleMouseMove = React.useCallback((e: MouseEvent) => {
+  const handleMouseMove = (e: MouseEvent) => {
     if (!isResizing.current) return;
     // Limit between 280px and 70% of screen
     const newWidth = Math.min(Math.max(300, e.clientX), window.innerWidth * 0.7);
     setSidebarWidth(newWidth);
-  }, []);
+  };
 
-  const endResizing = React.useCallback(() => {
+  const endResizing = () => {
     isResizing.current = false;
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', endResizing);
-  }, []);
+  };
+
+  const startResizing = (e: React.MouseEvent) => {
+    isResizing.current = true;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', endResizing);
+  };
   
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
@@ -216,11 +255,14 @@ export default function App() {
     api.getConversation(sessionId).then((res: any) => {
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
+        setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
         if (lastTurn?.features?.length > 0) {
           setFeatures(lastTurn.features);
           setGenerationContext(lastTurn.generationContext ?? null);
           setSidebarOpen(false);
         }
+      } else {
+        setWorkflowTokenUsage(null);
       }
     }).catch(() => {});
     loadHistory();
@@ -265,6 +307,7 @@ export default function App() {
         setFeatures(payload.features);
       }
       setGenerationContext(payload.generationContext ?? null);
+      setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
       setIsWorking(false);
       setIsGenerationStarted(false);
@@ -282,8 +325,10 @@ export default function App() {
   useClarifyRealtime(
     pendingClarifySessionId,
     ({ questions, contextMeta }) => {
+      const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
-      setClarifyContext((contextMeta as ClarifyContextMeta | undefined) ?? null);
+      setClarifyContext(nextClarifyContext);
+      setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
         setClarifyQuestions(questions);
         setIsWorking(false);
@@ -305,6 +350,7 @@ export default function App() {
     setFeatures([]);
     setGenerationContext(null);
     setClarifyContext(null);
+    setWorkflowTokenUsage(null);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -396,9 +442,11 @@ export default function App() {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
-        setRequirement(lastTurn.requirement ?? '');
-        setGenerationContext(lastTurn.generationContext ?? null);
-      }
+          setRequirement(lastTurn.requirement ?? '');
+          setGenerationContext(lastTurn.generationContext ?? null);
+          setClarifyContext(lastTurn.clarifyContext ?? null);
+        }
+        setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
         setViewMode('generate');
       }
     } catch {}
@@ -442,6 +490,8 @@ export default function App() {
                 setRequirement('');
                 setFeatures([]);
                 setGenerationContext(null);
+                setClarifyContext(null);
+                setWorkflowTokenUsage(null);
                 setClarifyQuestions([]);
                 setSidebarOpen(true);
                 setSidebarExiting(false);
@@ -457,6 +507,7 @@ export default function App() {
               tier={tier}
               usage={usage}
               limits={limits}
+              workflowTokenUsage={workflowTokenUsage}
               width={sidebarWidth}
               originIssueKey={originIssueKey}
               projectKey={projectKey}
@@ -523,11 +574,11 @@ export default function App() {
               setSidebarOpen={setSidebarOpen}
               sessionId={sessionId}
               requirement={requirement}
-              tier={tier}
-              usage={usage}
-              limits={limits}
               generationContext={generationContext}
               projectKey={projectKey}
+              onWorkflowTokenUsage={(usageDelta) => {
+                setWorkflowTokenUsage(prev => addTokenUsage(prev, usageDelta));
+              }}
             />
           )}
         </div>

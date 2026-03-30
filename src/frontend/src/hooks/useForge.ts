@@ -34,8 +34,8 @@ export const api = {
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>
     invoke('refineFeatures', { sessionId, requirement, features, feedback }),
-  refineSingleFeature: (feature: unknown, feedback: string) =>
-    invoke('refineSingleFeature', { feature, feedback }),
+  refineSingleFeature: (feature: unknown, feedback: string, sessionId?: string) =>
+    invoke('refineSingleFeature', { feature, feedback, sessionId }),
   checkRefineFeedback: (feature: unknown, feedback: string) =>
     invoke('checkRefineFeedback', { feature, feedback }),
 

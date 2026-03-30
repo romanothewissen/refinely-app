@@ -202,6 +202,7 @@ YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build f
 CLARITY ASSESSMENT:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
 - Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} clarifying questions (target ${opts.questionPlan.target}).
+- Never output fewer than ${opts.questionPlan.min} questions.
 - If the requirement is very clear and specific, stay near the lower bound.
 - If the requirement is vague or underspecified, stay near the upper bound.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
@@ -286,6 +287,8 @@ PRESERVATION RULES — do NOT change any of the following unless the feedback ex
 - summary: preserve unless feedback is about the title or name
 - acceptance_requirements: only add, remove, or edit the specific ARs the feedback refers to — leave all others word-for-word identical
 - description: only rewrite if feedback is explicitly about the description
+- Keep acceptance_requirements order stable; when splitting one AR, place the new AR(s) directly next to that original AR and keep all unrelated ARs in the same relative order
+- For untouched ARs, copy the text verbatim (no paraphrasing)
 
 CHANGE RULES:
 - Make the smallest possible edit that satisfies the feedback
