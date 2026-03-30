@@ -443,13 +443,14 @@ export function MainContent({
         {[1, 2, 3].map(i => (
           <motion.div
             key={i}
-            className="rounded-lg border border-[#DFE1E6] bg-white overflow-hidden shadow-[0_1px_3px_rgba(9,30,66,0.06),0_0_1px_rgba(9,30,66,0.04)]"
+            className="rounded-xl bg-white overflow-hidden"
+            style={{ boxShadow: 'var(--rf-shadow-sm)' }}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.12, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="flex">
-              <div className="w-1 shrink-0 bg-[#DFE1E6]" />
+              <div className="w-1.5 shrink-0 bg-[#DFE1E6]" />
               <div className="flex-1 p-5 space-y-3">
                 <div className="shimmer h-4 w-2/5 rounded" />
                 <div className="shimmer h-3 w-full rounded" />
@@ -467,9 +468,10 @@ export function MainContent({
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#F4F5F7]">
-      {/* Header */}
+      {/* Header — matches sidebar header: py-4, same shadow treatment */}
       <motion.header
-        className="shrink-0 border-b border-[#DFE1E6] bg-white px-5 py-3 z-10 sticky top-0 shadow-[0_1px_2px_rgba(9,30,66,0.04)]"
+        className="shrink-0 bg-white px-5 py-4 z-10 sticky top-0"
+        style={{ boxShadow: 'var(--rf-header-shadow)' }}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -479,7 +481,7 @@ export function MainContent({
             {!sidebarOpen && (
               <motion.button
                 onClick={() => setSidebarOpen(true)}
-                className="p-1.5 -ml-0.5 rounded-md hover:bg-[#F4F5F7] text-[#626F86] transition border border-[#DFE1E6]"
+                className="p-1.5 -ml-1 rounded-lg hover:bg-[#F4F5F7] text-[#626F86] transition"
                 title="Open Sidebar"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -487,21 +489,21 @@ export function MainContent({
                 <Menu className="w-4 h-4" />
               </motion.button>
             )}
-            <div className="min-w-0 flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-semibold text-[#172B4D]">Feature Canvas</h2>
-              <div className="inline-flex items-center gap-1 rounded border border-[#DFE1E6] bg-[#F4F5F7] px-2 py-0.5 text-[10px] font-medium text-[#626F86]">
+            <div className="min-w-0 flex flex-wrap items-center gap-2.5">
+              <h2 className="text-base font-bold text-[#172B4D] tracking-tight">Feature Canvas</h2>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F4F5F7] px-2.5 py-0.5 text-[10px] font-semibold text-[#626F86]">
                 <span className="text-[#8993A4]">Scope</span>
-                <span className="font-semibold text-[#172B4D]">
+                <span className="text-[#172B4D]">
                   {projectKey === '*' ? 'Standalone workspace' : projectKey}
                 </span>
-              </div>
+              </span>
             </div>
           </div>
           <div className="relative">
             <motion.button
               type="button"
               onClick={() => setShowTokenDetails(prev => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#DFE1E6] bg-white px-2 py-1 text-[11px] font-medium text-[#626F86] hover:bg-[#F4F5F7]"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#F4F5F7] hover:bg-[#EBECF0] px-2.5 py-1.5 text-[11px] font-semibold text-[#626F86] transition-colors"
               title="Workflow token usage"
               whileTap={{ scale: 0.97 }}
             >
@@ -539,14 +541,14 @@ export function MainContent({
         </div>
 
         {hasFeatures && (
-          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2.5">
-            <div className="inline-flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center rounded border border-[#DFE1E6] bg-[#F4F5F7] px-2.5 py-1 text-[11px] font-semibold text-[#172B4D]">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2.5">
+            <div className="inline-flex items-center gap-2.5 flex-wrap">
+              <span className="inline-flex items-center rounded-full bg-[#172B4D] text-white px-3 py-1 text-[11px] font-semibold">
                   {features.length} Features
-                  <span className="mx-1.5 text-[#DFE1E6]">|</span>
+                  <span className="mx-1.5 opacity-30">·</span>
                   {totalArCount} ARs
               </span>
-              <span className="text-[11px] text-[#8993A4]">
+              <span className="text-[11px] text-[#8993A4] font-medium">
                 {features.filter(f => f.isAccepted).length} accepted
               </span>
             </div>
@@ -651,7 +653,7 @@ export function MainContent({
           >
             {generationContext && (
               <motion.div
-                className="rounded-lg border border-[#DFE1E6] bg-white p-4 shadow-[0_1px_3px_rgba(9,30,66,0.06),0_0_1px_rgba(9,30,66,0.04)]"
+                className="rf-card p-4"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -731,16 +733,16 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`rounded-lg border bg-white overflow-hidden ${feature.pendingRemoval ? 'border-red-400 opacity-80' : feature.isAccepted ? 'border-green-400' : 'border-[#DFE1E6]'}`}
+                  className={`rounded-xl bg-white overflow-hidden ${feature.pendingRemoval ? 'opacity-80' : ''}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.06, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  whileHover={{ boxShadow: '0 4px 12px rgba(9,30,66,0.08), 0 1px 3px rgba(9,30,66,0.04)' }}
-                  style={{ boxShadow: '0 1px 3px rgba(9,30,66,0.06), 0 0 1px rgba(9,30,66,0.04)' }}
+                  style={{ boxShadow: feature.isAccepted ? '0 0 0 1px rgba(0,135,90,0.25), 0 2px 8px rgba(9,30,66,0.07)' : feature.pendingRemoval ? '0 0 0 1px rgba(222,53,11,0.25), 0 2px 8px rgba(9,30,66,0.07)' : 'var(--rf-shadow-sm)' }}
+                  whileHover={{ boxShadow: feature.isAccepted ? '0 0 0 1px rgba(0,135,90,0.3), 0 4px 16px rgba(9,30,66,0.10)' : 'var(--rf-shadow-md)', y: -1 }}
                 >
-                  {/* Left accent — thin solid line */}
+                  {/* Left accent bar */}
                   <div className="flex">
-                    <div className={`w-1 shrink-0 ${feature.pendingRemoval ? 'bg-[#DE350B]' : feature.isAccepted ? 'bg-[#00875A]' : 'bg-[#0052CC]'}`} />
+                    <div className={`w-1.5 shrink-0 ${feature.pendingRemoval ? 'bg-[#DE350B]' : feature.isAccepted ? 'bg-[#00875A]' : 'bg-[#0052CC]'}`} />
 
                     <div className="flex-1 p-5">
                       {/* Title row */}
