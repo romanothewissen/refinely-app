@@ -1,0 +1,51 @@
+app:
+  id: ari:cloud:ecosystem::app/c2222793-707f-4f79-b0ca-66356a03ba2f
+  licensing:
+    enabled: true
+  runtime:
+    name: nodejs20.x
+
+modules:
+  jira:globalPage:
+    - key: story-generator-page
+      resource: main
+      resolver:
+        function: resolver
+      title: Refinely
+      route: story-generator
+  jira:issueAction:
+    - key: story-generator-issue-action
+      resource: main
+      resolver:
+        function: resolver
+      title: Refine Stories
+      viewportSize: max
+  function:
+    - key: resolver
+      handler: resolvers/index.handler
+    - key: generation-consumer
+      handler: queues/generation.handler
+    - key: clarify-consumer
+      handler: queues/clarify.handler
+  consumer:
+    - key: generation-consumer-listener
+      queue: generation-queue
+      function: generation-consumer
+    - key: clarify-consumer-listener
+      queue: clarify-queue
+      function: clarify-consumer
+resources:
+  - key: main
+    path: src/frontend/build
+
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - read:jira-user
+    - storage:app
+  external:
+    fetch:
+      backend:
+        - address: https://generativelanguage.googleapis.com
+        - address: https://api.openai.com

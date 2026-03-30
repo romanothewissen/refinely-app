@@ -1,0 +1,35 @@
+{
+  "name": "refinely",
+  "version": "1.0.0",
+  "description": "Refinely: AI-powered Jira story generator by AutoMano.ai",
+  "main": "src/resolvers/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && cd src/frontend && npm run build",
+    "build:backend": "tsc -p tsconfig.build.json",
+    "build:frontend": "cd src/frontend && npm run build",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@forge/api": "^5.0.0",
+    "@forge/bridge": "5.14.1",
+    "@forge/events": "^2.0.0",
+    "@forge/llm": "^0.6.1",
+    "@forge/resolver": "^1.7.1",
+    "@forge/storage": "^2.0.3",
+    "pdf-parse": "^1.1.1",
+    "uuid": "^10.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/node": "^20.0.0",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}
