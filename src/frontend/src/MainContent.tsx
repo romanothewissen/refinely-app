@@ -364,22 +364,23 @@ export function MainContent({
   );
 
   return (
-    <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-[var(--rf-bg)]">
+    <main className="rf-shell flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header */}
-      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white px-6 py-4 z-10 sticky top-0">
+      <header className="shrink-0 border-b border-[rgba(183,197,214,0.68)] bg-[rgba(248,251,255,0.74)] px-6 py-5 z-10 sticky top-0 backdrop-blur">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3 min-w-0">
             {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-1 rounded-md hover:bg-[var(--rf-bg)] text-[var(--rf-text-secondary)] transition border border-[var(--rf-border)]" title="Open Sidebar">
+              <button onClick={() => setSidebarOpen(true)} className="p-2.5 -ml-1 rounded-xl hover:bg-white text-[var(--rf-text-secondary)] transition border border-[rgba(183,197,214,0.7)] bg-white/70 shadow-[var(--rf-shadow-sm)]" title="Open Sidebar">
                 <Menu className="w-4 h-4" />
               </button>
             )}
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-[var(--rf-text)]">Feature Canvas</h2>
-              <p className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Feature Canvas</div>
+              <h2 className="mt-2 text-[22px] font-semibold tracking-[-0.03em] text-[var(--rf-text)]">Feature delivery workspace</h2>
+              <p className="text-[12px] text-[var(--rf-text-secondary)] mt-1">
                 Review, refine, and push backlog-ready features without losing the thread.
               </p>
-              <div className="mt-2 inline-flex items-center gap-1.5 rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)]">
+              <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-[rgba(183,197,214,0.72)] bg-white/86 px-3 py-1.5 text-[11px] font-medium text-[var(--rf-text-secondary)] shadow-[var(--rf-shadow-sm)]">
                 Project scope:
                 <span className="font-semibold text-[var(--rf-text)]">
                   {projectKey === '*' ? 'Standalone workspace' : projectKey}
@@ -397,7 +398,7 @@ export function MainContent({
           <div className="mt-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex items-center gap-2">
-                <span className="inline-flex items-center rounded border border-[var(--rf-border)] bg-[var(--rf-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text)]">
+                <span className="inline-flex items-center rounded-full border border-[rgba(183,197,214,0.72)] bg-white/88 px-3 py-1.5 text-[11px] font-semibold text-[var(--rf-text)] shadow-[var(--rf-shadow-sm)]">
                   {features.length} Features
                   <span className="mx-1.5 text-[var(--rf-border)]">|</span>
                   {totalArCount} ARs
@@ -418,14 +419,14 @@ export function MainContent({
                 <div className="relative">
                   <button
                     onClick={() => setShowBulkRefine(!showBulkRefine)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold transition ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]'}`}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-semibold transition ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)] shadow-[var(--rf-shadow-sm)]' : 'bg-white text-[var(--rf-text-secondary)] border-[rgba(183,197,214,0.72)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)] shadow-[var(--rf-shadow-sm)]'}`}
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     Refine All
                   </button>
 
                   {showBulkRefine && (
-                    <div className="absolute right-0 top-full mt-2 w-[380px] bg-white rounded-lg border border-[var(--rf-border)] p-4 z-50 shadow-[var(--rf-shadow-lg)] slide-up">
+                    <div className="absolute right-0 top-full mt-2 w-[380px] rf-panel rounded-[22px] p-4 z-50 slide-up">
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="text-[11px] font-semibold text-[var(--rf-text-secondary)] uppercase tracking-wide flex items-center gap-1.5">
                            <Sparkles className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Bulk Refine
@@ -477,17 +478,19 @@ export function MainContent({
         {isGenerating ? (
           <GeneratingSkeleton />
         ) : !hasFeatures ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center fade-in max-w-md mx-auto p-6">
-            <div className="w-14 h-14 bg-[var(--rf-brand-subtle)] rounded-lg flex items-center justify-center mb-5">
+          <div className="flex-1 flex flex-col items-center justify-center text-center fade-in max-w-3xl mx-auto p-6 w-full">
+            <div className="rf-panel rf-canvas-surface rf-subtle-grid w-full rounded-[34px] px-8 py-16">
+              <div className="w-16 h-16 bg-[linear-gradient(180deg,#eaf2ff_0%,#d8e8ff_100%)] rounded-[20px] flex items-center justify-center mb-6 mx-auto shadow-[0_18px_34px_rgba(9,30,66,0.08)]">
               <Sparkles className="w-6 h-6 text-[var(--rf-brand)]" />
+              </div>
+              <h2 className="text-[40px] leading-none font-semibold tracking-[-0.04em] text-[var(--rf-text)] mb-4">Ready to generate</h2>
+              <p className="text-[var(--rf-text-secondary)] text-[15px] leading-7 max-w-xl mx-auto">Describe your requirement in the sidebar, answer the clarifying questions, and your features will appear here.</p>
             </div>
-            <h2 className="text-xl font-semibold text-[var(--rf-text)] mb-2">Ready to generate</h2>
-            <p className="text-[var(--rf-text-secondary)] text-sm leading-relaxed">Describe your requirement in the sidebar, answer the clarifying questions, and your features will appear here.</p>
           </div>
         ) : (
           <div className="w-full max-w-4xl mx-auto px-6 py-6 space-y-3 fade-in flex-1">
             {generationContext && (
-              <div className="rounded-lg border border-[var(--rf-border)] bg-white p-4 shadow-[var(--rf-shadow-sm)]">
+              <div className="rf-panel rounded-[24px] p-4">
                 <div className="flex flex-wrap items-center gap-4 text-xs">
                   <div className="font-semibold text-[var(--rf-text)]">
                     Context used: {generationContext.goldExamplesCount} golden example{generationContext.goldExamplesCount !== 1 ? 's' : ''}
@@ -536,7 +539,7 @@ export function MainContent({
               const draft = editDraft;
 
               return (
-                <div key={feature.id || idx} className={`rounded-lg border bg-white shadow-[var(--rf-shadow-sm)] transition-all duration-200 overflow-hidden ${feature.pendingRemoval ? 'border-red-400 opacity-80' : feature.isAccepted ? 'border-green-400' : 'border-[var(--rf-border)]'}`}>
+                <div key={feature.id || idx} className={`rounded-[24px] border overflow-hidden transition-all duration-200 ${feature.pendingRemoval ? 'rf-panel border-red-400 opacity-80' : feature.isAccepted ? 'rf-panel border-green-400' : 'rf-panel-soft border-[rgba(183,197,214,0.72)] hover:border-[var(--rf-border-strong)]'}`}>
                   {/* Left accent — thin solid line */}
                   <div className="flex">
                     <div className={`w-1 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger)]' : feature.isAccepted ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-brand)]'}`} />
