@@ -545,7 +545,7 @@ export default function App() {
           initialProjectKey={settingsStartProjectKey}
         />
       ) : (
-        <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
+        <div className="rf-main-shell rf-pane-seam flex-1 flex flex-col h-full relative overflow-hidden">
           <AnimatePresence>
             {generationError && (
               <motion.div

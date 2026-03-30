@@ -551,10 +551,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }, [provider, geminiApiKey, existingGeminiApiKey, openaiApiKey, existingOpenaiApiKey]);
 
   const settingsNav = [
-    { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'LLM & API Keys' },
-    { id: 'jira', label: 'Jira Governance', icon: Database, sub: 'Mappings & Linking' },
-    { id: 'domain', label: 'Domain Intelligence', icon: Globe, sub: 'Rules & Reference' },
-    { id: 'billing', label: 'Plan & Billing', icon: CreditCard, sub: 'Tier & Usage' },
+    { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
+    { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, examples' },
+    { id: 'domain', label: 'Guidance', icon: Globe, sub: 'Roles and workspace rules' },
+    { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
   ] as const;
 
   const wiUploadCopy = wiUploadState
@@ -566,15 +566,16 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     : null;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[var(--rf-bg)] relative overflow-hidden font-sans">
-      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white/90 backdrop-blur flex items-center justify-between px-6 py-4 z-30 sticky top-0">
+    <div className="flex-1 flex flex-col h-full bg-transparent relative overflow-hidden font-sans">
+      <header className="shrink-0 h-[88px] border-b border-[var(--rf-border)] bg-white flex items-center justify-between px-6 z-30 sticky top-0">
         <div className="flex items-center gap-5">
           <button onClick={onClose} className="p-2.5 rounded-2xl border border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] transition-all group shadow-[var(--rf-shadow-sm)]">
              <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5" />
           </button>
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Workspace Settings</div>
-            <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--rf-text)] flex items-center gap-2">Settings <span className="text-[var(--rf-border-strong)] font-light">/</span> <span className="text-[var(--rf-brand)]">Configuration</span></h2>
+            <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--rf-text)]">Configure Refinely</h2>
+            <p className="mt-1 text-xs text-[var(--rf-text-secondary)]">Set up AI, choose a Jira project, then add optional guidance only where it helps.</p>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase border ${isAdmin ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
                 {isAdmin ? 'Administrator' : 'Read-Only'}
@@ -595,14 +596,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden flex bg-[var(--rf-bg)]">
-          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-white/75 p-6 flex flex-col gap-2">
+      <div className="flex-1 overflow-hidden flex bg-transparent">
+          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-[linear-gradient(180deg,#fcfdff_0%,var(--rf-bg)_55%,var(--rf-bg-canvas)_100%)] p-6 flex flex-col gap-2">
             {settingsNav.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                  activeTab === tab.id ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.12)] shadow-[var(--rf-shadow-sm)]' : 'text-[var(--rf-text-secondary)] border-transparent hover:bg-[var(--rf-surface-soft)]'
+                  activeTab === tab.id ? 'bg-white text-[var(--rf-brand)] border-[rgba(0,82,204,0.12)] shadow-[var(--rf-shadow-sm)]' : 'text-[var(--rf-text-secondary)] border-transparent hover:bg-white/70'
                 }`}
               >
                 <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`} />
@@ -614,11 +615,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             ))}
             
             <div className="mt-auto px-3 py-5 border-t border-[var(--rf-border-subtle)]">
-               <div className="rf-panel-soft rounded-2xl p-4 text-[var(--rf-text)]">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Current Plan</div>
-                 <div className="text-base font-bold capitalize">{tier}</div>
-                 <div className="text-xs text-[var(--rf-text-secondary)] mt-1">
-                   {usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0} generations
+               <div className="rf-panel-soft rounded-2xl p-4 text-[var(--rf-text)] space-y-3">
+                 <div>
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Recommended Order</div>
+                   <div className="text-sm font-semibold">1. AI Setup</div>
+                   <div className="text-sm font-semibold">2. Project Setup</div>
+                   <div className="text-sm font-semibold">3. Guidance</div>
+                 </div>
+                 <div className="pt-3 border-t border-[var(--rf-border-subtle)]">
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Current Plan</div>
+                   <div className="text-base font-bold capitalize">{tier}</div>
+                   <div className="text-xs text-[var(--rf-text-secondary)] mt-1">
+                     {usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0} generations
+                   </div>
                  </div>
                </div>
             </div>
@@ -628,17 +637,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             {activeTab === 'models' && (
               <div className="max-w-3xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="space-y-1">
-                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">AI Infrastructure</div>
-                   <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Model and provider setup</h3>
-                   <p className="text-[var(--rf-text-secondary)] text-sm">Configure the language models powering your story refinement pipeline.</p>
+                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">AI Setup</div>
+                   <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Choose a provider and assign the core model roles</h3>
+                   <p className="text-[var(--rf-text-secondary)] text-sm">You only need three things here: a provider, credentials, and which models handle the main reasoning steps.</p>
                 </div>
 
                 <div className="rf-panel rounded-[28px] p-6 space-y-6">
                   <div className="space-y-3">
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">LLM Provider</label>
-                    <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                    <label className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-wider">LLM Provider</label>
+                    <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border-subtle)]">
                       {(['openai', 'gemini', 'forge_llms'] as const).map(p => (
-                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${provider === p ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-400'}`}>
+                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm' : 'text-[var(--rf-text-tertiary)]'}`}>
                           {p.replace('_', ' ')}
                         </button>
                       ))}
@@ -648,32 +657,35 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   {provider === 'openai' && (
                     <div className="space-y-2 pt-2 animate-in slide-in-from-top-1">
                       <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">OpenAI API Key</label>
+                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">OpenAI API Key</label>
                         {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[9px] font-bold text-red-500 hover:underline">Clear Stored</button>}
                       </div>
-                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
+                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
                     </div>
                   )}
 
                   {provider === 'gemini' && (
                     <div className="space-y-2 pt-2 animate-in slide-in-from-top-1">
                       <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Gemini API Key</label>
+                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Gemini API Key</label>
                         {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[9px] font-bold text-red-500 hover:underline">Clear Stored</button>}
                       </div>
-                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
+                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-500" />
                     </div>
                   )}
 
                   <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)]">
+                      <span className="font-semibold text-[var(--rf-text)]">Keep it simple:</span> one stronger model for decomposition, one fast model for clarify/evaluation, and optionally a separate refine model later.
+                    </div>
                     {[
                       { label: 'Decomposition Pass', val: decompositionModel, set: setDecompositionModel },
                       { label: 'Reasoning & Clarify', val: clarifyModel, set: setClarifyModel },
                       { label: 'Evaluation & Theme', val: evaluateModel, set: setEvaluateModel },
                     ].map((item, i) => (
                       <div key={i} className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-600">{item.label}</span>
-                        <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-semibold text-slate-700 min-w-[180px] outline-none">
+                        <span className="text-xs font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
+                        <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[11px] font-semibold text-[var(--rf-text)] min-w-[180px] outline-none">
                           {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                         </select>
                       </div>
@@ -681,7 +693,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   <div className="pt-4 flex items-center gap-4">
-                    <button onClick={testLlmConnection} disabled={isTestingLlm} className="bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
+                    <button onClick={testLlmConnection} disabled={isTestingLlm} className="bg-[var(--rf-text)] hover:bg-slate-900 text-white text-[10px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
                        {isTestingLlm ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />} Test Connection
                     </button>
                     {llmTestResult && (
@@ -698,9 +710,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               <div className="max-w-4xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Jira Governance</div>
-                    <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Connect Jira in the right order</h3>
-                    <p className="text-[var(--rf-text-secondary)] text-sm">Start with workspace-wide discovery, then choose one project and configure the backlog, AR mapping, and optional curated examples for that project.</p>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Project Setup</div>
+                    <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Set up one Jira project at a time</h3>
+                    <p className="text-[var(--rf-text-secondary)] text-sm">Focus on the essentials first: sync Jira, choose a project, define backlog context, then add optional boosters like curated examples only if needed.</p>
                   </div>
                 </div>
 
@@ -879,8 +891,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             {activeTab === 'domain' && (
               <div className="max-w-4xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Domain Intelligence</div>
-                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Reference knowledge and team standards</h3>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Guidance</div>
+                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Set the shared guidance Refinely should follow</h3>
+                  <p className="text-sm text-[var(--rf-text-secondary)]">Use this section for workspace-wide defaults only. Project-specific rules now live in Project Setup.</p>
                 </div>
                 <div className="rf-panel rounded-[32px] p-8 lg:p-10 space-y-10">
                   <div className="space-y-4">
@@ -907,8 +920,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             {activeTab === 'billing' && (
               <div className="max-w-4xl space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Plan & Billing</div>
-                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Choose the right plan for your team</h3>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Billing</div>
+                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Plan, usage, and compliance controls</h3>
                 </div>
 
                 <div className="rf-panel rounded-[28px] p-8 space-y-6">
@@ -1151,6 +1164,16 @@ function ProjectConfigurationManager({
   const [isSavingProject, setIsSavingProject] = useState(false);
   const selectedStatuses: string[] = Array.isArray(newSource.statuses) ? newSource.statuses : [];
   const [projectNotice, setProjectNotice] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState({
+    backlog: true,
+    guidance: true,
+    mapping: false,
+    examples: false,
+  });
+
+  const toggleSection = (section: 'backlog' | 'guidance' | 'mapping' | 'examples') => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
 
   const toggleStatus = (statusName: string) => {
     const exists = selectedStatuses.includes(statusName);
@@ -1208,9 +1231,23 @@ function ProjectConfigurationManager({
     <div className="space-y-8 animate-in fade-in">
       <div className="flex flex-col gap-4 border-b border-[var(--rf-border-subtle)] pb-6">
         <div>
-          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Project Configuration</div>
           <h4 className="text-lg font-bold text-[var(--rf-text)]">Project setup for {activeArProj}</h4>
-          <p className="text-sm text-[var(--rf-text-secondary)] mt-1">Save the project rules first, then rebuild the backlog cache so the selected statuses and mappings are applied immediately.</p>
+          <p className="text-sm text-[var(--rf-text-secondary)] mt-1">Start with backlog context and project guidance. Acceptance-criteria mapping and curated examples are there if you need them, but they are not required for every rollout.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Required First</div>
+            <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">Backlog context</div>
+          </div>
+          <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Usually Helpful</div>
+            <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">Project guidance</div>
+          </div>
+          <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced / Optional</div>
+            <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">AR mapping and examples</div>
+          </div>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           {projectNotice ? (
@@ -1237,15 +1274,24 @@ function ProjectConfigurationManager({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
          <div className="col-span-full space-y-4">
-           <div>
-             <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
-               <Database className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Backlog Cache Scope
-             </h5>
-             <p className="text-xs text-[var(--rf-text-secondary)] mt-1">
-               Refinely will index up to 1000 of the most recently updated non-subtask issues in these statuses. This is the primary Jira context pool used for clarifying questions and feature generation.
-             </p>
-           </div>
+           <button
+             type="button"
+             onClick={() => toggleSection('backlog')}
+             className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+           >
+             <div>
+               <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
+                 <Database className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Backlog Context
+                 <span className="rounded-full bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[9px] text-[var(--rf-brand)] border border-[rgba(0,82,204,0.1)]">Required</span>
+               </h5>
+               <p className="text-xs text-[var(--rf-text-secondary)] mt-1">
+                 Choose which Jira statuses Refinely should treat as the usable backlog context for this project.
+               </p>
+             </div>
+             <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.backlog ? 'rotate-90' : ''}`} />
+           </button>
 
+           {expandedSections.backlog && (
            <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3">
@@ -1337,17 +1383,45 @@ function ProjectConfigurationManager({
                If you click <span className="font-semibold text-[var(--rf-text)]">Save + Rebuild Cache</span>, the current project settings are saved first and then the cache is rebuilt immediately using the selected statuses.
              </div>
            </div>
+           )}
          </div>
 
          <div className="space-y-3">
-            <h5 className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">Project Guidance</h5>
-            <p className="text-xs text-[var(--rf-text-secondary)]">Optional writing or process instructions that should apply only to this project.</p>
-            <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
+            <button
+              type="button"
+              onClick={() => toggleSection('guidance')}
+              className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+            >
+              <div>
+                <h5 className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
+                  Project Guidance
+                  <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] text-[var(--rf-text-secondary)] border border-[var(--rf-border-subtle)]">Recommended</span>
+                </h5>
+                <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Optional writing or process rules that should apply only to this project.</p>
+              </div>
+              <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
+            </button>
+            {expandedSections.guidance && (
+              <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
+            )}
          </div>
 
          <div className="space-y-6">
-            <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> AR Field Mapping</h5>
-            <p className="text-xs text-[var(--rf-text-secondary)]">Tell Refinely where acceptance requirements live on completed Jira issues so the backlog cache can read them correctly.</p>
+            <button
+              type="button"
+              onClick={() => toggleSection('mapping')}
+              className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+            >
+              <div>
+                <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> AR Field Mapping
+                  <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] text-[var(--rf-text-secondary)] border border-[var(--rf-border-subtle)]">Advanced</span>
+                </h5>
+                <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Only needed if acceptance criteria live in custom Jira fields or iterative slots.</p>
+              </div>
+              <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.mapping ? 'rotate-90' : ''}`} />
+            </button>
+            {expandedSections.mapping && (
             <div className="rf-panel-soft rounded-[24px] p-6 space-y-6">
                <div className="flex p-1 bg-white rounded-2xl border border-[var(--rf-border-subtle)] shadow-[var(--rf-shadow-sm)] max-w-[240px]">
                  <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-md' : 'text-[var(--rf-text-tertiary)]'}`}>Consolidated</button>
@@ -1382,16 +1456,27 @@ function ProjectConfigurationManager({
                   </select>
                </div>
             </div>
+            )}
          </div>
 
          <div className="col-span-full space-y-6 pt-8 border-t border-[var(--rf-border-subtle)] animate-in fade-in slide-in-from-bottom-2 duration-500">
-             <div className="flex items-center justify-between">
-                <div>
-                  <h5 className="text-[11px] font-black text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Optional Curated Examples</h5>
-                  <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Backlog cache is now the primary Jira context source. Use curated examples only if you want to boost especially strong reference stories.</p>
-                </div>
-             </div>
+             <button
+               type="button"
+               onClick={() => toggleSection('examples')}
+               className="w-full flex items-start justify-between gap-4 rounded-[24px] border border-[var(--rf-border)] bg-white px-5 py-4 text-left"
+             >
+               <div>
+                 <h5 className="text-[11px] font-black text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2">
+                   <Globe className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Curated Examples
+                   <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] text-[var(--rf-text-secondary)] border border-[var(--rf-border-subtle)]">Optional</span>
+                 </h5>
+                 <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Use this only if you want to boost especially strong reference stories. Backlog context remains the primary source.</p>
+               </div>
+               <ChevronRight className={`w-4 h-4 mt-1 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.examples ? 'rotate-90' : ''}`} />
+             </button>
              
+             {expandedSections.examples && (
+             <div className="space-y-5">
              {activeArProj !== '*' && (
                 <div className="rf-panel rounded-[24px] p-6 space-y-5">
                   <div className="flex flex-wrap gap-4">
@@ -1487,6 +1572,8 @@ function ProjectConfigurationManager({
                   ))
                 )}
              </div>
+             </div>
+             )}
           </div>
       </div>
     </div>

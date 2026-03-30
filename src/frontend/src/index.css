@@ -7,6 +7,10 @@
     /* Atlassian-adjacent palette with a slightly richer enterprise canvas */
     --rf-bg: #f6f8fc;
     --rf-bg-canvas: #f1f5fa;
+    --rf-bg-sidebar: #f8fafc;
+    --rf-bg-sidebar-deep: #f2f6fb;
+    --rf-bg-main: #f4f8fd;
+    --rf-bg-main-deep: #edf3fb;
     --rf-surface: #ffffff;
     --rf-surface-raised: #ffffff;
     --rf-surface-soft: #fafcff;
@@ -90,6 +94,22 @@
     background: #f6f9fe;
     border: 1px solid rgba(219, 229, 244, 0.95);
     box-shadow: var(--rf-shadow-sm);
+  }
+
+  .rf-sidebar-shell {
+    background:
+      linear-gradient(180deg, var(--rf-bg-sidebar) 0%, var(--rf-bg-sidebar-deep) 100%);
+  }
+
+  .rf-main-shell {
+    background:
+      linear-gradient(180deg, var(--rf-bg-main) 0%, var(--rf-bg-main-deep) 100%);
+  }
+
+  .rf-pane-seam {
+    box-shadow:
+      inset 1px 0 0 rgba(255, 255, 255, 0.8),
+      -8px 0 18px rgba(15, 23, 42, 0.03);
   }
 
   .no-scrollbar::-webkit-scrollbar { display: none; }

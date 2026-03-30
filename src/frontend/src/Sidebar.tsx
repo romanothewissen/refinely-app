@@ -85,7 +85,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="h-full flex flex-col shrink-0 overflow-hidden border-r border-[var(--rf-border)] bg-[linear-gradient(180deg,#fcfdff_0%,var(--rf-bg)_55%,var(--rf-bg-canvas)_100%)]"
+      className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden border-r border-[var(--rf-border)]"
       style={{ width: width ?? 380 }}
     >
       {/* Header — matches canvas header height and shadow treatment */}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
@@ -284,6 +284,119 @@ export function MainContent({
   const [isBulkRefining, setIsBulkRefining] = useState(false);
   const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
 
+  const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+
+  const buildSpreadsheetRow = (cells: Array<string | number | boolean>, header = false) =>
+    `<Row>${cells.map(cell => `<Cell${header ? ' ss:StyleID="header"' : ''}><Data ss:Type="String">${escapeSpreadsheetValue(cell)}</Data></Cell>`).join('')}</Row>`;
+
+  const exportFeaturesToExcel = () => {
+    if (!features.length) return;
+
+    const featureRows = [
+      buildSpreadsheetRow(['Feature #', 'Title', 'Description', 'AR Count', 'Accepted', 'Jira Issue', 'Jira URL', 'Pending Refinement', 'Pending Removal'], true),
+      ...features.map((feature, idx) => buildSpreadsheetRow([
+        idx + 1,
+        feature.title || feature.summary || `Feature ${idx + 1}`,
+        feature.description || feature.markdown || '',
+        feature.acceptanceRequirements?.length || 0,
+        feature.isAccepted ? 'Yes' : 'No',
+        feature.jiraIssueKey || '',
+        feature.jiraIssueUrl || '',
+        feature.pendingRefinement ? 'Yes' : 'No',
+        feature.pendingRemoval ? 'Yes' : 'No',
+      ])),
+    ].join('');
+
+    const acceptanceRequirementRows = [
+      buildSpreadsheetRow(['Feature #', 'Feature Title', 'AR #', 'Given', 'When', 'Then', 'Accepted', 'Jira Issue'], true),
+      ...features.flatMap((feature, featureIdx) => {
+        const ars = feature.acceptanceRequirements || [];
+        if (!ars.length) {
+          return [
+            buildSpreadsheetRow([
+              featureIdx + 1,
+              feature.title || feature.summary || `Feature ${featureIdx + 1}`,
+              '',
+              '',
+              '',
+              '',
+              feature.isAccepted ? 'Yes' : 'No',
+              feature.jiraIssueKey || '',
+            ]),
+          ];
+        }
+
+        return ars.map((ar, arIdx) => buildSpreadsheetRow([
+          featureIdx + 1,
+          feature.title || feature.summary || `Feature ${featureIdx + 1}`,
+          arIdx + 1,
+          ar.given || '',
+          ar.when || '',
+          ar.then || '',
+          feature.isAccepted ? 'Yes' : 'No',
+          feature.jiraIssueKey || '',
+        ]));
+      }),
+    ].join('');
+
+    const exportedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const workbook = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="header">
+   <Font ss:Bold="1"/>
+   <Interior ss:Color="#F4F5F7" ss:Pattern="Solid"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Features">
+  <Table>
+   ${featureRows}
+  </Table>
+ </Worksheet>
+ <Worksheet ss:Name="Acceptance Requirements">
+  <Table>
+   ${acceptanceRequirementRows}
+  </Table>
+ </Worksheet>
+ <Worksheet ss:Name="Export Info">
+  <Table>
+   ${buildSpreadsheetRow(['Workspace Scope', projectKey === '*' ? 'Standalone workspace' : projectKey], true)}
+   ${buildSpreadsheetRow(['Exported At (UTC)', exportedAt])}
+   ${buildSpreadsheetRow(['Feature Count', features.length])}
+   ${buildSpreadsheetRow(['Acceptance Requirement Count', totalArCount])}
+  </Table>
+ </Worksheet>
+</Workbook>`;
+
+    try {
+      const blob = new Blob([workbook], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeScope = (projectKey === '*' ? 'workspace' : projectKey).replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
+      const dateStamp = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `refinely-feature-canvas-${safeScope}-${dateStamp}.xls`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Excel export failed:', error);
+      window.alert('Excel export failed. Please try again.');
+    }
+  };
+
   // ── Edit helpers ─────────────────────────────────────────────────────────
   const startEditing  = (idx: number) => { setEditingIdx(idx); setEditDraft(JSON.parse(JSON.stringify(features[idx]))); };
   const cancelEditing = () => { setEditingIdx(null); setEditDraft(null); };
@@ -315,14 +428,13 @@ export function MainContent({
 
   // ── Refinement helpers ───────────────────────────────────────────────────
   const acceptRefinement = (idx: number) => {
+    if (features[idx]?.pendingRemoval) {
+      removeFeatureAt(idx);
+      return;
+    }
     setFeatures(prev => {
       const n = [...prev];
       if (n[idx].pendingRefinement) n[idx] = { ...n[idx].pendingRefinement!, pendingRefinement: undefined, pendingRemoval: undefined };
-      else if (n[idx].pendingRemoval) {
-        const next = n.filter((_, i) => i !== idx);
-        api.updateConversationFeatures(sessionId, next);
-        return next;
-      }
       api.updateConversationFeatures(sessionId, n);
       return n;
     });
@@ -342,6 +454,44 @@ export function MainContent({
       api.updateConversationFeatures(sessionId, n);
       return n;
     });
+  };
+  const shiftIndexedUiStateAfterRemoval = (idx: number) => {
+    setExpandedIndices(prev => {
+      const next = new Set<number>();
+      prev.forEach(i => {
+        if (i < idx) next.add(i);
+        if (i > idx) next.add(i - 1);
+      });
+      return next;
+    });
+    setEditingIdx(prev => (prev === null ? null : prev === idx ? null : prev > idx ? prev - 1 : prev));
+    setRefinePopupIdx(prev => (prev === null ? null : prev === idx ? null : prev > idx ? prev - 1 : prev));
+  };
+  const clearPendingRemoval = (idx: number) => {
+    setFeatures(prev => {
+      const next = prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false } : f);
+      api.updateConversationFeatures(sessionId, next);
+      return next;
+    });
+  };
+  const removeFeatureAt = (idx: number) => {
+    shiftIndexedUiStateAfterRemoval(idx);
+    setFeatures(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      api.updateConversationFeatures(sessionId, next);
+      return next;
+    });
+  };
+  const requestFeatureRemoval = (idx: number) => {
+    const feature = features[idx];
+    if (!feature) return;
+    const featureLabel = feature.title || feature.summary || `Feature ${idx + 1}`;
+    const jiraMessage = feature.jiraIssueKey
+      ? `\n\nThis only removes it from Refinely. Jira issue ${feature.jiraIssueKey} will remain unchanged.`
+      : '';
+    if (window.confirm(`Remove "${featureLabel}" from the canvas? This cannot be undone.${jiraMessage}`)) {
+      removeFeatureAt(idx);
+    }
   };
 
   const handleBulkRefine = async () => {
@@ -470,14 +620,14 @@ export function MainContent({
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header — aligned to sidebar header height and padding */}
       <motion.header
-        className="shrink-0 h-[88px] bg-white px-6 z-10 sticky top-0 border-b border-[var(--rf-border)] flex items-center"
+        className="shrink-0 bg-white px-6 py-4 z-10 sticky top-0 border-b border-[var(--rf-border)]"
         style={{ boxShadow: 'var(--rf-header-shadow)' }}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="flex w-full flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex min-h-[56px] w-full items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-2.5">
             {!sidebarOpen && (
               <motion.button
                 onClick={() => setSidebarOpen(true)}
@@ -489,7 +639,7 @@ export function MainContent({
                 <Menu className="w-4 h-4" />
               </motion.button>
             )}
-            <div className="min-w-0 flex flex-wrap items-center gap-2.5">
+            <div className="min-w-0 flex items-center gap-2.5">
               <h2 className="text-base font-bold text-[#172B4D] tracking-tight">Feature Canvas</h2>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rf-brand-muted)] px-2.5 py-0.5 text-[10px] font-semibold text-[#626F86] border border-[rgba(0,82,204,0.08)]">
                 <span className="text-[#8993A4]">Scope</span>
@@ -499,7 +649,7 @@ export function MainContent({
               </span>
             </div>
           </div>
-          <div className="relative">
+          <div className="relative shrink-0">
             <motion.button
               type="button"
               onClick={() => setShowTokenDetails(prev => !prev)}
@@ -541,25 +691,35 @@ export function MainContent({
         </div>
 
         {hasFeatures && (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2.5">
-            <div className="inline-flex items-center gap-2.5 flex-wrap">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] pt-3">
+            <div className="flex flex-wrap items-center gap-2.5">
               <span className="inline-flex items-center rounded-full bg-[#172B4D] text-white px-3 py-1 text-[11px] font-semibold">
                   {features.length} Features
                   <span className="mx-1.5 opacity-30">·</span>
                   {totalArCount} ARs
               </span>
-              <span className="text-[11px] text-[#8993A4] font-medium">
+              <span className="text-[11px] text-[#8993A4] font-medium whitespace-nowrap">
                 {features.filter(f => f.isAccepted).length} accepted
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               {features.some(f => f.pendingRefinement) && (
                 <>
                   <motion.button onClick={discardAllProposed} className="px-2.5 py-1.5 text-[11px] font-semibold text-[#626F86] bg-[rgba(255,255,255,0.94)] border border-[var(--rf-border)] rounded-md hover:text-[#DE350B] hover:border-red-300 transition" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
                   <motion.button onClick={acceptAllProposed} className="px-2.5 py-1.5 bg-[#00875A] hover:bg-green-700 text-white text-[11px] font-semibold rounded-md transition" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
                 </>
               )}
+
+              <motion.button
+                onClick={exportFeaturesToExcel}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--rf-border)] bg-[rgba(255,255,255,0.94)] text-[11px] font-semibold text-[#626F86] transition hover:border-[#0052CC] hover:text-[#0052CC]"
+                whileTap={{ scale: 0.97 }}
+                title="Export features and acceptance requirements to Excel"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export Excel
+              </motion.button>
 
               <div className="relative">
                 <motion.button
@@ -755,14 +915,16 @@ export function MainContent({
                             className="flex-1 text-sm font-semibold text-[#172B4D] bg-white border border-[#DFE1E6] rounded-md px-3 py-1.5 focus:ring-1 focus:ring-[#0052CC] outline-none"
                           />
                         ) : (
-                          <div className="flex-1 flex items-center gap-2 cursor-pointer group/title" onClick={() => toggleExpand(idx)}>
-                            <h3 className="text-sm font-semibold text-[#172B4D]">
+                          <div className="flex-1 min-w-0 flex items-start gap-3 cursor-pointer group/title" onClick={() => toggleExpand(idx)}>
+                            <h3 className="min-w-0 flex-1 text-sm font-semibold leading-6 text-[#172B4D]">
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
-                            <span className="inline-flex items-center rounded px-1.5 py-0.5 bg-[#F4F5F7] text-[#8993A4] text-[10px] font-medium border border-[#EBECF0]">
-                              {feature.acceptanceRequirements?.length || 0} ARs
-                            </span>
-                            <ChevronDown className={`w-3.5 h-3.5 text-[#8993A4] transition-transform duration-200 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
+                            <div className="shrink-0 flex items-center gap-2 pt-0.5">
+                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-md px-2 py-0.5 bg-[#F4F5F7] text-[#8993A4] text-[10px] font-medium border border-[#EBECF0]">
+                                {feature.acceptanceRequirements?.length || 0} ARs
+                              </span>
+                              <ChevronDown className={`w-3.5 h-3.5 text-[#8993A4] transition-transform duration-200 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
+                            </div>
                           </div>
                         )}
 
@@ -779,6 +941,7 @@ export function MainContent({
                               <motion.button onClick={() => toggleAccepted(idx)} className={`px-2 py-1 text-[11px] font-medium rounded-md transition border flex items-center gap-1 ${feature.isAccepted ? 'text-[#00875A] bg-[#E3FCEF] border-green-300' : 'text-[#626F86] border-transparent hover:bg-[#E3FCEF] hover:text-[#00875A] hover:border-green-300'}`} whileTap={{ scale: 0.97 }}>
                                 <Check className="w-3 h-3" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
                               </motion.button>
+                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2 py-1 text-[11px] font-medium text-[#AE2E24] hover:bg-[#FFEBE6] border border-transparent hover:border-[#FFBDAD] rounded-md transition flex items-center gap-1" whileTap={{ scale: 0.97 }}><Trash2 className="w-3 h-3" /> Delete</motion.button>
                               {feature.jiraIssueKey ? (
                                 <div className="flex items-center gap-1">
                                   <motion.button
@@ -823,8 +986,8 @@ export function MainContent({
                              <Trash2 className="w-3.5 h-3.5" /> Proposed for Removal
                            </div>
                            <div className="flex items-center gap-1.5">
-                             <motion.button onClick={() => setFeatures(prev => prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false } : f))} className="px-2 py-1 text-[10px] font-medium text-[#626F86] bg-white border border-[#DFE1E6] hover:bg-[#F4F5F7] rounded-md" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
-                             <motion.button onClick={() => setFeatures(prev => prev.filter((_, i) => i !== idx))} className="px-2 py-1 text-[10px] font-medium text-white bg-[#DE350B] hover:bg-red-700 rounded-md" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
+                             <motion.button onClick={() => clearPendingRemoval(idx)} className="px-2 py-1 text-[10px] font-medium text-[#626F86] bg-white border border-[#DFE1E6] hover:bg-[#F4F5F7] rounded-md" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
+                             <motion.button onClick={() => removeFeatureAt(idx)} className="px-2 py-1 text-[10px] font-medium text-white bg-[#DE350B] hover:bg-red-700 rounded-md" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
                            </div>
                         </div>
                       )}
