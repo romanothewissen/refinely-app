@@ -42,6 +42,13 @@ export interface BacklogCacheDiagnostics {
   likelyReason: string;
 }
 
+interface SearchJqlResponse {
+  issues?: Array<{ key: string; fields: Record<string, unknown> }>;
+  total?: number;
+  nextPageToken?: string;
+  isLast?: boolean;
+}
+
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_INDEX_ITEMS = 1000;
 
@@ -137,15 +144,15 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
   const fields = buildFieldList(config, projectKey);
   const statusClause = buildBacklogStatusClause(config, projectKey);
   const docs: BacklogDoc[] = [];
-  let startAt = 0;
+  let nextPageToken: string | undefined;
   const pageSize = 50;
 
   while (docs.length < MAX_INDEX_ITEMS) {
     const data = await runSearchJql({
       jql: `project = ${projectKey} AND ${statusClause} AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
       maxResults: pageSize,
-      startAt,
       fields,
+      nextPageToken,
     });
     const issues = data.issues ?? [];
     if (!issues.length) break;
@@ -158,8 +165,8 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
       if (docs.length >= MAX_INDEX_ITEMS) break;
     }
 
-    startAt += issues.length;
-    if (startAt >= (data.total ?? 0)) break;
+    if (data.isLast || !data.nextPageToken) break;
+    nextPageToken = data.nextPageToken;
   }
 
   return {
@@ -223,22 +230,37 @@ function getConfiguredBacklogStatuses(config: TenantConfig, projectKey: string):
 }
 
 async function countIssues(jql: string): Promise<number> {
-  const data = await runSearchJql({
-    jql,
-    maxResults: 0,
-    startAt: 0,
-    fields: ['key'],
-  });
-  return data.total ?? 0;
+  const approximate = await getApproximateCount(jql);
+  if (approximate !== null) return approximate;
+
+  let nextPageToken: string | undefined;
+  let count = 0;
+  const maxCount = 2000;
+
+  while (count < maxCount) {
+    const data = await runSearchJql({
+      jql,
+      maxResults: 100,
+      fields: ['key'],
+      nextPageToken,
+    });
+    const issues = data.issues ?? [];
+    if (!issues.length) break;
+    count += issues.length;
+    if (data.isLast || !data.nextPageToken) break;
+    nextPageToken = data.nextPageToken;
+  }
+
+  return count;
 }
 
 async function runSearchJql(payload: {
   jql: string;
   maxResults: number;
-  startAt: number;
   fields: string[];
-}): Promise<{ issues?: Array<{ key: string; fields: Record<string, unknown> }>; total?: number }> {
-  const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
+  nextPageToken?: string;
+}): Promise<SearchJqlResponse> {
+  const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search/jql'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -250,10 +272,29 @@ async function runSearchJql(payload: {
   }
 
   try {
-    return JSON.parse(raw) as { issues?: Array<{ key: string; fields: Record<string, unknown> }>; total?: number };
+    return JSON.parse(raw) as SearchJqlResponse;
   } catch {
     throw new Error('Jira search returned non-JSON response.');
   }
+}
+
+async function getApproximateCount(jql: string): Promise<number | null> {
+  const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search/approximate-count'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jql }),
+  });
+  if (!response.ok) return null;
+
+  const raw = await response.text();
+  try {
+    const data = JSON.parse(raw) as { count?: number; approximateCount?: number };
+    if (typeof data.count === 'number') return data.count;
+    if (typeof data.approximateCount === 'number') return data.approximateCount;
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function buildFieldList(config: TenantConfig, projectKey: string): string[] {

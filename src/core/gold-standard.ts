@@ -23,6 +23,13 @@ interface GoldStandardsCache {
   itemCount: number;
 }
 
+interface SearchJqlResponse {
+  issues?: JiraIssue[];
+  total?: number;
+  nextPageToken?: string;
+  isLast?: boolean;
+}
+
 // ─── Fetch few-shot examples for generation ───────────────────────────────────
 
 export async function fetchGoldExamples(
@@ -115,17 +122,11 @@ async function fetchFromSource(source: GoldSource, limit: number): Promise<GoldI
 
   const jql = `project = ${source.project} AND issuetype = "${source.issuetype}" AND ${statusFilter}${labelFilter} ORDER BY updated DESC`;
 
-  const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jql,
-      maxResults: limit,
-      fields,
-    }),
+  const data = await runSearchJql({
+    jql,
+    maxResults: limit,
+    fields,
   });
-
-  const data = await response.json() as { issues?: JiraIssue[] };
   return (data.issues ?? []).map(issue => parseIssue(issue, source));
 }
 
@@ -142,27 +143,49 @@ async function fetchFromSourcePaginated(source: GoldSource, maxItems: number): P
   const jql = `project = ${source.project} AND issuetype = "${source.issuetype}" AND ${statusFilter}${labelFilter} ORDER BY updated DESC`;
 
   const results: GoldItem[] = [];
-  let startAt = 0;
+  let nextPageToken: string | undefined;
   const pageSize = 50;
 
   while (results.length < maxItems) {
-    const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jql, maxResults: pageSize, startAt, fields }),
+    const data = await runSearchJql({
+      jql,
+      maxResults: pageSize,
+      fields,
+      nextPageToken,
     });
-
-    const data = await response.json() as { issues?: JiraIssue[]; total?: number };
     const issues = data.issues ?? [];
     if (!issues.length) break;
 
     results.push(...issues.map(issue => parseIssue(issue, source)));
-    startAt += issues.length;
-
-    if (startAt >= (data.total ?? 0)) break;
+    if (data.isLast || !data.nextPageToken) break;
+    nextPageToken = data.nextPageToken;
   }
 
   return results.slice(0, maxItems);
+}
+
+async function runSearchJql(payload: {
+  jql: string;
+  maxResults: number;
+  fields: string[];
+  nextPageToken?: string;
+}): Promise<SearchJqlResponse> {
+  const response = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/search/jql'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Jira search failed (${response.status}): ${raw.slice(0, 280)}`);
+  }
+
+  try {
+    return JSON.parse(raw) as SearchJqlResponse;
+  } catch {
+    throw new Error('Jira search returned non-JSON response.');
+  }
 }
 
 function buildFieldList(source: GoldSource): string[] {
