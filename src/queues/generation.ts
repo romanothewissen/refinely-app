@@ -7,7 +7,7 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { GenerationEvent, SimilarStory } from '../types';
+import { GenerationContextMeta, GenerationEvent, SimilarStory } from '../types';
 import { generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
@@ -91,12 +91,30 @@ export async function handler(event: { body: GenerationEvent }) {
 
     result.similarStories = similarStories;
     result.sessionId = sessionId;
+    const generationContext: GenerationContextMeta = {
+      domainRolesUsed: config.domainRoles ?? [],
+      goldExamplesCount: goldItems.length,
+      referencedGoldExamples: goldItems.slice(0, 15).map(item => ({
+        key: item.key,
+        source: item.source,
+        summary: item.summary,
+      })),
+    };
+    result.generationContext = generationContext;
 
     // Record usage
     await recordGeneration();
 
     // Save to conversation history
-    await saveConversationTurn(sessionId, accountId, requirement, result.features, similarStories, config.generatorConfig.arModel);
+    await saveConversationTurn(
+      sessionId,
+      accountId,
+      requirement,
+      result.features,
+      similarStories,
+      config.generatorConfig.arModel,
+      generationContext,
+    );
 
     // Generate session title (non-critical; should not fail the generation run)
     try {
@@ -135,6 +153,7 @@ async function saveConversationTurn(
   features: unknown[],
   similarStories: unknown[],
   model: string,
+  generationContext?: GenerationContextMeta,
 ) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
@@ -144,6 +163,7 @@ async function saveConversationTurn(
       requirement,
       features,
       similarStories,
+      generationContext,
       model,
       timestamp: new Date().toISOString(),
     });

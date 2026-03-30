@@ -1,5 +1,5 @@
 import React from 'react';
-import { UploadCloud, Paperclip, ChevronDown, Plus, MessageSquare, Pin, Clock, Settings, PanelLeftClose, Zap, X } from 'lucide-react';
+import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X } from 'lucide-react';
 import { UsageMeter } from './UsageMeter';
 
 interface SidebarProps {
@@ -20,6 +20,7 @@ interface SidebarProps {
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
   width?: number;
+  originIssueKey?: string | null;
 }
 
 export function Sidebar({
@@ -39,7 +40,8 @@ export function Sidebar({
   tier,
   usage,
   limits,
-  width
+  width,
+  originIssueKey
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const brainstormDisabled = !requirement.trim() || isWorking || isAtLimit;
@@ -47,19 +49,27 @@ export function Sidebar({
 
   return (
     <aside 
-      className="h-full flex flex-col bg-white border-r border-slate-200 shadow-sm shrink-0 overflow-hidden"
+      className="rf-glass-strong h-full flex flex-col shrink-0 overflow-hidden rounded-r-[28px] border-r border-white/60"
       style={{ width: width ?? 380 }}
     >
       {/* Header */}
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-        <h1 className="font-semibold text-slate-800 text-lg tracking-tight hover:text-blue-600 transition-colors cursor-pointer" onClick={() => setViewMode('generate')}>
-          Feature Assistant <span className="text-blue-600 text-[10px] ml-1 px-1.5 py-0.5 bg-blue-50 rounded-full align-top font-bold uppercase">v2.0</span>
-        </h1>
+      <div className="px-6 py-5 border-b border-slate-200/70 bg-white/55 flex items-center justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="font-semibold text-slate-900 text-lg tracking-tight hover:text-blue-700 transition-colors cursor-pointer" onClick={() => setViewMode('generate')}>
+              Refinely
+            </h1>
+            <span className="rf-chip text-blue-700 text-[10px] px-2 py-0.5 rounded-full align-top font-bold uppercase tracking-[0.16em]">Forge</span>
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500 font-medium">
+            Requirement-to-backlog workspace
+          </p>
+        </div>
         <div className="flex items-center gap-1">
           {isAdmin && (
             <button 
               onClick={() => setViewMode('settings')}
-              className={`p-1.5 rounded-lg transition-colors ${viewMode === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`}
+              className={`p-2 rounded-xl transition-colors ${viewMode === 'settings' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-slate-400 hover:bg-white hover:text-slate-700 border border-transparent'}`}
               title="Settings"
             >
               <Settings className="w-4 h-4" />
@@ -67,7 +77,7 @@ export function Sidebar({
           )}
           <button 
             onClick={onToggleSidebar}
-            className="p-1.5 rounded-lg transition-colors text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="p-2 rounded-xl transition-colors text-slate-400 hover:bg-white hover:text-slate-700 border border-transparent"
             title="Collapse Sidebar"
           >
             <PanelLeftClose className="w-4 h-4" />
@@ -80,9 +90,17 @@ export function Sidebar({
 
         {/* Input Scope */}
         <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex-1 flex flex-col space-y-2 min-h-0">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">Requirement Scope</label>
-            <div className="flex-1 min-h-[250px] relative border border-slate-200 bg-slate-50 rounded-xl focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all p-4 shadow-inner flex flex-col">
+          <div className="rf-surface rounded-[26px] p-5 flex-1 flex flex-col space-y-3 min-h-0 overflow-hidden">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.22em] pl-0.5">Requirement Scope</label>
+                <p className="mt-1 text-xs text-slate-500">Describe the outcome, constraints, edge cases, and business context.</p>
+              </div>
+              <div className="rf-chip rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                {originIssueKey ? `From ${originIssueKey}` : 'New brief'}
+              </div>
+            </div>
+            <div className="flex-1 min-h-[280px] relative rounded-[20px] border border-slate-200/80 bg-white/70 focus-within:ring-2 focus-within:ring-blue-500/15 focus-within:border-blue-500/40 transition-all p-4 shadow-inner flex flex-col">
               <textarea
                 value={requirement}
                 onChange={(e) => setRequirement(e.target.value)}
@@ -90,24 +108,24 @@ export function Sidebar({
                 disabled={isWorking}
                 className="flex-1 w-full bg-transparent border-none text-slate-700 placeholder-slate-400 focus:outline-none text-[15px] leading-relaxed resize-none disabled:opacity-50"
               />
-              <div className="pt-3 flex justify-between items-center border-t border-slate-200/60 mt-2 shrink-0">
-                <button title="Attach doc (PDF/TXT)" className="flex items-center gap-1.5 px-2 py-1 text-slate-400 hover:bg-white hover:text-blue-600 rounded-lg transition-colors text-xs font-medium">
+              <div className="pt-3 flex justify-between items-center border-t border-slate-200/70 mt-3 shrink-0">
+                <button title="Attach doc (PDF/TXT)" className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-500 hover:bg-slate-50 hover:text-blue-700 rounded-xl transition-colors text-xs font-medium">
                   <Paperclip className="w-3.5 h-3.5" />
                   <span>Attach Context</span>
                 </button>
-                <div className="text-[10px] text-slate-300 font-medium">Rich text supported</div>
+                <div className="text-[10px] text-slate-400 font-medium">{requirement.trim().split(/\s+/).filter(Boolean).length} words</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* Action Area */}
-        <div className="space-y-3 pt-2">
+        <div className="space-y-3 pt-1">
           <button
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Monthly generation limit reached.' : ''}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold py-3.5 rounded-xl shadow-[0_8px_20px_-6px_rgba(37,99,235,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 group"
+            className="rf-button-primary w-full disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold py-4 rounded-[20px] transition-all active:scale-[0.985] flex items-center justify-center gap-2 group"
           >
             {isWorking ? (
               <div className="flex items-center gap-2">
@@ -117,7 +135,7 @@ export function Sidebar({
             ) : (
               <>
                 <Zap className={`w-4 h-4 ${requirement.trim() ? 'fill-white' : ''}`} />
-                <span>{isAtLimit ? 'Limit Reached' : 'Start Brainstorm'}</span>
+                <span>{isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Brainstorm'}</span>
               </>
             )}
           </button>
@@ -125,14 +143,14 @@ export function Sidebar({
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={onNewSession}
-              className="px-3 py-2.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-[11px] font-bold uppercase tracking-wider rounded-xl transition-colors flex items-center justify-center gap-2"
+              className="rf-surface rounded-2xl px-3 py-3 text-slate-700 text-[11px] font-bold uppercase tracking-[0.18em] transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
             >
               <Plus className="w-3.5 h-3.5" />
               New
             </button>
             <button
               onClick={onOpenHistory}
-              className="px-3 py-2.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-[11px] font-bold uppercase tracking-wider rounded-xl transition-colors flex items-center justify-center gap-2"
+              className="rf-surface rounded-2xl px-3 py-3 text-slate-700 text-[11px] font-bold uppercase tracking-[0.18em] transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
             >
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               History
@@ -143,7 +161,7 @@ export function Sidebar({
 
       {/* Footer / Usage Meter */}
       {showUsage && (
-        <div className="p-6 border-t border-slate-100 bg-slate-50/50 relative group">
+        <div className="p-6 border-t border-slate-200/70 bg-white/40 relative group">
           <button 
             onClick={() => setShowUsage(false)}
             className="absolute top-2 right-2 p-1.5 rounded-full text-slate-300 hover:text-slate-500 hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition-all z-20"
@@ -152,7 +170,9 @@ export function Sidebar({
             <X className="w-3.5 h-3.5" />
             <span className="sr-only">Hide</span>
           </button>
-          <UsageMeter usage={usage} limits={limits} tier={tier} />
+          <div className="rf-surface rounded-[22px] p-4">
+            <UsageMeter usage={usage} limits={limits} tier={tier} />
+          </div>
         </div>
       )}
     </aside>

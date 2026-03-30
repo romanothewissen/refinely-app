@@ -57,21 +57,21 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
   });
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden fade-in">
+    <div className="rf-grid-bg flex-1 flex flex-col h-full overflow-hidden fade-in">
       {/* Header */}
-      <header className="h-[72px] shrink-0 border-b border-slate-200 bg-white shadow-sm flex items-center justify-between px-8 gap-4 sticky top-0 z-20">
+      <header className="h-[84px] shrink-0 border-b border-white/60 bg-white/68 shadow-sm backdrop-blur-xl flex items-center justify-between px-8 gap-4 sticky top-0 z-20">
         <div className="flex items-center gap-4">
           {!sidebarOpen && (
-            <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition border border-slate-200" title="Open Sidebar">
+            <button onClick={() => setSidebarOpen(true)} className="p-2.5 rounded-xl hover:bg-white text-slate-500 transition border border-slate-200 shadow-sm" title="Open Sidebar">
               <Menu className="w-4 h-4" />
             </button>
           )}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 shadow-lg shadow-blue-100 flex items-center justify-center animate-pulse">
+            <div className="w-12 h-12 rounded-[18px] bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_18px_40px_-18px_rgba(37,99,235,0.68)] flex items-center justify-center animate-pulse">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-slate-800 tracking-tight leading-tight">Requirement Discovery</h1>
+              <h1 className="text-base font-bold text-slate-900 tracking-tight leading-tight">Requirement Discovery</h1>
               <p className="text-[11px] text-slate-500 font-medium leading-tight mt-0.5">{answeredCount} of {questions.length} questions explored</p>
             </div>
           </div>
@@ -94,7 +94,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
           </button>
           <button
             onClick={handleSubmit}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm active:scale-[0.98]"
+            className="rf-button-primary flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition active:scale-[0.98]"
           >
             Generate Features <ArrowRight className="w-4 h-4" />
           </button>
@@ -108,7 +108,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
             <div key={category} className="space-y-4">
               {/* Category header */}
               <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-1 rounded-full">{category}</span>
+                <span className="rf-chip text-[10px] font-bold uppercase tracking-widest text-blue-700 px-2.5 py-1 rounded-full">{category}</span>
                 <div className="flex-1 h-px bg-slate-200" />
               </div>
 
@@ -120,11 +120,11 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
                   return (
                     <div
                       key={idx}
-                      className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden ${isAnswered ? 'border-blue-200 shadow-sm shadow-blue-100/50' : 'border-slate-200'}`}
+                      className={`rf-surface rounded-[24px] transition-all duration-200 overflow-hidden ${isAnswered ? 'border-blue-200 shadow-sm shadow-blue-100/50' : 'border-slate-200/80'}`}
                     >
                       {/* Question */}
                       <div className="px-5 pt-4 pb-3 flex items-start gap-3">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 transition-all ${isAnswered ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 transition-all ${isAnswered ? 'bg-blue-600 text-white shadow-[0_10px_24px_-12px_rgba(37,99,235,0.7)]' : 'bg-slate-100 text-slate-400'}`}>
                           {isAnswered ? <Check className="w-3.5 h-3.5" /> : <span className="text-[10px] font-bold">{idx + 1}</span>}
                         </div>
                         <p className="text-sm font-medium text-slate-800 leading-relaxed">{q.question}</p>
@@ -142,7 +142,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
                                 className={`px-3 py-1.5 text-xs font-medium rounded-xl border transition-all ${
                                   sel
                                     ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                    : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50'
+                                    : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:-translate-y-0.5'
                                 }`}
                               >
                                 {sel && <Check className="w-3 h-3 inline mr-1" />}
@@ -160,7 +160,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
                           onChange={e => handleCustomChange(idx, e.target.value)}
                           placeholder={q.suggestions.length > 0 ? 'Click suggestions above or type your own answer…' : 'Type your answer…'}
                           rows={2}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none"
+                          className="w-full bg-white/80 border border-slate-200 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none"
                         />
                       </div>
                     </div>
@@ -174,7 +174,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, sidebarOpe
           <div className="flex justify-end pt-2 pb-8">
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition shadow-md active:scale-[0.98]"
+              className="rf-button-primary flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-semibold text-white transition active:scale-[0.98]"
             >
               Generate Features <ArrowRight className="w-4 h-4" />
             </button>

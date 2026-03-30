@@ -259,8 +259,25 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
     setNewSource(prev => ({ ...prev, project: projectKey }));
     try {
       const [it, st] = await Promise.all([api.discoverIssueTypes(projectKey) as Promise<any>, api.discoverStatuses(projectKey) as Promise<any>]);
-      setIssueTypes(it.issueTypes ?? []);
-      setStatuses(st.statuses ?? []);
+      const fetchedTypes = it.issueTypes ?? [];
+      const fetchedStatuses = st.statuses ?? [];
+      setIssueTypes(fetchedTypes);
+      setStatuses(fetchedStatuses);
+
+      // Auto-select sensible defaults so the admin doesn't have to hunt for them
+      const doneKeywords = ['done', 'completed', 'deployed', 'released', 'closed'];
+      const autoStatus = fetchedStatuses.find((s: JiraStatus) =>
+        doneKeywords.includes(s.name.toLowerCase())
+      );
+      const autoType = fetchedTypes.find((t: JiraIssueType) =>
+        t.name.toLowerCase() === 'story'
+      ) ?? fetchedTypes[0];
+
+      setNewSource(prev => ({
+        ...prev,
+        ...(autoStatus ? { status: autoStatus.name } : {}),
+        ...(autoType ? { issuetype: autoType.name } : {}),
+      }));
     } catch {}
   }
 

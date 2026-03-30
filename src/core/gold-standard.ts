@@ -7,7 +7,7 @@ import { asApp, assumeTrustedRoute } from '@forge/api';
 import { GoldSource } from '../types';
 import { objectRead, objectWrite, entityGet, entitySet, KEYS } from '../services/cache';
 
-interface GoldItem {
+export interface GoldItem {
   key: string;
   summary: string;
   description: string;

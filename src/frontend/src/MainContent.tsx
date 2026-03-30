@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, Zap, ChevronDown } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown } from 'lucide-react';
 import { api } from './hooks/useForge';
 import { UsageMeter } from './UsageMeter';
 import { router } from '@forge/bridge';
@@ -163,13 +163,18 @@ interface MainContentProps {
   tier: string;
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
+  generationContext?: {
+    domainRolesUsed: string[];
+    goldExamplesCount: number;
+    referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
+  } | null;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({ 
   features, setFeatures, onPushFeature, isGenerating, progress, 
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  tier, usage, limits
+  tier, usage, limits, generationContext
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -192,8 +197,6 @@ export function MainContent({
 
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
-  const acceptedCount = Array.isArray(features) ? features.filter(f => f?.isAccepted).length : 0;
-
   // Bulk Refine state
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
@@ -335,11 +338,11 @@ export function MainContent({
     <div className="w-full px-6 md:px-12 py-8 space-y-6 fade-in h-full flex flex-col pt-12">
       {/* Moved progress to top as requested */}
       <div className="flex flex-col items-center gap-4 mb-4 zoom-in">
-        <div className="w-12 h-12 rounded-2xl bg-blue-600 shadow-lg shadow-blue-200 flex items-center justify-center animate-pulse">
+        <div className="w-14 h-14 rounded-[20px] bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 shadow-[0_18px_42px_-18px_rgba(37,99,235,0.68)] flex items-center justify-center animate-pulse">
           <Sparkles className="w-6 h-6 text-white" />
         </div>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight">Refinely at work</h2>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">Refinely at work</h2>
           <p className="text-sm text-slate-500 font-medium mt-1">{progress || 'Processing your request…'}</p>
         </div>
         <div className="dot-bounce text-blue-400 mt-2"><span /><span /><span /></div>
@@ -347,7 +350,7 @@ export function MainContent({
 
       <div className="space-y-6">
         {[1, 2, 3].map(i => (
-          <div key={i} className="bg-white rounded-2xl border border-slate-200 overflow-hidden" style={{ animationDelay: `${i * 0.12}s` }}>
+          <div key={i} className="rf-surface rounded-[24px] overflow-hidden" style={{ animationDelay: `${i * 0.12}s` }}>
             <div className="flex">
               <div className="w-2 shimmer shrink-0" />
               <div className="flex-1 p-6 space-y-4">
@@ -366,16 +369,19 @@ export function MainContent({
   );
 
   return (
-    <main className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden">
+    <main className="flex-1 flex flex-col h-full relative overflow-hidden">
       {/* Header */}
-      <header className="h-[60px] shrink-0 border-b border-slate-200 bg-white/80 backdrop-blur-sm flex items-center justify-between px-8 z-10 sticky top-0">
+      <header className="h-[74px] shrink-0 border-b border-white/60 bg-white/65 backdrop-blur-xl flex items-center justify-between px-8 z-10 sticky top-0">
         <div className="flex items-center gap-4">
           {!sidebarOpen && (
-            <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-2 rounded-lg hover:bg-slate-100 text-slate-500 transition border border-slate-200" title="Open Sidebar">
+            <button onClick={() => setSidebarOpen(true)} className="p-2.5 -ml-2 rounded-xl hover:bg-white text-slate-500 transition border border-slate-200/80 shadow-sm" title="Open Sidebar">
               <Menu className="w-4 h-4" />
             </button>
           )}
-          <span className="font-semibold text-slate-700 text-sm">Feature Canvas</span>
+          <div>
+            <span className="font-semibold text-slate-800 text-sm tracking-[0.08em] uppercase">Feature Canvas</span>
+            <p className="text-[11px] text-slate-500 mt-0.5">Review, refine, and push backlog-ready features.</p>
+          </div>
           
           <UsageMeter usage={usage} limits={limits} tier={tier} isCompact />
         </div>
@@ -391,14 +397,14 @@ export function MainContent({
             <div className="relative">
               <button 
                 onClick={() => setShowBulkRefine(!showBulkRefine)} 
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${showBulkRefine ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-600 border-slate-200 hover:border-purple-400 hover:text-purple-600 shadow-sm'}`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-2xl border text-xs font-semibold transition-all ${showBulkRefine ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white/85 text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700 shadow-sm'}`}
               >
                 <Sparkles className={`w-3.5 h-3.5 ${showBulkRefine ? 'animate-pulse' : ''}`} />
                 Refine All
               </button>
 
               {showBulkRefine && (
-                <div className="absolute right-0 top-full mt-3 w-[400px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50 slide-down">
+                <div className="absolute right-0 top-full mt-3 w-[400px] rf-glass-strong rounded-[24px] p-4 z-50 slide-down">
                   <div className="flex items-center justify-between mb-3 px-1">
                     <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                        <Sparkles className="w-3.5 h-3.5 text-purple-500" /> Advanced Bulk Refine
@@ -460,22 +466,50 @@ export function MainContent({
           <GeneratingSkeleton />
         ) : !hasFeatures ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center fade-in max-w-md mx-auto p-6">
-            <div className="w-16 h-16 bg-blue-50/70 rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-blue-100/50">
+            <div className="w-[72px] h-[72px] bg-white/80 rounded-[24px] flex items-center justify-center mb-6 shadow-[0_24px_52px_-28px_rgba(37,99,235,0.5)] border border-white/80 p-4">
               <Sparkles className="w-8 h-8 text-blue-400" />
             </div>
-            <h2 className="text-xl font-semibold text-slate-800 tracking-tight mb-2">Ready to generate</h2>
-            <p className="text-slate-400 text-sm leading-relaxed">Describe your requirement in the sidebar, answer the clarifying questions, and your features will appear here.</p>
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight mb-2">Ready to generate</h2>
+            <p className="text-slate-500 text-sm leading-relaxed">Describe your requirement in the sidebar, answer the clarifying questions, and your features will appear here.</p>
           </div>
         ) : (
           <div className="w-full px-6 md:px-12 py-8 space-y-4 fade-in flex-1">
+            {generationContext && (
+              <div className="rf-surface rounded-[24px] p-5">
+                <div className="flex flex-wrap items-center gap-4 text-xs">
+                  <div className="font-semibold text-slate-800">
+                    Context used: {generationContext.goldExamplesCount} golden example{generationContext.goldExamplesCount !== 1 ? 's' : ''}
+                  </div>
+                  {generationContext.domainRolesUsed?.length > 0 && (
+                    <div className="text-slate-600">
+                      Roles: {generationContext.domainRolesUsed.join(', ')}
+                    </div>
+                  )}
+                </div>
+                {generationContext.referencedGoldExamples?.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {generationContext.referencedGoldExamples.map((example, i) => (
+                      <span
+                        key={`${example.source}-${example.key}-${i}`}
+                        className="rf-chip inline-flex items-center gap-1 rounded-full text-blue-700 px-2.5 py-1 text-[11px] font-medium"
+                        title={example.summary}
+                      >
+                        {example.source}: {example.key}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {features.map((feature, idx) => {
               const isEditing = editingIdx === idx;
               const draft = editDraft;
 
               return (
-                <div key={feature.id || idx} className={`bg-white rounded-xl shadow-sm border transition-all duration-300 overflow-hidden ${feature.pendingRemoval ? 'border-red-400 opacity-80' : feature.isAccepted ? 'border-green-400 ring-1 ring-green-100' : 'border-slate-200'}`}>
+                <div key={feature.id || idx} className={`rf-surface rounded-[24px] transition-all duration-300 overflow-hidden ${feature.pendingRemoval ? 'border-red-400 opacity-80' : feature.isAccepted ? 'border-green-300 ring-1 ring-green-100' : 'border-slate-200/80'}`}>
                   {/* Accent bar */}
-                  <div className={`h-1 ${feature.pendingRemoval ? 'bg-red-500' : feature.isAccepted ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 'bg-gradient-to-r from-blue-500 to-indigo-500'}`} />
+                  <div className={`h-1.5 ${feature.pendingRemoval ? 'bg-red-500' : feature.isAccepted ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 'bg-gradient-to-r from-blue-500 via-sky-500 to-indigo-500'}`} />
 
                   <div className="p-5">
                     {/* Title row */}

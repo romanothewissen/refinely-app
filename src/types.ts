@@ -155,11 +155,24 @@ export interface ValidationViolation {
   message: string;
 }
 
+export interface ReferencedGoldExample {
+  key: string;
+  source: string;
+  summary: string;
+}
+
+export interface GenerationContextMeta {
+  domainRolesUsed: string[];
+  goldExamplesCount: number;
+  referencedGoldExamples: ReferencedGoldExample[];
+}
+
 export interface GenerationResult {
   features: Feature[];
   violations: ValidationViolation[];
   similarStories: SimilarStory[];
   sessionId: string;
+  generationContext?: GenerationContextMeta;
   tokenUsage?: { input: number; output: number };
 }
 
@@ -194,6 +207,7 @@ export interface ConversationTurn {
   requirement: string;
   features: Feature[];
   similarStories: SimilarStory[];
+  generationContext?: GenerationContextMeta;
   feedback?: string;
   model: string;
   timestamp: string;

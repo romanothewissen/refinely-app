@@ -3,17 +3,40 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --rf-bg: #eef3f8;
+    --rf-panel: rgba(255, 255, 255, 0.9);
+    --rf-panel-strong: rgba(255, 255, 255, 0.96);
+    --rf-line: rgba(15, 23, 42, 0.08);
+    --rf-line-strong: rgba(15, 23, 42, 0.14);
+    --rf-text: #0f172a;
+    --rf-muted: #5b6b82;
+    --rf-brand: #1d4ed8;
+    --rf-brand-soft: rgba(29, 78, 216, 0.12);
+    --rf-glow: rgba(59, 130, 246, 0.22);
+    --rf-shadow-lg: 0 28px 60px -28px rgba(15, 23, 42, 0.24);
+    --rf-shadow-md: 0 18px 36px -24px rgba(15, 23, 42, 0.18);
+    --rf-radius-xl: 24px;
+    --rf-radius-lg: 18px;
+  }
+
   html, body {
     height: 100%;
     margin: 0;
     overflow: hidden;
-    /* Safe system font stack — no external CSP-blocked fonts */
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.16), transparent 26%),
+      radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 24%),
+      linear-gradient(180deg, #f6f9fc 0%, var(--rf-bg) 55%, #e8eef6 100%);
+    color: var(--rf-text);
   }
+
   #root {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
   }
 }
 
@@ -25,6 +48,103 @@
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  .rf-shell {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .rf-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.54), transparent 40%),
+      radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.68), transparent 22%),
+      radial-gradient(circle at 80% 12%, rgba(147, 197, 253, 0.18), transparent 16%);
+    z-index: -2;
+  }
+
+  .rf-shell::after {
+    content: "";
+    position: absolute;
+    inset: 18px;
+    border-radius: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .rf-glass {
+    background: var(--rf-panel);
+    border: 1px solid var(--rf-line);
+    box-shadow: var(--rf-shadow-md);
+    backdrop-filter: blur(18px);
+  }
+
+  .rf-glass-strong {
+    background: var(--rf-panel-strong);
+    border: 1px solid var(--rf-line-strong);
+    box-shadow: var(--rf-shadow-lg);
+    backdrop-filter: blur(22px);
+  }
+
+  .rf-surface {
+    position: relative;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.86)),
+      rgba(255, 255, 255, 0.86);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: var(--rf-shadow-md);
+  }
+
+  .rf-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent 28%);
+  }
+
+  .rf-grid-bg {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-position: center center;
+  }
+
+  .rf-floating-orb {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(42px);
+    opacity: 0.55;
+    pointer-events: none;
+    animation: floatOrb 12s ease-in-out infinite;
+  }
+
+  .rf-chip {
+    border: 1px solid rgba(59, 130, 246, 0.12);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(239, 246, 255, 0.9));
+    box-shadow: 0 8px 22px -18px rgba(29, 78, 216, 0.42);
+  }
+
+  .rf-button-primary {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 58%, #1e40af 100%);
+    box-shadow:
+      0 16px 34px -18px rgba(37, 99, 235, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  }
+
+  .rf-button-primary:hover {
+    box-shadow:
+      0 20px 38px -18px rgba(37, 99, 235, 0.62),
+      0 0 0 6px rgba(29, 78, 216, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  }
 
   /* Fade in (content) */
   .fade-in { animation: fadeIn 0.4s ease-out forwards; }
@@ -87,5 +207,18 @@
   /* Spin (loading spinner) */
   .spin-slow { animation: spin 1.6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  @keyframes floatOrb {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(10px, -14px, 0) scale(1.08); }
+  }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

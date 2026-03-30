@@ -43,6 +43,48 @@ interface RawFeature {
   process_code?: string;
 }
 
+interface ClarifyQuestionPlan {
+  min: number;
+  max: number;
+  target: number;
+  clarity: 'clear' | 'medium' | 'vague';
+}
+
+function inferClarifyQuestionPlan(input: {
+  requirement: string;
+  attachmentText: string;
+  wiContextText: string;
+}): ClarifyQuestionPlan {
+  const requirement = input.requirement?.trim() ?? '';
+  const attachment = input.attachmentText?.trim() ?? '';
+  const wi = input.wiContextText?.trim() ?? '';
+
+  const reqWords = requirement ? requirement.split(/\s+/).length : 0;
+  const reqSentences = requirement
+    ? requirement.split(/[.!?]\s+/).map(s => s.trim()).filter(Boolean).length
+    : 0;
+  const hasRichContext = attachment.length > 250 || wi.length > 250;
+  const hasConstraints = /(must|should|cannot|can't|only|except|unless|sla|kpi|compliance|permission|role|workflow|edge case|error|fallback|validation|audit|security)/i
+    .test(requirement);
+  const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|better|faster|enhance|fix this|update this|handle this|do it)/i
+    .test(requirement);
+
+  const clarityScore =
+    (reqWords >= 45 ? 1 : 0) +
+    (reqSentences >= 3 ? 1 : 0) +
+    (hasRichContext ? 1 : 0) +
+    (hasConstraints ? 1 : 0) -
+    (hasAmbiguousTokens ? 1 : 0);
+
+  if (clarityScore >= 3) {
+    return { min: 5, max: 6, target: 6, clarity: 'clear' };
+  }
+  if (clarityScore <= 1) {
+    return { min: 11, max: 15, target: 13, clarity: 'vague' };
+  }
+  return { min: 7, max: 10, target: 8, clarity: 'medium' };
+}
+
 // ─── Main Generation ──────────────────────────────────────────────────────────
 
 export async function generateFeatures(opts: {
@@ -159,10 +201,12 @@ export async function generateClarifyingQuestions(opts: {
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
+  const questionPlan = inferClarifyQuestionPlan({ requirement, attachmentText, wiContextText });
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
     domainRoles: config.domainRoles,
+    questionPlan,
   });
 
   const raw = await callLlmJson<ClarifyQuestion[]>({
@@ -186,7 +230,9 @@ export async function generateClarifyingQuestions(opts: {
   }
 
   // Final validation: must be array of objects with "question" key
-  return questions.filter(x => typeof x === 'object' && x !== null && 'question' in x);
+  return questions
+    .filter(x => typeof x === 'object' && x !== null && 'question' in x)
+    .slice(0, questionPlan.max);
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────

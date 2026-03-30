@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { requestJira, view, router } from '@forge/bridge';
+import { requestJira, view } from '@forge/bridge';
 import { Sidebar } from './Sidebar';
 import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
@@ -31,6 +31,12 @@ export interface AppConfig {
   goldSources?: unknown[];
 }
 
+interface GenerationContextMeta {
+  domainRolesUsed: string[];
+  goldExamplesCount: number;
+  referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
+}
+
 /** Recursively extract plain text from an Atlassian Document Format node */
 function extractAdfText(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
@@ -45,6 +51,7 @@ export default function App() {
   const [requirement, setRequirement] = useState('');
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
+  const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
     try { return crypto.randomUUID(); } 
@@ -149,6 +156,7 @@ export default function App() {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn?.features?.length > 0) {
           setFeatures(lastTurn.features);
+          setGenerationContext(lastTurn.generationContext ?? null);
           setSidebarOpen(false);
         }
       }
@@ -194,6 +202,7 @@ export default function App() {
       if (payload.features) {
         setFeatures(payload.features);
       }
+      setGenerationContext(payload.generationContext ?? null);
       setPendingSessionId(null);
       setIsWorking(false);
       setIsGenerationStarted(false);
@@ -231,6 +240,7 @@ export default function App() {
     setIsWorking(true);
     setGenerationError(null);
     setFeatures([]);
+    setGenerationContext(null);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -321,8 +331,9 @@ export default function App() {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
-          setRequirement(lastTurn.requirement ?? '');
-        }
+        setRequirement(lastTurn.requirement ?? '');
+        setGenerationContext(lastTurn.generationContext ?? null);
+      }
         setViewMode('generate');
       }
     } catch {}
@@ -335,7 +346,9 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-slate-50 text-slate-800 font-sans overflow-hidden">
+    <div className="rf-shell flex h-screen w-full overflow-hidden text-slate-800 font-sans">
+      <div className="rf-floating-orb top-[-60px] left-[-40px] h-48 w-48 bg-blue-200/70" />
+      <div className="rf-floating-orb bottom-[-80px] right-[8%] h-56 w-56 bg-sky-200/60" style={{ animationDelay: '1.8s' }} />
       {/* Left Sidebar — animated & resizable */}
       {(sidebarOpen || sidebarExiting) && (
         <div 
@@ -359,6 +372,7 @@ export default function App() {
                 
                 setRequirement('');
                 setFeatures([]);
+                setGenerationContext(null);
                 setClarifyQuestions([]);
                 setSidebarOpen(true);
                 setSidebarExiting(false);
@@ -375,6 +389,7 @@ export default function App() {
               usage={usage}
               limits={limits}
               width={sidebarWidth}
+              originIssueKey={originIssueKey}
             />
             {/* Resize Handle */}
             {sidebarOpen && (
@@ -394,7 +409,7 @@ export default function App() {
       {viewMode === 'settings' && isAdmin ? (
         <SettingsView onClose={() => { setViewMode('generate'); setSidebarOpen(true); }} />
       ) : (
-        <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden">
+        <div className="rf-grid-bg flex-1 flex flex-col h-full relative overflow-hidden">
           {generationError && (
             <div className="w-full bg-red-600 text-white px-6 py-4 text-sm font-semibold flex items-start gap-3 z-50 shadow-lg">
               <span className="flex-1">{generationError}</span>
@@ -431,6 +446,7 @@ export default function App() {
               tier={tier}
               usage={usage}
               limits={limits}
+              generationContext={generationContext}
             />
           )}
         </div>

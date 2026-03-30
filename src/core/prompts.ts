@@ -150,6 +150,12 @@ Output JSON: same features array with acceptance_requirements arrays filled in. 
 export function buildClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
+  questionPlan: {
+    min: number;
+    max: number;
+    target: number;
+    clarity: 'clear' | 'medium' | 'vague';
+  };
 }): string {
   const roleHint = opts.domainRoles.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}.`
@@ -161,7 +167,13 @@ ${roleHint}
 
 YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build feature set. Even if the requirement seems clear, there are always nuances regarding error handling, user permissions, data edge cases, or business workflows that need exploration.
 
-TASK: Generate 8-15 targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough — even for seemingly simple requirements, explore the edge cases and business constraints deeply.
+CLARITY ASSESSMENT:
+- The input appears: ${opts.questionPlan.clarity.toUpperCase()}
+- Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} clarifying questions (target ${opts.questionPlan.target}).
+- If the requirement is very clear and specific, stay near the lower bound.
+- If the requirement is vague or underspecified, stay near the upper bound.
+
+TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected
 2. Trigger & Context — when/why does this happen
 3. Functional Flow — what are the key steps and decisions
