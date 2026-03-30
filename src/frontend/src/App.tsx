@@ -466,7 +466,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden text-[#172B4D] font-sans bg-[#F4F5F7]">
+    <div className="flex h-full w-full overflow-hidden text-[#172B4D] font-sans bg-transparent">
       {/* Left Sidebar — animated & resizable */}
       <AnimatePresence>
         {(sidebarOpen || sidebarExiting) && (
@@ -545,11 +545,16 @@ export default function App() {
           initialProjectKey={settingsStartProjectKey}
         />
       ) : (
-        <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#F4F5F7]">
+        <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute inset-x-0 top-0 h-40 bg-[linear-gradient(180deg,rgba(255,255,255,0.56),transparent)]" />
+            <div className="absolute right-[-12%] top-[-8%] h-64 w-64 rounded-full bg-[rgba(0,82,204,0.06)] blur-3xl" />
+            <div className="absolute left-[-10%] bottom-[-10%] h-72 w-72 rounded-full bg-[rgba(54,179,126,0.05)] blur-3xl" />
+          </div>
           <AnimatePresence>
             {generationError && (
               <motion.div
-                className="w-full bg-[#FFEBE6] text-[#DE350B] border-b border-red-300 px-6 py-3 text-sm font-medium flex items-start gap-3 z-50"
+                className="w-full bg-[rgba(255,235,230,0.92)] backdrop-blur-sm text-[#DE350B] border-b border-red-300 px-6 py-3 text-sm font-medium flex items-start gap-3 z-50"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
