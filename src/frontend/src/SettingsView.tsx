@@ -79,6 +79,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   // WIs State
   const [wiEnabled, setWiEnabled] = useState(true);
   const [wiDocs, setWiDocs] = useState<WiDocRow[]>([]);
+  const [wiUploadState, setWiUploadState] = useState<{ filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null>(null);
+  const [wiUploadError, setWiUploadError] = useState<string | null>(null);
   const wiFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -192,7 +194,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.type !== 'application/pdf') return;
+    if (file.type !== 'application/pdf') {
+      setWiUploadError('Only PDF documents are supported right now.');
+      return;
+    }
+    setWiUploadError(null);
+    setWiUploadState({ filename: file.name, stage: 'reading' });
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -203,9 +210,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         reader.onerror = () => reject(new Error('Read failed'));
         reader.readAsDataURL(file);
       });
+      setWiUploadState({ filename: file.name, stage: 'uploading' });
       const res = await api.uploadWi(file.name, base64, undefined, activeArProj) as any;
-      if (res.success !== false && !res.duplicate) await loadWiDocs();
-    } catch (err: any) { console.error('Upload failed', err); }
+      if (res.success === false) {
+        throw new Error(res.error || 'Upload failed');
+      }
+      setWiUploadState({ filename: file.name, stage: 'indexing' });
+      if (!res.duplicate) await loadWiDocs();
+    } catch (err: any) {
+      console.error('Upload failed', err);
+      setWiUploadError(err?.message || 'Upload failed.');
+    } finally {
+      setWiUploadState(null);
+    }
   }
 
   async function handleRemoveWiDoc(docId: string) {
@@ -377,28 +394,44 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     return [];
   }, [provider, geminiApiKey, existingGeminiApiKey, openaiApiKey, existingOpenaiApiKey]);
 
+  const settingsNav = [
+    { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'LLM & API Keys' },
+    { id: 'jira', label: 'Jira Governance', icon: Database, sub: 'Mappings & Linking' },
+    { id: 'domain', label: 'Domain Intelligence', icon: Globe, sub: 'Rules & Reference' },
+    { id: 'billing', label: 'Plan & Billing', icon: CreditCard, sub: 'Tier & Usage' },
+  ] as const;
+
+  const wiUploadCopy = wiUploadState
+    ? wiUploadState.stage === 'reading'
+      ? 'Preparing document'
+      : wiUploadState.stage === 'uploading'
+        ? 'Uploading document'
+        : 'Indexing for retrieval'
+    : null;
+
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden font-sans">
-      <header className="h-16 shrink-0 border-b border-[var(--rf-border)] bg-white flex items-center justify-between px-6 z-30 sticky top-0">
+    <div className="flex-1 flex flex-col h-full bg-[var(--rf-bg)] relative overflow-hidden font-sans">
+      <header className="shrink-0 border-b border-[var(--rf-border)] bg-white/90 backdrop-blur flex items-center justify-between px-6 py-4 z-30 sticky top-0">
         <div className="flex items-center gap-5">
-          <button onClick={onClose} className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-800 transition-all group">
+          <button onClick={onClose} className="p-2.5 rounded-2xl border border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] transition-all group shadow-[var(--rf-shadow-sm)]">
              <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5" />
           </button>
           <div>
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">Settings <span className="text-slate-300 font-light">/</span> <span className="text-blue-600">Configuration</span></h2>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Workspace Settings</div>
+            <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[var(--rf-text)] flex items-center gap-2">Settings <span className="text-[var(--rf-border-strong)] font-light">/</span> <span className="text-[var(--rf-brand)]">Configuration</span></h2>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase border ${isAdmin ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
                 {isAdmin ? 'Administrator' : 'Read-Only'}
               </span>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-blue-500" /> {tier} plan
+              <span className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-wider flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-[var(--rf-brand)]" /> {tier} plan
               </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-4">
           {isAdmin && (
-            <button onClick={handleSave} disabled={isSaving} className="bg-slate-900 hover:bg-black disabled:opacity-50 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center gap-2">
+            <button onClick={handleSave} disabled={isSaving} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 text-white text-sm font-bold px-6 py-2.5 rounded-2xl shadow-[var(--rf-shadow-md)] transition-all active:scale-[0.98] flex items-center gap-2">
               {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               Save Config
             </button>
@@ -406,49 +439,45 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden flex bg-slate-50/40">
-          <div className="w-72 shrink-0 border-r border-slate-200 bg-white/70 p-6 flex flex-col gap-2">
-            {[
-              { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'LLM & API Keys' },
-              { id: 'jira', label: 'Jira Governance', icon: Database, sub: 'Mappings & Linking' },
-              { id: 'domain', label: 'Domain Intelligence', icon: Globe, sub: 'Rules & Reference' },
-              { id: 'billing', label: 'Plan & Billing', icon: CreditCard, sub: 'Tier & Usage' },
-            ].map((tab) => (
+      <div className="flex-1 overflow-hidden flex bg-[var(--rf-bg)]">
+          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-white/75 p-6 flex flex-col gap-2">
+            {settingsNav.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                  activeTab === tab.id ? 'bg-blue-50 text-blue-700 border-blue-100 shadow-sm' : 'text-slate-600 border-transparent hover:bg-slate-100'
+                  activeTab === tab.id ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.12)] shadow-[var(--rf-shadow-sm)]' : 'text-[var(--rf-text-secondary)] border-transparent hover:bg-[var(--rf-surface-soft)]'
                 }`}
               >
-                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`} />
+                <tab.icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`} />
                 <div className="text-left">
                   <div className="text-xs font-bold">{tab.label}</div>
-                  <div className="text-[10px] text-slate-400">{tab.sub}</div>
+                  <div className="text-[10px] text-[var(--rf-text-tertiary)]">{tab.sub}</div>
                 </div>
               </button>
             ))}
             
-            <div className="mt-auto px-3 py-5 border-t border-slate-100">
-               <div className="bg-slate-50 rounded-2xl p-4 text-slate-700 border border-slate-200">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Current Plan</div>
+            <div className="mt-auto px-3 py-5 border-t border-[var(--rf-border-subtle)]">
+               <div className="rf-panel-soft rounded-2xl p-4 text-[var(--rf-text)]">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1">Current Plan</div>
                  <div className="text-base font-bold capitalize">{tier}</div>
-                 <div className="text-xs text-slate-500 mt-1">
+                 <div className="text-xs text-[var(--rf-text-secondary)] mt-1">
                    {usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0} generations
                  </div>
                </div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-8 lg:p-10 space-y-10 custom-scrollbar">
             {activeTab === 'models' && (
               <div className="max-w-3xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="space-y-1">
-                   <h3 className="text-2xl font-black text-slate-900 tracking-tight">AI Infrastructure</h3>
-                   <p className="text-slate-500 text-sm">Configure the Large Language Models powering your story refinement pipeline.</p>
+                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">AI Infrastructure</div>
+                   <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Model and provider setup</h3>
+                   <p className="text-[var(--rf-text-secondary)] text-sm">Configure the language models powering your story refinement pipeline.</p>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+                <div className="rf-panel rounded-[28px] p-6 space-y-6">
                   <div className="space-y-3">
                     <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">LLM Provider</label>
                     <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
@@ -513,12 +542,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               <div className="max-w-4xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Jira Governance</h3>
-                    <p className="text-slate-500 text-sm">Fine-tune how Refinely interacts with your specific Jira projects.</p>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Jira Governance</div>
+                    <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Project mapping and source control</h3>
+                    <p className="text-[var(--rf-text-secondary)] text-sm">Fine-tune how Refinely interacts with your Jira projects.</p>
                   </div>
-                  <div className="flex items-center gap-2 bg-slate-100/50 p-1.5 rounded-2xl border border-slate-200/60 shadow-inner">
-                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3">Editing Context:</span>
-                     <select value={activeArProj} onChange={e => setActiveArProj(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-blue-600 shadow-sm focus:ring-2 focus:ring-blue-500/20 outline-none min-w-[180px]">
+                  <div className="rf-panel-soft flex items-center gap-2 p-1.5 rounded-2xl">
+                     <span className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest px-3">Editing Context:</span>
+                     <select value={activeArProj} onChange={e => setActiveArProj(e.target.value)} className="bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2 text-xs font-black text-[var(--rf-brand)] shadow-[var(--rf-shadow-sm)] focus:ring-2 focus:ring-blue-500/20 outline-none min-w-[180px]">
                         <option value="*">Global Org-Wide</option>
                         {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
                       </select>
@@ -526,7 +556,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 </div>
 
                 <div className="grid grid-cols-1 gap-8">
-                <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-8">
+                <div className="rf-panel rounded-[28px] p-8 space-y-8">
                   <div className="flex items-center justify-between">
                      <div className="space-y-1">
                         <h4 className="text-base font-bold text-slate-800">Schema Discovery</h4>
@@ -551,49 +581,86 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
             {activeTab === 'domain' && (
               <div className="max-w-4xl space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Domain Intelligence</h3>
-                <div className="bg-white border border-slate-200/80 rounded-[32px] p-10 shadow-sm space-y-10">
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Domain Intelligence</div>
+                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Reference knowledge and team standards</h3>
+                </div>
+                <div className="rf-panel rounded-[32px] p-8 lg:p-10 space-y-10">
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center border border-orange-100"><Users className="w-6 h-6" /></div>
+                      <div className="w-12 h-12 rounded-2xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(0,82,204,0.1)]"><Users className="w-6 h-6" /></div>
                       <div>
-                        <h4 className="text-lg font-bold text-slate-900">Core Persona Roles</h4>
-                        <p className="text-xs text-slate-500 font-medium italic">Key stakeholders for story decomposition.</p>
+                        <h4 className="text-lg font-bold text-[var(--rf-text)]">Core persona roles</h4>
+                        <p className="text-xs text-[var(--rf-text-secondary)] font-medium">Key stakeholders for story decomposition.</p>
                       </div>
                     </div>
-                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Project Manager" className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-medium focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Project Manager" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl px-6 py-4 text-sm font-medium focus:ring-2 focus:ring-blue-500/20 outline-none" />
                   </div>
 
-                  <div className="pt-10 border-t border-slate-100 space-y-6">
+                  <div className="pt-10 border-t border-[var(--rf-border-subtle)] space-y-6">
                     <div className="flex justify-between items-center">
                        <div className="flex items-center gap-4">
-                         <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-100"><FileText className="w-6 h-6" /></div>
+                         <div className="w-12 h-12 rounded-2xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(0,82,204,0.1)]"><FileText className="w-6 h-6" /></div>
                          <div>
-                            <h4 className="text-lg font-bold text-slate-900">Work Instructions</h4>
-                            <p className="text-xs text-slate-500 font-medium italic">PDF guidelines for organization-wide standards.</p>
+                            <h4 className="text-lg font-bold text-[var(--rf-text)]">Work instructions</h4>
+                            <p className="text-xs text-[var(--rf-text-secondary)] font-medium">PDF guidelines for organization-wide standards.</p>
                          </div>
                        </div>
-                       <button onClick={() => wiFileInputRef.current?.click()} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-black px-6 py-3 rounded-2xl shadow-sm transition-all">+ Add Instruction</button>
-                       <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" className="hidden" />
+                       <button onClick={() => wiFileInputRef.current?.click()} disabled={!!wiUploadState} className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] disabled:opacity-60 text-[var(--rf-text)] text-xs font-black px-6 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all">
+                         {wiUploadState ? 'Uploading…' : '+ Add Instruction'}
+                       </button>
+                       <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" className="hidden" disabled={!!wiUploadState} />
                     </div>
+
+                    {(wiUploadState || wiUploadError) && (
+                      <div className={`rounded-[24px] border p-4 ${wiUploadError ? 'border-red-200 bg-[var(--rf-danger-subtle)]' : 'border-[rgba(0,82,204,0.12)] bg-[var(--rf-brand-muted)]'}`}>
+                        {wiUploadState && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Upload In Progress</div>
+                                <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{wiUploadState.filename}</div>
+                              </div>
+                              <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-semibold">
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                {wiUploadCopy}
+                              </div>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-white/70 border border-[rgba(0,82,204,0.08)]">
+                              <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                            </div>
+                            <p className="text-xs text-[var(--rf-text-secondary)]">Your document is being uploaded and indexed so it can be referenced in future runs.</p>
+                          </div>
+                        )}
+                        {wiUploadError && (
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-danger)]">Upload Failed</div>
+                              <p className="mt-1 text-sm text-[var(--rf-text)]">{wiUploadError}</p>
+                            </div>
+                            <button type="button" onClick={() => setWiUploadError(null)} className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-[var(--rf-danger)]">Dismiss</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {wiDocs.length === 0 ? (
-                        <div className="col-span-2 p-16 text-center border-2 border-dashed border-slate-100 rounded-3xl">
-                           <FileText className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-                           <p className="text-sm font-bold text-slate-400">No organizational instructions linked.</p>
+                        <div className="col-span-2 p-16 text-center border-2 border-dashed border-[var(--rf-border-subtle)] rounded-3xl bg-[var(--rf-surface-soft)]">
+                           <FileText className="w-12 h-12 text-[var(--rf-text-tertiary)]/30 mx-auto mb-4" />
+                           <p className="text-sm font-bold text-[var(--rf-text-tertiary)]">No organizational instructions linked.</p>
                         </div>
                       ) : (
                         wiDocs.map(doc => (
-                          <div key={doc.docId} className="bg-slate-50/50 border border-slate-200 p-5 rounded-lg flex items-center justify-between group hover:bg-white transition-all duration-300">
+                          <div key={doc.docId} className="rf-panel-soft p-5 rounded-[20px] flex items-center justify-between group hover:bg-white transition-all duration-300">
                              <div className="flex items-center gap-4 truncate">
-                               <div className="shrink-0 w-10 h-10 bg-white rounded-xl border border-slate-200 flex items-center justify-center"><FileText className="w-5 h-5 text-slate-400 font-light" /></div>
+                               <div className="shrink-0 w-10 h-10 bg-white rounded-xl border border-[var(--rf-border)] flex items-center justify-center"><FileText className="w-5 h-5 text-[var(--rf-text-tertiary)] font-light" /></div>
                                <div className="truncate">
-                                 <p className="text-xs font-black text-slate-700 truncate">{doc.filename}</p>
-                                 <p className="text-[10px] text-slate-400 font-bold uppercase">{doc.chunkCount} vector chunks</p>
+                                 <p className="text-xs font-black text-[var(--rf-text)] truncate">{doc.filename}</p>
+                                 <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase">{doc.chunkCount} vector chunks</p>
                                </div>
                              </div>
-                             <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash className="w-4 h-4"/></button>
+                             <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-red-500 transition-colors"><Trash className="w-4 h-4"/></button>
                           </div>
                         ))
                       )}
@@ -605,9 +672,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
             {activeTab === 'billing' && (
               <div className="max-w-4xl space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Plan & Usage</h3>
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Plan & Billing</div>
+                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Subscription and workspace health</h3>
+                </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-6">
+                  <div className="rf-panel rounded-[28px] p-8 space-y-6">
                     <div>
                       <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
                       <h4 className="text-3xl font-black text-slate-900 capitalize mt-2">{tier}</h4>
@@ -628,8 +698,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-6">
-                    <h4 className="text-sm font-bold text-slate-800">Environment Overview</h4>
+                  <div className="rf-panel rounded-[28px] p-8 space-y-6">
+                    <h4 className="text-sm font-bold text-[var(--rf-text)]">Environment Overview</h4>
                     <div className="space-y-4 text-sm">
                       <div className="flex items-center justify-between"><span className="text-slate-600">Cloud Status</span><span className="font-semibold text-green-600">Healthy</span></div>
                       <div className="flex items-center justify-between"><span className="text-slate-600">Security Layer</span><span className="font-semibold text-blue-600">Encrypted</span></div>
@@ -695,13 +765,13 @@ function ProjectConfigurationManager({
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      <div className="flex items-center justify-between border-b border-slate-100 pb-6">
+      <div className="flex items-center justify-between border-b border-[var(--rf-border-subtle)] pb-6">
         <div>
-          <h4 className="text-lg font-bold text-slate-800">Project Configuration</h4>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Focus: {activeArProj === '*' ? 'System-Wide Defaults' : activeArProj}</p>
+          <h4 className="text-lg font-bold text-[var(--rf-text)]">Project configuration</h4>
+          <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-widest mt-0.5">Focus: {activeArProj === '*' ? 'System-Wide Defaults' : activeArProj}</p>
         </div>
         {isProjectAdmin && (
-          <button onClick={handleSave} disabled={isSavingProject} className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold uppercase tracking-widest px-6 py-3 rounded-xl shadow-md active:scale-[0.98] transition-all flex items-center gap-2">
+          <button onClick={handleSave} disabled={isSavingProject} className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-[10px] font-bold uppercase tracking-widest px-6 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] active:scale-[0.98] transition-all flex items-center gap-2">
             {isSavingProject ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save Settings
           </button>
         )}
@@ -709,22 +779,22 @@ function ProjectConfigurationManager({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
          <div className="space-y-3">
-            <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">Local Project Guidelines</h5>
-            <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-white border border-slate-200 rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
+            <h5 className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2">Local Project Guidelines</h5>
+            <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="Guidelines for this project context..." className="w-full h-40 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20" />
          </div>
 
          <div className="space-y-6">
-            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-purple-500" /> AR Field Mapping</h5>
-            <div className="bg-slate-50 rounded-lg p-6 space-y-6 border border-slate-200/60">
-               <div className="flex p-1 bg-white rounded-2xl border border-slate-100 shadow-sm max-w-[240px]">
-                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>Consolidated</button>
-                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'iterative' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>Iterative</button>
+            <h5 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2"><Layers className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> AR Field Mapping</h5>
+            <div className="rf-panel-soft rounded-[24px] p-6 space-y-6">
+               <div className="flex p-1 bg-white rounded-2xl border border-[var(--rf-border-subtle)] shadow-[var(--rf-shadow-sm)] max-w-[240px]">
+                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-md' : 'text-[var(--rf-text-tertiary)]'}`}>Consolidated</button>
+                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-xl ${currentMapping.mode === 'iterative' ? 'bg-[var(--rf-text)] text-white shadow-md' : 'text-[var(--rf-text-tertiary)]'}`}>Iterative</button>
                </div>
                
                <div className="pt-2">
                  {currentMapping.mode === 'consolidated' ? (
                    <div className="flex items-center justify-between gap-4">
-                     <span className="text-xs font-bold text-slate-700">Storage Field</span>
+                     <span className="text-xs font-bold text-[var(--rf-text)]">Storage Field</span>
                      <FieldSelector value={currentMapping.consolidatedFieldId} onChange={(fid: string) => updateMapping({ consolidatedFieldId: fid })} customFields={customFields} />
                    </div>
                  ) : (
@@ -741,9 +811,9 @@ function ProjectConfigurationManager({
                  )}
                </div>
 
-               <div className="pt-6 border-t border-slate-200/50 flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700">Issue Linking</span>
-                  <select value={currentMapping.issueLinkType || ''} onChange={e => updateMapping({ issueLinkType: e.target.value })} className="bg-white border border-slate-100 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 outline-none shadow-sm min-w-[140px]">
+               <div className="pt-6 border-t border-[var(--rf-border-subtle)] flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--rf-text)]">Issue Linking</span>
+                  <select value={currentMapping.issueLinkType || ''} onChange={e => updateMapping({ issueLinkType: e.target.value })} className="bg-white border border-[var(--rf-border)] px-4 py-2 rounded-xl text-xs font-bold text-[var(--rf-text-secondary)] outline-none shadow-[var(--rf-shadow-sm)] min-w-[140px]">
                     <option value="">Global Default</option>
                     {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
@@ -751,21 +821,21 @@ function ProjectConfigurationManager({
             </div>
          </div>
 
-         <div className="col-span-full space-y-6 pt-8 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-500">
+         <div className="col-span-full space-y-6 pt-8 border-t border-[var(--rf-border-subtle)] animate-in fade-in slide-in-from-bottom-2 duration-500">
              <div className="flex items-center justify-between">
                 <div>
-                  <h5 className="text-[11px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-blue-500" /> Golden Example Sources</h5>
-                  <p className="text-xs text-slate-500 mt-1">Defaults are auto-detected. You can override project, issue type, and statuses anytime.</p>
+                  <h5 className="text-[11px] font-black text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-[var(--rf-brand)]" /> Golden Example Sources</h5>
+                  <p className="text-xs text-[var(--rf-text-secondary)] mt-1">Defaults are auto-detected. You can override project, issue type, and statuses anytime.</p>
                 </div>
              </div>
              
              {activeArProj !== '*' && (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+                <div className="rf-panel rounded-[24px] p-6 space-y-5">
                   <div className="flex flex-wrap gap-4">
                     <div className="space-y-1.5 min-w-[220px]">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Source Project</span>
+                      <span className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest ml-1">Source Project</span>
                       <select
-                        className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none w-full"
+                        className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-xs text-[var(--rf-text)] outline-none w-full"
                         onChange={e => onProjectSelect(e.target.value)}
                         value={newSource.project || ''}
                       >
@@ -775,9 +845,9 @@ function ProjectConfigurationManager({
                     </div>
 
                     <div className="space-y-1.5 min-w-[220px]">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Issue Type</span>
+                      <span className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest ml-1">Issue Type</span>
                       <select
-                        className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none w-full"
+                        className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-xs text-[var(--rf-text)] outline-none w-full"
                         onChange={e => setNewSource((p: any) => ({ ...p, issuetype: e.target.value }))}
                         value={newSource.issuetype || ''}
                       >
@@ -789,11 +859,11 @@ function ProjectConfigurationManager({
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Statuses In Scope</span>
+                      <span className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest ml-1">Statuses In Scope</span>
                       <button
                         type="button"
                         onClick={() => setNewSource((p: any) => ({ ...p, statuses: statuses.map((s: any) => s.name), status: statuses[0]?.name || '' }))}
-                        className="text-[10px] font-bold text-blue-600 hover:text-blue-700"
+                        className="text-[10px] font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
                       >
                         Select All
                       </button>
@@ -806,7 +876,7 @@ function ProjectConfigurationManager({
                             key={st.name}
                             type="button"
                             onClick={() => toggleStatus(st.name)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${selected ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${selected ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-[rgba(0,82,204,0.14)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}
                           >
                             {st.name}
                           </button>
@@ -819,7 +889,7 @@ function ProjectConfigurationManager({
                     <button
                       onClick={addGoldSource}
                       disabled={!newSource.project || !newSource.issuetype || selectedStatuses.length === 0}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-xs font-bold px-6 py-2.5 rounded-xl shadow-sm transition-all"
+                      className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-40 text-white text-xs font-bold px-6 py-2.5 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all"
                     >
                       Add Golden Source
                     </button>
@@ -829,25 +899,25 @@ function ProjectConfigurationManager({
              
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-6">
                 {currentGoldSources.length === 0 ? (
-                  <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/40">
-                     <BrainCircuit className="w-12 h-12 text-slate-100 mx-auto mb-4" />
-                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No Active Golden Sources</p>
-                     <p className="text-[11px] text-slate-500 mt-2">The AI will use global defaults if no project sources are configured.</p>
+                  <div className="col-span-full py-16 text-center border-2 border-dashed border-[var(--rf-border)] rounded-[24px] bg-[var(--rf-surface-soft)]">
+                     <BrainCircuit className="w-12 h-12 text-[var(--rf-text-tertiary)]/30 mx-auto mb-4" />
+                     <p className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest">No Active Golden Sources</p>
+                     <p className="text-[11px] text-[var(--rf-text-secondary)] mt-2">The AI will use global defaults if no project sources are configured.</p>
                   </div>
                 ) : (
                   currentGoldSources.map((s: any, idx: number) => (
-                    <div key={idx} className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm flex items-start justify-between gap-4">
+                    <div key={idx} className="rf-panel-soft p-5 rounded-[24px] flex items-start justify-between gap-4">
                        <div className="space-y-2">
-                         <div className="text-sm font-bold text-slate-900">{s.project} <span className="text-slate-500">/ {s.issuetype}</span></div>
+                         <div className="text-sm font-bold text-[var(--rf-text)]">{s.project} <span className="text-[var(--rf-text-secondary)]">/ {s.issuetype}</span></div>
                          <div className="flex flex-wrap gap-1.5">
                            {(Array.isArray(s.statuses) && s.statuses.length ? s.statuses : [s.status]).filter(Boolean).map((statusName: string) => (
-                             <span key={statusName} className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700">
+                             <span key={statusName} className="px-2 py-0.5 rounded-full bg-white border border-[var(--rf-border)] text-[10px] font-semibold text-[var(--rf-text-secondary)]">
                                {statusName}
                              </span>
                            ))}
                          </div>
                        </div>
-                       <button onClick={() => setGoldSources((p: any) => p.filter((x: any) => x !== s))} className="p-2 bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all">
+                       <button onClick={() => setGoldSources((p: any) => p.filter((x: any) => x !== s))} className="p-2 bg-white text-[var(--rf-text-tertiary)] hover:bg-red-50 hover:text-red-500 rounded-xl transition-all border border-[var(--rf-border)]">
                          <Trash className="w-4 h-4" />
                        </button>
                     </div>
@@ -881,19 +951,19 @@ function FieldSelector({ value, onChange, customFields }: any) {
 
   return (
     <div className="relative w-full max-w-[280px]" ref={wrapperRef}>
-      <button type="button" onClick={() => setIsOpen(!isOpen)} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-left flex justify-between items-center hover:border-blue-400 transition-all shadow-sm">
-        <span className="truncate text-slate-700">{selected ? selected.name : 'Select Field'} <span className="ml-1 text-[9px] text-slate-300 font-mono">({selected ? selected.id : '---'})</span></span>
-        <ChevronRight className={`w-3.5 h-3.5 text-slate-300 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+      <button type="button" onClick={() => setIsOpen(!isOpen)} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-xs font-bold text-left flex justify-between items-center hover:border-[var(--rf-brand)] transition-all shadow-[var(--rf-shadow-sm)]">
+        <span className="truncate text-[var(--rf-text)]">{selected ? selected.name : 'Select Field'} <span className="ml-1 text-[9px] text-[var(--rf-text-tertiary)] font-mono">({selected ? selected.id : '---'})</span></span>
+        <ChevronRight className={`w-3.5 h-3.5 text-[var(--rf-text-tertiary)] transition-transform ${isOpen ? 'rotate-90' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute z-[100] top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col">
-          <div className="p-3 border-b border-slate-50 bg-slate-50/50"><input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-2 text-xs outline-none" /></div>
+        <div className="absolute z-[100] top-full left-0 right-0 mt-2 bg-white border border-[var(--rf-border)] rounded-[18px] shadow-[var(--rf-shadow-lg)] overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col">
+          <div className="p-3 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]"><input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter fields..." className="w-full bg-white border border-[var(--rf-border)] rounded-2xl px-4 py-2 text-xs outline-none" /></div>
           <div className="max-h-[240px] overflow-y-auto custom-scrollbar">
             {filtered.map((f: any) => (
-              <button key={f.id} onClick={() => { onChange(f.id); setIsOpen(false); setSearch(''); }} className={`w-full text-left px-5 py-3.5 text-xs hover:bg-slate-50 transition-colors flex flex-col gap-0.5 border-b border-slate-50 last:border-0 ${value === f.id ? 'bg-blue-50/40' : ''}`}>
-                <span className={`font-black uppercase tracking-tight ${value === f.id ? 'text-blue-600' : 'text-slate-800'}`}>{f.name}</span>
-                <span className="text-[9px] text-slate-300 font-mono tracking-tighter">{f.id}</span>
+              <button key={f.id} onClick={() => { onChange(f.id); setIsOpen(false); setSearch(''); }} className={`w-full text-left px-5 py-3.5 text-xs hover:bg-[var(--rf-surface-soft)] transition-colors flex flex-col gap-0.5 border-b border-[var(--rf-border-subtle)] last:border-0 ${value === f.id ? 'bg-[var(--rf-brand-muted)]/70' : ''}`}>
+                <span className={`font-black uppercase tracking-tight ${value === f.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text)]'}`}>{f.name}</span>
+                <span className="text-[9px] text-[var(--rf-text-tertiary)] font-mono tracking-tighter">{f.id}</span>
               </button>
             ))}
           </div>
