@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins } from 'lucide-react';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
 
@@ -237,6 +237,7 @@ interface MainContentProps {
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   projectKey: string;
+  workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
 }
 
@@ -244,7 +245,7 @@ interface MainContentProps {
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  generationContext, projectKey, onWorkflowTokenUsage
+  generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -265,6 +266,7 @@ export function MainContent({
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
   const [showBulkRefine, setShowBulkRefine] = useState(false);
+  const [showTokenDetails, setShowTokenDetails] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
   const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
@@ -455,7 +457,36 @@ export function MainContent({
               </div>
             </div>
           </div>
-
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowTokenDetails(prev => !prev)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--rf-border)] bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-secondary)] hover:bg-[var(--rf-bg)]"
+              title="Workflow token usage"
+            >
+              <Coins className="w-3.5 h-3.5 text-[var(--rf-text-tertiary)]" />
+              Tokens
+            </button>
+            {showTokenDetails && (
+              <div className="absolute right-0 top-full mt-2 w-[250px] rounded-md border border-[var(--rf-border)] bg-white p-3 shadow-[var(--rf-shadow-lg)] z-40">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Workflow tokens</div>
+                <div className="mt-1 text-base font-semibold text-[var(--rf-text)]">
+                  {(workflowTokenUsage?.total ?? 0).toLocaleString()}
+                </div>
+                <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)]">
+                  {(workflowTokenUsage?.input ?? 0).toLocaleString()} in / {(workflowTokenUsage?.output ?? 0).toLocaleString()} out
+                </div>
+                <div className="mt-2 text-[10px] text-[var(--rf-text-tertiary)]">
+                  Includes clarify, generation, and refinements.
+                </div>
+                {lastAiTokenUsage && (
+                  <div className="mt-2 border-t border-[var(--rf-border-subtle)] pt-2 text-[10px] text-[var(--rf-text-tertiary)]">
+                    Last action: {lastAiTokenUsage.label} ({lastAiTokenUsage.total.toLocaleString()} tokens)
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {hasFeatures && (
@@ -469,11 +500,6 @@ export function MainContent({
               <span className="text-[11px] text-[var(--rf-text-tertiary)]">
                 {features.filter(f => f.isAccepted).length} accepted
               </span>
-              {lastAiTokenUsage && (
-                <span className="text-[11px] text-[var(--rf-text-tertiary)]">
-                  {lastAiTokenUsage.label}: {lastAiTokenUsage.total.toLocaleString()} tokens
-                </span>
-              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">

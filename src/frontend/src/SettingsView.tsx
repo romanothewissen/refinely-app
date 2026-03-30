@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
-  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info
+  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, ExternalLink
 } from 'lucide-react';
 import { api } from './hooks/useForge';
 import { REDACTED } from './types';
@@ -317,7 +317,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }
 
   useEffect(() => {
-    if (activeTab === 'domain') loadWiDocs();
+    if (activeTab === 'jira') loadWiDocs();
   }, [activeTab, loadWiDocs]);
 
   async function handleWiPdfDrop(e: React.ChangeEvent<HTMLInputElement>) {
@@ -742,6 +742,91 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <p className="text-sm text-[var(--rf-text-secondary)] mt-2">Once a project is selected, you can define which deployed backlog items are indexed, how ARs are read, and whether curated examples should boost the output.</p>
                     </div>
                   )}
+
+                  <div className="rf-panel-soft rounded-[24px] p-6 space-y-5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
+                        <h4 className="text-base font-bold text-[var(--rf-text)]">Project work instructions</h4>
+                        <p className="text-xs text-[var(--rf-text-secondary)]">
+                          Attach PDF instructions to the selected project so clarify and generation can reference them.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => wiFileInputRef.current?.click()}
+                        disabled={activeArProj === '*' || !!wiUploadState}
+                        className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] disabled:opacity-60 text-[var(--rf-text)] text-xs font-black px-5 py-2.5 rounded-xl shadow-[var(--rf-shadow-sm)] transition-all"
+                      >
+                        {wiUploadState ? 'Uploading…' : 'Add PDF'}
+                      </button>
+                      <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
+                    </div>
+
+                    {activeArProj === '*' ? (
+                      <div className="rounded-2xl border border-dashed border-[var(--rf-border)] bg-white px-4 py-5 text-sm text-[var(--rf-text-secondary)]">
+                        Select a project first to manage project-specific work instructions.
+                      </div>
+                    ) : (
+                      <>
+                        {(wiUploadState || wiUploadError) && (
+                          <div className={`rounded-2xl border p-4 ${wiUploadError ? 'border-red-200 bg-[var(--rf-danger-subtle)]' : 'border-[rgba(0,82,204,0.12)] bg-[var(--rf-brand-muted)]'}`}>
+                            {wiUploadState && (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Upload In Progress</div>
+                                    <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{wiUploadState.filename}</div>
+                                  </div>
+                                  <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-semibold">
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    {wiUploadCopy}
+                                  </div>
+                                </div>
+                                <div className="h-2 overflow-hidden rounded-full bg-white/70 border border-[rgba(0,82,204,0.08)]">
+                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                                </div>
+                              </div>
+                            )}
+                            {wiUploadError && (
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-danger)]">Upload Failed</div>
+                                  <p className="mt-1 text-sm text-[var(--rf-text)]">{wiUploadError}</p>
+                                </div>
+                                <button type="button" onClick={() => setWiUploadError(null)} className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-[var(--rf-danger)]">Dismiss</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {wiDocs.length === 0 ? (
+                            <div className="col-span-2 p-10 text-center border-2 border-dashed border-[var(--rf-border-subtle)] rounded-3xl bg-[var(--rf-surface-soft)]">
+                              <FileText className="w-10 h-10 text-[var(--rf-text-tertiary)]/30 mx-auto mb-3" />
+                              <p className="text-sm font-semibold text-[var(--rf-text-tertiary)]">No work instructions linked to {activeArProj}.</p>
+                            </div>
+                          ) : (
+                            wiDocs.map(doc => (
+                              <div key={doc.docId} className="rf-panel-soft p-4 rounded-2xl flex items-center justify-between group hover:bg-white transition-all duration-300">
+                                <div className="flex items-center gap-3 truncate">
+                                  <div className="shrink-0 w-9 h-9 bg-white rounded-lg border border-[var(--rf-border)] flex items-center justify-center">
+                                    <FileText className="w-4 h-4 text-[var(--rf-text-tertiary)] font-light" />
+                                  </div>
+                                  <div className="truncate">
+                                    <p className="text-xs font-bold text-[var(--rf-text)] truncate">{doc.filename}</p>
+                                    <p className="text-[10px] text-[var(--rf-text-tertiary)] font-semibold uppercase">{doc.chunkCount} chunks</p>
+                                  </div>
+                                </div>
+                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-red-500 transition-colors">
+                                  <Trash className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
                 </div>
               </div>
@@ -765,74 +850,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Project Manager" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl px-6 py-4 text-sm font-medium focus:ring-2 focus:ring-blue-500/20 outline-none" />
                   </div>
 
-                  <div className="pt-10 border-t border-[var(--rf-border-subtle)] space-y-6">
-                    <div className="flex justify-between items-center">
-                       <div className="flex items-center gap-4">
-                         <div className="w-12 h-12 rounded-2xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(0,82,204,0.1)]"><FileText className="w-6 h-6" /></div>
-                         <div>
-                            <h4 className="text-lg font-bold text-[var(--rf-text)]">Work instructions</h4>
-                            <p className="text-xs text-[var(--rf-text-secondary)] font-medium">PDF guidelines for organization-wide standards.</p>
-                         </div>
-                       </div>
-                       <button onClick={() => wiFileInputRef.current?.click()} disabled={!!wiUploadState} className="bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] disabled:opacity-60 text-[var(--rf-text)] text-xs font-black px-6 py-3 rounded-2xl shadow-[var(--rf-shadow-sm)] transition-all">
-                         {wiUploadState ? 'Uploading…' : '+ Add Instruction'}
-                       </button>
-                       <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" className="hidden" disabled={!!wiUploadState} />
-                    </div>
-
-                    {(wiUploadState || wiUploadError) && (
-                      <div className={`rounded-[24px] border p-4 ${wiUploadError ? 'border-red-200 bg-[var(--rf-danger-subtle)]' : 'border-[rgba(0,82,204,0.12)] bg-[var(--rf-brand-muted)]'}`}>
-                        {wiUploadState && (
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Upload In Progress</div>
-                                <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{wiUploadState.filename}</div>
-                              </div>
-                              <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-semibold">
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                {wiUploadCopy}
-                              </div>
-                            </div>
-                            <div className="h-2 overflow-hidden rounded-full bg-white/70 border border-[rgba(0,82,204,0.08)]">
-                              <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
-                            </div>
-                            <p className="text-xs text-[var(--rf-text-secondary)]">Your document is being uploaded and indexed so it can be referenced in future runs.</p>
-                          </div>
-                        )}
-                        {wiUploadError && (
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--rf-danger)]">Upload Failed</div>
-                              <p className="mt-1 text-sm text-[var(--rf-text)]">{wiUploadError}</p>
-                            </div>
-                            <button type="button" onClick={() => setWiUploadError(null)} className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-[var(--rf-danger)]">Dismiss</button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {wiDocs.length === 0 ? (
-                        <div className="col-span-2 p-16 text-center border-2 border-dashed border-[var(--rf-border-subtle)] rounded-3xl bg-[var(--rf-surface-soft)]">
-                           <FileText className="w-12 h-12 text-[var(--rf-text-tertiary)]/30 mx-auto mb-4" />
-                           <p className="text-sm font-bold text-[var(--rf-text-tertiary)]">No organizational instructions linked.</p>
-                        </div>
-                      ) : (
-                        wiDocs.map(doc => (
-                          <div key={doc.docId} className="rf-panel-soft p-5 rounded-[20px] flex items-center justify-between group hover:bg-white transition-all duration-300">
-                             <div className="flex items-center gap-4 truncate">
-                               <div className="shrink-0 w-10 h-10 bg-white rounded-xl border border-[var(--rf-border)] flex items-center justify-center"><FileText className="w-5 h-5 text-[var(--rf-text-tertiary)] font-light" /></div>
-                               <div className="truncate">
-                                 <p className="text-xs font-black text-[var(--rf-text)] truncate">{doc.filename}</p>
-                                 <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase">{doc.chunkCount} vector chunks</p>
-                               </div>
-                             </div>
-                             <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-red-500 transition-colors"><Trash className="w-4 h-4"/></button>
-                          </div>
-                        ))
-                      )}
-                    </div>
+                  <div className="pt-10 border-t border-[var(--rf-border-subtle)] rounded-2xl border border-dashed border-[var(--rf-border)] bg-white px-5 py-4">
+                    <div className="text-xs font-semibold text-[var(--rf-text)]">Project work instructions moved</div>
+                    <p className="mt-1 text-xs text-[var(--rf-text-secondary)]">
+                      Work instructions are project-scoped and are now managed in <span className="font-semibold">Jira Governance</span> after selecting a project.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -842,44 +864,96 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               <div className="max-w-4xl space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="space-y-1">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Plan & Billing</div>
-                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Subscription and workspace health</h3>
+                  <h3 className="text-3xl font-semibold text-[var(--rf-text)] tracking-[-0.04em]">Choose the right plan for your team</h3>
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="rf-panel rounded-[28px] p-8 space-y-6">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
-                      <h4 className="text-3xl font-black text-slate-900 capitalize mt-2">{tier}</h4>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm font-semibold text-slate-700">
-                        <span>Generations this month</span>
-                        <span>{usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span>
-                      </div>
-                      {limits?.generationsPerMonth !== -1 && (
-                        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-blue-600 transition-all duration-500"
-                            style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="rf-panel rounded-[28px] p-8 space-y-6">
-                    <h4 className="text-sm font-bold text-[var(--rf-text)]">Environment Overview</h4>
-                    <div className="space-y-4 text-sm">
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Cloud Status</span><span className="font-semibold text-green-600">Healthy</span></div>
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Security Layer</span><span className="font-semibold text-blue-600">Encrypted</span></div>
-                      <div className="flex items-center justify-between"><span className="text-slate-600">Active Mappings</span><span className="font-semibold text-slate-900">{arMappings.length}</span></div>
+                <div className="rf-panel rounded-[28px] p-8 space-y-6">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Current Plan</p>
+                    <h4 className="text-3xl font-black text-slate-900 capitalize mt-2">{tier}</h4>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm font-semibold text-slate-700">
+                      <span>Generations this month</span>
+                      <span>{usage?.currentMonth ?? 0} / {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</span>
                     </div>
-                    {isAdmin && (
-                      <button onClick={handleResetUsage} className="w-full py-3 text-xs font-bold uppercase tracking-widest text-red-600 hover:text-white border border-red-200 hover:bg-red-600 rounded-xl transition-all">
-                        Reset Usage Counter
-                      </button>
+                    {limits?.generationsPerMonth !== -1 && (
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-600 transition-all duration-500"
+                          style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
+                        />
+                      </div>
                     )}
                   </div>
                 </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {[
+                    {
+                      key: 'free',
+                      name: 'Free',
+                      price: 'Try it out',
+                      highlights: ['Core generation', 'Limited monthly volume', 'Basic workspace setup'],
+                    },
+                    {
+                      key: 'standard',
+                      name: 'Standard',
+                      price: 'For growing teams',
+                      highlights: ['Higher monthly volume', 'Backlog context features', 'Project governance controls'],
+                    },
+                    {
+                      key: 'premium',
+                      name: 'Premium',
+                      price: 'For advanced workflows',
+                      highlights: ['Unlimited generations', 'Full automation support', 'Best fit for enterprise rollout'],
+                    },
+                  ].map(plan => {
+                    const isCurrent = tier === plan.key;
+                    return (
+                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 shadow-[var(--rf-shadow-sm)] ${isCurrent ? 'border-[var(--rf-brand)]' : 'border-[var(--rf-border)]'}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-lg font-bold text-[var(--rf-text)]">{plan.name}</div>
+                            <div className="text-xs text-[var(--rf-text-secondary)] mt-1">{plan.price}</div>
+                          </div>
+                          {isCurrent && (
+                            <span className="rounded-full bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-brand)]">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        <ul className="mt-4 space-y-2">
+                          {plan.highlights.map(item => (
+                            <li key={item} className="text-xs text-[var(--rf-text-secondary)] flex items-center gap-2">
+                              <Check className="w-3.5 h-3.5 text-[var(--rf-brand)]" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                        <a
+                          href="https://marketplace.atlassian.com"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                            isCurrent
+                              ? 'border-[var(--rf-border)] bg-white text-[var(--rf-text-secondary)] hover:bg-[var(--rf-surface-soft)]'
+                              : 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white hover:bg-[var(--rf-brand-hover)]'
+                          }`}
+                        >
+                          {isCurrent ? 'Manage Plan' : 'Upgrade'}
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isAdmin && (
+                  <button onClick={handleResetUsage} className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-red-600 hover:text-white border border-red-200 hover:bg-red-600 rounded-xl transition-all">
+                    Reset Usage Counter
+                  </button>
+                )}
               </div>
             )}
           </div>

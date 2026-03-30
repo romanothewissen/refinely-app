@@ -507,7 +507,6 @@ export default function App() {
               tier={tier}
               usage={usage}
               limits={limits}
-              workflowTokenUsage={workflowTokenUsage}
               width={sidebarWidth}
               originIssueKey={originIssueKey}
               projectKey={projectKey}
@@ -576,6 +575,7 @@ export default function App() {
               requirement={requirement}
               generationContext={generationContext}
               projectKey={projectKey}
+              workflowTokenUsage={workflowTokenUsage}
               onWorkflowTokenUsage={(usageDelta) => {
                 setWorkflowTokenUsage(prev => addTokenUsage(prev, usageDelta));
               }}

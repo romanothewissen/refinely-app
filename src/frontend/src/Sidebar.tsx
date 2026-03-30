@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Sparkles } from 'lucide-react';
+import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X } from 'lucide-react';
 import { UsageMeter } from './UsageMeter';
 
 interface SidebarProps {
@@ -19,7 +19,6 @@ interface SidebarProps {
   tier: string;
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
-  workflowTokenUsage?: { input: number; output: number; total: number } | null;
   width?: number;
   originIssueKey?: string | null;
   projectKey: string;
@@ -47,7 +46,6 @@ export function Sidebar({
   tier,
   usage,
   limits,
-  workflowTokenUsage,
   width,
   originIssueKey,
   projectKey,
@@ -91,7 +89,7 @@ export function Sidebar({
               Refinely
             </h1>
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-blue-200">
-              Forge
+              {tierName}
             </span>
           </div>
           <p className="mt-0.5 text-[11px] text-[var(--rf-text-tertiary)]">
@@ -163,7 +161,7 @@ export function Sidebar({
 
           <button
             type="button"
-            onClick={() => onOpenProjectSettings('domain', projectKey)}
+            onClick={() => onOpenProjectSettings('jira', projectKey)}
             className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2.5 text-left shadow-[var(--rf-shadow-sm)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--rf-brand)]"
           >
             <div className="flex items-center justify-between gap-2">
@@ -176,39 +174,6 @@ export function Sidebar({
               {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
             </div>
           </button>
-        </div>
-
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
-          <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2.5 shadow-[var(--rf-shadow-sm)]">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
-                <Zap className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Plan</div>
-                <div className="text-sm font-semibold text-[var(--rf-text)]">{tierName}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2.5 shadow-[var(--rf-shadow-sm)]">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
-                <Sparkles className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--rf-text-tertiary)]">Workflow Tokens</div>
-                <div className="text-sm font-semibold text-[var(--rf-text)]">
-                  {workflowTokenUsage ? workflowTokenUsage.total.toLocaleString() : '0'}
-                </div>
-                <div className="text-[10px] text-[var(--rf-text-tertiary)]">
-                  {workflowTokenUsage
-                    ? `${workflowTokenUsage.input.toLocaleString()} in / ${workflowTokenUsage.output.toLocaleString()} out`
-                    : 'Clarify, generate, and refine'}
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Requirement scope label */}
