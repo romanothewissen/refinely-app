@@ -53,6 +53,11 @@ export interface ProjectDomainContext {
   context: string;
 }
 
+export interface ProjectBacklogStatusScope {
+  projectKey: string;
+  statuses: string[];
+}
+
 export interface Branding {
   appTitle: string;
   logoUrl: string | null;
@@ -81,6 +86,7 @@ export interface TenantConfig {
   issueLinkType: string;  // default: 'Relates to'
   arMappings: ProjectArMapping[];
   domainContexts: ProjectDomainContext[];
+  backlogStatusScopes: ProjectBacklogStatusScope[];
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
@@ -130,6 +136,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
       context: '',
     }
   ],
+  backlogStatusScopes: [],
 };
 
 // ─── Feature / Story Types ────────────────────────────────────────────────────

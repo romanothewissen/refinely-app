@@ -27,6 +27,8 @@ modules:
       handler: queues/generation.handler
     - key: clarify-consumer
       handler: queues/clarify.handler
+    - key: backlog-cache-refresh
+      handler: queues/backlog-cache-refresh.handler
   consumer:
     - key: generation-consumer-listener
       queue: generation-queue
@@ -34,6 +36,10 @@ modules:
     - key: clarify-consumer-listener
       queue: clarify-queue
       function: clarify-consumer
+  scheduledTrigger:
+    - key: weekly-backlog-cache-refresh
+      function: backlog-cache-refresh
+      interval: week
 resources:
   - key: main
     path: src/frontend/build

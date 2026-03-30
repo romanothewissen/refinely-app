@@ -28,7 +28,7 @@ import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
 import { refreshGoldCache, getCacheInfo } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
-import { findSimilarStories } from '../core/similar-stories';
+import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm } from '../core/llm';
 import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
@@ -466,7 +466,7 @@ resolver.define('listWiDocs', async ({ payload }) => {
 
 
 resolver.define('saveProjectConfig', async ({ payload, context }) => {
-  const { projectKey, arMapping, domainContext, goldSources } = payload;
+  const { projectKey, arMapping, domainContext, goldSources, backlogStatuses } = payload;
   await ensureAdmin(context, projectKey);
   
   const current = await getConfig();
@@ -497,6 +497,17 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
     }));
     current.goldSources = [...otherSources, ...projectSources];
   }
+
+  if (Array.isArray(backlogStatuses)) {
+    const otherScopes = (current.backlogStatusScopes || []).filter(scope => scope.projectKey !== projectKey);
+    current.backlogStatusScopes = [
+      ...otherScopes,
+      {
+        projectKey,
+        statuses: [...new Set(backlogStatuses.filter(Boolean))],
+      },
+    ];
+  }
   
   const result = await saveConfig(current);
   return { success: result };
@@ -515,6 +526,12 @@ resolver.define('getCacheInfo', async () => {
   return { success: true, ...info };
 });
 
+resolver.define('getBacklogCacheInfo', async ({ payload }) => {
+  const projectKey = payload?.projectKey || '*';
+  const info = await getBacklogCacheInfo(projectKey);
+  return { success: true, ...info };
+});
+
 resolver.define('refreshCache', async ({ context }) => {
   await ensureAdmin(context);
   const eventConfig = await getConfig();
@@ -525,6 +542,18 @@ resolver.define('refreshCache', async ({ context }) => {
   }
   const cache = await refreshGoldCache(config.goldSources);
   return { success: true, itemCount: cache.itemCount, cachedAt: cache.cachedAt };
+});
+
+resolver.define('refreshBacklogCache', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const eventConfig = await getConfig();
+  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const projectKey = payload?.projectKey || '*';
+  if (!projectKey || projectKey === '*') {
+    return { success: false, error: 'Select a project before refreshing the backlog cache.' };
+  }
+  const cache = await refreshBacklogCache(projectKey, config);
+  return { success: true, ...cache };
 });
 
 // ─── Conversation History ─────────────────────────────────────────────────────

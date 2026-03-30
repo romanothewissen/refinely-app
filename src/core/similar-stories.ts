@@ -32,8 +32,8 @@ interface BacklogIndexCache {
   docs: BacklogDoc[];
 }
 
-const INDEX_TTL_MS = 12 * 60 * 60 * 1000;
-const MAX_INDEX_ITEMS = 300;
+export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_INDEX_ITEMS = 1000;
 
 export async function findSimilarStories(
   requirement: string,
@@ -83,8 +83,49 @@ async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Pro
   return refreshed;
 }
 
+export async function getBacklogCacheInfo(projectKey: string): Promise<{ projectKey: string; builtAt?: string; issueCount: number; stale: boolean }> {
+  const cacheKey = KEYS.backlogIndex(projectKey);
+  const cached = await objectRead<BacklogIndexCache>(cacheKey);
+  if (!cached) {
+    return { projectKey, issueCount: 0, stale: true };
+  }
+
+  return {
+    projectKey,
+    builtAt: cached.builtAt,
+    issueCount: cached.issueCount ?? cached.docs?.length ?? 0,
+    stale: !cached.builtAt || (Date.now() - new Date(cached.builtAt).getTime() >= INDEX_TTL_MS),
+  };
+}
+
+export async function refreshBacklogCache(projectKey: string, config: TenantConfig): Promise<{ projectKey: string; builtAt: string; issueCount: number }> {
+  const refreshed = await buildBacklogIndex(projectKey, config);
+  await objectWrite(KEYS.backlogIndex(projectKey), refreshed);
+  return {
+    projectKey,
+    builtAt: refreshed.builtAt,
+    issueCount: refreshed.issueCount,
+  };
+}
+
+export async function refreshBacklogCachesForProjects(projectKeys: string[], config: TenantConfig): Promise<Array<{ projectKey: string; builtAt: string; issueCount: number }>> {
+  const uniqueProjectKeys = [...new Set(projectKeys.filter(key => key && key !== '*'))];
+  const results: Array<{ projectKey: string; builtAt: string; issueCount: number }> = [];
+
+  for (const projectKey of uniqueProjectKeys) {
+    try {
+      results.push(await refreshBacklogCache(projectKey, config));
+    } catch (err) {
+      console.warn(`[similar-stories] Failed to refresh backlog cache for ${projectKey}:`, err);
+    }
+  }
+
+  return results;
+}
+
 async function buildBacklogIndex(projectKey: string, config: TenantConfig): Promise<BacklogIndexCache> {
   const fields = buildFieldList(config, projectKey);
+  const statusClause = buildBacklogStatusClause(config, projectKey);
   const docs: BacklogDoc[] = [];
   let startAt = 0;
   const pageSize = 50;
@@ -94,7 +135,7 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        jql: `project = ${projectKey} AND statusCategory = Done AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
+        jql: `project = ${projectKey} AND ${statusClause} AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
         maxResults: pageSize,
         startAt,
         fields,
@@ -123,6 +164,20 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
     issueCount: docs.length,
     docs,
   };
+}
+
+function buildBacklogStatusClause(config: TenantConfig, projectKey: string): string {
+  const scopedStatuses = config.backlogStatusScopes?.find(scope => scope.projectKey === projectKey)?.statuses ?? [];
+  const uniqueStatuses = [...new Set(scopedStatuses.map(status => String(status).trim()).filter(Boolean))];
+  if (!uniqueStatuses.length) {
+    return 'statusCategory = Done';
+  }
+
+  const quotedStatuses = uniqueStatuses
+    .map(status => `"${status.replace(/"/g, '\\"')}"`)
+    .join(', ');
+
+  return `status in (${quotedStatuses})`;
 }
 
 function buildFieldList(config: TenantConfig, projectKey: string): string[] {

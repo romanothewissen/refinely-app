@@ -69,6 +69,8 @@ export const api = {
   // Cache
   getCacheInfo: () => invoke('getCacheInfo'),
   refreshCache: () => invoke('refreshCache'),
+  getBacklogCacheInfo: (projectKey: string) => invoke('getBacklogCacheInfo', { projectKey }),
+  refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),
 
   // History
   getHistory: (limit?: number) => invoke('getHistory', { limit }),

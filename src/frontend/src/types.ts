@@ -46,6 +46,11 @@ export interface Branding {
   secondaryColor: string;
 }
 
+export interface ProjectBacklogStatusScope {
+  projectKey: string;
+  statuses: string[];
+}
+
 export interface TenantConfig {
   goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
@@ -65,6 +70,7 @@ export interface TenantConfig {
   };
   tier: 'free' | 'team' | 'enterprise';
   issueLinkType: string;  // default: 'Relates to'
+  backlogStatusScopes: ProjectBacklogStatusScope[];
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
@@ -100,6 +106,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
   },
   tier: 'free',
   issueLinkType: 'Relates to',
+  backlogStatusScopes: [],
 };
 
 // ─── Feature / Story Types ────────────────────────────────────────────────────
