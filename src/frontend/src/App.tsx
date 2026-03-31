@@ -579,6 +579,11 @@ export default function App() {
               setFeatures={setFeatures}
               onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
               isGenerating={isGenerating || isWorking}
+              loadingTitle={
+                isWorking && !isGenerating && !isGenerationStarted
+                  ? 'Analyzing context & clarifying requirements'
+                  : 'Crafting features'
+              }
               progress={
                 isWorking && !isGenerating 
                   ? (isGenerationStarted ? 'Preparing generation engine...' : 'Discovery phase: Deep-dive requirement analysis...') 

@@ -251,11 +251,12 @@ interface MainContentProps {
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
+  loadingTitle?: string;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
-  features, setFeatures, onPushFeature, isGenerating, progress,
+  features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage
 }: MainContentProps) {
@@ -583,7 +584,7 @@ export function MainContent({
           <div className="absolute inset-0 bg-[var(--rf-brand-muted)]/50 animate-pulse" />
         </div>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">Crafting features</h2>
+          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">{loadingTitle || 'Crafting features'}</h2>
           <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1">{progress || 'Processing your request\u2026'}</p>
         </div>
         <div className="dot-bounce text-[var(--rf-brand)] mt-2"><span /><span /><span /></div>
