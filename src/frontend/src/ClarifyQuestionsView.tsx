@@ -109,7 +109,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
         <div className="flex items-center gap-4 flex-1 max-w-lg hidden md:flex">
           <div className="flex-1 h-2 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
             <div
-              className="h-full bg-[var(--rf-brand-muted)]0 rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+              className="h-full bg-[var(--rf-brand)] rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
               style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
             />
           </div>

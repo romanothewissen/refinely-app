@@ -696,8 +696,8 @@ export function MainContent({
                   <span className="mx-2 opacity-40">·</span>
                   {totalArCount} ARs
               </span>
-              <span className="text-xs font-semibold text-[var(--rf-text-tertiary)] whitespace-nowrap bg-[var(--rf-surface-soft)] px-3 py-1.5 rounded-lg border border-[var(--rf-border)]">
-                <span className="text-[var(--rf-success)] mr-1.5">{features.filter(f => f.isAccepted).length}</span> accepted
+              <span className={`text-xs font-semibold whitespace-nowrap px-3 py-1.5 rounded-lg border ${features.filter(f => f.isAccepted).length > 0 ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success)]/20' : 'text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border-[var(--rf-border)]'}`}>
+                <span className="font-bold mr-1">{features.filter(f => f.isAccepted).length}</span> accepted
               </span>
             </div>
 
@@ -705,7 +705,7 @@ export function MainContent({
               {features.some(f => f.pendingRefinement) && (
                 <>
                   <motion.button onClick={discardAllProposed} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-lg hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
-                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-emerald-600 hover:bg-[var(--rf-success-subtle)]0 text-white text-xs font-bold rounded-lg transition shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
+                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-[var(--rf-success)] hover:bg-[#1E4D3B] text-white text-xs font-bold rounded-lg transition shadow-sm shadow-[var(--rf-success)]/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
                 </>
               )}
 
@@ -867,16 +867,16 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`group overflow-hidden rounded-2xl border bg-white ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'border-[var(--rf-success-subtle)]' : 'border-[var(--rf-border)]'}`}
+                  className={`group overflow-hidden rounded-2xl border ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)] bg-white' : feature.isAccepted ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/30' : 'border-[var(--rf-border)] bg-white'}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  style={{ boxShadow: feature.isAccepted ? '0 4px 20px -4px rgba(16,185,129,0.15)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(15,23,42,0.05)' }}
-                  whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 30px -4px rgba(16,185,129,0.2)' : '0 8px 24px -4px rgba(15,23,42,0.08)' }}
+                  style={{ boxShadow: feature.isAccepted ? '0 4px 24px -4px rgba(58,107,83,0.12)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(31,30,29,0.04)' }}
+                  whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 32px -4px rgba(58,107,83,0.16)' : '0 8px 24px -4px rgba(31,30,29,0.06)' }}
                 >
                   <div className="flex flex-col sm:flex-row">
                     {/* Left Accent Strip */}
-                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]0' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]0' : 'bg-[var(--rf-brand-muted)]0'}`} />
+                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger)]' : feature.isAccepted ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-border-strong)]'}`} />
 
                     <div className="flex-1 p-5 sm:p-6">
                       {/* Header Row */}
@@ -906,13 +906,13 @@ export function MainContent({
                           {isEditing ? (
                             <>
                               <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
-                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-[var(--rf-success-subtle)]0 rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
+                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-[var(--rf-success)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
                             </>
                           ) : (
                             <>
                               <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
                               <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
-                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
+                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-white bg-[var(--rf-success)] border-[var(--rf-success)] shadow-[var(--rf-success)]/20' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
                                 <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
                               </motion.button>
                               <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>

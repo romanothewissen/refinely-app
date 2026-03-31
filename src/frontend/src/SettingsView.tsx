@@ -852,7 +852,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                   </div>
                                 </div>
                                 <div className="h-1.5 overflow-hidden rounded-full bg-blue-100">
-                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand-muted)]0 animate-pulse" />
+                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
                                 </div>
                               </div>
                             )}
@@ -960,7 +960,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     {limits?.generationsPerMonth !== -1 && (
                       <div className="w-full h-2.5 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
                         <div
-                          className="h-full bg-[var(--rf-brand-muted)]0 transition-all duration-500"
+                          className="h-full bg-[var(--rf-brand)] transition-all duration-500"
                           style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
                         />
                       </div>

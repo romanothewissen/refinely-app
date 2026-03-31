@@ -526,10 +526,10 @@ export default function App() {
               {sidebarOpen && (
                 <div
                   onMouseDown={startResizing}
-                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-[var(--rf-brand-muted)]0/20 group z-50 transition-colors flex items-center justify-center"
+                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-[var(--rf-brand)]/20 group z-50 transition-colors flex items-center justify-center"
                   style={{ cursor: 'col-resize' }}
                 >
-                  <div className="w-1 h-8 bg-white/20 group-hover:bg-[var(--rf-brand-muted)]0 rounded-full transition-colors" />
+                  <div className="w-1 h-8 bg-white/20 group-hover:bg-[var(--rf-brand)] rounded-full transition-colors" />
                 </div>
               )}
             </div>
