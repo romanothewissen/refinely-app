@@ -55,6 +55,8 @@ Assess the request based on structural signals only:
 - number of possible outcomes
 - missing business rules
 - scope breadth
+- competing prioritization or optimization criteria
+- scheduling, routing, assignment, or sequencing logic
 
 Do not rely on domain-specific role names, industry jargon, or organization-specific terminology as a shortcut for complexity.
 
@@ -297,6 +299,14 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     .test(requirement);
   const hasEnterpriseSignals = /(enterprise|compliance|audit|governance|permission matrix|cross[- ]functional|cross[- ]team|multiple teams|multiple departments|multiple business units|regional|global rollout)/i
     .test(requirement);
+  const hasOptimizationSignal = /\b(optimal|optimi[sz]e|optimization|prioriti[sz](?:e|ation)?|priority|criticality|urgency|due date|sla|weight(?:ed|ing)?|score|ranking|rank|balance|trade[- ]off)\b/i
+    .test(requirement);
+  const hasSchedulingSignal = /\b(schedule|scheduling|dispatch|dispatching|route|routing|sequence|sequencing|assignment|allocate|allocation|reschedul(?:e|ing)|calendar|slot)\b/i
+    .test(requirement);
+  const hasMultiFactorDecisionSignal = /\bbased on\b/i.test(requirement)
+    && /\b(criticality|priority|due date|sla|availability|capacity|skill|distance|cost|urgency|workload)\b/i.test(requirement);
+  const hasAllocationPlanningSignal = hasSchedulingSignal
+    && (hasOptimizationSignal || hasMultiFactorDecisionSignal || /\b(availability|capacity|workload|skill|coverage|window|slot)\b/i.test(requirement));
   const hasAutomationSignal = /\b(auto(?:matic|mated|matically)?|trigger(?:ed)?|upon|when)\b/i
     .test(requirement);
   const hasSourceSignal = /\b(from|via|received|submitted|captured|generated from|created from|incoming)\b/i
@@ -326,6 +336,8 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     (actorMentions === 0 ? 1 : 0) +
     (exceptionMentions === 0 ? 1 : 0) -
     (hasConstraints ? 1 : 0) +
+    (hasOptimizationSignal ? 1 : 0) +
+    (hasMultiFactorDecisionSignal ? 1 : 0) +
     (hasAutomationSignal && hasDecisionSignal && answers.length === 0 ? 1 : 0) +
     (hasMultiScenarioSignal && exceptionMentions === 0 ? 1 : 0);
 
@@ -339,6 +351,10 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     (reqSentences >= 3 ? 1 : 0) +
     (actorMentions >= 2 ? 1 : 0) +
     (integrationMentions >= 1 ? 1 : 0) +
+    (hasOptimizationSignal ? 1 : 0) +
+    (hasSchedulingSignal ? 1 : 0) +
+    (hasAllocationPlanningSignal ? 1 : 0) +
+    (hasMultiFactorDecisionSignal ? 1 : 0) +
     (hasAutomationSignal && hasSourceSignal ? 1 : 0) +
     (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
     (hasMultiScenarioSignal ? 1 : 0) +
@@ -351,6 +367,10 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     (exceptionMentions >= 2 ? 1 : 0) +
     (actorMentions >= 2 ? 1 : 0) +
     (integrationMentions >= 1 ? 1 : 0) +
+    (hasOptimizationSignal ? 1 : 0) +
+    (hasSchedulingSignal ? 1 : 0) +
+    (hasAllocationPlanningSignal ? 1 : 0) +
+    (hasMultiFactorDecisionSignal ? 1 : 0) +
     (hasAutomationSignal && hasSourceSignal ? 1 : 0) +
     (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
     (hasMultiScenarioSignal ? 1 : 0) +
@@ -374,6 +394,8 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     scopeMode = 'atomic';
   } else if (hasEnterpriseSignals || breadthScore >= 5) {
     scopeMode = 'initiative';
+  } else if (hasAllocationPlanningSignal || (hasOptimizationSignal && hasMultiFactorDecisionSignal) || breadthScore >= 3) {
+    scopeMode = 'standard';
   } else if (breadthScore >= 3) {
     scopeMode = 'standard';
   } else {
@@ -398,6 +420,10 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
   if (scopeMode === 'initiative') rationale.push('Request appears broad enough to require an initiative-style breakdown.');
   if (hasBroadScopeSignals) rationale.push('Requirement contains broad scope signals spanning multiple capabilities.');
   if (hasEnterpriseSignals) rationale.push('Requirement contains enterprise delivery or governance signals.');
+  if (hasOptimizationSignal) rationale.push('Requirement includes prioritization or optimization criteria that usually hide decision rules.');
+  if (hasSchedulingSignal) rationale.push('Requirement implies scheduling, sequencing, or assignment behavior rather than a single isolated action.');
+  if (hasAllocationPlanningSignal) rationale.push('Requirement appears to involve time-based or capacity-based allocation planning, which usually needs broader discovery.');
+  if (hasMultiFactorDecisionSignal) rationale.push('Requirement depends on competing factors, so discovery should uncover ranking and tie-break logic.');
   if (hasMultiScenarioSignal) rationale.push('Requirement includes multiple scenarios or activity variants that increase discovery needs.');
   if (hasComplexityLanguageSignal) rationale.push('Requirement explicitly indicates complexity and likely hidden business rules.');
   if (integrationMentions >= 1) rationale.push('Integrations or external data dependencies are implied.');
