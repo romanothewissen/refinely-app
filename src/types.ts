@@ -490,7 +490,6 @@ export interface ConversationTurn {
   tokenUsage?: TokenUsageSummary;
   feedback?: string;
   model: string;
-  outputInstructions?: string;
   timestamp: string;
 }
 
@@ -569,7 +568,6 @@ export interface ClarifyEvent {
   projectKey: string;
   reasoningMode?: ReasoningMode;
   outputMode?: OutputMode;
-  outputInstructions?: string;
 }
 
 // ─── Generation Queue Event ───────────────────────────────────────────────────
@@ -588,7 +586,6 @@ export interface GenerationEvent {
   projectKey: string;
   reasoningMode?: ReasoningMode;
   outputMode?: OutputMode;
-  outputInstructions?: string;
 }
 
 // ─── Tier Limits ─────────────────────────────────────────────────────────────

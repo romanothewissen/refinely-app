@@ -969,7 +969,6 @@ export async function generateFeatures(opts: {
   reasoningMode?: 'fast' | 'deep';
   outputMode?: 'single' | 'auto' | 'full_breakdown';
   plannerDecision?: PlannerDecision;
-  outputInstructions?: string;
   onPass1Complete?: (payload: {
     featureCount: number;
     draftFeatures: Feature[];
@@ -987,7 +986,6 @@ export async function generateFeatures(opts: {
     reasoningMode,
     outputMode,
     plannerDecision,
-    outputInstructions,
     onPass1Complete,
   } = opts;
   const { generatorConfig } = config;
@@ -1022,7 +1020,6 @@ export async function generateFeatures(opts: {
     processTaxonomy: config.processTaxonomy,
     processTaxonomyEnabled: config.processTaxonomyEnabled,
     featurePlan: decision.featurePlan,
-    outputInstructions,
   });
 
   const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
@@ -1053,7 +1050,6 @@ export async function generateFeatures(opts: {
   const pass2System = buildArSystemPrompt({
     domainContext: config.domainContext,
     arPlan: decision.arPlan,
-    outputInstructions,
   });
   const pass2Context = buildGenerationContextSections({
     requirement,
@@ -1116,8 +1112,6 @@ export async function generateClarifyingQuestions(opts: {
   reasoningMode?: 'fast' | 'deep';
   outputMode?: 'single' | 'auto' | 'full_breakdown';
   plannerDecision?: PlannerDecision;
-  outputInstructions?: string;
-  onProgress?: (message: string) => Promise<void>;
 }): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
   const {
     requirement,
@@ -1129,7 +1123,6 @@ export async function generateClarifyingQuestions(opts: {
     reasoningMode,
     outputMode,
     plannerDecision,
-    outputInstructions,
   } = opts;
   const decision = plannerDecision ?? buildHeuristicPlannerDecision({
     requirement,
@@ -1191,7 +1184,6 @@ export async function generateClarifyingQuestions(opts: {
     domainRoles: config.domainRoles,
     domainSignals,
     questionPlan,
-    outputInstructions,
   });
 
   const desiredQuestionCount = Math.min(

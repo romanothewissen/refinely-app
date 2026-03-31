@@ -109,7 +109,7 @@ async function getLatestDiscoveryTranscript(sessionId: string, accountId: string
 }
 
 export async function handler(event: { body: GenerationEvent }) {
-  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, outputInstructions, license, config: eventConfig, projectKey } = event.body;
+  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
   // Resolve project-specific context and filter gold sources
   const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
@@ -203,7 +203,6 @@ export async function handler(event: { body: GenerationEvent }) {
       reasoningMode,
       outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
       plannerDecision,
-      outputInstructions,
       onPass1Complete: async ({ featureCount, draftFeatures, arBatchCount }) => {
         await sendProgress(
           sessionId,
@@ -291,7 +290,6 @@ export async function handler(event: { body: GenerationEvent }) {
         config.generatorConfig.arModel,
         generationContext,
         result.tokenUsage,
-        outputInstructions,
       );
 
       if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
@@ -381,7 +379,6 @@ async function saveConversationTurn(
   model: string,
   generationContext?: GenerationContextMeta,
   tokenUsage?: TokenUsageSummary,
-  outputInstructions?: string,
 ) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
@@ -389,7 +386,6 @@ async function saveConversationTurn(
     existing.turns.push({
       turnType: 'generate',
       requirement,
-      outputInstructions,
       features,
       similarStories,
       generationContext,

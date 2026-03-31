@@ -26,11 +26,6 @@ export function processTaxonomyBlock(taxonomy: ProcessCode[]): string {
   return lines.join('\n');
 }
 
-export function outputInstructionsBlock(instructions?: string): string {
-  if (!instructions || !instructions.trim()) return '';
-  return `\nUSER OUTPUT INSTRUCTIONS — strictly follow these additional formatting or content rules:\n${instructions.trim()}\n`;
-}
-
 export function formatGoldExample(item: {
   summary?: string;
   description?: string;
@@ -79,7 +74,6 @@ export function buildDecompositionSystemPrompt(opts: {
     shape: 'narrow' | 'balanced' | 'broad';
     complexity: 'low' | 'medium' | 'high';
   };
-  outputInstructions?: string;
 }): string {
   const roleList = opts.domainRoles.length
     ? `Roles in this domain: ${opts.domainRoles.join(', ')}.`
@@ -104,7 +98,6 @@ export function buildDecompositionSystemPrompt(opts: {
 
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
-${outputInstructionsBlock(opts.outputInstructions)}
 ${roleList}
 
 YOUR JOB: Calibrate the output to the real size of the request. Some asks should produce exactly one strong feature. Other asks need a broader breakdown. Think deeply, but do not split a narrow request into trivial or UI-level features.
@@ -145,7 +138,6 @@ export function buildArSystemPrompt(opts: {
     target: number;
     depth: 'lean' | 'standard' | 'thorough';
   };
-  outputInstructions?: string;
 }): string {
   const arGuidance = opts.arPlan
     ? `AR CALIBRATION:
@@ -157,7 +149,6 @@ export function buildArSystemPrompt(opts: {
 
   return `You are a principal QA lead and business analyst writing acceptance requirements for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
-${outputInstructionsBlock(opts.outputInstructions)}
 For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that capture:
 - The primary business scenario (happy path)
 - Key business rules that must hold true
@@ -198,7 +189,6 @@ export function buildClarifySystemPrompt(opts: {
     target: number;
     clarity: 'clear' | 'medium' | 'vague';
   };
-  outputInstructions?: string;
 }): string {
   const roleHint = opts.domainRoles.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}.`
@@ -209,7 +199,6 @@ export function buildClarifySystemPrompt(opts: {
 
   return `You are a senior business analyst running a deep discovery session for a new product requirement.
 ${platformContextBlock(opts.domainContext)}
-${outputInstructionsBlock(opts.outputInstructions)}
 ${roleHint}
 ${domainSignalHint}
 
@@ -338,7 +327,6 @@ export function buildRefineSystemPrompt(opts: {
   domainRoles: string[];
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
-  outputInstructions?: string;
 }): string {
   const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? processTaxonomyBlock(opts.processTaxonomy)
@@ -346,7 +334,6 @@ export function buildRefineSystemPrompt(opts: {
 
   return `You are a principal business analyst and QA lead refining a Jira feature backlog.
 ${platformContextBlock(opts.domainContext)}
-${outputInstructionsBlock(opts.outputInstructions)}
 YOUR JOB: Given existing features and user feedback, refine the feature set and write complete acceptance requirements.
 
 FEATURE RULES:

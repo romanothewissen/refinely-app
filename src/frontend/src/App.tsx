@@ -160,7 +160,6 @@ export default function App() {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [reasoningMode, setReasoningMode] = useState<ReasoningMode>('fast');
   const [outputMode, setOutputMode] = useState<OutputMode>('auto');
-  const [outputInstructions, setOutputInstructions] = useState('');
   const [effectiveAiPolicy, setEffectiveAiPolicy] = useState<AiExecutionPolicy>(DEFAULT_CONFIG.aiExecutionPolicy);
   const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
@@ -544,8 +543,8 @@ export default function App() {
     }
 
     try {
-      console.log('[App] startClarify', { sessionId, projectKey, reasoningMode, outputMode, outputInstructions });
-      const res = await api.startClarify(sessionId, requirement, undefined, projectKey, reasoningMode, outputMode, outputInstructions) as any;
+      console.log('[App] startClarify', { sessionId, projectKey, reasoningMode, outputMode });
+      const res = await api.startClarify(sessionId, requirement, undefined, projectKey, reasoningMode, outputMode) as any;
       console.log('[App] startClarify result', res);
       if (res.success) {
         setPendingSessionId(null);
@@ -582,7 +581,6 @@ export default function App() {
       projectKey,
       reasoningMode,
       outputMode,
-      outputInstructions,
     });
     setIsWorking(true);
     setIsGenerationStarted(true);
@@ -605,7 +603,6 @@ export default function App() {
         projectKey,
         reasoningMode,
         outputMode,
-        outputInstructions,
       }) as any;
 
       console.log('[App] startGeneration result', res);
@@ -685,7 +682,6 @@ export default function App() {
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
           setRequirement(lastTurn.requirement ?? '');
-          setOutputInstructions(lastTurn.outputInstructions ?? '');
           setGenerationContext(lastTurn.generationContext ?? null);
           setClarifyContext(lastTurn.clarifyContext ?? null);
         }
@@ -737,8 +733,6 @@ export default function App() {
               }}
               requirement={requirement}
               setRequirement={setRequirement}
-              outputInstructions={outputInstructions}
-              setOutputInstructions={setOutputInstructions}
               onStartBrainstorm={() => { handleStartBrainstorm(); closeSidebar(); }}
               onNewSession={() => {
                 let newSid: string;
@@ -746,7 +740,6 @@ export default function App() {
                 catch(e) { newSid = `sid_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
                 
                 setRequirement('');
-                setOutputInstructions('');
                 setFeatures([]);
                 setGenerationContext(null);
                 setClarifyContext(null);
@@ -844,7 +837,6 @@ export default function App() {
               features={features}
               setFeatures={setFeatures}
               onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
-              outputInstructions={outputInstructions}
               isGenerating={isGenerating || isWorking}
               loadingTitle={
                 isWorking && !isGenerating && !isGenerationStarted
