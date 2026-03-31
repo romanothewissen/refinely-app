@@ -250,6 +250,79 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
         {conv.isPinned && <div className="absolute top-5 right-5 group-hover:hidden"><Pin className="w-4 h-4 text-[var(--rf-brand)] fill-current" /></div>}
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {conv.lastTurnType && (
+          <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+            {conv.lastTurnType}
+          </span>
+        )}
+        {conv.lastScopeMode && (
+          <span className="rounded-md bg-[var(--rf-brand-muted)]/60 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)] border border-blue-100">
+            {String(conv.lastScopeMode).replace('_', ' ')}
+          </span>
+        )}
+        {typeof conv.lastDiscoveryRoundCount === 'number' && conv.lastDiscoveryRoundCount > 0 && (
+          <span className="rounded-md bg-white px-2.5 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+            {conv.lastDiscoveryRoundCount} round{conv.lastDiscoveryRoundCount !== 1 ? 's' : ''}
+          </span>
+        )}
+        {typeof conv.lastFeatureCount === 'number' && conv.lastFeatureCount > 0 && (
+          <span className="rounded-md bg-white px-2.5 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+            {conv.lastFeatureCount} feature{conv.lastFeatureCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+
+      {typeof conv.lastDiscoveryScore === 'number' && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold tracking-widest text-amber-900 border border-amber-200">
+              Discovery {conv.lastDiscoveryScore}%
+            </span>
+            <span className="text-[11px] font-medium text-amber-900/90">
+              {conv.lastMissingCriticalCount ? `${conv.lastMissingCriticalCount} critical gap${conv.lastMissingCriticalCount !== 1 ? 's' : ''}` : 'Coverage looked complete'}
+            </span>
+          </div>
+          {conv.lastDiscoverySummary && (
+            <div className="mt-2 text-xs text-amber-900/90 leading-relaxed">
+              {conv.lastDiscoverySummary}
+            </div>
+          )}
+        </div>
+      )}
+
+      {Array.isArray(conv.discoveryTranscriptPreview) && conv.discoveryTranscriptPreview.length > 0 && (
+        <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-3 space-y-3">
+          {conv.discoveryTranscriptPreview.map((round: any) => (
+            <div key={round.roundNumber} className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold tracking-widest text-[var(--rf-text)] border border-[var(--rf-border-subtle)]">
+                  Round {round.roundNumber}
+                </span>
+                <span className="rounded-md bg-white px-2 py-1 text-[10px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
+                  {round.answerCount} answer{round.answerCount !== 1 ? 's' : ''}
+                </span>
+              </div>
+              {round.summary && (
+                <div className="text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                  {round.summary}
+                </div>
+              )}
+              {Array.isArray(round.highlights) && round.highlights.length > 0 && (
+                <div className="space-y-1.5">
+                  {round.highlights.map((item: any, index: number) => (
+                    <div key={`${round.roundNumber}-${index}`} className="rounded-lg bg-white px-3 py-2 border border-[var(--rf-border-subtle)]">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{item.question}</div>
+                      <div className="mt-1 text-xs text-[var(--rf-text-secondary)] line-clamp-2">{item.answer}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mt-auto pt-2">
         <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}

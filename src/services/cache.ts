@@ -77,4 +77,5 @@ export const KEYS = {
   complianceAuditTrail: 'compliance_audit_trail',
   transparencyReports: 'transparency_reports',
   complianceRuntimeVersion: 'compliance_runtime_version',
+  aiSessionInsights: 'ai_session_insights',
 } as const;

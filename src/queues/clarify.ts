@@ -9,11 +9,13 @@
  */
 
 import { ClarifyContextMeta, ClarifyEvent } from '../types';
+import { buildPlannerDecision } from '../core/planner';
 import { generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
+import { upsertAiSessionInsight } from '../services/ai-insights';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
 
@@ -61,6 +63,17 @@ export async function handler(event: { body: ClarifyEvent }) {
         : Promise.resolve([]),
     ]);
 
+    const plannerDecision = buildPlannerDecision({
+      requirement: maskedRequirement.text,
+      attachmentText: maskedAttachment.text,
+      wiContextText: wiContext.text,
+      goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
+      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+      reasoningMode: event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
+      outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
+      policy: config.aiExecutionPolicy,
+    });
+
     const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
@@ -68,6 +81,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
+      plannerDecision,
     });
 
     const clarifyContext: ClarifyContextMeta = {
@@ -75,6 +89,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
+      plannerDecision,
       goldExamplesCount: goldItems.length,
       referencedGoldExamples: goldItems.slice(0, 12).map(item => ({
         key: item.key,
@@ -86,6 +101,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         key: item.key,
         summary: item.summary,
         relevanceScore: item.relevanceScore,
+        url: item.url,
       })),
       ambiguityAssessment: {
         ...ambiguityAssessment,
@@ -100,6 +116,18 @@ export async function handler(event: { body: ClarifyEvent }) {
       })),
     };
 
+    await upsertAiSessionInsight({
+      sessionId,
+      projectKey,
+      reasoningMode: plannerDecision.reasoningMode,
+      outputMode: plannerDecision.outputMode,
+      scopeMode: plannerDecision.scopeMode,
+      clarificationMode: plannerDecision.clarificationMode,
+      plannedFeatureTarget: plannerDecision.featurePlan.target,
+      plannedQuestionTarget: plannerDecision.questionPlan.target,
+      initialClarifyQuestionCount: questions.length,
+    });
+
     await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext);
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
@@ -111,6 +139,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
+          `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.clarificationMode} discovery.`,
           `Generated ${questions.length} clarifying questions for ${ambiguityAssessment.level} ambiguity input.`,
           `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
         ],
@@ -119,6 +148,8 @@ export async function handler(event: { body: ClarifyEvent }) {
           similarStoriesCount: similarStories.length,
           wiDocsCount: wiContext.docs.length,
           ambiguityScore: ambiguityAssessment.score,
+          scopeMode: plannerDecision.scopeMode,
+          clarificationMode: plannerDecision.clarificationMode,
         },
         tokenUsage,
         piiMasking: {
@@ -135,7 +166,13 @@ export async function handler(event: { body: ClarifyEvent }) {
       actorAccountId: accountId,
       category: 'runtime',
       action: 'CLARIFY_WORKFLOW_EXECUTED',
-      details: { sessionId, projectKey, model: config.generatorConfig.clarifyModel },
+      details: {
+        sessionId,
+        projectKey,
+        model: config.generatorConfig.clarifyModel,
+        scopeMode: plannerDecision.scopeMode,
+        clarificationMode: plannerDecision.clarificationMode,
+      },
       enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
     });
 
@@ -174,7 +211,33 @@ async function saveClarifyTurn(
       timestamp: new Date().toISOString(),
     });
     await entitySet(key, existing);
+    await updateConversationIndex(sessionId, accountId, requirement.slice(0, 80));
   } catch (err) {
     console.warn('[clarify-queue] Failed to save clarify turn:', err);
+  }
+}
+
+interface ConvIndex {
+  sessionId: string;
+  title: string;
+  updatedAt: string;
+  turnCount: number;
+  isPinned?: boolean;
+}
+
+async function updateConversationIndex(sessionId: string, accountId: string, title: string) {
+  try {
+    const indexKey = KEYS.userConversationIndex(accountId);
+    const index = await entityGet<ConvIndex[]>(indexKey) ?? [];
+    const existing = index.find(entry => entry.sessionId === sessionId);
+    if (existing) {
+      existing.updatedAt = new Date().toISOString();
+      existing.turnCount = (existing.turnCount ?? 0) + 1;
+    } else {
+      index.unshift({ sessionId, title, updatedAt: new Date().toISOString(), turnCount: 1 });
+    }
+    await entitySet(indexKey, index.slice(0, 100));
+  } catch (err) {
+    console.warn('[clarify-queue] Failed to update conversation index:', err);
   }
 }

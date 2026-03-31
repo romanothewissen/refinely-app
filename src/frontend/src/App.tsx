@@ -9,6 +9,7 @@ import { api } from './hooks/useForge';
 import { useGenerationRealtime, useClarifyRealtime } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
+import { AiExecutionPolicy, DEFAULT_CONFIG, OutputMode, ReasoningMode } from './types';
 
 export interface Feature {
   id: string;
@@ -42,7 +43,10 @@ interface GenerationContextMeta {
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
+  initiativeGroups?: Array<{ id: string; title: string; summary: string; featureIds: string[] }>;
+  discoveryCoverage?: DiscoveryCoverageSummary;
+  discoveryTranscript?: DiscoveryRoundSummary[];
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
@@ -54,10 +58,39 @@ interface ClarifyContextMeta {
   goldExamplesCount?: number;
   referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
   similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+  discoveryCoverage?: DiscoveryCoverageSummary;
+  discoveryTranscript?: DiscoveryRoundSummary[];
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
+}
+
+interface DiscoveryCoverageSummary {
+  sufficient: boolean;
+  canGenerate: boolean;
+  shouldContinueDiscovery: boolean;
+  overallScore: number;
+  summary: string;
+  missingCritical: string[];
+  dimensions: Array<{
+    key: string;
+    label: string;
+    required: boolean;
+    score: number;
+    status: 'missing' | 'partial' | 'covered';
+    evidence: string;
+  }>;
+  questions?: Array<{ category: string; question: string; suggestions: string[] }>;
+  tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
+}
+
+interface DiscoveryRoundSummary {
+  roundNumber: number;
+  questions: Array<{ category: string; question: string; suggestions: string[] }>;
+  answers: Array<{ question: string; answer: string }>;
+  coverage?: DiscoveryCoverageSummary;
+  submittedAt: string;
 }
 
 interface WorkflowTokenUsage {
@@ -114,8 +147,12 @@ export default function App() {
   const [requirement, setRequirement] = useState('');
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
+  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>('fast');
+  const [outputMode, setOutputMode] = useState<OutputMode>('auto');
+  const [effectiveAiPolicy, setEffectiveAiPolicy] = useState<AiExecutionPolicy>(DEFAULT_CONFIG.aiExecutionPolicy);
   const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
+  const [discoveryCoverage, setDiscoveryCoverage] = useState<DiscoveryCoverageSummary | null>(null);
   const [workflowTokenUsage, setWorkflowTokenUsage] = useState<WorkflowTokenUsage | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
@@ -125,6 +162,9 @@ export default function App() {
   
   // Realtime Integration
   const [clarifyQuestions, setClarifyQuestions] = useState<any[]>([]);
+  const [discoveryAnswers, setDiscoveryAnswers] = useState<any[]>([]);
+  const [discoveryRound, setDiscoveryRound] = useState(0);
+  const [isReviewingDiscovery, setIsReviewingDiscovery] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingClarifySessionId, setPendingClarifySessionId] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
@@ -232,14 +272,6 @@ export default function App() {
   }, []); // eslint-disable-line
 
   useEffect(() => {
-    api.getConfig()
-      .then((res: any) => {
-        setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
-      })
-      .catch(() => {});
-  }, []); // eslint-disable-line
-
-  useEffect(() => {
     api.listWiDocs(projectKey)
       .then((res: any) => {
         setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
@@ -280,15 +312,27 @@ export default function App() {
     } catch {}
   };
 
-  // Initial fetch of config and usage
-  useEffect(() => {
-    api.getConfig().then((res: any) => {
+  const loadWorkspaceConfig = async (selectedProjectKey = projectKey) => {
+    try {
+      const res = await api.getConfig({ projectKey: selectedProjectKey }) as any;
       if (!res) return;
+      setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
-    }).catch(e => console.error('Config fetch failed', e));
+      const nextPolicy = (res.effectiveAiPolicy as AiExecutionPolicy | undefined) ?? DEFAULT_CONFIG.aiExecutionPolicy;
+      setEffectiveAiPolicy(nextPolicy);
+      setReasoningMode(nextPolicy.defaultReasoningMode);
+      setOutputMode(nextPolicy.defaultOutputMode);
+    } catch (e) {
+      console.error('Config fetch failed', e);
+    }
+  };
+
+  // Initial fetch of config and usage
+  useEffect(() => {
+    loadWorkspaceConfig(projectKey);
     loadUsage();
-  }, []);
+  }, [projectKey]); // eslint-disable-line
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
 
@@ -328,10 +372,13 @@ export default function App() {
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
+      setIsReviewingDiscovery(false);
       setClarifyContext(nextClarifyContext);
+      setDiscoveryCoverage(null);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
         setClarifyQuestions(questions);
+        setDiscoveryRound(1);
         setIsWorking(false);
       } else {
         startGeneration(requirement, []);
@@ -340,6 +387,8 @@ export default function App() {
     () => {
       // Error or timeout — skip clarify and go straight to generation
       setPendingClarifySessionId(null);
+      setIsReviewingDiscovery(false);
+      setDiscoveryCoverage(null);
       startGeneration(requirement, []);
     },
   );
@@ -351,7 +400,11 @@ export default function App() {
     setFeatures([]);
     setGenerationContext(null);
     setClarifyContext(null);
+    setDiscoveryCoverage(null);
     setWorkflowTokenUsage(null);
+    setDiscoveryAnswers([]);
+    setDiscoveryRound(0);
+    setIsReviewingDiscovery(false);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -359,7 +412,7 @@ export default function App() {
     }
 
     try {
-      const res = await api.startClarify(sessionId, requirement, undefined, projectKey) as any;
+      const res = await api.startClarify(sessionId, requirement, undefined, projectKey, reasoningMode, outputMode) as any;
       if (res.success) {
         setPendingClarifySessionId(sessionId);
       } else {
@@ -375,6 +428,8 @@ export default function App() {
   requirementRef.current = requirement;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const discoveryAnswersRef = useRef<any[]>([]);
+  discoveryAnswersRef.current = discoveryAnswers;
   const [isGenerationStarted, setIsGenerationStarted] = useState(false);
 
   const startGeneration = async (reqText: string, clarifyAnswers: any[]) => {
@@ -383,8 +438,10 @@ export default function App() {
     
     setIsWorking(true);
     setIsGenerationStarted(true);
+    setIsReviewingDiscovery(false);
     setGenerationError(null);
     setClarifyQuestions([]);
+    setDiscoveryCoverage(null);
     // CRITICAL: Stop clarify polling if it was active
     setPendingClarifySessionId(null);
 
@@ -398,6 +455,8 @@ export default function App() {
         requirement: req,
         clarifyAnswers,
         projectKey,
+        reasoningMode,
+        outputMode,
       }) as any;
 
       if (res?.success) {
@@ -414,6 +473,86 @@ export default function App() {
       setIsGenerationStarted(false);
       setPendingSessionId(null);
     }
+  };
+
+  const handleClarifyComplete = async (answers: any[]) => {
+    const currentRoundQuestions = [...clarifyQuestions];
+    const currentRoundNumber = discoveryRound || 1;
+    const nextAnswers = [...discoveryAnswersRef.current, ...answers];
+    setDiscoveryAnswers(nextAnswers);
+    setClarifyQuestions([]);
+
+    if (reasoningMode === 'deep' && discoveryRound < effectiveAiPolicy.maxDeepDiscoveryRounds) {
+      setIsWorking(true);
+      setIsReviewingDiscovery(true);
+      try {
+        const sufficiency = await api.evaluateSufficiency(
+          sessionIdRef.current,
+          requirementRef.current,
+          nextAnswers,
+          projectKey,
+          reasoningMode,
+        ) as any;
+        if (sufficiency?.tokenUsage) {
+          setWorkflowTokenUsage(prev => addTokenUsage(prev, sufficiency.tokenUsage));
+        }
+        if (sufficiency) {
+          setDiscoveryCoverage(sufficiency as DiscoveryCoverageSummary);
+          setClarifyContext(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              discoveryCoverage: sufficiency as DiscoveryCoverageSummary,
+              tokenUsage: addTokenUsage(prev.tokenUsage ?? null, sufficiency.tokenUsage ?? null) ?? undefined,
+            };
+          });
+        }
+        await api.saveDiscoveryRound({
+          sessionId: sessionIdRef.current,
+          roundNumber: currentRoundNumber,
+          questions: currentRoundQuestions,
+          answers,
+          coverage: sufficiency,
+        }).catch(err => {
+          console.error('Failed to persist discovery round', err);
+        });
+        if (sufficiency && sufficiency.shouldContinueDiscovery && Array.isArray(sufficiency.questions) && sufficiency.questions.length > 0) {
+          setClarifyQuestions(sufficiency.questions);
+          setDiscoveryRound(prev => prev + 1);
+          setIsReviewingDiscovery(false);
+          setIsWorking(false);
+          return;
+        }
+      } catch (err) {
+        console.error('Discovery sufficiency check failed', err);
+        setDiscoveryCoverage(null);
+        await api.saveDiscoveryRound({
+          sessionId: sessionIdRef.current,
+          roundNumber: currentRoundNumber,
+          questions: currentRoundQuestions,
+          answers,
+        }).catch(saveErr => {
+          console.error('Failed to persist discovery round after coverage error', saveErr);
+        });
+      }
+      setIsReviewingDiscovery(false);
+    } else {
+      await api.saveDiscoveryRound({
+        sessionId: sessionIdRef.current,
+        roundNumber: currentRoundNumber,
+        questions: currentRoundQuestions,
+        answers,
+      }).catch(err => {
+        console.error('Failed to persist discovery round', err);
+      });
+    }
+
+    await startGeneration(requirementRef.current, nextAnswers);
+  };
+
+  const handleClarifySkip = async () => {
+    const currentAnswers = discoveryAnswersRef.current;
+    await startGeneration(requirementRef.current, currentAnswers);
   };
 
   const handleCreateJiraFeature = async (formData: any) => {
@@ -447,6 +586,11 @@ export default function App() {
           setGenerationContext(lastTurn.generationContext ?? null);
           setClarifyContext(lastTurn.clarifyContext ?? null);
         }
+        setClarifyQuestions([]);
+        setDiscoveryAnswers([]);
+        setDiscoveryRound(0);
+        setDiscoveryCoverage(null);
+        setIsReviewingDiscovery(false);
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
         setViewMode('generate');
       }
@@ -499,6 +643,9 @@ export default function App() {
                 setClarifyContext(null);
                 setWorkflowTokenUsage(null);
                 setClarifyQuestions([]);
+                setDiscoveryAnswers([]);
+                setDiscoveryRound(0);
+                setIsReviewingDiscovery(false);
                 setSidebarOpen(true);
                 setSidebarExiting(false);
                 setSessionId(newSid);
@@ -521,6 +668,12 @@ export default function App() {
               goldSources={goldSources}
               wiDocs={wiDocs}
               onOpenProjectSettings={openProjectSettings}
+              reasoningMode={reasoningMode}
+              setReasoningMode={setReasoningMode}
+              outputMode={outputMode}
+              setOutputMode={setOutputMode}
+              allowReasoningModeOverride={effectiveAiPolicy.allowReasoningModeOverride}
+              allowOutputModeOverride={effectiveAiPolicy.allowOutputModeOverride}
             />
               {/* Resize Handle */}
               {sidebarOpen && (
@@ -540,7 +693,11 @@ export default function App() {
       {/* Main Right Pane / Settings */}
       {viewMode === 'settings' && isAdmin ? (
         <SettingsView
-          onClose={() => { setViewMode('generate'); setSidebarOpen(true); }}
+          onClose={() => {
+            setViewMode('generate');
+            setSidebarOpen(true);
+            loadWorkspaceConfig(projectKey);
+          }}
           initialTab={settingsStartTab}
           initialProjectKey={settingsStartProjectKey}
         />
@@ -563,15 +720,15 @@ export default function App() {
           {clarifyQuestions.length > 0 ? (
             <ClarifyQuestionsView 
               questions={clarifyQuestions} 
-              onComplete={(answers: any[]) => {
-                startGeneration(requirement, answers);
-              }}
-              onSkip={() => {
-                startGeneration(requirement, []);
-              }}
+              onComplete={handleClarifyComplete}
+              onSkip={handleClarifySkip}
               contextMeta={clarifyContext}
+              coverageSummary={discoveryCoverage}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
+              roundNumber={discoveryRound}
+              reasoningMode={reasoningMode}
+              skipLabel={discoveryAnswers.length > 0 ? 'Generate now' : 'Skip questions'}
             />
           ) : (
             <MainContent
@@ -586,7 +743,11 @@ export default function App() {
               }
               progress={
                 isWorking && !isGenerating 
-                  ? (isGenerationStarted ? 'Preparing generation engine...' : 'Discovery phase: Deep-dive requirement analysis...') 
+                  ? (isGenerationStarted
+                      ? 'Preparing generation engine...'
+                      : isReviewingDiscovery
+                        ? 'Reviewing discovery coverage...'
+                        : 'Discovery phase: Adaptive requirement analysis...')
                   : progress
               }
               sidebarOpen={sidebarOpen}

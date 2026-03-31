@@ -8,10 +8,12 @@
  */
 
 import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
+import { buildPlannerDecision } from '../core/planner';
 import { generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
+import { upsertAiSessionInsight } from '../services/ai-insights';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { getConfig } from '../services/tenant-config';
 import { entityGet, entitySet, KEYS } from '../services/cache';
@@ -46,6 +48,24 @@ function resolveRelevantGoldSources(
   const deduped = new Map<string, (typeof sources)[number]>();
   [...exact, ...global].forEach(source => deduped.set(source.key, source));
   return Array.from(deduped.values());
+}
+
+async function getLatestDiscoveryCoverage(sessionId: string, accountId: string) {
+  const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(KEYS.userConversations(accountId, sessionId));
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const latestClarifyTurn = [...turns]
+    .reverse()
+    .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryCoverage);
+  return latestClarifyTurn?.clarifyContext?.discoveryCoverage;
+}
+
+async function getLatestDiscoveryTranscript(sessionId: string, accountId: string) {
+  const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(KEYS.userConversations(accountId, sessionId));
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const latestClarifyTurn = [...turns]
+    .reverse()
+    .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryTranscript?.length);
+  return latestClarifyTurn?.clarifyContext?.discoveryTranscript;
 }
 
 export async function handler(event: { body: GenerationEvent }) {
@@ -89,6 +109,17 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
+    const plannerDecision = buildPlannerDecision({
+      requirement: maskedRequirement.text,
+      clarifyAnswers: maskedAnswers.answers,
+      attachmentText: maskedAttachment.text,
+      goldExamplesText,
+      similarStoriesText,
+      wiContextText: wiContext.text,
+      reasoningMode: event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
+      outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
+      policy: config.aiExecutionPolicy,
+    });
 
     // Progress: pass 1
     await sendProgress(sessionId, 'Decomposing requirement into features…', 1);
@@ -101,6 +132,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
+      plannerDecision,
       onPass1Complete: async (featureCount) => {
         await sendProgress(sessionId, `Writing acceptance criteria for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
       },
@@ -108,11 +140,14 @@ export async function handler(event: { body: GenerationEvent }) {
 
     result.similarStories = similarStories;
     result.sessionId = sessionId;
+    const latestDiscoveryCoverage = await getLatestDiscoveryCoverage(sessionId, accountId);
+    const latestDiscoveryTranscript = await getLatestDiscoveryTranscript(sessionId, accountId);
     const generationContext: GenerationContextMeta = {
       projectKey,
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
+      plannerDecision,
       goldExamplesCount: goldItems.length,
       referencedGoldExamples: goldItems.slice(0, 15).map(item => ({
         key: item.key,
@@ -124,7 +159,11 @@ export async function handler(event: { body: GenerationEvent }) {
         key: item.key,
         summary: item.summary,
         relevanceScore: item.relevanceScore,
+        url: item.url,
       })),
+      initiativeGroups: result.initiativeGroups,
+      discoveryCoverage: latestDiscoveryCoverage,
+      discoveryTranscript: latestDiscoveryTranscript,
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
@@ -134,6 +173,28 @@ export async function handler(event: { body: GenerationEvent }) {
       })),
     };
     result.generationContext = generationContext;
+
+    await upsertAiSessionInsight({
+      sessionId,
+      projectKey,
+      reasoningMode: plannerDecision.reasoningMode,
+      outputMode: plannerDecision.outputMode,
+      scopeMode: plannerDecision.scopeMode,
+      clarificationMode: plannerDecision.clarificationMode,
+      plannedFeatureTarget: plannerDecision.featurePlan.target,
+      plannedQuestionTarget: plannerDecision.questionPlan.target,
+      latestCoverageScore: latestDiscoveryCoverage?.overallScore ?? null,
+      latestMissingCriticalCount: latestDiscoveryCoverage?.missingCritical?.length ?? 0,
+      discoveryRounds: Array.isArray(latestDiscoveryTranscript) ? latestDiscoveryTranscript.length : undefined,
+      totalDiscoveryQuestions: Array.isArray(latestDiscoveryTranscript)
+        ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.questions) ? round.questions.length : 0), 0)
+        : undefined,
+      totalDiscoveryAnswers: Array.isArray(latestDiscoveryTranscript)
+        ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.answers) ? round.answers.length : 0), 0)
+        : undefined,
+      generatedFeatureCount: result.features.length,
+      initiativeGroupCount: result.initiativeGroups?.length ?? 0,
+    });
 
     // Record usage
     await recordGeneration();
@@ -160,8 +221,12 @@ export async function handler(event: { body: GenerationEvent }) {
         projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
+          `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.featurePlan.target} target feature(s).`,
           `Generated features using ${goldItems.length} curated examples and ${similarStories.length} backlog references.`,
           `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
+          result.initiativeGroups?.length
+            ? `Organized the output into ${result.initiativeGroups.length} initiative group(s) for easier backlog review.`
+            : 'Returned a flat feature list because no initiative grouping was needed.',
           'Acceptance requirements were produced in a dedicated second pass for consistency.',
         ],
         contextUsage: {
@@ -169,6 +234,9 @@ export async function handler(event: { body: GenerationEvent }) {
           similarStoriesCount: similarStories.length,
           wiDocsCount: wiContext.docs.length,
           domainRolesCount: config.domainRoles?.length ?? 0,
+          scopeMode: plannerDecision.scopeMode,
+          featureTarget: plannerDecision.featurePlan.target,
+          initiativeGroupCount: result.initiativeGroups?.length ?? 0,
         },
         tokenUsage: result.tokenUsage,
         piiMasking: {
@@ -190,6 +258,9 @@ export async function handler(event: { body: GenerationEvent }) {
         sessionId,
         projectKey,
         model: config.generatorConfig.arModel,
+        scopeMode: plannerDecision.scopeMode,
+        featureTarget: plannerDecision.featurePlan.target,
+        initiativeGroupCount: result.initiativeGroups?.length ?? 0,
       },
       enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
     });

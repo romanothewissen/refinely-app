@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
-  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, ExternalLink, AlertCircle
+  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, AlertCircle
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
-import { REDACTED } from './types';
+import { AiInsightsReport, AiPolicyPreset, AiProfileMode, LlmProvider, OutputMode, ProjectAiPolicy, REDACTED, ReasoningMode } from './types';
 
 interface GoldSource {
   key: string;
@@ -78,19 +78,173 @@ const OPENAI_MODELS = [
   { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
   { id: 'o1-preview', label: 'o1 Preview' },
 ];
+const BEDROCK_MODELS = [
+  { id: 'anthropic.claude-3-5-haiku-20241022-v1:0', label: 'Claude 3.5 Haiku on Bedrock' },
+  { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', label: 'Claude 3.5 Sonnet on Bedrock' },
+  { id: 'anthropic.claude-3-7-sonnet-20250219-v1:0', label: 'Claude 3.7 Sonnet on Bedrock' },
+];
+
+const PROVIDER_OPTIONS: Array<{ id: LlmProvider; label: string; blurb: string }> = [
+  { id: 'forge_llms', label: 'Forge', blurb: 'Atlassian-managed routing' },
+  { id: 'openai', label: 'OpenAI', blurb: 'Direct OpenAI API access' },
+  { id: 'azure_openai', label: 'Azure OpenAI', blurb: 'Enterprise-managed OpenAI through Azure' },
+  { id: 'bedrock', label: 'AWS Bedrock', blurb: 'AWS-managed foundation models through Bedrock runtime' },
+  { id: 'gemini', label: 'Gemini', blurb: 'Google Gemini API access' },
+];
+
+const AI_POLICY_PRESETS: Record<
+  AiPolicyPreset,
+  {
+    label: string;
+    description: string;
+    values: {
+      defaultReasoningMode: ReasoningMode;
+      defaultOutputMode: OutputMode;
+      allowReasoningModeOverride: boolean;
+      allowOutputModeOverride: boolean;
+      simpleAskMaxQuestions: number;
+      deepModeRoundTarget: number;
+      enterpriseMaxQuestionsPerRound: number;
+      maxDeepDiscoveryRounds: number;
+    };
+  }
+> = {
+  balanced: {
+    label: 'Balanced',
+    description: 'General-purpose default for most teams and mixed complexity asks.',
+    values: {
+      defaultReasoningMode: 'fast',
+      defaultOutputMode: 'auto',
+      allowReasoningModeOverride: true,
+      allowOutputModeOverride: true,
+      simpleAskMaxQuestions: 2,
+      deepModeRoundTarget: 5,
+      enterpriseMaxQuestionsPerRound: 7,
+      maxDeepDiscoveryRounds: 3,
+    },
+  },
+  delivery: {
+    label: 'Delivery',
+    description: 'Biases toward faster output and fewer clarifying questions.',
+    values: {
+      defaultReasoningMode: 'fast',
+      defaultOutputMode: 'single',
+      allowReasoningModeOverride: true,
+      allowOutputModeOverride: true,
+      simpleAskMaxQuestions: 1,
+      deepModeRoundTarget: 4,
+      enterpriseMaxQuestionsPerRound: 6,
+      maxDeepDiscoveryRounds: 2,
+    },
+  },
+  discovery: {
+    label: 'Discovery',
+    description: 'Encourages deeper planning and more user input before generation.',
+    values: {
+      defaultReasoningMode: 'deep',
+      defaultOutputMode: 'auto',
+      allowReasoningModeOverride: true,
+      allowOutputModeOverride: true,
+      simpleAskMaxQuestions: 2,
+      deepModeRoundTarget: 6,
+      enterpriseMaxQuestionsPerRound: 8,
+      maxDeepDiscoveryRounds: 4,
+    },
+  },
+  enterprise: {
+    label: 'Enterprise',
+    description: 'Supports broader decomposition and extended discovery on complex asks.',
+    values: {
+      defaultReasoningMode: 'deep',
+      defaultOutputMode: 'full_breakdown',
+      allowReasoningModeOverride: true,
+      allowOutputModeOverride: true,
+      simpleAskMaxQuestions: 3,
+      deepModeRoundTarget: 7,
+      enterpriseMaxQuestionsPerRound: 9,
+      maxDeepDiscoveryRounds: 5,
+    },
+  },
+};
+
+function modelMatchesProvider(model: string, provider: LlmProvider): boolean {
+  if (!model) return false;
+  if (provider === 'gemini') return model.startsWith('gemini-');
+  if (provider === 'openai' || provider === 'azure_openai') {
+    return model.startsWith('gpt-') || model.startsWith('o1-');
+  }
+  if (provider === 'bedrock') return model.startsWith('anthropic.');
+  return !model.startsWith('gemini-') && !model.startsWith('gpt-') && !model.startsWith('o1-');
+}
+
+function getProviderDefaults(provider: LlmProvider): { fastModel: string; deepModel: string } {
+  if (provider === 'gemini') return { fastModel: 'gemini-2.5-flash', deepModel: 'gemini-2.5-pro' };
+  if (provider === 'openai' || provider === 'azure_openai') return { fastModel: 'gpt-4o-mini', deepModel: 'gpt-4o' };
+  if (provider === 'bedrock') return { fastModel: 'anthropic.claude-3-5-haiku-20241022-v1:0', deepModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' };
+  return { fastModel: 'claude-sonnet-4-5-20250929', deepModel: 'claude-opus-4-6' };
+}
+
+function getAvailableModels(provider: LlmProvider) {
+  if (provider === 'gemini') return GEMINI_MODELS;
+  if (provider === 'openai' || provider === 'azure_openai') return OPENAI_MODELS;
+  if (provider === 'bedrock') return BEDROCK_MODELS;
+  return CLAUDE_MODELS;
+}
+
+function getModelLabel(model: string): string {
+  return [...CLAUDE_MODELS, ...GEMINI_MODELS, ...OPENAI_MODELS, ...BEDROCK_MODELS].find((option) => option.id === model)?.label ?? model;
+}
+
+function applySimplifiedRouting(fastModel: string, deepModel: string) {
+  return {
+    decompositionModel: deepModel,
+    arModel: deepModel,
+    clarifyModel: fastModel,
+    refineModel: fastModel,
+    evaluateModel: fastModel,
+    themeModel: fastModel,
+  };
+}
+
+function getProviderLabel(provider: LlmProvider): string {
+  return PROVIDER_OPTIONS.find((option) => option.id === provider)?.label ?? provider.replace('_', ' ');
+}
+
+function normalizePolicyNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(Math.round(value), min), max);
+}
+
+function getDefaultModelForProvider(provider: LlmProvider, depth: 'fast' | 'deep') {
+  const defaults = getProviderDefaults(provider);
+  return depth === 'deep' ? defaults.deepModel : defaults.fastModel;
+}
+
+function formatInsightKey(value: string) {
+  if (value === '*') return 'Workspace default';
+  return value
+    .split('_')
+    .join(' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'billing'; initialProjectKey?: string }) {
   const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialTab);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Models State
-  const [provider, setProvider] = useState<'forge_llms' | 'gemini' | 'openai'>('forge_llms');
+  // AI infrastructure state
+  const [provider, setProvider] = useState<LlmProvider>('forge_llms');
+  const [profileMode, setProfileMode] = useState<AiProfileMode>('simplified');
+  const [fastProfileProvider, setFastProfileProvider] = useState<LlmProvider>('forge_llms');
+  const [deepProfileProvider, setDeepProfileProvider] = useState<LlmProvider>('forge_llms');
+  const [fastProfileModel, setFastProfileModel] = useState('claude-sonnet-4-5-20250929');
+  const [deepProfileModel, setDeepProfileModel] = useState('claude-opus-4-6');
   const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-6');
   const [arModel, setArModel] = useState('claude-opus-4-6');
   const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-5-20250929');
-  const [evaluateModel, setEvaluateModel] = useState('claude-haiku-4-5-20251001');
+  const [evaluateModel, setEvaluateModel] = useState('claude-sonnet-4-5-20250929');
   const [refineModel, setRefineModel] = useState('claude-sonnet-4-5-20250929');
-  const [themeModel, setThemeModel] = useState('claude-haiku-4-5-20251001');
+  const [themeModel, setThemeModel] = useState('claude-sonnet-4-5-20250929');
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
@@ -99,9 +253,34 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
   const [existingOpenaiApiKey, setExistingOpenaiApiKey] = useState('');
+
+  const [azureOpenaiApiKey, setAzureOpenaiApiKey] = useState('');
+  const [azureOpenaiEndpoint, setAzureOpenaiEndpoint] = useState('');
+  const [azureOpenaiDeployment, setAzureOpenaiDeployment] = useState('');
+  const [azureOpenaiApiVersion, setAzureOpenaiApiVersion] = useState('2024-10-21');
+  const [existingAzureOpenaiApiKey, setExistingAzureOpenaiApiKey] = useState('');
+  const [bedrockAccessKeyId, setBedrockAccessKeyId] = useState('');
+  const [bedrockSecretAccessKey, setBedrockSecretAccessKey] = useState('');
+  const [bedrockSessionToken, setBedrockSessionToken] = useState('');
+  const [bedrockRegion, setBedrockRegion] = useState('us-east-1');
+  const [existingBedrockAccessKeyId, setExistingBedrockAccessKeyId] = useState('');
+  const [existingBedrockSecretAccessKey, setExistingBedrockSecretAccessKey] = useState('');
+  const [existingBedrockSessionToken, setExistingBedrockSessionToken] = useState('');
   
   const [isTestingLlm, setIsTestingLlm] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [workspacePreset, setWorkspacePreset] = useState<AiPolicyPreset>('balanced');
+  const [defaultReasoningMode, setDefaultReasoningMode] = useState<ReasoningMode>('fast');
+  const [defaultOutputMode, setDefaultOutputMode] = useState<OutputMode>('auto');
+  const [allowReasoningModeOverride, setAllowReasoningModeOverride] = useState(true);
+  const [allowOutputModeOverride, setAllowOutputModeOverride] = useState(true);
+  const [simpleAskMaxQuestions, setSimpleAskMaxQuestions] = useState(2);
+  const [deepModeRoundTarget, setDeepModeRoundTarget] = useState(5);
+  const [enterpriseMaxQuestionsPerRound, setEnterpriseMaxQuestionsPerRound] = useState(7);
+  const [maxDeepDiscoveryRounds, setMaxDeepDiscoveryRounds] = useState(3);
+  const [projectAiPolicies, setProjectAiPolicies] = useState<ProjectAiPolicy[]>([]);
+  const [aiInsights, setAiInsights] = useState<AiInsightsReport | null>(null);
+  const [isLoadingAiInsights, setIsLoadingAiInsights] = useState(false);
 
   // Jira State
   const [issueLinkType, setIssueLinkType] = useState('Relates to');
@@ -145,16 +324,26 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const wiFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadInitialConfig();
-  }, []);
-
-  useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
   useEffect(() => {
     if (initialProjectKey) setActiveArProj(initialProjectKey);
   }, [initialProjectKey]);
+
+  const loadAiInsights = useCallback(async () => {
+    setIsLoadingAiInsights(true);
+    try {
+      const res = await api.getAiInsights() as any;
+      if (res?.success && res.insights) {
+        setAiInsights(res.insights);
+      }
+    } catch (e) {
+      console.error('Error loading AI insights', e);
+    } finally {
+      setIsLoadingAiInsights(false);
+    }
+  }, []);
 
   function detectDefaultIssueType(types: JiraIssueType[]): string | undefined {
     if (!types.length) return undefined;
@@ -180,7 +369,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     return matches.length ? [...new Set(matches)] : [statuses[0].name];
   }
 
-  async function loadInitialConfig() {
+  const loadInitialConfig = useCallback(async () => {
     api.discoverLinkTypes().then((res: any) => {
       // Logic for available link types was removed
     }).catch(() => {});
@@ -190,6 +379,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (existingConfig) {
         const gc = existingConfig.generatorConfig || {};
         if (gc.provider) setProvider(gc.provider);
+        if (gc.profileMode) setProfileMode(gc.profileMode);
+        if (gc.fastProfileProvider) setFastProfileProvider(gc.fastProfileProvider);
+        else if (gc.provider) setFastProfileProvider(gc.provider);
+        if (gc.deepProfileProvider) setDeepProfileProvider(gc.deepProfileProvider);
+        else if (gc.provider) setDeepProfileProvider(gc.provider);
+        if (gc.fastProfileModel) setFastProfileModel(gc.fastProfileModel);
+        else if (gc.clarifyModel) setFastProfileModel(gc.clarifyModel);
+        if (gc.deepProfileModel) setDeepProfileModel(gc.deepProfileModel);
+        else if (gc.decompositionModel) setDeepProfileModel(gc.decompositionModel);
         if (gc.decompositionModel) setDecompositionModel(gc.decompositionModel);
         if (gc.arModel) setArModel(gc.arModel);
         if (gc.clarifyModel) setClarifyModel(gc.clarifyModel);
@@ -201,6 +399,26 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.geminiBaseUrl) setGeminiBaseUrl(gc.geminiBaseUrl);
         if (gc.openaiApiKey) setExistingOpenaiApiKey(gc.openaiApiKey);
         if (gc.openaiBaseUrl) setOpenaiBaseUrl(gc.openaiBaseUrl);
+        if (gc.azureOpenaiApiKey) setExistingAzureOpenaiApiKey(gc.azureOpenaiApiKey);
+        if (gc.azureOpenaiEndpoint) setAzureOpenaiEndpoint(gc.azureOpenaiEndpoint);
+        if (gc.azureOpenaiDeployment) setAzureOpenaiDeployment(gc.azureOpenaiDeployment);
+        if (gc.azureOpenaiApiVersion) setAzureOpenaiApiVersion(gc.azureOpenaiApiVersion);
+        if (gc.bedrockAccessKeyId) setExistingBedrockAccessKeyId(gc.bedrockAccessKeyId);
+        if (gc.bedrockSecretAccessKey) setExistingBedrockSecretAccessKey(gc.bedrockSecretAccessKey);
+        if (gc.bedrockSessionToken) setExistingBedrockSessionToken(gc.bedrockSessionToken);
+        if (gc.bedrockRegion) setBedrockRegion(gc.bedrockRegion);
+
+        const aiPolicy = existingConfig.aiExecutionPolicy || {};
+        if (aiPolicy.workspacePreset) setWorkspacePreset(aiPolicy.workspacePreset);
+        if (aiPolicy.defaultReasoningMode) setDefaultReasoningMode(aiPolicy.defaultReasoningMode);
+        if (aiPolicy.defaultOutputMode) setDefaultOutputMode(aiPolicy.defaultOutputMode);
+        if (typeof aiPolicy.allowReasoningModeOverride === 'boolean') setAllowReasoningModeOverride(aiPolicy.allowReasoningModeOverride);
+        if (typeof aiPolicy.allowOutputModeOverride === 'boolean') setAllowOutputModeOverride(aiPolicy.allowOutputModeOverride);
+        if (typeof aiPolicy.simpleAskMaxQuestions === 'number') setSimpleAskMaxQuestions(aiPolicy.simpleAskMaxQuestions);
+        if (typeof aiPolicy.deepModeRoundTarget === 'number') setDeepModeRoundTarget(aiPolicy.deepModeRoundTarget);
+        if (typeof aiPolicy.enterpriseMaxQuestionsPerRound === 'number') setEnterpriseMaxQuestionsPerRound(aiPolicy.enterpriseMaxQuestionsPerRound);
+        if (typeof aiPolicy.maxDeepDiscoveryRounds === 'number') setMaxDeepDiscoveryRounds(aiPolicy.maxDeepDiscoveryRounds);
+        if (existingConfig.projectAiPolicies) setProjectAiPolicies(existingConfig.projectAiPolicies);
 
         if (existingConfig.goldSources) {
           setGoldSources(existingConfig.goldSources.map((gs: any) => {
@@ -229,6 +447,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (existingConfig.domainContexts) setDomainContexts(existingConfig.domainContexts);
         if (existingConfig.backlogStatusScopes) setBacklogStatusScopes(existingConfig.backlogStatusScopes);
         if (existingConfig.isAdmin !== undefined) setIsAdmin(existingConfig.isAdmin);
+        if (existingConfig.isAdmin) {
+          await loadAiInsights();
+        } else {
+          setAiInsights(null);
+        }
       }
       const usageRes = await api.getUsage() as any;
       if (usageRes?.usage) setUsage(usageRes.usage);
@@ -247,7 +470,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       setTransparencyReports(Array.isArray(reportRes?.reports) ? reportRes.reports : []);
       setJiraAuditRecords(Array.isArray(jiraAuditRes?.records) ? jiraAuditRes.records : []);
     } catch (e) { console.error('Error loading config', e); }
-  }
+  }, [loadAiInsights]);
+
+  useEffect(() => {
+    loadInitialConfig();
+  }, [loadInitialConfig]);
 
   const checkProjectAdmin = useCallback(async () => {
     if (!activeArProj || activeArProj === '*') {
@@ -401,28 +628,162 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     } catch (e: any) { console.error('Remove failed', e); }
   }
 
+  function applyWorkspacePolicyPreset(preset: AiPolicyPreset) {
+    const values = AI_POLICY_PRESETS[preset].values;
+    setWorkspacePreset(preset);
+    setDefaultReasoningMode(values.defaultReasoningMode);
+    setDefaultOutputMode(values.defaultOutputMode);
+    setAllowReasoningModeOverride(values.allowReasoningModeOverride);
+    setAllowOutputModeOverride(values.allowOutputModeOverride);
+    setSimpleAskMaxQuestions(values.simpleAskMaxQuestions);
+    setDeepModeRoundTarget(values.deepModeRoundTarget);
+    setEnterpriseMaxQuestionsPerRound(values.enterpriseMaxQuestionsPerRound);
+    setMaxDeepDiscoveryRounds(values.maxDeepDiscoveryRounds);
+  }
+
+  const currentProjectAiPolicy = projectAiPolicies.find((policy) => policy.projectKey === activeArProj) || null;
+
+  function updateProjectAiPolicy(nextPatch: Partial<ProjectAiPolicy> | null) {
+    if (!activeArProj || activeArProj === '*') return;
+    setProjectAiPolicies((prev) => {
+      const idx = prev.findIndex((policy) => policy.projectKey === activeArProj);
+      if (nextPatch === null) {
+        if (idx === -1) return prev;
+        return prev.filter((policy) => policy.projectKey !== activeArProj);
+      }
+
+      const nextPolicy: ProjectAiPolicy = {
+        ...(idx >= 0 ? prev[idx] : { projectKey: activeArProj, preset: 'inherit' }),
+        ...nextPatch,
+        projectKey: activeArProj,
+      };
+
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = nextPolicy;
+        return next;
+      }
+      return [...prev, nextPolicy];
+    });
+  }
+
+  function applyProjectPolicyPreset(preset: AiPolicyPreset | 'inherit') {
+    if (preset === 'inherit') {
+      updateProjectAiPolicy(null);
+      return;
+    }
+    const values = AI_POLICY_PRESETS[preset].values;
+    updateProjectAiPolicy({
+      preset,
+      defaultReasoningMode: values.defaultReasoningMode,
+      defaultOutputMode: values.defaultOutputMode,
+      allowReasoningModeOverride: values.allowReasoningModeOverride,
+      allowOutputModeOverride: values.allowOutputModeOverride,
+      simpleAskMaxQuestions: values.simpleAskMaxQuestions,
+      deepModeRoundTarget: values.deepModeRoundTarget,
+      enterpriseMaxQuestionsPerRound: values.enterpriseMaxQuestionsPerRound,
+      maxDeepDiscoveryRounds: values.maxDeepDiscoveryRounds,
+    });
+  }
+
+  function handleFastProfileProviderChange(nextProvider: LlmProvider) {
+    setFastProfileProvider(nextProvider);
+    if (!modelMatchesProvider(fastProfileModel, nextProvider)) {
+      setFastProfileModel(getDefaultModelForProvider(nextProvider, 'fast'));
+    }
+  }
+
+  function handleDeepProfileProviderChange(nextProvider: LlmProvider) {
+    setDeepProfileProvider(nextProvider);
+    if (!modelMatchesProvider(deepProfileModel, nextProvider)) {
+      setDeepProfileModel(getDefaultModelForProvider(nextProvider, 'deep'));
+    }
+  }
+
+  function handleProjectRouteProviderChange(
+    profile: 'fast' | 'deep',
+    nextProvider: LlmProvider,
+  ) {
+    if (profile === 'fast') {
+      const currentModel = currentProjectAiPolicy?.fastProfileModel ?? fastProfileModel;
+      updateProjectAiPolicy({
+        fastProfileProvider: nextProvider,
+        fastProfileModel: modelMatchesProvider(currentModel, nextProvider)
+          ? currentModel
+          : getDefaultModelForProvider(nextProvider, 'fast'),
+      });
+      return;
+    }
+
+    const currentModel = currentProjectAiPolicy?.deepProfileModel ?? deepProfileModel;
+    updateProjectAiPolicy({
+      deepProfileProvider: nextProvider,
+      deepProfileModel: modelMatchesProvider(currentModel, nextProvider)
+        ? currentModel
+        : getDefaultModelForProvider(nextProvider, 'deep'),
+    });
+  }
+
   async function handleSave() {
     setIsSaving(true);
     try {
+      const normalizedProjectAiPolicies = projectAiPolicies.map((policy) => ({
+        ...policy,
+        simpleAskMaxQuestions: policy.simpleAskMaxQuestions === undefined ? undefined : normalizePolicyNumber(policy.simpleAskMaxQuestions, 0, 6),
+        deepModeRoundTarget: policy.deepModeRoundTarget === undefined ? undefined : normalizePolicyNumber(policy.deepModeRoundTarget, 1, 10),
+        enterpriseMaxQuestionsPerRound: policy.enterpriseMaxQuestionsPerRound === undefined ? undefined : normalizePolicyNumber(policy.enterpriseMaxQuestionsPerRound, 2, 12),
+        maxDeepDiscoveryRounds: policy.maxDeepDiscoveryRounds === undefined ? undefined : normalizePolicyNumber(policy.maxDeepDiscoveryRounds, 1, 6),
+      }));
+      const routedModels = profileMode === 'advanced'
+        ? {
+            decompositionModel,
+            arModel,
+            clarifyModel,
+            refineModel: refineModel || fastProfileModel,
+            evaluateModel,
+            themeModel: themeModel || evaluateModel,
+          }
+        : applySimplifiedRouting(fastProfileModel, deepProfileModel);
+
       await api.saveConfig({
         goldSources,
         generatorConfig: {
           provider,
-          decompositionModel,
-          arModel,
-          clarifyModel,
-          refineModel: refineModel || arModel,
-          evaluateModel,
-          themeModel: themeModel || evaluateModel,
+          profileMode,
+          fastProfileProvider,
+          deepProfileProvider,
+          fastProfileModel,
+          deepProfileModel,
+          ...routedModels,
           maxTokens: 8192,
           geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || "",
           geminiBaseUrl: geminiBaseUrl.trim() || undefined,
           openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || "",
           openaiBaseUrl: openaiBaseUrl.trim() || undefined,
+          azureOpenaiApiKey: azureOpenaiApiKey.trim() || existingAzureOpenaiApiKey || "",
+          azureOpenaiEndpoint: azureOpenaiEndpoint.trim() || undefined,
+          azureOpenaiDeployment: azureOpenaiDeployment.trim() || undefined,
+          azureOpenaiApiVersion: azureOpenaiApiVersion.trim() || undefined,
+          bedrockAccessKeyId: bedrockAccessKeyId.trim() || existingBedrockAccessKeyId || "",
+          bedrockSecretAccessKey: bedrockSecretAccessKey.trim() || existingBedrockSecretAccessKey || "",
+          bedrockSessionToken: bedrockSessionToken.trim() || existingBedrockSessionToken || "",
+          bedrockRegion: bedrockRegion.trim() || undefined,
         },
         domainContext: domainContext.trim(),
         domainContexts,
         domainRoles: domainRoles.split(',').map((r: any) => r.trim()).filter(Boolean),
+        aiExecutionPolicy: {
+          workspacePreset,
+          defaultReasoningMode,
+          defaultOutputMode,
+          allowReasoningModeOverride,
+          allowOutputModeOverride,
+          simpleAskMaxQuestions: normalizePolicyNumber(simpleAskMaxQuestions, 0, 6),
+          deepModeRoundTarget: normalizePolicyNumber(deepModeRoundTarget, 1, 10),
+          enterpriseMaxQuestionsPerRound: normalizePolicyNumber(enterpriseMaxQuestionsPerRound, 2, 12),
+          maxDeepDiscoveryRounds: normalizePolicyNumber(maxDeepDiscoveryRounds, 1, 6),
+          hideModelSelectionFromEndUsers: true,
+        },
         wiConfig: { enabled: wiEnabled, topKChunks: 8, maxChars: 100000 },
         compliance: {
           enabled: complianceEnabled,
@@ -433,11 +794,21 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         issueLinkType,
         arMappings,
         backlogStatusScopes,
+        projectAiPolicies: normalizedProjectAiPolicies,
         tier,
       });
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
-      setGeminiApiKey(''); setOpenaiApiKey('');
+      if (azureOpenaiApiKey.trim()) setExistingAzureOpenaiApiKey(REDACTED);
+      if (bedrockAccessKeyId.trim()) setExistingBedrockAccessKeyId(REDACTED);
+      if (bedrockSecretAccessKey.trim()) setExistingBedrockSecretAccessKey(REDACTED);
+      if (bedrockSessionToken.trim()) setExistingBedrockSessionToken(REDACTED);
+      setGeminiApiKey('');
+      setOpenaiApiKey('');
+      setAzureOpenaiApiKey('');
+      setBedrockAccessKeyId('');
+      setBedrockSecretAccessKey('');
+      setBedrockSessionToken('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
@@ -460,9 +831,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     try {
       const res = await api.testLlmConnection({
         provider,
-        model: clarifyModel,
+        model: profileMode === 'advanced' ? clarifyModel : fastProfileModel,
         geminiApiKey: provider === 'gemini' ? (geminiApiKey.trim() || existingGeminiApiKey || undefined) : undefined,
+        geminiBaseUrl: provider === 'gemini' ? (geminiBaseUrl.trim() || undefined) : undefined,
         openaiApiKey: provider === 'openai' ? (openaiApiKey.trim() || existingOpenaiApiKey || undefined) : undefined,
+        openaiBaseUrl: provider === 'openai' ? (openaiBaseUrl.trim() || undefined) : undefined,
+        azureOpenaiApiKey: provider === 'azure_openai' ? (azureOpenaiApiKey.trim() || existingAzureOpenaiApiKey || undefined) : undefined,
+        azureOpenaiEndpoint: provider === 'azure_openai' ? (azureOpenaiEndpoint.trim() || undefined) : undefined,
+        azureOpenaiDeployment: provider === 'azure_openai' ? (azureOpenaiDeployment.trim() || undefined) : undefined,
+        azureOpenaiApiVersion: provider === 'azure_openai' ? (azureOpenaiApiVersion.trim() || undefined) : undefined,
+        bedrockAccessKeyId: provider === 'bedrock' ? (bedrockAccessKeyId.trim() || existingBedrockAccessKeyId || undefined) : undefined,
+        bedrockSecretAccessKey: provider === 'bedrock' ? (bedrockSecretAccessKey.trim() || existingBedrockSecretAccessKey || undefined) : undefined,
+        bedrockSessionToken: provider === 'bedrock' ? (bedrockSessionToken.trim() || existingBedrockSessionToken || undefined) : undefined,
+        bedrockRegion: provider === 'bedrock' ? (bedrockRegion.trim() || undefined) : undefined,
       }) as any;
       setLlmTestResult(res.success ? { ok: true, message: 'Connection successful.' } : { ok: false, message: res.error || 'Connection failed.' });
     } catch (err: any) { setLlmTestResult({ ok: false, message: err.message || 'Connection failed.' }); }
@@ -520,39 +901,53 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }
 
   useEffect(() => {
-    if (provider === 'gemini') {
-      if (!decompositionModel.startsWith('gemini-')) setDecompositionModel('gemini-2.5-pro');
-      if (!arModel.startsWith('gemini-')) setArModel('gemini-2.5-pro');
-      if (!clarifyModel.startsWith('gemini-')) setClarifyModel('gemini-2.5-flash');
-      if (!evaluateModel.startsWith('gemini-')) setEvaluateModel('gemini-2.5-flash');
-      if (!refineModel.startsWith('gemini-')) setRefineModel('gemini-2.5-flash');
-      if (!themeModel.startsWith('gemini-')) setThemeModel('gemini-2.5-flash');
-    } else if (provider === 'openai') {
-      if (!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o1-')) setDecompositionModel('gpt-4o');
-      if (!arModel.startsWith('gpt-') && !arModel.startsWith('o1-')) setArModel('gpt-4o');
-      if (!clarifyModel.startsWith('gpt-')) setClarifyModel('gpt-4o-mini');
-      if (!evaluateModel.startsWith('gpt-')) setEvaluateModel('gpt-4o-mini');
-      if (!refineModel.startsWith('gpt-')) setRefineModel('gpt-4o-mini');
-      if (!themeModel.startsWith('gpt-')) setThemeModel('gpt-4o-mini');
-    } else {
-      if (decompositionModel.startsWith('gemini-') || decompositionModel.startsWith('gpt-')) setDecompositionModel('claude-opus-4-6');
-      if (arModel.startsWith('gemini-') || arModel.startsWith('gpt-')) setArModel('claude-opus-4-6');
-      if (clarifyModel.startsWith('gemini-') || clarifyModel.startsWith('gpt-')) setClarifyModel('claude-sonnet-4-5-20250929');
-      if (evaluateModel.startsWith('gemini-') || evaluateModel.startsWith('gpt-')) setEvaluateModel('claude-haiku-4-5-20251001');
-      if (refineModel.startsWith('gemini-') || refineModel.startsWith('gpt-')) setRefineModel('claude-sonnet-4-5-20250929');
-      if (themeModel.startsWith('gemini-') || themeModel.startsWith('gpt-')) setThemeModel('claude-haiku-4-5-20251001');
-    }
-  }, [provider]); // eslint-disable-line
+    const fastDefaults = getProviderDefaults(fastProfileProvider);
+    const deepDefaults = getProviderDefaults(deepProfileProvider);
+    const advancedDefaults = getProviderDefaults(provider);
 
-  const availableModels = useMemo(() => {
-    if (provider === 'forge_llms') return CLAUDE_MODELS;
-    if (provider === 'gemini' && (geminiApiKey || existingGeminiApiKey)) return GEMINI_MODELS;
-    if (provider === 'openai' && (openaiApiKey || existingOpenaiApiKey)) return OPENAI_MODELS;
-    return [];
-  }, [provider, geminiApiKey, existingGeminiApiKey, openaiApiKey, existingOpenaiApiKey]);
+    if (!modelMatchesProvider(fastProfileModel, fastProfileProvider)) setFastProfileModel(fastDefaults.fastModel);
+    if (!modelMatchesProvider(deepProfileModel, deepProfileProvider)) setDeepProfileModel(deepDefaults.deepModel);
+
+    if (profileMode === 'advanced') {
+      if (!modelMatchesProvider(decompositionModel, provider)) setDecompositionModel(advancedDefaults.deepModel);
+      if (!modelMatchesProvider(arModel, provider)) setArModel(advancedDefaults.deepModel);
+      if (!modelMatchesProvider(clarifyModel, provider)) setClarifyModel(advancedDefaults.fastModel);
+      if (!modelMatchesProvider(refineModel, provider)) setRefineModel(advancedDefaults.fastModel);
+      if (!modelMatchesProvider(evaluateModel, provider)) setEvaluateModel(advancedDefaults.fastModel);
+      if (!modelMatchesProvider(themeModel, provider)) setThemeModel(advancedDefaults.fastModel);
+    }
+  }, [
+    provider,
+    fastProfileProvider,
+    deepProfileProvider,
+    profileMode,
+    fastProfileModel,
+    deepProfileModel,
+    decompositionModel,
+    arModel,
+    clarifyModel,
+    refineModel,
+    evaluateModel,
+    themeModel,
+  ]);
+
+  useEffect(() => {
+    if (profileMode !== 'simplified') return;
+    const routed = applySimplifiedRouting(fastProfileModel, deepProfileModel);
+    setDecompositionModel(routed.decompositionModel);
+    setArModel(routed.arModel);
+    setClarifyModel(routed.clarifyModel);
+    setRefineModel(routed.refineModel);
+    setEvaluateModel(routed.evaluateModel);
+    setThemeModel(routed.themeModel);
+  }, [profileMode, fastProfileModel, deepProfileModel]);
+
+  const availableModels = useMemo(() => getAvailableModels(provider), [provider]);
+  const fastProfileModels = useMemo(() => getAvailableModels(fastProfileProvider), [fastProfileProvider]);
+  const deepProfileModels = useMemo(() => getAvailableModels(deepProfileProvider), [deepProfileProvider]);
 
   const settingsNav = [
-    { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
+    { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'Provider and execution profiles' },
     { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, examples' },
     { id: 'domain', label: 'Guidance', icon: Globe, sub: 'Roles and workspace rules' },
     { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
@@ -629,7 +1024,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                  <div>
                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Recommended Order</div>
                    <div className="text-xs font-semibold text-[var(--rf-text-secondary)] space-y-1.5">
-                     <div>1. AI Setup</div>
+                     <div>1. AI Infrastructure</div>
                      <div>2. Project Setup</div>
                      <div>3. Guidance</div>
                    </div>
@@ -654,80 +1049,674 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 transition={{ duration: 0.3 }}
               >
                 <div className="space-y-1">
-                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">AI Provider & Models</h3>
-                   <p className="text-[var(--rf-text-tertiary)] text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
+                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">AI Infrastructure</h3>
+                   <p className="text-[var(--rf-text-tertiary)] text-sm">Workspace administrators manage providers and execution profiles here. End users only see the simplified Fast and Deep choices in the main flow.</p>
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
-                  <div className="space-y-3">
-                    <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">LLM Provider</label>
-                    <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
-                      {(['openai', 'gemini', 'forge_llms'] as const).map(p => (
-                        <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
-                          {p.replace('_', ' ')}
-                        </button>
-                      ))}
+                {!isAdmin ? (
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4 text-sm text-[var(--rf-text-secondary)] flex items-start gap-3">
+                      <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)] shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-[var(--rf-text)]">AI infrastructure is administrator-managed</div>
+                        <div className="mt-1 text-xs leading-relaxed">Users can still choose Fast or Deep when creating work, but provider credentials and model routing are intentionally hidden from this view.</div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Admin Panel</div>
+                        <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getProviderLabel(provider)}</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used for credential management and advanced routing.</div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Fast Profile</div>
+                        <div className="mt-2 text-[11px] font-bold text-[var(--rf-brand)]">{getProviderLabel(fastProfileProvider)}</div>
+                        <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getModelLabel(fastProfileModel)}</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used for lighter reasoning and shorter turnaround.</div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Deep Profile</div>
+                        <div className="mt-2 text-[11px] font-bold text-[var(--rf-brand)]">{getProviderLabel(deepProfileProvider)}</div>
+                        <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getModelLabel(deepProfileModel)}</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used for backlog generation and more complex reasoning.</div>
+                      </div>
                     </div>
                   </div>
-
-                  {provider === 'openai' && (
-                    <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                      <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">OpenAI API Key</label>
-                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
-                      </div>
-                      <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                    </motion.div>
-                  )}
-
-                  {provider === 'gemini' && (
-                    <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                      <div className="flex justify-between items-center px-1">
-                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Gemini API Key</label>
-                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
-                      </div>
-                      <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                    </motion.div>
-                  )}
-
-                  <div className="space-y-5 pt-6 border-t border-[var(--rf-border-subtle)]">
-                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)] flex items-start gap-3">
-                      <Info className="w-4 h-4 text-[var(--rf-brand)] shrink-0 mt-0.5" />
-                      <p><span className="font-bold text-[var(--rf-text)]">Best practice:</span> use a stronger model for decomposition and a faster model for clarify and evaluation.</p>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      {[
-                        { label: 'Decomposition Pass', val: decompositionModel, set: setDecompositionModel },
-                        { label: 'Reasoning & Clarify', val: clarifyModel, set: setClarifyModel },
-                        { label: 'Evaluation & Theme', val: evaluateModel, set: setEvaluateModel },
-                      ].map((item, i) => (
-                        <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
-                          <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[240px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
-                            {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                          </select>
+                ) : (
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
+                    <div className="space-y-5">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="space-y-1">
+                          <div className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Planning Insights</div>
+                          <p className="text-sm text-[var(--rf-text-tertiary)]">Track how the adaptive planner is behaving across this workspace so you can tune defaults without guessing.</p>
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                        <button
+                          type="button"
+                          onClick={loadAiInsights}
+                          disabled={isLoadingAiInsights}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-brand)]/40 hover:text-[var(--rf-text)] disabled:opacity-60"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isLoadingAiInsights ? 'animate-spin' : ''}`} />
+                          Refresh insights
+                        </button>
+                      </div>
 
-                  <div className="pt-6 border-t border-[var(--rf-border-subtle)] flex items-center gap-4">
-                    <motion.button 
-                      onClick={testLlmConnection} 
-                      disabled={isTestingLlm} 
-                      className="bg-[var(--rf-text)] hover:bg-black text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg transition-all flex items-center gap-2"
-                      whileTap={{ scale: 0.98 }}
-                    >
-                       {isTestingLlm ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Test Connection
-                    </motion.button>
-                    {llmTestResult && (
-                      <div className={`px-4 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-2 border ${llmTestResult.ok ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
-                         {llmTestResult.ok ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />} {llmTestResult.message}
+                      {aiInsights ? (
+                        <div className="space-y-4 rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
+                          <div className="grid gap-3 md:grid-cols-4">
+                            {[
+                              { label: 'Tracked sessions', value: aiInsights.totalSessions },
+                              { label: 'Avg features', value: aiInsights.avgFeatureCount },
+                              { label: 'Avg rounds', value: aiInsights.avgDiscoveryRounds },
+                              { label: 'Avg coverage', value: aiInsights.avgCoverageScore !== null ? `${aiInsights.avgCoverageScore}%` : 'n/a' },
+                              { label: 'Single-feature runs', value: aiInsights.singleFeatureSessions },
+                              { label: 'Over target runs', value: aiInsights.overTargetFeatureSessions },
+                              { label: 'Multi-round discovery', value: aiInsights.multiRoundSessions },
+                              { label: 'Initiative outputs', value: aiInsights.initiativeSessions },
+                            ].map((item) => (
+                              <div key={item.label} className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
+                                <div className="mt-2 text-2xl font-bold tracking-tight text-[var(--rf-text)]">{item.value}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="grid gap-4 xl:grid-cols-4">
+                            <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm xl:col-span-2">
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Scope mix</div>
+                              <div className="mt-3 space-y-2.5">
+                                {aiInsights.scopeBreakdown.length ? aiInsights.scopeBreakdown.map((item) => (
+                                  <div key={item.key} className="flex items-center justify-between gap-3 text-sm">
+                                    <div>
+                                      <div className="font-bold text-[var(--rf-text)]">{formatInsightKey(item.key)}</div>
+                                      <div className="text-[11px] text-[var(--rf-text-tertiary)]">
+                                        {item.avgFeatures} avg features • {item.avgDiscoveryRounds} avg rounds
+                                        {item.avgCoverageScore !== null ? ` • ${item.avgCoverageScore}% coverage` : ''}
+                                      </div>
+                                    </div>
+                                    <span className="rounded-md bg-[var(--rf-brand-muted)] px-2 py-1 text-[11px] font-bold text-[var(--rf-brand)]">
+                                      {item.count}
+                                    </span>
+                                  </div>
+                                )) : (
+                                  <div className="text-sm text-[var(--rf-text-tertiary)]">No planner sessions recorded yet.</div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Reasoning mix</div>
+                              <div className="mt-3 space-y-2.5">
+                                {aiInsights.reasoningBreakdown.length ? aiInsights.reasoningBreakdown.map((item) => (
+                                  <div key={item.key} className="flex items-center justify-between gap-3 text-sm">
+                                    <span className="font-bold text-[var(--rf-text)]">{formatInsightKey(item.key)}</span>
+                                    <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-1 text-[11px] font-bold text-[var(--rf-text-secondary)]">{item.count}</span>
+                                  </div>
+                                )) : (
+                                  <div className="text-sm text-[var(--rf-text-tertiary)]">No reasoning activity yet.</div>
+                                )}
+                              </div>
+                              <div className="mt-4 border-t border-[var(--rf-border-subtle)] pt-4">
+                                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Output mix</div>
+                                <div className="mt-3 space-y-2.5">
+                                  {aiInsights.outputBreakdown.length ? aiInsights.outputBreakdown.map((item) => (
+                                    <div key={item.key} className="flex items-center justify-between gap-3 text-sm">
+                                      <span className="font-bold text-[var(--rf-text)]">{formatInsightKey(item.key)}</span>
+                                      <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-1 text-[11px] font-bold text-[var(--rf-text-secondary)]">{item.count}</span>
+                                    </div>
+                                  )) : (
+                                    <div className="text-sm text-[var(--rf-text-tertiary)]">No output overrides recorded yet.</div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Recent sessions</div>
+                              <div className="mt-3 space-y-2.5">
+                                {aiInsights.recentSessions.length ? aiInsights.recentSessions.map((session) => (
+                                  <div key={session.sessionId} className="rounded-lg border border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/45 px-3 py-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-xs font-bold text-[var(--rf-text)]">
+                                        {formatInsightKey(session.scopeMode ?? 'unclassified')}
+                                      </div>
+                                      <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+                                        {new Date(session.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                      </div>
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">
+                                      {session.projectKey === '*' ? 'Workspace default' : session.projectKey} • {formatInsightKey(session.reasoningMode ?? 'fast')}
+                                      {session.generatedFeatureCount !== undefined ? ` • ${session.generatedFeatureCount} features` : ''}
+                                      {session.discoveryRounds !== undefined ? ` • ${session.discoveryRounds} rounds` : ''}
+                                      {session.latestCoverageScore !== null && session.latestCoverageScore !== undefined ? ` • ${session.latestCoverageScore}% coverage` : ''}
+                                    </div>
+                                  </div>
+                                )) : (
+                                  <div className="text-sm text-[var(--rf-text-tertiary)]">No recent session telemetry yet.</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {aiInsights.projectBreakdown.length > 0 && (
+                            <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Top projects</div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {aiInsights.projectBreakdown.map((item) => (
+                                  <span key={item.key} className="rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-1 text-[11px] font-bold text-[var(--rf-text-secondary)]">
+                                    {formatInsightKey(item.key)}: {item.count}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-sm text-[var(--rf-text-tertiary)]">
+                          {isLoadingAiInsights ? 'Loading planner insights…' : 'No planner insights recorded yet. Run a few clarify and generation sessions to start seeing workspace behavior.'}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Provider Route</label>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {PROVIDER_OPTIONS.map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => setProvider(option.id)}
+                            className={`rounded-xl border px-4 py-4 text-left transition-all ${
+                              provider === option.id
+                                ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] shadow-sm'
+                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] hover:border-[var(--rf-brand)]/40'
+                            }`}
+                          >
+                            <div className="text-sm font-bold text-[var(--rf-text)]">{option.label}</div>
+                            <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">{option.blurb}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {provider === 'forge_llms' && (
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4 text-sm text-[var(--rf-text-secondary)]">
+                        Forge-managed routing is active. No external API keys are required for this provider.
                       </div>
                     )}
+
+                    {provider === 'openai' && (
+                      <motion.div className="grid gap-4 md:grid-cols-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                        <div className="space-y-2 md:col-span-2">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">OpenAI API Key</label>
+                            {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          </div>
+                          <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Base URL</label>
+                          <input type="text" value={openaiBaseUrl} onChange={e => setOpenaiBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {provider === 'gemini' && (
+                      <motion.div className="grid gap-4 md:grid-cols-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                        <div className="space-y-2 md:col-span-2">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Gemini API Key</label>
+                            {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          </div>
+                          <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Base URL</label>
+                          <input type="text" value={geminiBaseUrl} onChange={e => setGeminiBaseUrl(e.target.value)} placeholder="https://generativelanguage.googleapis.com/v1beta" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {provider === 'azure_openai' && (
+                      <motion.div className="grid gap-4 md:grid-cols-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                        <div className="space-y-2 md:col-span-2">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Azure OpenAI API Key</label>
+                            {existingAzureOpenaiApiKey && <button onClick={() => { setExistingAzureOpenaiApiKey(''); setAzureOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          </div>
+                          <input type="password" value={azureOpenaiApiKey} onChange={e => setAzureOpenaiApiKey(e.target.value)} placeholder={existingAzureOpenaiApiKey ? '••••••••• (Stored)' : 'Azure key'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Endpoint</label>
+                          <input type="text" value={azureOpenaiEndpoint} onChange={e => setAzureOpenaiEndpoint(e.target.value)} placeholder="https://your-resource.openai.azure.com" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deployment</label>
+                          <input type="text" value={azureOpenaiDeployment} onChange={e => setAzureOpenaiDeployment(e.target.value)} placeholder="gpt-4o-prod" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">API Version</label>
+                          <input type="text" value={azureOpenaiApiVersion} onChange={e => setAzureOpenaiApiVersion(e.target.value)} placeholder="2024-10-21" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {provider === 'bedrock' && (
+                      <motion.div className="grid gap-4 md:grid-cols-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Access Key ID</label>
+                            {existingBedrockAccessKeyId && <button onClick={() => { setExistingBedrockAccessKeyId(''); setBedrockAccessKeyId(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          </div>
+                          <input type="password" value={bedrockAccessKeyId} onChange={e => setBedrockAccessKeyId(e.target.value)} placeholder={existingBedrockAccessKeyId ? '••••••••• (Stored)' : 'AKIA…'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Secret Access Key</label>
+                            {existingBedrockSecretAccessKey && <button onClick={() => { setExistingBedrockSecretAccessKey(''); setBedrockSecretAccessKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          </div>
+                          <input type="password" value={bedrockSecretAccessKey} onChange={e => setBedrockSecretAccessKey(e.target.value)} placeholder={existingBedrockSecretAccessKey ? '••••••••• (Stored)' : 'AWS secret'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Session Token</label>
+                            {existingBedrockSessionToken && <button onClick={() => { setExistingBedrockSessionToken(''); setBedrockSessionToken(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          </div>
+                          <input type="password" value={bedrockSessionToken} onChange={e => setBedrockSessionToken(e.target.value)} placeholder={existingBedrockSessionToken ? '••••••••• (Stored optional token)' : 'Optional STS token'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Region</label>
+                          <input type="text" value={bedrockRegion} onChange={e => setBedrockRegion(e.target.value)} placeholder="us-east-1" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="md:col-span-2 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)]">
+                          Bedrock support currently targets Anthropic Claude model IDs on the Bedrock runtime. Use the Fast and Deep profile selectors below to choose which Bedrock Claude models each workflow path should use.
+                        </div>
+                      </motion.div>
+                    )}
+
+                    <div className="space-y-5 pt-6 border-t border-[var(--rf-border-subtle)]">
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Workspace AI Policy</div>
+                        <p className="text-sm text-[var(--rf-text-tertiary)]">Set the default planning behavior for everyone in this workspace. These values drive the Fast and Deep experience users see in the main flow.</p>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {(Object.entries(AI_POLICY_PRESETS) as Array<[AiPolicyPreset, (typeof AI_POLICY_PRESETS)[AiPolicyPreset]]>).map(([presetId, preset]) => (
+                          <button
+                            key={presetId}
+                            type="button"
+                            onClick={() => applyWorkspacePolicyPreset(presetId)}
+                            className={`rounded-xl border px-4 py-4 text-left transition-all ${
+                              workspacePreset === presetId
+                                ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] shadow-sm'
+                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] hover:border-[var(--rf-brand)]/40'
+                            }`}
+                          >
+                            <div className="text-sm font-bold text-[var(--rf-text)]">{preset.label}</div>
+                            <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">{preset.description}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Default Reasoning</label>
+                          <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
+                            {(['fast', 'deep'] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setDefaultReasoningMode(mode)}
+                                className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                                  defaultReasoningMode === mode
+                                    ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
+                                    : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
+                                }`}
+                              >
+                                {mode}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Default Output</label>
+                          <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
+                            {([
+                              { id: 'single', label: 'Single' },
+                              { id: 'auto', label: 'Auto' },
+                              { id: 'full_breakdown', label: 'Full' },
+                            ] as const).map((mode) => (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                onClick={() => setDefaultOutputMode(mode.id)}
+                                className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                                  defaultOutputMode === mode.id
+                                    ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
+                                    : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
+                                }`}
+                              >
+                                {mode.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-sm text-[var(--rf-text-secondary)] flex items-start gap-3 cursor-pointer">
+                          <input type="checkbox" checked={allowReasoningModeOverride} onChange={e => setAllowReasoningModeOverride(e.target.checked)} className="mt-0.5 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20" />
+                          <span>
+                            <span className="block font-bold text-[var(--rf-text)]">Let users choose Fast or Deep</span>
+                            <span className="block text-xs text-[var(--rf-text-tertiary)] mt-1">Turn this off if you want every request in this workspace to follow one default reasoning mode.</span>
+                          </span>
+                        </label>
+                        <label className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-sm text-[var(--rf-text-secondary)] flex items-start gap-3 cursor-pointer">
+                          <input type="checkbox" checked={allowOutputModeOverride} onChange={e => setAllowOutputModeOverride(e.target.checked)} className="mt-0.5 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20" />
+                          <span>
+                            <span className="block font-bold text-[var(--rf-text)]">Let users override output shape</span>
+                            <span className="block text-xs text-[var(--rf-text-tertiary)] mt-1">Turn this off to keep output sizing fixed to workspace or project policy.</span>
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Simple Ask Max Questions</label>
+                          <input type="number" min={0} max={6} value={simpleAskMaxQuestions} onChange={e => setSimpleAskMaxQuestions(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Round Target Questions</label>
+                          <input type="number" min={1} max={10} value={deepModeRoundTarget} onChange={e => setDeepModeRoundTarget(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Enterprise Max Questions / Round</label>
+                          <input type="number" min={2} max={12} value={enterpriseMaxQuestionsPerRound} onChange={e => setEnterpriseMaxQuestionsPerRound(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Max Deep Discovery Rounds</label>
+                          <input type="number" min={1} max={6} value={maxDeepDiscoveryRounds} onChange={e => setMaxDeepDiscoveryRounds(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-5 pt-6 border-t border-[var(--rf-border-subtle)]">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="space-y-1">
+                          <div className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Project AI Override</div>
+                          <p className="text-sm text-[var(--rf-text-tertiary)]">Override the workspace defaults for a specific project when one team needs different planning behavior.</p>
+                        </div>
+                        <select
+                          value={activeArProj}
+                          onChange={e => setActiveArProj(e.target.value)}
+                          className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none md:w-72 transition"
+                        >
+                          <option value="*">Select a project...</option>
+                          {projects.map(project => (
+                            <option key={project.key} value={project.key}>{project.key}: {project.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {activeArProj === '*' ? (
+                        <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-sm text-[var(--rf-text-tertiary)] text-center">
+                          Select a project to define project-specific AI behavior.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <button
+                              type="button"
+                              onClick={() => applyProjectPolicyPreset('inherit')}
+                              className={`rounded-xl border px-4 py-4 text-left transition-all ${
+                                !currentProjectAiPolicy || currentProjectAiPolicy.preset === 'inherit'
+                                  ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] shadow-sm'
+                                  : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] hover:border-[var(--rf-brand)]/40'
+                              }`}
+                            >
+                              <div className="text-sm font-bold text-[var(--rf-text)]">Inherit Workspace Policy</div>
+                              <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">Use the workspace defaults without project-specific AI behavior.</div>
+                            </button>
+                            {(Object.entries(AI_POLICY_PRESETS) as Array<[AiPolicyPreset, (typeof AI_POLICY_PRESETS)[AiPolicyPreset]]>).map(([presetId, preset]) => (
+                              <button
+                                key={presetId}
+                                type="button"
+                                onClick={() => applyProjectPolicyPreset(presetId)}
+                                className={`rounded-xl border px-4 py-4 text-left transition-all ${
+                                  currentProjectAiPolicy?.preset === presetId
+                                    ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] shadow-sm'
+                                    : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] hover:border-[var(--rf-brand)]/40'
+                                }`}
+                              >
+                                <div className="text-sm font-bold text-[var(--rf-text)]">{preset.label}</div>
+                                <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">{preset.description}</div>
+                              </button>
+                            ))}
+                          </div>
+
+                          {currentProjectAiPolicy && currentProjectAiPolicy.preset !== 'inherit' && (
+                            <div className="space-y-4 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
+                              <div className="grid gap-4 md:grid-cols-2">
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Project Default Reasoning</label>
+                                  <div className="flex p-1 bg-white rounded-xl border border-[var(--rf-border)]">
+                                    {(['fast', 'deep'] as const).map((mode) => (
+                                      <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() => updateProjectAiPolicy({ defaultReasoningMode: mode })}
+                                        className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                                          currentProjectAiPolicy.defaultReasoningMode === mode
+                                            ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                                            : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
+                                        }`}
+                                      >
+                                        {mode}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Project Default Output</label>
+                                  <div className="flex p-1 bg-white rounded-xl border border-[var(--rf-border)]">
+                                    {([
+                                      { id: 'single', label: 'Single' },
+                                      { id: 'auto', label: 'Auto' },
+                                      { id: 'full_breakdown', label: 'Full' },
+                                    ] as const).map((mode) => (
+                                      <button
+                                        key={mode.id}
+                                        type="button"
+                                        onClick={() => updateProjectAiPolicy({ defaultOutputMode: mode.id })}
+                                        className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                                          currentProjectAiPolicy.defaultOutputMode === mode.id
+                                            ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                                            : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
+                                        }`}
+                                      >
+                                        {mode.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid gap-4 md:grid-cols-2">
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Project Fast Provider</label>
+                                  <select
+                                    value={currentProjectAiPolicy.fastProfileProvider ?? fastProfileProvider}
+                                    onChange={e => handleProjectRouteProviderChange('fast', e.target.value as LlmProvider)}
+                                    className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                                  >
+                                    {PROVIDER_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                                  </select>
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Project Fast Profile</label>
+                                  <select
+                                    value={currentProjectAiPolicy.fastProfileModel ?? fastProfileModel}
+                                    onChange={e => updateProjectAiPolicy({ fastProfileModel: e.target.value })}
+                                    className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                                  >
+                                    {getAvailableModels(currentProjectAiPolicy.fastProfileProvider ?? fastProfileProvider).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                  </select>
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Project Deep Provider</label>
+                                  <select
+                                    value={currentProjectAiPolicy.deepProfileProvider ?? deepProfileProvider}
+                                    onChange={e => handleProjectRouteProviderChange('deep', e.target.value as LlmProvider)}
+                                    className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                                  >
+                                    {PROVIDER_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                                  </select>
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Project Deep Profile</label>
+                                  <select
+                                    value={currentProjectAiPolicy.deepProfileModel ?? deepProfileModel}
+                                    onChange={e => updateProjectAiPolicy({ deepProfileModel: e.target.value })}
+                                    className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                                  >
+                                    {getAvailableModels(currentProjectAiPolicy.deepProfileProvider ?? deepProfileProvider).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="grid gap-4 md:grid-cols-2">
+                                <label className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text-secondary)] flex items-start gap-3 cursor-pointer">
+                                  <input type="checkbox" checked={currentProjectAiPolicy.allowReasoningModeOverride ?? true} onChange={e => updateProjectAiPolicy({ allowReasoningModeOverride: e.target.checked })} className="mt-0.5 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20" />
+                                  <span>
+                                    <span className="block font-bold text-[var(--rf-text)]">Allow project users to choose Fast or Deep</span>
+                                    <span className="block text-xs text-[var(--rf-text-tertiary)] mt-1">Lock this project to one reasoning mode if needed.</span>
+                                  </span>
+                                </label>
+                                <label className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text-secondary)] flex items-start gap-3 cursor-pointer">
+                                  <input type="checkbox" checked={currentProjectAiPolicy.allowOutputModeOverride ?? true} onChange={e => updateProjectAiPolicy({ allowOutputModeOverride: e.target.checked })} className="mt-0.5 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20" />
+                                  <span>
+                                    <span className="block font-bold text-[var(--rf-text)]">Allow project users to override output shape</span>
+                                    <span className="block text-xs text-[var(--rf-text-tertiary)] mt-1">Hide Single / Auto / Full when the project should stay standardized.</span>
+                                  </span>
+                                </label>
+                              </div>
+
+                              <div className="grid gap-4 md:grid-cols-2">
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Simple Ask Max Questions</label>
+                                  <input type="number" min={0} max={6} value={currentProjectAiPolicy.simpleAskMaxQuestions ?? 2} onChange={e => updateProjectAiPolicy({ simpleAskMaxQuestions: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Round Target Questions</label>
+                                  <input type="number" min={1} max={10} value={currentProjectAiPolicy.deepModeRoundTarget ?? 5} onChange={e => updateProjectAiPolicy({ deepModeRoundTarget: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Enterprise Max Questions / Round</label>
+                                  <input type="number" min={2} max={12} value={currentProjectAiPolicy.enterpriseMaxQuestionsPerRound ?? 7} onChange={e => updateProjectAiPolicy({ enterpriseMaxQuestionsPerRound: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Max Deep Discovery Rounds</label>
+                                  <input type="number" min={1} max={6} value={currentProjectAiPolicy.maxDeepDiscoveryRounds ?? 3} onChange={e => updateProjectAiPolicy({ maxDeepDiscoveryRounds: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    <div className="space-y-5 pt-6 border-t border-[var(--rf-border-subtle)]">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)] flex items-start gap-3">
+                        <Info className="w-4 h-4 text-[var(--rf-brand)] shrink-0 mt-0.5" />
+                        <p><span className="font-bold text-[var(--rf-text)]">Execution profiles:</span> Fast powers lighter reasoning and follow-up work. Deep powers the heavier generation passes. Users only see these profile concepts, not raw model names.</p>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast Provider</label>
+                          <select value={fastProfileProvider} onChange={e => handleFastProfileProviderChange(e.target.value as LlmProvider)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                            {PROVIDER_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast Profile</label>
+                          <select value={fastProfileModel} onChange={e => setFastProfileModel(e.target.value)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                            {fastProfileModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                          </select>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for clarify, evaluation, refinement, and titles in simplified mode.</div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Provider</label>
+                          <select value={deepProfileProvider} onChange={e => handleDeepProfileProviderChange(e.target.value as LlmProvider)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                            {PROVIDER_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Profile</label>
+                          <select value={deepProfileModel} onChange={e => setDeepProfileModel(e.target.value)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                            {deepProfileModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                          </select>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for feature decomposition and acceptance-requirement generation in simplified mode.</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)] w-fit">
+                        {([
+                          { id: 'simplified', label: 'Profiles Only' },
+                          { id: 'advanced', label: 'Advanced Routing' },
+                        ] as const).map((modeOption) => (
+                          <button
+                            key={modeOption.id}
+                            onClick={() => setProfileMode(modeOption.id)}
+                            className={`px-4 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                              profileMode === modeOption.id
+                                ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
+                                : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
+                            }`}
+                          >
+                            {modeOption.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {profileMode === 'advanced' && (
+                        <div className="space-y-4 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
+                          {[
+                            { label: 'Decomposition', val: decompositionModel, set: setDecompositionModel },
+                            { label: 'Acceptance Requirements', val: arModel, set: setArModel },
+                            { label: 'Clarify', val: clarifyModel, set: setClarifyModel },
+                            { label: 'Refine', val: refineModel, set: setRefineModel },
+                            { label: 'Evaluate', val: evaluateModel, set: setEvaluateModel },
+                            { label: 'Themes / Titles', val: themeModel, set: setThemeModel },
+                          ].map((item) => (
+                            <div key={item.label} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
+                              <select value={item.val} onChange={e => item.set(e.target.value)} className="bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[260px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                                {availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-6 border-t border-[var(--rf-border-subtle)] flex flex-col gap-4 sm:flex-row sm:items-center">
+                      <motion.button 
+                        onClick={testLlmConnection} 
+                        disabled={isTestingLlm} 
+                        className="bg-[var(--rf-text)] hover:bg-black text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg transition-all flex items-center justify-center gap-2"
+                        whileTap={{ scale: 0.98 }}
+                      >
+                         {isTestingLlm ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Test Provider Connection
+                      </motion.button>
+                      {llmTestResult && (
+                        <div className={`px-4 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-2 border ${llmTestResult.ok ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
+                           {llmTestResult.ok ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />} {llmTestResult.message}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </motion.div>
             )}
 

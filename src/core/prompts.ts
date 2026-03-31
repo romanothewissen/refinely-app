@@ -5,7 +5,7 @@
  * removed. Domain context is injected dynamically from tenant configuration.
  */
 
-import { ProcessCode } from '../types';
+import { ProcessCode, ScopeMode } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ export function buildDecompositionSystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
 
-YOUR JOB: Given a short requirement, think deeply about everything it actually takes to deliver it. A requirement like "show an optimized schedule based on criticality" implies much more than one feature — think about what generates the schedule, what data feeds it, who uses it, what disrupts it, and what supporting capabilities are needed.
+YOUR JOB: Calibrate the output to the real size of the request. Some asks should produce exactly one strong feature. Other asks need a broader breakdown. Think deeply, but do not split a narrow request into trivial or UI-level features.
 
 DECOMPOSITION FRAMEWORK — reason through each dimension:
 1. CORE CAPABILITY: What is the primary thing being requested?
@@ -110,7 +110,7 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically?
 6. DEPENDENCIES: What supporting capabilities need to exist?
 
-Each dimension that represents a distinct, deliverable capability should become its own feature. Use judgment — not every dimension needs a separate feature.
+Each dimension that represents a distinct, deliverable capability should become its own feature. Use judgment — not every dimension needs a separate feature, and a tightly bounded request may still be best expressed as a single feature.
 
 RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
@@ -193,11 +193,11 @@ export function buildClarifySystemPrompt(opts: {
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}.`
     : '';
 
-  return `You are a senior business analyst performing a deep discovery session for a new product requirement.
+  return `You are a senior business analyst performing adaptive discovery for a new product requirement.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build feature set. Even if the requirement seems clear, there are always nuances regarding error handling, user permissions, data edge cases, or business workflows that need exploration.
+YOUR MISSION: Gather only the missing information needed to produce a precise, ready-to-build backlog. If the request is already clear and bounded, keep questioning minimal. If the request is broad or risky, focus on the highest-value missing details first.
 
 CLARITY ASSESSMENT:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
@@ -207,6 +207,7 @@ CLARITY ASSESSMENT:
 - If the requirement is vague or underspecified, stay near the upper bound.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
 - Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
+- Prefer fewer, higher-value questions over exhaustive questionnaires.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected
@@ -222,14 +223,86 @@ Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...",
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
 
-export function buildEvaluateSystemPrompt(): string {
-  return `You are a senior business analyst evaluating whether answered discovery questions provide enough context to write precise, testable acceptance requirements for a Jira backlog.
+export function buildEvaluateSystemPrompt(opts: {
+  domainContext: string;
+  scopeMode: ScopeMode;
+}): string {
+  const requiredDimensions = opts.scopeMode === 'atomic'
+    ? 'goal, actors, workflow, business_rules'
+    : opts.scopeMode === 'focused'
+      ? 'goal, actors, workflow, business_rules, exceptions'
+      : opts.scopeMode === 'standard'
+        ? 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, success_metrics'
+        : 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, non_functional, success_metrics';
 
-Assess the Q&A and decide: is there enough information to write clear GIVEN/WHEN/THEN acceptance requirements that cover the happy path, key business rules, and main edge cases?
+  return `You are a senior business analyst evaluating discovery coverage for a Jira backlog request.
+${platformContextBlock(opts.domainContext)}
+Assess how well the answered Q&A covers the business context needed to generate a strong backlog.
 
-If sufficient: return {"sufficient": true}
-If not sufficient: return {"sufficient": false, "questions": [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}]}
-Ask at most 5 follow-up questions. Focus only on what is genuinely missing. Avoid repetitive questions, but ensure critical gaps are closed.`;
+CURRENT EXPECTED SCOPE:
+- Scope mode: ${opts.scopeMode.toUpperCase()}
+- Required dimensions for this scope: ${requiredDimensions}
+
+SCORE THESE DIMENSIONS:
+- goal
+- actors
+- workflow
+- business_rules
+- exceptions
+- permissions
+- integrations
+- non_functional
+- success_metrics
+
+For each dimension:
+- score from 0-100
+- mark status as missing, partial, or covered
+- include one short evidence note explaining the score
+- set required=true when it is essential for this scope
+
+FOLLOW-UP RULES:
+- Ask at most 5 follow-up questions
+- Only ask follow-up questions for genuinely weak required dimensions
+- Prefer the highest-value missing questions over broad questionnaires
+
+Return strict JSON only:
+{
+  "summary": "...",
+  "dimensions": [
+    { "key": "goal", "label": "Business goal", "required": true, "score": 80, "status": "covered", "evidence": "..." }
+  ],
+  "missing_critical": ["workflow", "permissions"],
+  "questions": [
+    { "category": "...", "question": "...", "suggestions": ["...", "...", "..."] }
+  ]
+}`;
+}
+
+// ─── Initiative Grouping ──────────────────────────────────────────────────────
+
+export function buildInitiativeGroupingSystemPrompt(opts: {
+  domainContext: string;
+  featureCount: number;
+}): string {
+  const preferredGroupCount = opts.featureCount >= 8
+    ? 'Aim for 3-5 initiative groups.'
+    : 'Aim for 2-4 initiative groups.';
+
+  return `You are a principal product manager organizing a large backlog into an initiative-level structure.
+${platformContextBlock(opts.domainContext)}
+YOUR JOB: Group the provided features into meaningful initiative sections so the backlog is easier to review and prioritize.
+
+GROUPING RULES:
+- Every feature must appear in exactly one group
+- Use business-oriented group titles, not technical implementation labels
+- Each group title should be short and scannable
+- Each group summary should explain the shared business outcome in 1 sentence
+- Do not invent or rename feature IDs
+- Avoid singleton groups unless a feature is truly standalone
+- ${preferredGroupCount}
+
+OUTPUT FORMAT (strict JSON):
+{"groups":[{"title":"...", "summary":"...", "feature_ids":["feature-id-1","feature-id-2"]}]}`;
 }
 
 // ─── Refinement (full feature set) ───────────────────────────────────────────

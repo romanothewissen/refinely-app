@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download, AlertCircle, FileText, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
@@ -7,6 +7,13 @@ import { router } from '@forge/bridge';
 // ─── Word-level diff utility ──────────────────────────────────────────────────
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
 type AcceptanceRequirement = { given: string; when: string; then: string };
+
+function formatPlannerLabel(value: string): string {
+  return value
+    .split('_')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
 
 function wordDiff(oldText: string, newText: string): DiffToken[] {
   const oldWords = (oldText || '').split(/\b/);
@@ -225,6 +232,13 @@ interface Feature {
   jiraIssueUrl?: string;
 }
 
+interface InitiativeGroup {
+  id: string;
+  title: string;
+  summary: string;
+  featureIds: string[];
+}
+
 interface MainContentProps {
   features: Feature[];
   setFeatures: React.Dispatch<React.SetStateAction<Feature[]>>;
@@ -242,16 +256,73 @@ interface MainContentProps {
     projectKey: string;
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
+    plannerDecision?: {
+      reasoningMode: 'fast' | 'deep';
+      outputMode: 'single' | 'auto' | 'full_breakdown';
+      scopeMode: 'atomic' | 'focused' | 'standard' | 'initiative';
+      clarificationMode: 'none' | 'light' | 'standard' | 'deep';
+      featurePlan: { min: number; max: number; target: number };
+      questionPlan: { min: number; max: number; target: number; clarity: 'clear' | 'medium' | 'vague' };
+      useHierarchy: boolean;
+      confidence: number;
+      rationale: string[];
+    };
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
     similarStoriesCount?: number;
-    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
+    initiativeGroups?: InitiativeGroup[];
+    discoveryTranscript?: Array<{
+      roundNumber: number;
+      questions: Array<{ category: string; question: string; suggestions: string[] }>;
+      answers: Array<{ question: string; answer: string }>;
+      coverage?: {
+        sufficient: boolean;
+        canGenerate: boolean;
+        shouldContinueDiscovery: boolean;
+        overallScore: number;
+        summary: string;
+        missingCritical: string[];
+        dimensions: Array<{
+          key: string;
+          label: string;
+          required: boolean;
+          score: number;
+          status: 'missing' | 'partial' | 'covered';
+          evidence: string;
+        }>;
+      };
+      submittedAt: string;
+    }>;
+    discoveryCoverage?: {
+      sufficient: boolean;
+      canGenerate: boolean;
+      shouldContinueDiscovery: boolean;
+      overallScore: number;
+      summary: string;
+      missingCritical: string[];
+      dimensions: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        score: number;
+        status: 'missing' | 'partial' | 'covered';
+        evidence: string;
+      }>;
+    };
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
   loadingTitle?: string;
+}
+
+interface FeatureSection {
+  id: string;
+  title: string;
+  summary: string;
+  items: Array<{ feature: Feature; index: number }>;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -280,9 +351,57 @@ export function MainContent({
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [showTokenDetails, setShowTokenDetails] = useState(false);
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
   const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
+  const initiativeGroups = generationContext?.initiativeGroups ?? [];
+  const featureIndexById = new Map(features.map((feature, index) => [feature.id, index] as const));
+  const featureGroupTitleById = new Map<string, string>();
+  const groupedFeatureIds = new Set<string>();
+
+  initiativeGroups.forEach(group => {
+    group.featureIds.forEach(featureId => {
+      if (featureIndexById.has(featureId)) {
+        groupedFeatureIds.add(featureId);
+        featureGroupTitleById.set(featureId, group.title);
+      }
+    });
+  });
+
+  const featureSections: FeatureSection[] = initiativeGroups.length
+    ? [
+        ...initiativeGroups
+          .map(group => ({
+            id: group.id,
+            title: group.title,
+            summary: group.summary,
+            items: group.featureIds
+              .map(featureId => {
+                const index = featureIndexById.get(featureId);
+                return index === undefined ? null : { feature: features[index], index };
+              })
+              .filter((item): item is { feature: Feature; index: number } => item !== null),
+          }))
+          .filter(section => section.items.length > 0),
+        ...(features.some(feature => !groupedFeatureIds.has(feature.id))
+          ? [{
+              id: 'ungrouped-features',
+              title: 'Additional features',
+              summary: 'These items remained outside the generated initiative groupings.',
+              items: features
+                .map((feature, index) => ({ feature, index }))
+                .filter(({ feature }) => !groupedFeatureIds.has(feature.id)),
+            }]
+          : []),
+      ]
+    : [{
+        id: 'all-features',
+        title: 'Generated features',
+        summary: '',
+        items: features.map((feature, index) => ({ feature, index })),
+      }];
+  const hasInitiativeSections = initiativeGroups.length > 0 && featureSections.some(section => section.items.length > 0);
 
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
@@ -299,9 +418,10 @@ export function MainContent({
     if (!features.length) return;
 
     const featureRows = [
-      buildSpreadsheetRow(['Feature #', 'Title', 'Description', 'AR Count', 'Accepted', 'Jira Issue', 'Jira URL', 'Pending Refinement', 'Pending Removal'], true),
+      buildSpreadsheetRow(['Feature #', 'Initiative Group', 'Title', 'Description', 'AR Count', 'Accepted', 'Jira Issue', 'Jira URL', 'Pending Refinement', 'Pending Removal'], true),
       ...features.map((feature, idx) => buildSpreadsheetRow([
         idx + 1,
+        featureGroupTitleById.get(feature.id) || '',
         feature.title || feature.summary || `Feature ${idx + 1}`,
         feature.description || feature.markdown || '',
         feature.acceptanceRequirements?.length || 0,
@@ -314,13 +434,14 @@ export function MainContent({
     ].join('');
 
     const acceptanceRequirementRows = [
-      buildSpreadsheetRow(['Feature #', 'Feature Title', 'AR #', 'Given', 'When', 'Then', 'Accepted', 'Jira Issue'], true),
+      buildSpreadsheetRow(['Feature #', 'Initiative Group', 'Feature Title', 'AR #', 'Given', 'When', 'Then', 'Accepted', 'Jira Issue'], true),
       ...features.flatMap((feature, featureIdx) => {
         const ars = feature.acceptanceRequirements || [];
         if (!ars.length) {
           return [
             buildSpreadsheetRow([
               featureIdx + 1,
+              featureGroupTitleById.get(feature.id) || '',
               feature.title || feature.summary || `Feature ${featureIdx + 1}`,
               '',
               '',
@@ -334,6 +455,7 @@ export function MainContent({
 
         return ars.map((ar, arIdx) => buildSpreadsheetRow([
           featureIdx + 1,
+          featureGroupTitleById.get(feature.id) || '',
           feature.title || feature.summary || `Feature ${featureIdx + 1}`,
           arIdx + 1,
           ar.given || '',
@@ -434,7 +556,14 @@ export function MainContent({
     }
     setFeatures(prev => {
       const n = [...prev];
-      if (n[idx].pendingRefinement) n[idx] = { ...n[idx].pendingRefinement!, pendingRefinement: undefined, pendingRemoval: undefined };
+      if (n[idx].pendingRefinement) {
+        n[idx] = {
+          ...n[idx].pendingRefinement!,
+          id: n[idx].id,
+          pendingRefinement: undefined,
+          pendingRemoval: undefined,
+        };
+      }
       api.updateConversationFeatures(sessionId, n);
       return n;
     });
@@ -518,6 +647,7 @@ export function MainContent({
               pendingRefinement: {
                 ...f,
                 ...r,
+                id: f.id,
                 acceptanceRequirements: r.acceptanceRequirements || f.acceptanceRequirements
               }
             };
@@ -555,6 +685,7 @@ export function MainContent({
           return {
             ...f,
             ...f.pendingRefinement,
+            id: f.id,
             pendingRefinement: undefined,
             pendingRemoval: undefined,
             isAccepted: true
@@ -615,6 +746,260 @@ export function MainContent({
       </div>
     </motion.div>
   );
+
+  const renderFeatureCard = (feature: Feature, idx: number, animationIndex: number) => {
+    const isEditing = editingIdx === idx;
+    const draft = editDraft;
+
+    return (
+      <motion.div
+        key={feature.id || idx}
+        className={`group overflow-hidden rounded-2xl border ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)] bg-white' : feature.isAccepted ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/30' : 'border-[var(--rf-border)] bg-white'}`}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: animationIndex * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+        style={{ boxShadow: feature.isAccepted ? '0 4px 24px -4px rgba(58,107,83,0.12)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(31,30,29,0.04)' }}
+        whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 32px -4px rgba(58,107,83,0.16)' : '0 8px 24px -4px rgba(31,30,29,0.06)' }}
+      >
+        <div className="flex flex-col sm:flex-row">
+          <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger)]' : feature.isAccepted ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-border-strong)]'}`} />
+
+          <div className="flex-1 p-5 sm:p-6">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
+              {isEditing ? (
+                <input
+                  type="text"
+                  value={draft?.title || draft?.summary || ''}
+                  onChange={e => setEditDraft(d => d ? { ...d, summary: e.target.value, title: e.target.value } : null)}
+                  className="flex-1 text-lg font-bold text-[var(--rf-text)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                />
+              ) : (
+                <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
+                  <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
+                    {feature.title || feature.summary || 'Untitled Feature'}
+                  </h3>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[10px] font-bold tracking-widest border border-[var(--rf-border)]">
+                      {feature.acceptanceRequirements?.length || 0} ARs
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {isEditing ? (
+                  <>
+                    <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
+                    <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-[var(--rf-success)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
+                  </>
+                ) : (
+                  <>
+                    <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
+                    <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
+                    <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-white bg-[var(--rf-success)] border-[var(--rf-success)] shadow-[var(--rf-success)]/20' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
+                      <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
+                    </motion.button>
+                    <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
+                    {feature.jiraIssueKey ? (
+                      <div className="flex items-center gap-1">
+                        <motion.button
+                          onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
+                          className="px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-blue-100 shadow-sm"
+                          whileTap={{ scale: 0.97 }}
+                        >
+                          <Check className="w-3.5 h-3.5" /> {feature.jiraIssueKey}
+                        </motion.button>
+                        <motion.button
+                          onClick={() => {
+                            if (window.confirm(`Safety Warning: This feature has already been pushed to Jira as issue ${feature.jiraIssueKey}.\n\nAre you sure you want to push it again and create a duplicate issue?`)) {
+                              onPushFeature(idx);
+                            }
+                          }}
+                          title="Push a duplicate to Jira"
+                          className="px-2 py-1.5 text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text-secondary)] rounded-lg transition"
+                          whileTap={{ scale: 0.97 }}
+                        >
+                          <Upload className="w-4 h-4" />
+                        </motion.button>
+                      </div>
+                    ) : (
+                      <motion.button
+                        onClick={() => onPushFeature(idx)}
+                        disabled={!feature.isAccepted}
+                        title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
+                        className="px-3 py-1.5 text-[11px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-slate-300 disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
+                        whileTap={{ scale: 0.97 }}
+                      >
+                        <Upload className="w-3.5 h-3.5" /> Push
+                      </motion.button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {feature.pendingRemoval && (
+              <div className="mb-4 p-4 rounded-xl bg-[var(--rf-danger-subtle)] border border-[var(--rf-danger-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-2 text-[var(--rf-danger)] font-bold text-sm">
+                  <Trash2 className="w-4 h-4" /> Proposed for Removal
+                </div>
+                <div className="flex items-center gap-2">
+                  <motion.button onClick={() => clearPendingRemoval(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
+                  <motion.button onClick={() => removeFeatureAt(idx)} className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm shadow-rose-600/20" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
+                </div>
+              </div>
+            )}
+
+            {feature.pendingRefinement && (() => {
+              const proposed = feature.pendingRefinement!;
+              const origTitle = feature.title || feature.summary || '';
+              const propTitle = proposed.title || proposed.summary || '';
+              const origDesc = feature.description || feature.markdown || '';
+              const propDesc = proposed.description || proposed.markdown || '';
+              const arDiffRows = alignAcceptanceRequirements(
+                feature.acceptanceRequirements || [],
+                proposed.acceptanceRequirements || [],
+              );
+              return (
+                <div className="mb-5 p-4 rounded-2xl bg-amber-50/50 border border-amber-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                    <h4 className="text-amber-700 font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> AI Suggested Refinements</h4>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center bg-white p-1 rounded-lg border border-amber-200 shadow-sm">
+                        <button
+                          onClick={() => setDiffMode('redline')}
+                          className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                        >
+                          Redline
+                        </button>
+                        <button
+                          onClick={() => setDiffMode('blackline')}
+                          className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                        >
+                          Blackline
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <motion.button onClick={() => rejectRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
+                        <motion.button onClick={() => acceptRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] rounded-lg flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Accept</motion.button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="bg-white p-4 rounded-xl border border-[var(--rf-border)] shadow-sm">
+                      <div className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
+                      <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2">{origTitle}</h4>
+                      <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
+                      <div className="space-y-2">
+                        {feature.acceptanceRequirements.map((ar, i) => (
+                          <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[11px] text-[var(--rf-text-secondary)]">
+                            {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
+                            {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
+                            <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="bg-[var(--rf-brand-muted)]/50 p-4 rounded-xl border border-[var(--rf-brand-subtle)] shadow-sm">
+                      <div className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
+                      <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
+                      <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
+                      <div className="space-y-2">
+                        {arDiffRows.map((row, i) => {
+                          const ar = row.proposed;
+                          const oldAr = row.oldAr;
+                          const isNew = row.isNew;
+                          return (
+                            <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-blue-100'}`}>
+                              {isNew && <div className="text-[10px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
+                              {ar.given && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
+                              {ar.when && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
+                              <div><strong className="text-[var(--rf-brand-hover)]">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {(expandedIndices.has(idx) || isEditing) && (
+              <div className={`mt-4 ${feature.pendingRefinement ? 'opacity-50 pointer-events-none' : ''}`}>
+                {isEditing ? (
+                  <textarea
+                    value={draft?.description || ''}
+                    onChange={e => setEditDraft(d => d ? { ...d, description: e.target.value } : null)}
+                    className="w-full text-[var(--rf-text-secondary)] text-sm bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 min-h-[120px] mb-6 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none resize-y transition"
+                  />
+                ) : (
+                  <div className="text-[var(--rf-text-secondary)] text-[13px] sm:text-sm mb-6 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-brand)]/20 pl-4 py-1">
+                    {feature.markdown || feature.description}
+                  </div>
+                )}
+
+                {((isEditing && draft?.acceptanceRequirements) || (!isEditing && feature.acceptanceRequirements?.length > 0)) && (
+                  <div className="mt-2 text-sm">
+                    <div className="flex items-center justify-between mb-4 pb-2">
+                      <h4 className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Acceptance Criteria</h4>
+                      {isEditing && (
+                        <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
+                      )}
+                    </div>
+                    <div className="space-y-2.5">
+                      {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
+                        <div key={i} className="bg-[var(--rf-surface-soft)]/50 rounded-xl p-4 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)]">
+                          {isEditing && (
+                            <button onClick={() => deleteDraftAr(i)} className="absolute top-3 right-3 p-1.5 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                          )}
+                          {isEditing ? (
+                            <div className="space-y-3 pr-8">
+                              {(['given', 'when', 'then'] as const).map(field => (
+                                <div key={field} className="flex items-start gap-3">
+                                  <strong className="text-[var(--rf-text-tertiary)] w-12 pt-2 text-[10px] font-bold uppercase tracking-widest">{field}</strong>
+                                  {field === 'then'
+                                    ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] resize-none transition" />
+                                    : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition" />
+                                  }
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5 text-[13px] sm:text-sm">
+                              {ar.given?.trim() && (
+                                <div className="flex gap-4">
+                                  <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>
+                                  <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.given}</div>
+                                </div>
+                              )}
+                              {ar.when?.trim() && (
+                                <div className="flex gap-4">
+                                  <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">When</div>
+                                  <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.when}</div>
+                                </div>
+                              )}
+                              <div className="flex gap-4">
+                                <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest pt-0.5">Then</div>
+                                <div className="text-[var(--rf-text)] leading-relaxed whitespace-pre-wrap font-medium">{ar.then}</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
@@ -830,6 +1215,38 @@ export function MainContent({
                   <div className="font-bold text-[var(--rf-text)]">
                     Attachment: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.attachmentIncluded ? 'Included' : 'None'}</span>
                   </div>
+                  {generationContext.plannerDecision && (
+                    <>
+                      <div className="font-bold text-[var(--rf-text)]">
+                        Scope: <span className="font-medium text-[var(--rf-text-secondary)]">{formatPlannerLabel(generationContext.plannerDecision.scopeMode)}</span>
+                      </div>
+                      <div className="font-bold text-[var(--rf-text)]">
+                        Target: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.plannerDecision.featurePlan.target} features</span>
+                      </div>
+                      {generationContext.discoveryCoverage ? (
+                        <div className="font-bold text-[var(--rf-text)]">
+                          Discovery: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.discoveryCoverage.overallScore}% coverage</span>
+                        </div>
+                      ) : null}
+                      {generationContext.discoveryTranscript?.length ? (
+                        <div className="font-bold text-[var(--rf-text)]">
+                          Discovery rounds: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.discoveryTranscript.length}</span>
+                        </div>
+                      ) : null}
+                      {generationContext.initiativeGroups?.length ? (
+                        <div className="font-bold text-[var(--rf-text)]">
+                          Structure: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.initiativeGroups.length} initiative group{generationContext.initiativeGroups.length !== 1 ? 's' : ''}</span>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsContextModalOpen(true)}
+                    className="text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
+                  >
+                    View full details
+                  </button>
                 </div>
                 {generationContext.referencedGoldExamples?.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -861,267 +1278,61 @@ export function MainContent({
               </motion.div>
             )}
 
-            {features.map((feature, idx) => {
-              const isEditing = editingIdx === idx;
-              const draft = editDraft;
-
-              return (
-                <motion.div
-                  key={feature.id || idx}
-                  className={`group overflow-hidden rounded-2xl border ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)] bg-white' : feature.isAccepted ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/30' : 'border-[var(--rf-border)] bg-white'}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  style={{ boxShadow: feature.isAccepted ? '0 4px 24px -4px rgba(58,107,83,0.12)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(31,30,29,0.04)' }}
-                  whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 32px -4px rgba(58,107,83,0.16)' : '0 8px 24px -4px rgba(31,30,29,0.06)' }}
-                >
-                  <div className="flex flex-col sm:flex-row">
-                    {/* Left Accent Strip */}
-                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger)]' : feature.isAccepted ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-border-strong)]'}`} />
-
-                    <div className="flex-1 p-5 sm:p-6">
-                      {/* Header Row */}
-                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={draft?.title || draft?.summary || ''}
-                            onChange={e => setEditDraft(d => d ? { ...d, summary: e.target.value, title: e.target.value } : null)}
-                            className="flex-1 text-lg font-bold text-[var(--rf-text)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
-                          />
-                        ) : (
-                          <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
-                            <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
-                              {feature.title || feature.summary || 'Untitled Feature'}
-                            </h3>
-                            <div className="shrink-0 flex items-center gap-2">
-                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[10px] font-bold tracking-widest border border-[var(--rf-border)]">
-                                {feature.acceptanceRequirements?.length || 0} ARs
-                              </span>
-                              <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex flex-wrap items-center gap-2 shrink-0">
-                          {isEditing ? (
-                            <>
-                              <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
-                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-[var(--rf-success)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
-                            </>
-                          ) : (
-                            <>
-                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
-                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
-                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-white bg-[var(--rf-success)] border-[var(--rf-success)] shadow-[var(--rf-success)]/20' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
-                                <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
-                              </motion.button>
-                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
-                              {feature.jiraIssueKey ? (
-                                <div className="flex items-center gap-1">
-                                  <motion.button
-                                    onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
-                                    className="px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-blue-100 shadow-sm"
-                                    whileTap={{ scale: 0.97 }}
-                                  >
-                                    <Check className="w-3.5 h-3.5" /> {feature.jiraIssueKey}
-                                  </motion.button>
-                                  <motion.button
-                                    onClick={() => {
-                                      if (window.confirm(`Safety Warning: This feature has already been pushed to Jira as issue ${feature.jiraIssueKey}.\n\nAre you sure you want to push it again and create a duplicate issue?`)) {
-                                        onPushFeature(idx);
-                                      }
-                                    }}
-                                    title="Push a duplicate to Jira"
-                                    className="px-2 py-1.5 text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text-secondary)] rounded-lg transition"
-                                    whileTap={{ scale: 0.97 }}
-                                  >
-                                    <Upload className="w-4 h-4" />
-                                  </motion.button>
-                                </div>
-                              ) : (
-                                <motion.button
-                                  onClick={() => onPushFeature(idx)}
-                                  disabled={!feature.isAccepted}
-                                  title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
-                                  className="px-3 py-1.5 text-[11px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-slate-300 disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
-                                  whileTap={{ scale: 0.97 }}
-                                >
-                                  <Upload className="w-3.5 h-3.5" /> Push
-                                </motion.button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {feature.pendingRemoval && (
-                        <div className="mb-4 p-4 rounded-xl bg-[var(--rf-danger-subtle)] border border-[var(--rf-danger-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                           <div className="flex items-center gap-2 text-[var(--rf-danger)] font-bold text-sm">
-                             <Trash2 className="w-4 h-4" /> Proposed for Removal
-                           </div>
-                           <div className="flex items-center gap-2">
-                             <motion.button onClick={() => clearPendingRemoval(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
-                             <motion.button onClick={() => removeFeatureAt(idx)} className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm shadow-rose-600/20" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
-                           </div>
-                        </div>
-                      )}
-
-                      {/* Pending refinement diff view */}
-                      {feature.pendingRefinement && (() => {
-                        const proposed = feature.pendingRefinement!;
-                        const origTitle = feature.title || feature.summary || '';
-                        const propTitle = proposed.title || proposed.summary || '';
-                        const origDesc = feature.description || feature.markdown || '';
-                        const propDesc = proposed.description || proposed.markdown || '';
-                        const arDiffRows = alignAcceptanceRequirements(
-                          feature.acceptanceRequirements || [],
-                          proposed.acceptanceRequirements || [],
-                        );
-                        return (
-                          <div className="mb-5 p-4 rounded-2xl bg-amber-50/50 border border-amber-200">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                              <h4 className="text-amber-700 font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> AI Suggested Refinements</h4>
-
-                              <div className="flex flex-wrap items-center gap-3">
-                                <div className="flex items-center bg-white p-1 rounded-lg border border-amber-200 shadow-sm">
-                                  <button
-                                    onClick={() => setDiffMode('redline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
-                                  >
-                                    Redline
-                                  </button>
-                                  <button
-                                    onClick={() => setDiffMode('blackline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
-                                  >
-                                    Blackline
-                                  </button>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  <motion.button onClick={() => rejectRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
-                                  <motion.button onClick={() => acceptRefinement(idx)} className="px-3 py-1.5 text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] rounded-lg flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Accept</motion.button>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="bg-white p-4 rounded-xl border border-[var(--rf-border)] shadow-sm">
-                                <div className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
-                                <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2">{origTitle}</h4>
-                                <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
-                                <div className="space-y-2">
-                                  {feature.acceptanceRequirements.map((ar, i) => (
-                                    <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[11px] text-[var(--rf-text-secondary)]">
-                                      {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
-                                      {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
-                                      <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                              <div className="bg-[var(--rf-brand-muted)]/50 p-4 rounded-xl border border-[var(--rf-brand-subtle)] shadow-sm">
-                                <div className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
-                                <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
-                                <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
-                                <div className="space-y-2">
-                                  {arDiffRows.map((row, i) => {
-                                    const ar = row.proposed;
-                                    const oldAr = row.oldAr;
-                                    const isNew = row.isNew;
-                                    return (
-                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-blue-100'}`}>
-                                        {isNew && <div className="text-[10px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
-                                        {ar.given && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
-                                        {ar.when && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
-                                        <div><strong className="text-[var(--rf-brand-hover)]">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Feature body */}
-                      {(expandedIndices.has(idx) || isEditing) && (
-                        <div className={`mt-4 ${feature.pendingRefinement ? 'opacity-50 pointer-events-none' : ''}`}>
-                          {isEditing ? (
-                            <textarea
-                              value={draft?.description || ''}
-                              onChange={e => setEditDraft(d => d ? { ...d, description: e.target.value } : null)}
-                              className="w-full text-[var(--rf-text-secondary)] text-sm bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 min-h-[120px] mb-6 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none resize-y transition"
-                            />
-                          ) : (
-                            <div className="text-[var(--rf-text-secondary)] text-[13px] sm:text-sm mb-6 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-brand)]/20 pl-4 py-1">
-                              {feature.markdown || feature.description}
-                            </div>
-                          )}
-
-                          {/* Acceptance Criteria */}
-                          {((isEditing && draft?.acceptanceRequirements) || (!isEditing && feature.acceptanceRequirements?.length > 0)) && (
-                            <div className="mt-2 text-sm">
-                              <div className="flex items-center justify-between mb-4 pb-2">
-                                <h4 className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Acceptance Criteria</h4>
-                                {isEditing && (
-                                  <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
-                                )}
-                              </div>
-                              <div className="space-y-2.5">
-                                {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
-                                  <div key={i} className="bg-[var(--rf-surface-soft)]/50 rounded-xl p-4 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)]">
-                                    {isEditing && (
-                                      <button onClick={() => deleteDraftAr(i)} className="absolute top-3 right-3 p-1.5 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
-                                    )}
-                                    {isEditing ? (
-                                      <div className="space-y-3 pr-8">
-                                        {(['given', 'when', 'then'] as const).map(field => (
-                                          <div key={field} className="flex items-start gap-3">
-                                            <strong className="text-[var(--rf-text-tertiary)] w-12 pt-2 text-[10px] font-bold uppercase tracking-widest">{field}</strong>
-                                            {field === 'then'
-                                              ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] resize-none transition" />
-                                              : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition" />
-                                            }
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div className="space-y-1.5 text-[13px] sm:text-sm">
-                                        {ar.given?.trim() && (
-                                          <div className="flex gap-4">
-                                            <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>
-                                            <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.given}</div>
-                                          </div>
-                                        )}
-                                        {ar.when?.trim() && (
-                                          <div className="flex gap-4">
-                                            <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">When</div>
-                                            <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.when}</div>
-                                          </div>
-                                        )}
-                                        <div className="flex gap-4">
-                                          <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest pt-0.5">Then</div>
-                                          <div className="text-[var(--rf-text)] leading-relaxed whitespace-pre-wrap font-medium">{ar.then}</div>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+            {hasInitiativeSections && (
+              <motion.div
+                className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-brand-muted)]/45 p-5 shadow-sm"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center rounded-full border border-[var(--rf-brand-subtle)] bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)]">
+                    Initiative structure
+                  </span>
+                  <div className="text-sm font-semibold text-[var(--rf-text)]">
+                    {initiativeGroups.length} group{initiativeGroups.length !== 1 ? 's' : ''} organizing {features.length} generated features
                   </div>
-                </motion.div>
-              );
-            })}
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {featureSections.map(section => (
+                    <div key={section.id} className="rounded-2xl border border-[var(--rf-border)] bg-white/85 p-4">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
+                        {section.items.length} feature{section.items.length !== 1 ? 's' : ''}
+                      </div>
+                      <div className="mt-1 text-base font-bold text-[var(--rf-text)]">{section.title}</div>
+                      <div className="mt-2 text-sm text-[var(--rf-text-secondary)]">{section.summary}</div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {featureSections.map((section, sectionIndex) => (
+              <div key={section.id} className="space-y-4">
+                {hasInitiativeSections && (
+                  <div className="px-1 pt-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h3 className="text-lg font-bold tracking-tight text-[var(--rf-text)]">{section.title}</h3>
+                      <span className="inline-flex items-center rounded-full bg-[var(--rf-surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+                        {section.items.length} feature{section.items.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">{section.summary}</p>
+                  </div>
+                )}
+
+                {section.items.map(({ feature, index }, itemIndex) =>
+                  renderFeatureCard(feature, index, sectionIndex * 4 + itemIndex),
+                )}
+              </div>
+            ))}
           </motion.div>
         )}
       </div>
+
+      {generationContext && isContextModalOpen && (
+        <GenerationContextModal contextMeta={generationContext} onClose={() => setIsContextModalOpen(false)} />
+      )}
 
       {/* AI Refine Popup */}
       {refinePopupIdx !== null && (
@@ -1144,5 +1355,246 @@ export function MainContent({
         />
       )}
     </main>
+  );
+}
+
+function GenerationContextModal({
+  contextMeta,
+  onClose,
+}: {
+  contextMeta: NonNullable<MainContentProps['generationContext']>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      <motion.div
+        className="absolute inset-0 bg-[var(--rf-text)]/45 backdrop-blur-sm"
+        onClick={onClose}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      />
+
+      <motion.div
+        className="relative w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl border border-[var(--rf-border)] bg-white shadow-2xl"
+        initial={{ opacity: 0, scale: 0.96, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 16 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--rf-border-subtle)] px-6 py-5">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-[var(--rf-text)]">Feature canvas context</h2>
+            <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">
+              Full context used to generate the current feature set, including work instructions and related Jira stories.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl p-2 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)]"
+            aria-label="Close feature canvas context"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(88vh-92px)] overflow-y-auto p-6 custom-scrollbar">
+          <div className="grid gap-4 md:grid-cols-7">
+            <ContextStatCard label="Project" value={contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey} />
+            <ContextStatCard label="Examples" value={`${contextMeta.goldExamplesCount ?? 0}`} />
+            <ContextStatCard label="Work instructions" value={`${contextMeta.wiDocsCount ?? 0}`} />
+            <ContextStatCard label="Related stories" value={`${contextMeta.similarStoriesCount ?? 0}`} />
+            <ContextStatCard label="Initiative groups" value={`${contextMeta.initiativeGroups?.length ?? 0}`} />
+            <ContextStatCard label="Discovery coverage" value={contextMeta.discoveryCoverage ? `${contextMeta.discoveryCoverage.overallScore}%` : 'N/A'} />
+            <ContextStatCard label="Discovery rounds" value={`${contextMeta.discoveryTranscript?.length ?? 0}`} />
+          </div>
+
+            <div className="mt-6 rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40 p-4">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-[var(--rf-brand)]" />
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Setup</div>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm text-[var(--rf-text-secondary)] md:grid-cols-2">
+                <div><strong className="text-[var(--rf-text)]">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
+                <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
+                <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed?.length ? contextMeta.domainRolesUsed.join(', ') : 'None'}</div>
+                {contextMeta.plannerDecision && (
+                  <>
+                    <div><strong className="text-[var(--rf-text)]">Scope:</strong> {formatPlannerLabel(contextMeta.plannerDecision.scopeMode)}</div>
+                    <div><strong className="text-[var(--rf-text)]">Discovery:</strong> {formatPlannerLabel(contextMeta.plannerDecision.clarificationMode)}</div>
+                    <div><strong className="text-[var(--rf-text)]">Reasoning:</strong> {formatPlannerLabel(contextMeta.plannerDecision.reasoningMode)}</div>
+                    <div><strong className="text-[var(--rf-text)]">Target output:</strong> {contextMeta.plannerDecision.featurePlan.target} feature(s)</div>
+                    <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Planner rationale:</strong> {contextMeta.plannerDecision.rationale.join(' ') || 'No additional rationale recorded.'}</div>
+                  </>
+                )}
+                <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Tokens:</strong> {contextMeta.tokenUsage ? `${contextMeta.tokenUsage.total.toLocaleString()} total (${contextMeta.tokenUsage.input.toLocaleString()} in / ${contextMeta.tokenUsage.output.toLocaleString()} out)` : 'Not available'}</div>
+              </div>
+            </div>
+
+          {contextMeta.initiativeGroups?.length ? (
+            <section className="mt-6 rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Initiative groups</h3>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {contextMeta.initiativeGroups.map(group => (
+                  <div key={group.id} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
+                    <div className="text-sm font-bold text-[var(--rf-text)]">{group.title}</div>
+                    <div className="mt-2 text-sm text-[var(--rf-text-secondary)]">{group.summary}</div>
+                    <div className="mt-3 inline-flex rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
+                      {group.featureIds.length} feature{group.featureIds.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {contextMeta.discoveryCoverage ? (
+            <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-900" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-amber-900">Discovery coverage</h3>
+              </div>
+              <div className="mt-4 text-sm text-amber-900/90">{contextMeta.discoveryCoverage.summary}</div>
+              {contextMeta.discoveryCoverage.missingCritical.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {contextMeta.discoveryCoverage.missingCritical.map(item => (
+                    <span key={item} className="rounded-md bg-white px-2.5 py-1 text-[11px] font-medium text-amber-900 border border-amber-200">
+                      Missing: {item}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {contextMeta.discoveryTranscript?.length ? (
+            <section className="mt-6 rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Discovery transcript</h3>
+              </div>
+              <div className="mt-4 space-y-4">
+                {contextMeta.discoveryTranscript.map(round => (
+                  <div key={round.roundNumber} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-white px-2 py-1 text-[11px] font-bold tracking-wide text-[var(--rf-text)] border border-[var(--rf-border-subtle)]">
+                        Round {round.roundNumber}
+                      </span>
+                      <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
+                        {round.answers.length} answer{round.answers.length !== 1 ? 's' : ''}
+                      </span>
+                      {round.coverage ? (
+                        <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-amber-900 border border-amber-200">
+                          Coverage {round.coverage.overallScore}%
+                        </span>
+                      ) : null}
+                    </div>
+                    {round.coverage?.summary ? (
+                      <div className="mt-3 text-sm text-[var(--rf-text-secondary)]">{round.coverage.summary}</div>
+                    ) : null}
+                    <div className="mt-3 space-y-2">
+                      {round.answers.map((answer, index) => (
+                        <div key={`${round.roundNumber}-${index}`} className="rounded-xl bg-white p-3 border border-[var(--rf-border-subtle)]">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{answer.question}</div>
+                          <div className="mt-1 text-sm text-[var(--rf-text-secondary)] whitespace-pre-wrap">{answer.answer || 'No answer captured.'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <section className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instructions</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                {contextMeta.referencedWiDocs?.length ? (
+                  contextMeta.referencedWiDocs.map(doc => (
+                    <div key={doc.docId} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
+                      <div className="text-sm font-bold text-[var(--rf-text)] break-words">{doc.filename}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                        <span className="rounded-md bg-white px-2 py-1 border border-[var(--rf-border-subtle)]">Reference: {doc.docId}</span>
+                        <span className="rounded-md bg-white px-2 py-1 border border-[var(--rf-border-subtle)]">{doc.chunkCount} chunks matched</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <ContextEmptyState text="No work instructions were attached to this generation pass." />
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <ExternalLink className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Related Jira stories</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                {contextMeta.referencedSimilarStories?.length ? (
+                  contextMeta.referencedSimilarStories.map(story => (
+                    <div key={story.key} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {story.url ? (
+                          <a
+                            href={story.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold tracking-wide text-[var(--rf-brand-hover)] border border-blue-100 hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]"
+                          >
+                            {story.key}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="rounded-md bg-white px-2 py-1 text-[11px] font-bold tracking-wide text-[var(--rf-brand-hover)] border border-blue-100">
+                            {story.key}
+                          </span>
+                        )}
+                        {typeof story.relevanceScore === 'number' && (
+                          <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
+                            Match {Math.round(story.relevanceScore * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 text-sm">
+                        <div className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Title</div>
+                        <div className="mt-1 font-semibold text-[var(--rf-text)]">{story.summary}</div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <ContextEmptyState text="No related Jira stories were referenced for this generation pass." />
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ContextStatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-4">
+      <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{label}</div>
+      <div className="mt-2 text-2xl font-bold tracking-tight text-[var(--rf-text)]">{value}</div>
+    </div>
+  );
+}
+
+function ContextEmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/35 p-4 text-sm text-[var(--rf-text-tertiary)]">
+      {text}
+    </div>
   );
 }

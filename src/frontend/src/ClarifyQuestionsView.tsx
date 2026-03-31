@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowRight, Check, Menu, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowRight, Check, Menu, Sparkles, AlertCircle, FileText, ExternalLink, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface Question { category: string; question: string; suggestions: string[]; }
@@ -9,15 +9,83 @@ interface ClarifyProps {
   questions: Question[];
   onComplete: (answers: Answer[]) => void;
   onSkip: () => void;
+  roundNumber?: number;
+  reasoningMode?: 'fast' | 'deep';
+  skipLabel?: string;
+  coverageSummary?: {
+    sufficient: boolean;
+    canGenerate: boolean;
+    shouldContinueDiscovery: boolean;
+    overallScore: number;
+    summary: string;
+    missingCritical: string[];
+    dimensions: Array<{
+      key: string;
+      label: string;
+      required: boolean;
+      score: number;
+      status: 'missing' | 'partial' | 'covered';
+      evidence: string;
+    }>;
+  } | null;
   contextMeta?: {
     projectKey: string;
     domainRolesUsed: string[];
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
+    plannerDecision?: {
+      reasoningMode: 'fast' | 'deep';
+      outputMode: 'single' | 'auto' | 'full_breakdown';
+      scopeMode: 'atomic' | 'focused' | 'standard' | 'initiative';
+      clarificationMode: 'none' | 'light' | 'standard' | 'deep';
+      featurePlan: { min: number; max: number; target: number };
+      questionPlan: { min: number; max: number; target: number; clarity: 'clear' | 'medium' | 'vague' };
+      useHierarchy: boolean;
+      confidence: number;
+      rationale: string[];
+    };
     goldExamplesCount?: number;
     referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
     similarStoriesCount?: number;
-    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
+    discoveryTranscript?: Array<{
+      roundNumber: number;
+      questions: Array<{ category: string; question: string; suggestions: string[] }>;
+      answers: Array<{ question: string; answer: string }>;
+      coverage?: {
+        sufficient: boolean;
+        canGenerate: boolean;
+        shouldContinueDiscovery: boolean;
+        overallScore: number;
+        summary: string;
+        missingCritical: string[];
+        dimensions: Array<{
+          key: string;
+          label: string;
+          required: boolean;
+          score: number;
+          status: 'missing' | 'partial' | 'covered';
+          evidence: string;
+        }>;
+      };
+      submittedAt: string;
+    }>;
+    discoveryCoverage?: {
+      sufficient: boolean;
+      canGenerate: boolean;
+      shouldContinueDiscovery: boolean;
+      overallScore: number;
+      summary: string;
+      missingCritical: string[];
+      dimensions: Array<{
+        key: string;
+        label: string;
+        required: boolean;
+        score: number;
+        status: 'missing' | 'partial' | 'covered';
+        evidence: string;
+      }>;
+    };
     ambiguityAssessment?: {
       level: 'clear' | 'medium' | 'vague';
       score: number;
@@ -33,9 +101,28 @@ interface ClarifyProps {
   setSidebarOpen: (o: boolean) => void;
 }
 
-export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMeta, sidebarOpen, setSidebarOpen }: ClarifyProps) {
+function formatPlannerLabel(value: string): string {
+  return value
+    .split('_')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+export function ClarifyQuestionsView({
+  questions,
+  onComplete,
+  onSkip,
+  roundNumber = 1,
+  reasoningMode = 'fast',
+  skipLabel = 'Skip questions',
+  coverageSummary,
+  contextMeta,
+  sidebarOpen,
+  setSidebarOpen,
+}: ClarifyProps) {
   const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
-  const [showContextDetails, setShowContextDetails] = useState(false);
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
+  const activeCoverage = coverageSummary ?? contextMeta?.discoveryCoverage ?? null;
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
 
@@ -101,7 +188,9 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
             </div>
             <div>
               <h1 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Requirement Discovery</h1>
-              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">{answeredCount} of {questions.length} questions explored</p>
+              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">
+                Round {roundNumber} {reasoningMode === 'deep' ? 'of adaptive discovery' : 'of discovery'} • {answeredCount} of {questions.length} questions explored
+              </p>
             </div>
           </div>
         </div>
@@ -122,7 +211,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
             className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)]"
             whileTap={{ scale: 0.97 }}
           >
-            Skip all
+            {skipLabel}
           </motion.button>
           <motion.button
             onClick={handleSubmit}
@@ -154,43 +243,62 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                     <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Project: {contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}</span>
                     <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Docs: {contextMeta.wiDocsCount ?? 0}</span>
                     <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Refs: {contextMeta.similarStoriesCount ?? 0}</span>
+                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Rounds: {contextMeta.discoveryTranscript?.length ?? 0}</span>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowContextDetails(v => !v)}
+                  onClick={() => setIsContextModalOpen(true)}
                   className="text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
                 >
-                  {showContextDetails ? 'Hide details' : 'Show details'}
+                  View full details
                 </button>
               </div>
-
-              {showContextDetails && (
-                <motion.div
-                  className="mt-4 pt-4 border-t border-[var(--rf-border)]/60 space-y-2 text-xs"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                >
-                  {contextMeta.ambiguityAssessment?.reasons?.length ? (
-                    <div className="text-[var(--rf-text-secondary)] bg-[var(--rf-brand-muted)]/50 p-3 rounded-xl border border-blue-100">
-                      <strong className="text-blue-900 mb-1 block">Analysis:</strong>
-                      {contextMeta.ambiguityAssessment.reasons.join(' ')}
-                    </div>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-2 text-[var(--rf-text-secondary)] mt-2">
-                    <div><strong className="text-[var(--rf-text)]">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
-                    <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
-                    {contextMeta.domainRolesUsed?.length > 0 && (
-                      <div className="col-span-2"><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed.join(', ')}</div>
-                    )}
+              {contextMeta.plannerDecision && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                  <span className="rounded-md bg-[var(--rf-brand-muted)]/70 px-2.5 py-1 text-[var(--rf-brand-hover)] border border-blue-100">
+                    Scope: {formatPlannerLabel(contextMeta.plannerDecision.scopeMode)}
+                  </span>
+                  <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 border border-[var(--rf-border-subtle)]">
+                    Discovery: {formatPlannerLabel(contextMeta.plannerDecision.clarificationMode)}
+                  </span>
+                  <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 border border-[var(--rf-border-subtle)]">
+                    Target output: {contextMeta.plannerDecision.featurePlan.target}
+                  </span>
+                  <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 border border-[var(--rf-border-subtle)]">
+                    Reasoning: {formatPlannerLabel(contextMeta.plannerDecision.reasoningMode)}
+                  </span>
+                </div>
+              )}
+              <div className="mt-3 text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                {reasoningMode === 'deep'
+                  ? `Deep mode can continue into additional rounds if critical discovery gaps remain after round ${roundNumber}.`
+                  : 'Fast mode keeps discovery lightweight and will generate after this round.'}
+              </div>
+              {activeCoverage && (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="rounded-md bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-amber-900 border border-amber-200">
+                      Coverage {activeCoverage.overallScore}%
+                    </span>
+                    <span className="text-xs font-semibold text-amber-900">
+                      {activeCoverage.canGenerate ? 'Enough context to generate now' : 'Another discovery round is recommended'}
+                    </span>
                   </div>
-                  
-                  {contextMeta.tokenUsage && (
-                    <div className="text-[var(--rf-text-tertiary)] mt-3 pt-3 border-t border-[var(--rf-border-subtle)]">
-                      Tokens used: {contextMeta.tokenUsage.total.toLocaleString()} ({contextMeta.tokenUsage.input.toLocaleString()} in / {contextMeta.tokenUsage.output.toLocaleString()} out)
+                  <div className="mt-2 text-sm text-amber-900/90">{activeCoverage.summary}</div>
+                  {activeCoverage.missingCritical.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {activeCoverage.missingCritical.map(item => (
+                        <span
+                          key={item}
+                          className="rounded-md bg-white px-2.5 py-1 text-[11px] font-medium text-amber-900 border border-amber-200"
+                        >
+                          Missing: {item}
+                        </span>
+                      ))}
                     </div>
                   )}
-                </motion.div>
+                </div>
               )}
             </motion.div>
           )}
@@ -282,6 +390,240 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
           </motion.div>
         </div>
       </div>
+
+      {contextMeta && isContextModalOpen && (
+        <ContextDetailsModal contextMeta={contextMeta} onClose={() => setIsContextModalOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ContextDetailsModal({
+  contextMeta,
+  onClose,
+}: {
+  contextMeta: NonNullable<ClarifyProps['contextMeta']>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      <motion.div
+        className="absolute inset-0 bg-[var(--rf-text)]/45 backdrop-blur-sm"
+        onClick={onClose}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      />
+
+      <motion.div
+        className="relative w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl border border-[var(--rf-border)] bg-white shadow-2xl"
+        initial={{ opacity: 0, scale: 0.96, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 16 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--rf-border-subtle)] px-6 py-5">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-[var(--rf-text)]">Discovery context details</h2>
+            <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">
+              Full context used to prepare clarifying questions, including work instructions and related Jira stories.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl p-2 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)]"
+            aria-label="Close context details"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(88vh-92px)] overflow-y-auto p-6 custom-scrollbar">
+          <div className="grid gap-4 md:grid-cols-5">
+            <StatCard label="Project" value={contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey} />
+            <StatCard label="Work instructions" value={`${contextMeta.wiDocsCount ?? 0}`} />
+            <StatCard label="Related stories" value={`${contextMeta.similarStoriesCount ?? 0}`} />
+            <StatCard label="Questions" value={`${contextMeta.ambiguityAssessment?.generatedQuestions ?? 0}`} />
+            <StatCard label="Coverage" value={contextMeta.discoveryCoverage ? `${contextMeta.discoveryCoverage.overallScore}%` : 'N/A'} />
+          </div>
+
+          {contextMeta.ambiguityAssessment?.reasons?.length ? (
+            <div className="mt-6 rounded-2xl border border-blue-100 bg-[var(--rf-brand-muted)]/50 p-4 text-sm text-[var(--rf-text-secondary)]">
+              <div className="mb-1 font-bold text-blue-900">Analysis</div>
+              {contextMeta.ambiguityAssessment.reasons.join(' ')}
+            </div>
+          ) : null}
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40 p-4">
+              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Setup</div>
+              <div className="mt-3 space-y-2 text-sm text-[var(--rf-text-secondary)]">
+                <div><strong className="text-[var(--rf-text)]">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
+                <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
+                <div><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed?.length ? contextMeta.domainRolesUsed.join(', ') : 'None'}</div>
+                {contextMeta.plannerDecision && (
+                  <>
+                    <div><strong className="text-[var(--rf-text)]">Scope:</strong> {formatPlannerLabel(contextMeta.plannerDecision.scopeMode)}</div>
+                    <div><strong className="text-[var(--rf-text)]">Discovery:</strong> {formatPlannerLabel(contextMeta.plannerDecision.clarificationMode)}</div>
+                    <div><strong className="text-[var(--rf-text)]">Reasoning:</strong> {formatPlannerLabel(contextMeta.plannerDecision.reasoningMode)}</div>
+                    <div><strong className="text-[var(--rf-text)]">Target output:</strong> {contextMeta.plannerDecision.featurePlan.target} feature(s)</div>
+                    <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Planner rationale:</strong> {contextMeta.plannerDecision.rationale.join(' ') || 'No additional rationale recorded.'}</div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40 p-4">
+              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Token usage</div>
+              <div className="mt-3 text-sm text-[var(--rf-text-secondary)]">
+                {contextMeta.tokenUsage
+                  ? `${contextMeta.tokenUsage.total.toLocaleString()} total (${contextMeta.tokenUsage.input.toLocaleString()} in / ${contextMeta.tokenUsage.output.toLocaleString()} out)`
+                  : 'Not available'}
+              </div>
+            </div>
+          </div>
+
+          {contextMeta.discoveryCoverage ? (
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+              <div className="text-xs font-bold uppercase tracking-[0.18em] text-amber-900">Discovery coverage</div>
+              <div className="mt-3 text-sm text-amber-900/90">{contextMeta.discoveryCoverage.summary}</div>
+              {contextMeta.discoveryCoverage.missingCritical.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {contextMeta.discoveryCoverage.missingCritical.map(item => (
+                    <span key={item} className="rounded-md bg-white px-2.5 py-1 text-[11px] font-medium text-amber-900 border border-amber-200">
+                      Missing: {item}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {contextMeta.discoveryTranscript?.length ? (
+            <section className="mt-6 rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Discovery transcript</h3>
+              </div>
+              <div className="mt-4 space-y-4">
+                {contextMeta.discoveryTranscript.map(round => (
+                  <div key={round.roundNumber} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-white px-2 py-1 text-[11px] font-bold tracking-wide text-[var(--rf-text)] border border-[var(--rf-border-subtle)]">
+                        Round {round.roundNumber}
+                      </span>
+                      <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
+                        {round.answers.length} answer{round.answers.length !== 1 ? 's' : ''}
+                      </span>
+                      {round.coverage ? (
+                        <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-amber-900 border border-amber-200">
+                          Coverage {round.coverage.overallScore}%
+                        </span>
+                      ) : null}
+                    </div>
+                    {round.coverage?.summary ? (
+                      <div className="mt-3 text-sm text-[var(--rf-text-secondary)]">{round.coverage.summary}</div>
+                    ) : null}
+                    <div className="mt-3 space-y-2">
+                      {round.answers.map((answer, index) => (
+                        <div key={`${round.roundNumber}-${index}`} className="rounded-xl bg-white p-3 border border-[var(--rf-border-subtle)]">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{answer.question}</div>
+                          <div className="mt-1 text-sm text-[var(--rf-text-secondary)] whitespace-pre-wrap">{answer.answer || 'No answer captured.'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <section className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instructions</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                {contextMeta.referencedWiDocs?.length ? (
+                  contextMeta.referencedWiDocs.map(doc => (
+                    <div key={doc.docId} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
+                      <div className="text-sm font-bold text-[var(--rf-text)] break-words">{doc.filename}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                        <span className="rounded-md bg-white px-2 py-1 border border-[var(--rf-border-subtle)]">Reference: {doc.docId}</span>
+                        <span className="rounded-md bg-white px-2 py-1 border border-[var(--rf-border-subtle)]">{doc.chunkCount} chunks matched</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState text="No work instructions were attached to this clarifying pass." />
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <ExternalLink className="h-4 w-4 text-[var(--rf-brand)]" />
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Related Jira stories</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                {contextMeta.referencedSimilarStories?.length ? (
+                  contextMeta.referencedSimilarStories.map(story => (
+                    <div key={story.key} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {story.url ? (
+                          <a
+                            href={story.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold tracking-wide text-[var(--rf-brand-hover)] border border-blue-100 hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]"
+                          >
+                            {story.key}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="rounded-md bg-white px-2 py-1 text-[11px] font-bold tracking-wide text-[var(--rf-brand-hover)] border border-blue-100">
+                            {story.key}
+                          </span>
+                        )}
+                        {typeof story.relevanceScore === 'number' && (
+                          <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
+                            Match {Math.round(story.relevanceScore * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 text-sm">
+                        <div className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Title</div>
+                        <div className="mt-1 font-semibold text-[var(--rf-text)]">{story.summary}</div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState text="No related Jira stories were referenced for this clarifying pass." />
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-4">
+      <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{label}</div>
+      <div className="mt-2 text-2xl font-bold tracking-tight text-[var(--rf-text)]">{value}</div>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/35 p-4 text-sm text-[var(--rf-text-tertiary)]">
+      {text}
     </div>
   );
 }

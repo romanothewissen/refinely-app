@@ -28,6 +28,12 @@ interface SidebarProps {
   goldSources: Array<{ key: string; targetProjects?: string[]; project?: string; issuetype?: string; statuses?: string[]; status?: string }>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
+  reasoningMode: 'fast' | 'deep';
+  setReasoningMode: (mode: 'fast' | 'deep') => void;
+  outputMode: 'single' | 'auto' | 'full_breakdown';
+  setOutputMode: (mode: 'single' | 'auto' | 'full_breakdown') => void;
+  allowReasoningModeOverride: boolean;
+  allowOutputModeOverride: boolean;
 }
 
 const fadeUpVariant = {
@@ -63,7 +69,13 @@ export function Sidebar({
   availableProjects,
   goldSources,
   wiDocs,
-  onOpenProjectSettings
+  onOpenProjectSettings,
+  reasoningMode,
+  setReasoningMode,
+  outputMode,
+  setOutputMode,
+  allowReasoningModeOverride,
+  allowOutputModeOverride,
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
@@ -214,11 +226,95 @@ export function Sidebar({
 
         {/* Requirement scope label */}
         <motion.div
+          className="rf-sidebar-card px-4 py-3.5 space-y-3"
+          variants={fadeUpVariant}
+          initial="hidden"
+          animate="visible"
+          custom={4}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-2">Reasoning</div>
+              {allowReasoningModeOverride ? (
+                <div className="flex rounded-xl bg-[var(--rf-bg-sidebar)] border border-[var(--rf-sidebar-border)] p-1">
+                  {(['fast', 'deep'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setReasoningMode(mode)}
+                      className={`flex-1 rounded-lg px-3 py-2 text-[11px] font-bold transition ${
+                        reasoningMode === mode
+                          ? 'bg-white text-[var(--rf-brand)] shadow-sm'
+                          : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                      }`}
+                    >
+                      {mode === 'fast' ? 'Fast' : 'Deep'}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-[var(--rf-sidebar-border)] bg-[var(--rf-bg-sidebar)] px-3 py-3 text-sm font-bold text-[var(--rf-text)]">
+                  {reasoningMode === 'fast' ? 'Fast' : 'Deep'}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-2">Output</div>
+              {allowOutputModeOverride ? (
+                <div className="flex rounded-xl bg-[var(--rf-bg-sidebar)] border border-[var(--rf-sidebar-border)] p-1">
+                  {([
+                    { value: 'single', label: 'Single' },
+                    { value: 'auto', label: 'Auto' },
+                    { value: 'full_breakdown', label: 'Full' },
+                  ] as const).map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setOutputMode(option.value)}
+                      className={`flex-1 rounded-lg px-2 py-2 text-[11px] font-bold transition ${
+                        outputMode === option.value
+                          ? 'bg-white text-[var(--rf-brand)] shadow-sm'
+                          : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-[var(--rf-sidebar-border)] bg-[var(--rf-bg-sidebar)] px-3 py-3 text-sm font-bold text-[var(--rf-text)]">
+                  {outputMode === 'single' ? 'Single' : outputMode === 'full_breakdown' ? 'Full breakdown' : 'Auto'}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="grid gap-2 text-[11px] text-[var(--rf-sidebar-text-muted)] sm:grid-cols-2">
+            <div className="rounded-xl border border-[var(--rf-sidebar-border)] bg-[var(--rf-bg-sidebar)] px-3 py-2">
+              {reasoningMode === 'fast'
+                ? 'Fast keeps discovery short and gets to a first backlog draft quickly.'
+                : 'Deep can ask follow-up discovery rounds before generating the backlog.'}
+            </div>
+            <div className="rounded-xl border border-[var(--rf-sidebar-border)] bg-[var(--rf-bg-sidebar)] px-3 py-2">
+              {outputMode === 'single'
+                ? 'Single pushes the planner toward one strong feature.'
+                : outputMode === 'full_breakdown'
+                  ? 'Full breakdown pushes the planner toward broader decomposition.'
+                  : 'Auto lets the planner size the output to the ask.'}
+            </div>
+          </div>
+          {(!allowReasoningModeOverride || !allowOutputModeOverride) && (
+            <div className="rounded-xl border border-[var(--rf-sidebar-border)] bg-[var(--rf-bg-sidebar)] px-3 py-2 text-[11px] text-[var(--rf-sidebar-text-muted)]">
+              This project is using an administrator-defined AI policy, so some planning controls are locked to workspace or project defaults.
+            </div>
+          )}
+        </motion.div>
+
+        <motion.div
           className="flex items-center justify-between gap-3 px-1 mt-2"
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
-          custom={3}
+          custom={5}
         >
           <label className="text-[10px] font-bold text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">Feature Requirement</label>
           {originIssueKey && (
@@ -234,7 +330,7 @@ export function Sidebar({
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
-          custom={4}
+          custom={6}
         >
           <textarea
             value={requirement}
@@ -262,7 +358,7 @@ export function Sidebar({
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
-          custom={5}
+          custom={7}
         >
           <motion.button
             onClick={onStartBrainstorm}

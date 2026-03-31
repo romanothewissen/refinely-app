@@ -4,7 +4,7 @@
  * Pass 1: Decompose requirement into features (summary, description, process_code, story_points)
  * Pass 2: Write GIVEN/WHEN/THEN acceptance requirements for each feature
  *
- * Both passes use Forge LLMs (Claude) — no external API calls.
+ * All LLM calls route through the configured provider abstraction.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -14,16 +14,23 @@ import {
   ClarifyAnswer,
   TenantConfig,
   GenerationResult,
+  DiscoveryCoverageDimension,
+  DiscoveryCoverageResult,
+  InitiativeGroup,
+  PlannerDecision,
+  ScopeMode,
   ValidationViolation,
   TokenUsageSummary,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
+import { buildPlannerDecision } from './planner';
 import {
   buildDecompositionSystemPrompt,
   buildArSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
+  buildInitiativeGroupingSystemPrompt,
   buildRefineSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
@@ -42,6 +49,23 @@ interface RawFeature {
   acceptanceRequirements?: unknown[];
   suggested_story_points?: number;
   process_code?: string;
+}
+
+interface RawInitiativeGroup {
+  id?: string;
+  title?: string;
+  summary?: string;
+  feature_ids?: unknown[];
+  featureIds?: unknown[];
+}
+
+interface RawCoverageDimension {
+  key?: string;
+  label?: string;
+  required?: boolean;
+  score?: number;
+  status?: string;
+  evidence?: string;
 }
 
 interface ClarifyQuestionPlan {
@@ -90,109 +114,19 @@ function assessRequirement(input: {
   similarStoriesText?: string;
   clarifyAnswers?: ClarifyAnswer[];
 }): RequirementAssessment {
-  const requirement = input.requirement?.trim() ?? '';
-  const attachment = input.attachmentText?.trim() ?? '';
-  const wi = input.wiContextText?.trim() ?? '';
-  const gold = input.goldExamplesText?.trim() ?? '';
-  const similar = input.similarStoriesText?.trim() ?? '';
-  const answers = input.clarifyAnswers ?? [];
-
-  const reqWords = requirement ? requirement.split(/\s+/).length : 0;
-  const reqSentences = requirement
-    ? requirement.split(/[.!?]\s+/).map(s => s.trim()).filter(Boolean).length
-    : 0;
-  const hasRichContext = attachment.length > 250 || wi.length > 250 || gold.length > 250 || similar.length > 250 || answers.length >= 4;
-  const hasConstraints = /(must|should|cannot|can't|only|except|unless|sla|kpi|compliance|permission|role|workflow|edge case|error|fallback|validation|audit|security)/i
-    .test(requirement);
-  const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|optimal|better|faster|enhance|fix this|update this|handle this|do it)/i
-    .test(requirement);
-  const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception)/i
-    .test(requirement);
-  const roleMentions = (requirement.match(/\b(admin|manager|planner|dispatcher|technician|fse|field service engineer|agent|user|customer|analyst|qa|developer|operator)\b/ig) ?? []).length;
-  const exceptionMentions = (requirement.match(/\b(error|fail|exception|edge|invalid|conflict|fallback|retry|permission|duplicate)\b/ig) ?? []).length;
-
-  const ambiguityPenalty =
-    (reqWords <= 25 ? 1 : 0) +
-    (reqSentences <= 1 ? 1 : 0) +
-    (hasAmbiguousTokens ? 1 : 0) +
-    (hasBroadScopeSignals ? 1 : 0) +
-    (roleMentions === 0 ? 1 : 0) +
-    (exceptionMentions === 0 ? 1 : 0);
-
-  const clarityScore =
-    (reqWords >= 45 ? 1 : 0) +
-    (reqSentences >= 3 ? 1 : 0) +
-    (hasRichContext ? 1 : 0) +
-    (hasConstraints ? 1 : 0) -
-    (ambiguityPenalty >= 3 ? 1 : 0);
-
-  const complexityScore =
-    (hasConstraints ? 1 : 0) +
-    (exceptionMentions >= 2 ? 1 : 0) +
-    (answers.length >= 5 ? 1 : 0) +
-    (roleMentions >= 2 ? 1 : 0) +
-    (hasBroadScopeSignals ? 1 : 0);
-
-  const shapeScore =
-    (hasBroadScopeSignals ? 1 : 0) +
-    (reqWords >= 60 ? 1 : 0) +
-    (reqSentences >= 4 ? 1 : 0) +
-    (answers.length >= 5 ? 1 : 0);
-
-  const questionPlan: ClarifyQuestionPlan =
-    clarityScore >= 4
-      ? { min: 4, max: 6, target: 5, clarity: 'clear' }
-      : clarityScore <= 1
-        ? { min: 10, max: 14, target: 12, clarity: 'vague' }
-        : { min: 6, max: 9, target: 7, clarity: 'medium' };
-
-  const featurePlan: FeaturePlan =
-    shapeScore >= 3
-      ? {
-          min: complexityScore >= 4 ? 5 : 4,
-          max: complexityScore >= 4 ? 8 : 6,
-          target: complexityScore >= 4 ? 6 : 5,
-          shape: 'broad',
-          complexity: complexityScore >= 4 ? 'high' : 'medium',
-        }
-      : shapeScore <= 1
-        ? {
-            min: 1,
-            max: complexityScore >= 3 ? 4 : 3,
-            target: complexityScore >= 3 ? 3 : 2,
-            shape: 'narrow',
-            complexity: complexityScore >= 3 ? 'medium' : 'low',
-          }
-        : {
-            min: 2,
-            max: complexityScore >= 4 ? 6 : 5,
-            target: complexityScore >= 4 ? 5 : 4,
-            shape: 'balanced',
-            complexity: complexityScore >= 4 ? 'high' : 'medium',
-          };
-
-  const arPlan: ArPlan =
-    featurePlan.complexity === 'high'
-      ? { min: 4, max: 6, target: 5, depth: 'thorough' }
-      : featurePlan.complexity === 'low'
-        ? { min: 2, max: 3, target: 2, depth: 'lean' }
-      : { min: 3, max: 5, target: 4, depth: 'standard' };
-
-  const ambiguityReasons: string[] = [];
-  if (reqWords <= 25) ambiguityReasons.push('Requirement is short and likely underspecified.');
-  if (reqSentences <= 1) ambiguityReasons.push('Requirement is expressed as a single sentence without decomposition clues.');
-  if (!hasRichContext) ambiguityReasons.push('No attachment, work-instruction context, or prior Q&A was available.');
-  if (hasBroadScopeSignals) ambiguityReasons.push('Request implies multiple dimensions (priority, due dates, skills, or dependencies).');
-  if (roleMentions === 0) ambiguityReasons.push('Primary role is not explicit.');
-  if (exceptionMentions === 0) ambiguityReasons.push('Edge cases and failure handling are not defined.');
-  if (!hasConstraints) ambiguityReasons.push('Business constraints are still implicit.');
+  const decision = buildPlannerDecision({
+    ...input,
+    reasoningMode: 'fast',
+    outputMode: 'auto',
+    policy: undefined,
+  });
 
   return {
-    questionPlan,
-    featurePlan,
-    arPlan,
-    ambiguityScore: Math.max(0, ambiguityPenalty - (hasConstraints ? 1 : 0)),
-    ambiguityReasons,
+    questionPlan: decision.questionPlan,
+    featurePlan: decision.featurePlan,
+    arPlan: decision.arPlan,
+    ambiguityScore: decision.ambiguityScore,
+    ambiguityReasons: decision.ambiguityReasons,
   };
 }
 
@@ -210,6 +144,25 @@ function inferClarifyAssessment(input: {
     ambiguityScore: assessed.ambiguityScore,
     ambiguityReasons: assessed.ambiguityReasons,
   };
+}
+
+function getProviderOpts(config: TenantConfig) {
+  return {
+    provider: config.generatorConfig.provider,
+    geminiApiKey: config.generatorConfig.geminiApiKey,
+    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
+    azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
+    azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
+    azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
+    bedrockAccessKeyId: config.generatorConfig.bedrockAccessKeyId,
+    bedrockSecretAccessKey: config.generatorConfig.bedrockSecretAccessKey,
+    bedrockSessionToken: config.generatorConfig.bedrockSessionToken,
+    bedrockRegion: config.generatorConfig.bedrockRegion,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+  } as const;
 }
 
 function normaliseQuestionKey(question: string): string {
@@ -295,6 +248,283 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
   return seed.slice(0, Math.max(0, needed));
 }
 
+function clampFeatureCandidates(rawFeatures: RawFeature[], featurePlan: FeaturePlan): RawFeature[] {
+  if (featurePlan.max <= 0) return [];
+  return rawFeatures.slice(0, featurePlan.max);
+}
+
+const DISCOVERY_DIMENSIONS: Array<{ key: DiscoveryCoverageDimension['key']; label: string }> = [
+  { key: 'goal', label: 'Business goal' },
+  { key: 'actors', label: 'Actors and roles' },
+  { key: 'workflow', label: 'Workflow and triggers' },
+  { key: 'business_rules', label: 'Business rules' },
+  { key: 'exceptions', label: 'Exceptions and edge cases' },
+  { key: 'permissions', label: 'Permissions and approvals' },
+  { key: 'integrations', label: 'Integrations and dependencies' },
+  { key: 'non_functional', label: 'Non-functional and compliance needs' },
+  { key: 'success_metrics', label: 'Success metrics' },
+];
+
+function getRequiredCoverageDimensionKeys(scopeMode: ScopeMode): string[] {
+  switch (scopeMode) {
+    case 'atomic':
+      return ['goal', 'actors', 'workflow', 'business_rules'];
+    case 'focused':
+      return ['goal', 'actors', 'workflow', 'business_rules', 'exceptions'];
+    case 'standard':
+      return ['goal', 'actors', 'workflow', 'business_rules', 'exceptions', 'permissions', 'integrations', 'success_metrics'];
+    case 'initiative':
+      return ['goal', 'actors', 'workflow', 'business_rules', 'exceptions', 'permissions', 'integrations', 'non_functional', 'success_metrics'];
+    default:
+      return ['goal', 'actors', 'workflow', 'business_rules'];
+  }
+}
+
+function parseCoverageDimensionCandidates(rawData: unknown): RawCoverageDimension[] {
+  if (Array.isArray(rawData)) return rawData as RawCoverageDimension[];
+  if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).dimensions)) {
+    return (rawData as any).dimensions as RawCoverageDimension[];
+  }
+  return [];
+}
+
+function normaliseCoverageStatus(value: string | undefined, score: number): DiscoveryCoverageDimension['status'] {
+  const normalised = String(value ?? '').trim().toLowerCase();
+  if (normalised === 'missing' || normalised === 'partial' || normalised === 'covered') {
+    return normalised;
+  }
+  if (score >= 75) return 'covered';
+  if (score >= 40) return 'partial';
+  return 'missing';
+}
+
+function normaliseCoverageDimensions(rawData: unknown, scopeMode: ScopeMode): DiscoveryCoverageDimension[] {
+  const requiredKeys = new Set(getRequiredCoverageDimensionKeys(scopeMode));
+  const rawDimensions = parseCoverageDimensionCandidates(rawData);
+  const byKey = new Map<string, RawCoverageDimension>();
+
+  rawDimensions.forEach(dimension => {
+    const key = String(dimension.key ?? '').trim().toLowerCase();
+    if (!key || byKey.has(key)) return;
+    byKey.set(key, dimension);
+  });
+
+  return DISCOVERY_DIMENSIONS.map(definition => {
+    const candidate = byKey.get(definition.key) ?? {};
+    const rawScore = Number(candidate.score);
+    const score = Number.isFinite(rawScore)
+      ? Math.max(0, Math.min(100, Math.round(rawScore)))
+      : 0;
+    const required = typeof candidate.required === 'boolean' ? candidate.required : requiredKeys.has(definition.key);
+
+    return {
+      key: definition.key,
+      label: String(candidate.label ?? '').trim() || definition.label,
+      required,
+      score,
+      status: normaliseCoverageStatus(candidate.status, score),
+      evidence: String(candidate.evidence ?? '').trim() || 'No evidence captured.',
+    };
+  });
+}
+
+function getCoverageThreshold(scopeMode: ScopeMode): number {
+  switch (scopeMode) {
+    case 'atomic':
+      return 60;
+    case 'focused':
+      return 65;
+    case 'standard':
+      return 70;
+    case 'initiative':
+      return 75;
+    default:
+      return 65;
+  }
+}
+
+function buildCoverageSummary(dimensions: DiscoveryCoverageDimension[], missingCritical: string[]): string {
+  if (!dimensions.length) return 'Coverage analysis was unavailable.';
+  if (!missingCritical.length) return 'Discovery coverage is strong enough to generate the backlog.';
+
+  const weakestRequired = dimensions
+    .filter(dimension => dimension.required)
+    .sort((left, right) => left.score - right.score)
+    .slice(0, 2)
+    .map(dimension => dimension.label.toLowerCase());
+
+  if (!weakestRequired.length) {
+    return 'Some important discovery areas still need stronger coverage.';
+  }
+
+  return `Coverage is still weakest around ${weakestRequired.join(' and ')}.`;
+}
+
+function normaliseCoverageResult(rawData: unknown, questions: ClarifyQuestion[], scopeMode: ScopeMode): DiscoveryCoverageResult {
+  const dimensions = normaliseCoverageDimensions(rawData, scopeMode);
+  const requiredDimensions = dimensions.filter(dimension => dimension.required);
+  const requiredAverage = requiredDimensions.length
+    ? Math.round(requiredDimensions.reduce((total, dimension) => total + dimension.score, 0) / requiredDimensions.length)
+    : 0;
+  const threshold = getCoverageThreshold(scopeMode);
+
+  const rawMissing = rawData && typeof rawData === 'object' && Array.isArray((rawData as any).missing_critical)
+    ? ((rawData as any).missing_critical as unknown[]).map(value => String(value ?? '').trim()).filter(Boolean)
+    : [];
+
+  const derivedMissing = requiredDimensions
+    .filter(dimension => dimension.score < threshold || dimension.status !== 'covered')
+    .map(dimension => dimension.label);
+
+  const missingCritical = Array.from(new Set([...(rawMissing.length ? rawMissing : []), ...derivedMissing]));
+  const hasHardGap = requiredDimensions.some(dimension => dimension.score < 45 || dimension.status === 'missing');
+  const canGenerate = requiredAverage >= threshold && !hasHardGap;
+  const summary = rawData && typeof rawData === 'object' && typeof (rawData as any).summary === 'string'
+    ? String((rawData as any).summary).trim()
+    : buildCoverageSummary(dimensions, missingCritical);
+
+  return {
+    sufficient: canGenerate,
+    canGenerate,
+    shouldContinueDiscovery: !canGenerate && questions.length > 0,
+    overallScore: requiredAverage,
+    summary,
+    missingCritical,
+    dimensions,
+    questions,
+  };
+}
+
+function parseInitiativeGroupCandidates(rawData: unknown): RawInitiativeGroup[] {
+  if (Array.isArray(rawData)) return rawData as RawInitiativeGroup[];
+  if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).groups)) {
+    return (rawData as any).groups as RawInitiativeGroup[];
+  }
+  return [];
+}
+
+function buildFallbackInitiativeGroups(features: Feature[]): InitiativeGroup[] {
+  if (!features.length) return [];
+  return [
+    {
+      id: uuidv4(),
+      title: 'Initiative backlog',
+      summary: 'Grouped view was unavailable, so the generated backlog is shown as one initiative section.',
+      featureIds: features.map(feature => feature.id),
+    },
+  ];
+}
+
+function normaliseInitiativeGroups(rawData: unknown, features: Feature[]): InitiativeGroup[] {
+  const candidates = parseInitiativeGroupCandidates(rawData);
+  const featureIds = new Set(features.map(feature => feature.id));
+  const assigned = new Set<string>();
+  const groups: InitiativeGroup[] = [];
+
+  candidates.forEach((candidate, index) => {
+    if (!candidate || typeof candidate !== 'object') return;
+    const title = String(candidate.title ?? '').trim();
+    if (!title) return;
+
+    const rawFeatureIds = Array.isArray(candidate.feature_ids)
+      ? candidate.feature_ids
+      : Array.isArray(candidate.featureIds)
+        ? candidate.featureIds
+        : [];
+
+    const featureIdsForGroup = rawFeatureIds
+      .map(value => String(value ?? '').trim())
+      .filter(Boolean)
+      .filter(id => featureIds.has(id))
+      .filter(id => {
+        if (assigned.has(id)) return false;
+        assigned.add(id);
+        return true;
+      });
+
+    if (!featureIdsForGroup.length) return;
+
+    groups.push({
+      id: String(candidate.id ?? '').trim() || uuidv4(),
+      title,
+      summary: String(candidate.summary ?? '').trim() || `Group ${index + 1}`,
+      featureIds: featureIdsForGroup,
+    });
+  });
+
+  const unassigned = features
+    .map(feature => feature.id)
+    .filter(id => !assigned.has(id));
+
+  if (unassigned.length) {
+    if (groups.length) {
+      groups[groups.length - 1] = {
+        ...groups[groups.length - 1],
+        featureIds: [...groups[groups.length - 1].featureIds, ...unassigned],
+      };
+    } else {
+      return buildFallbackInitiativeGroups(features);
+    }
+  }
+
+  return groups;
+}
+
+async function buildInitiativeGroups(opts: {
+  requirement: string;
+  features: Feature[];
+  config: TenantConfig;
+}): Promise<{ initiativeGroups: InitiativeGroup[]; tokenUsage?: TokenUsageSummary }> {
+  const { requirement, features, config } = opts;
+
+  if (features.length <= 1) {
+    return { initiativeGroups: buildFallbackInitiativeGroups(features) };
+  }
+
+  const systemPrompt = buildInitiativeGroupingSystemPrompt({
+    domainContext: config.domainContext,
+    featureCount: features.length,
+  });
+
+  const userMessage = [
+    `REQUIREMENT: ${requirement}`,
+    `FEATURES:\n${JSON.stringify(features.map(feature => ({
+      id: feature.id,
+      summary: feature.summary,
+      description: feature.description,
+      storyPoints: feature.storyPoints,
+      processCode: feature.processCode,
+    })), null, 2)}`,
+  ].join('\n\n---\n\n');
+
+  try {
+    const result = await callLlmJsonWithUsage<{ groups?: RawInitiativeGroup[] } | RawInitiativeGroup[]>({
+      model: getTierModel(config.generatorConfig.themeModel, config.tier),
+      systemPrompt,
+      userMessage,
+      maxTokens: 4096,
+      ...getProviderOpts(config),
+    });
+
+    const initiativeGroups = normaliseInitiativeGroups(result.data, features);
+
+    return {
+      initiativeGroups: initiativeGroups.length ? initiativeGroups : buildFallbackInitiativeGroups(features),
+      tokenUsage: {
+        input: result.usage.input,
+        output: result.usage.output,
+        total: result.usage.input + result.usage.output,
+        byStage: {
+          initiativeGrouping: toStageUsage(result.usage),
+        },
+      },
+    };
+  } catch (error) {
+    console.warn('[story-generator] Initiative grouping failed; falling back to a single section:', error);
+    return { initiativeGroups: buildFallbackInitiativeGroups(features) };
+  }
+}
+
 // ─── Main Generation ──────────────────────────────────────────────────────────
 
 export async function generateFeatures(opts: {
@@ -305,25 +535,31 @@ export async function generateFeatures(opts: {
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
+  plannerDecision?: PlannerDecision;
   onPass1Complete?: (featureCount: number) => Promise<void>;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete } = opts;
+  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, plannerDecision, onPass1Complete } = opts;
   const { generatorConfig } = config;
-  const assessment = assessRequirement({
+  const decision = plannerDecision ?? buildPlannerDecision({
     requirement,
     clarifyAnswers,
     attachmentText,
     wiContextText,
     goldExamplesText,
     similarStoriesText,
+    reasoningMode: config.aiExecutionPolicy.defaultReasoningMode,
+    outputMode: config.aiExecutionPolicy.defaultOutputMode,
+    policy: config.aiExecutionPolicy,
   });
+  const assessment: RequirementAssessment = {
+    questionPlan: decision.questionPlan,
+    featurePlan: decision.featurePlan,
+    arPlan: decision.arPlan,
+    ambiguityScore: decision.ambiguityScore,
+    ambiguityReasons: decision.ambiguityReasons,
+  };
   const providerOpts = {
-    provider: generatorConfig.provider,
-    geminiApiKey: generatorConfig.geminiApiKey,
-    geminiBaseUrl: generatorConfig.geminiBaseUrl,
-    openaiApiKey: generatorConfig.openaiApiKey,
-    openaiBaseUrl: generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(config),
   } as const;
 
   // Build user message — include all context
@@ -371,7 +607,7 @@ export async function generateFeatures(opts: {
     ...providerOpts,
   });
 
-  const pass1Features = pass1Result.data.features ?? [];
+  const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], assessment.featurePlan);
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
@@ -402,14 +638,32 @@ export async function generateFeatures(opts: {
 
   const features = rawFeatures.map(normaliseFeature);
   const violations = validateFeatures(features, config);
+  let initiativeGroups: InitiativeGroup[] | undefined;
+  let initiativeGroupingUsage: TokenUsageSummary | undefined;
+
+  if (decision.useHierarchy && features.length > 0) {
+    const groupingResult = await buildInitiativeGroups({
+      requirement,
+      features,
+      config,
+    });
+    initiativeGroups = groupingResult.initiativeGroups;
+    initiativeGroupingUsage = groupingResult.tokenUsage;
+  }
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Result.usage.input + pass2Result.usage.input,
-    output: pass1Result.usage.output + pass2Result.usage.output,
-    total: pass1Result.usage.input + pass1Result.usage.output + pass2Result.usage.input + pass2Result.usage.output,
+    input: pass1Result.usage.input + pass2Result.usage.input + (initiativeGroupingUsage?.input ?? 0),
+    output: pass1Result.usage.output + pass2Result.usage.output + (initiativeGroupingUsage?.output ?? 0),
+    total:
+      pass1Result.usage.input +
+      pass1Result.usage.output +
+      pass2Result.usage.input +
+      pass2Result.usage.output +
+      (initiativeGroupingUsage?.total ?? 0),
     byStage: {
       decomposition: toStageUsage(pass1Result.usage),
       acceptanceRequirements: toStageUsage(pass2Result.usage),
+      ...(initiativeGroupingUsage?.byStage ?? {}),
     },
   };
 
@@ -418,6 +672,8 @@ export async function generateFeatures(opts: {
     violations,
     similarStories: [],   // filled in by the caller after this returns
     sessionId: uuidv4(),
+    plannerDecision: decision,
+    initiativeGroups,
     tokenUsage,
   };
 }
@@ -431,16 +687,50 @@ export async function generateClarifyingQuestions(opts: {
   goldExamplesText: string;
   similarStoriesText: string;
   config: TenantConfig;
+  plannerDecision?: PlannerDecision;
 }): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
-  const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config } = opts;
+  const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config, plannerDecision } = opts;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
   if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, 5000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
-  const assessment = inferClarifyAssessment({ requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText });
+  const decision = plannerDecision ?? buildPlannerDecision({
+    requirement,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+    reasoningMode: config.aiExecutionPolicy.defaultReasoningMode,
+    outputMode: config.aiExecutionPolicy.defaultOutputMode,
+    policy: config.aiExecutionPolicy,
+  });
+  const assessment = {
+    questionPlan: decision.questionPlan,
+    ambiguityScore: decision.ambiguityScore,
+    ambiguityReasons: decision.ambiguityReasons,
+  };
   const questionPlan = assessment.questionPlan;
+
+  if (questionPlan.max <= 0) {
+    return {
+      questions: [],
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        total: 0,
+        byStage: { clarify: { input: 0, output: 0, total: 0 } },
+      },
+      ambiguityAssessment: {
+        level: questionPlan.clarity,
+        score: assessment.ambiguityScore,
+        reasons: assessment.ambiguityReasons.slice(0, 4),
+        questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
+        generatedQuestions: 0,
+      },
+    };
+  }
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
@@ -452,12 +742,7 @@ export async function generateClarifyingQuestions(opts: {
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(config),
   });
 
   let totalInputTokens = raw.usage.input;
@@ -477,12 +762,7 @@ export async function generateClarifyingQuestions(opts: {
       model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
       systemPrompt: system,
       userMessage: topUpUserMessage,
-      provider: config.generatorConfig.provider,
-      geminiApiKey: config.generatorConfig.geminiApiKey,
-      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-      openaiApiKey: config.generatorConfig.openaiApiKey,
-      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-      piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+      ...getProviderOpts(config),
     });
     totalInputTokens += topUpRaw.usage.input;
     totalOutputTokens += topUpRaw.usage.output;
@@ -527,26 +807,55 @@ export async function evaluateSufficiency(opts: {
   requirement: string;
   answers: ClarifyAnswer[];
   config: TenantConfig;
-}): Promise<{ sufficient: boolean; questions?: ClarifyQuestion[] }> {
+  reasoningMode?: 'fast' | 'deep';
+}): Promise<DiscoveryCoverageResult> {
+  const decision = buildPlannerDecision({
+    requirement: opts.requirement,
+    clarifyAnswers: opts.answers,
+    attachmentText: '',
+    wiContextText: '',
+    goldExamplesText: '',
+    similarStoriesText: '',
+    reasoningMode: opts.reasoningMode ?? opts.config.aiExecutionPolicy.defaultReasoningMode,
+    outputMode: opts.config.aiExecutionPolicy.defaultOutputMode,
+    policy: opts.config.aiExecutionPolicy,
+  });
   const qaText = opts.answers
     .map(a => `Q: ${a.question}\nA: ${a.answer}`)
     .join('\n\n');
 
   const userMessage = `REQUIREMENT: ${opts.requirement}\n\nQ&A:\n${qaText}`;
 
-  const result = await callLlmJson<{ sufficient: boolean; questions?: ClarifyQuestion[] }>({
+  const result = await callLlmJsonWithUsage<{
+    summary?: string;
+    missing_critical?: string[];
+    dimensions?: RawCoverageDimension[];
+    questions?: ClarifyQuestion[];
+  }>({
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
-    systemPrompt: buildEvaluateSystemPrompt(),
+    systemPrompt: buildEvaluateSystemPrompt({
+      domainContext: opts.config.domainContext,
+      scopeMode: decision.scopeMode,
+    }),
     userMessage,
-    provider: opts.config.generatorConfig.provider,
-    geminiApiKey: opts.config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
+    maxTokens: 4096,
+    ...getProviderOpts(opts.config),
   });
 
-  return result;
+  const questions = dedupeQuestions(parseQuestionCandidates(result.data)).slice(0, 5);
+  const coverage = normaliseCoverageResult(result.data, questions, decision.scopeMode);
+
+  return {
+    ...coverage,
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: {
+        evaluateCoverage: toStageUsage(result.usage),
+      },
+    },
+  };
 }
 
 // ─── Refinement ───────────────────────────────────────────────────────────────
@@ -577,12 +886,7 @@ export async function refineFeatures(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: config.generatorConfig.maxTokens,
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(config),
   });
 
   return {
@@ -618,12 +922,7 @@ export async function refineSingleFeature(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: 4096,
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(config),
   });
 
   const refined = result.data.features?.[0];
@@ -669,12 +968,7 @@ export async function checkRefineFeedbackSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildRefineSufficiencyPrompt(),
     userMessage,
-    provider: opts.config.generatorConfig.provider,
-    geminiApiKey: opts.config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(opts.config),
   });
 
   return result;
@@ -688,12 +982,7 @@ export async function generateSessionTitle(requirement: string, config: TenantCo
     systemPrompt: 'Generate a concise 5-8 word title summarizing this requirement. Output the title only, no quotes.',
     userMessage: requirement,
     maxTokens: 32,
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(config),
   });
   return res.text.replace(/^["']|["']$/g, '').trim() || requirement.slice(0, 60);
 }
@@ -720,12 +1009,7 @@ export async function askQuestion(opts: {
     systemPrompt: opts.systemPrompt,
     userMessage,
     maxTokens: 2048,
-    provider: opts.config.generatorConfig.provider,
-    geminiApiKey: opts.config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
+    ...getProviderOpts(opts.config),
   });
 
   return res.text;

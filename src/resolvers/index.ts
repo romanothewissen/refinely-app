@@ -10,6 +10,8 @@ const Resolver = require('@forge/resolver').default;
 import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
+import { resolveAiExecutionPolicy, resolveGeneratorConfig } from '../services/ai-policy';
+import { getAiInsightsReport, upsertAiSessionInsight } from '../services/ai-insights';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
@@ -40,7 +42,7 @@ import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm } from '../core/llm';
-import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
+import { ClarifyAnswer, ClarifyQuestion, Feature, GenerationEvent, ClarifyEvent } from '../types';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -109,7 +111,7 @@ resolver.define('checkIsAdmin', async ({ context, payload }) => {
   };
 });
 
-resolver.define('getConfig', async ({ context }) => {
+resolver.define('getConfig', async ({ context, payload }) => {
   const config = await getConfig();
   const isAdmin = await checkAdmin(context);
   await recordRuntimeVersionIfChanged((context as { accountId?: string })?.accountId, Boolean(config.compliance?.auditTrailEnabled));
@@ -119,9 +121,26 @@ resolver.define('getConfig', async ({ context }) => {
     // Scrub keys for the frontend
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
+    if (gc.azureOpenaiApiKey) gc.azureOpenaiApiKey = REDACTED;
+    if (gc.bedrockAccessKeyId) gc.bedrockAccessKeyId = REDACTED;
+    if (gc.bedrockSecretAccessKey) gc.bedrockSecretAccessKey = REDACTED;
+    if (gc.bedrockSessionToken) gc.bedrockSessionToken = REDACTED;
   }
   
-  return { ...config, isAdmin };
+  return {
+    ...config,
+    isAdmin,
+    effectiveAiPolicy: resolveAiExecutionPolicy(config, payload?.projectKey),
+    effectiveGeneratorConfig: resolveGeneratorConfig(config, payload?.projectKey, payload?.reasoningMode),
+  };
+});
+
+resolver.define('getAiInsights', async ({ context }) => {
+  await ensureAdmin(context);
+  return {
+    success: true,
+    insights: await getAiInsightsReport(),
+  };
 });
 
 resolver.define('saveConfig', async ({ payload, context }) => {
@@ -134,17 +153,25 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
+  if (ngc.azureOpenaiApiKey === REDACTED) ngc.azureOpenaiApiKey = egc.azureOpenaiApiKey;
+  if (ngc.bedrockAccessKeyId === REDACTED) ngc.bedrockAccessKeyId = egc.bedrockAccessKeyId;
+  if (ngc.bedrockSecretAccessKey === REDACTED) ngc.bedrockSecretAccessKey = egc.bedrockSecretAccessKey;
+  if (ngc.bedrockSessionToken === REDACTED) ngc.bedrockSessionToken = egc.bedrockSessionToken;
   
   await saveConfig(payload);
 
   const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const modelFields = ['decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'themeModel'];
+  const modelFields = ['provider', 'profileMode', 'fastProfileProvider', 'fastProfileModel', 'deepProfileProvider', 'deepProfileModel', 'decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'themeModel'];
   const changedModelFields = modelFields.filter((field) => {
     return ngc[field] !== undefined && ngc[field] !== egc[field];
   });
   const apiKeyRotated = Boolean(
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
-    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey),
+    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
+    (ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED && ngc.azureOpenaiApiKey !== egc.azureOpenaiApiKey) ||
+    (ngc.bedrockAccessKeyId && ngc.bedrockAccessKeyId !== REDACTED && ngc.bedrockAccessKeyId !== egc.bedrockAccessKeyId) ||
+    (ngc.bedrockSecretAccessKey && ngc.bedrockSecretAccessKey !== REDACTED && ngc.bedrockSecretAccessKey !== egc.bedrockSecretAccessKey) ||
+    (ngc.bedrockSessionToken && ngc.bedrockSessionToken !== REDACTED && ngc.bedrockSessionToken !== egc.bedrockSessionToken),
   );
   const auditEnabled = Boolean(existingConfig.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled);
   if (changedModelFields.length > 0) {
@@ -165,6 +192,8 @@ resolver.define('saveConfig', async ({ payload, context }) => {
         providerKeysUpdated: [
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
+          ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED ? 'azure_openai' : null,
+          ngc.bedrockAccessKeyId && ngc.bedrockAccessKeyId !== REDACTED ? 'bedrock' : null,
         ].filter(Boolean),
       },
       enabled: auditEnabled,
@@ -203,6 +232,8 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
+    const isAzureOpenAI = payload.provider === 'azure_openai';
+    const isBedrock = payload.provider === 'bedrock';
     
     const res = await callLlm({
       provider: payload.provider,
@@ -211,6 +242,14 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       geminiBaseUrl: isGemini ? (payload.geminiBaseUrl?.trim() || gc.geminiBaseUrl) : undefined,
       openaiApiKey: isOpenAI ? (payload.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload.openaiApiKey?.trim() || gc.openaiApiKey)) : undefined,
       openaiBaseUrl: isOpenAI ? (payload.openaiBaseUrl?.trim() || gc.openaiBaseUrl) : undefined,
+      azureOpenaiApiKey: isAzureOpenAI ? (payload.azureOpenaiApiKey === REDACTED ? gc.azureOpenaiApiKey : (payload.azureOpenaiApiKey?.trim() || gc.azureOpenaiApiKey)) : undefined,
+      azureOpenaiEndpoint: isAzureOpenAI ? (payload.azureOpenaiEndpoint?.trim() || gc.azureOpenaiEndpoint) : undefined,
+      azureOpenaiDeployment: isAzureOpenAI ? (payload.azureOpenaiDeployment?.trim() || gc.azureOpenaiDeployment) : undefined,
+      azureOpenaiApiVersion: isAzureOpenAI ? (payload.azureOpenaiApiVersion?.trim() || gc.azureOpenaiApiVersion) : undefined,
+      bedrockAccessKeyId: isBedrock ? (payload.bedrockAccessKeyId === REDACTED ? gc.bedrockAccessKeyId : (payload.bedrockAccessKeyId?.trim() || gc.bedrockAccessKeyId)) : undefined,
+      bedrockSecretAccessKey: isBedrock ? (payload.bedrockSecretAccessKey === REDACTED ? gc.bedrockSecretAccessKey : (payload.bedrockSecretAccessKey?.trim() || gc.bedrockSecretAccessKey)) : undefined,
+      bedrockSessionToken: isBedrock ? (payload.bedrockSessionToken === REDACTED ? gc.bedrockSessionToken : (payload.bedrockSessionToken?.trim() || gc.bedrockSessionToken)) : undefined,
+      bedrockRegion: isBedrock ? (payload.bedrockRegion?.trim() || gc.bedrockRegion) : undefined,
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
       noFallback: true,
@@ -226,8 +265,19 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
 
 resolver.define('startGeneration', async ({ payload, context }) => {
   const config = await getConfig();
+  const effectivePolicy = resolveAiExecutionPolicy(config, payload.projectKey || '*');
+  const effectiveGeneratorConfig = resolveGeneratorConfig(
+    config,
+    payload.projectKey || '*',
+    payload.reasoningMode,
+  );
+  const eventConfig = {
+    ...config,
+    aiExecutionPolicy: effectivePolicy,
+    generatorConfig: effectiveGeneratorConfig,
+  };
 
-  const check = await checkGenerationAllowed(config, context);
+  const check = await checkGenerationAllowed(eventConfig, context);
   if (!check.allowed) {
     return { success: false, error: check.reason };
   }
@@ -240,11 +290,13 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     requirement: payload.requirement,
     clarifyAnswers: payload.clarifyAnswers ?? [],
     attachmentText: payload.attachmentText ?? '',
-    config,
+    config: eventConfig,
     license: context?.license,
     goldExamples: '',   // fetched inside queue consumer
     wiContext: '',      // fetched inside queue consumer
     projectKey: payload.projectKey || '*',
+    reasoningMode: payload.reasoningMode,
+    outputMode: payload.outputMode,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
@@ -272,6 +324,11 @@ resolver.define('getProgress', async ({ payload }: { payload: { sessionId: strin
 resolver.define('startClarify', async ({ payload, context }) => {
   try {
     const config = await getConfig();
+    const eventConfig = {
+      ...config,
+      aiExecutionPolicy: resolveAiExecutionPolicy(config, payload.projectKey || '*'),
+      generatorConfig: resolveGeneratorConfig(config, payload.projectKey || '*', payload.reasoningMode),
+    };
     const clarifyQueue = new Queue({ key: 'clarify-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     const event: ClarifyEvent = {
@@ -279,9 +336,11 @@ resolver.define('startClarify', async ({ payload, context }) => {
       accountId,
       requirement: payload.requirement,
       attachmentText: payload.attachmentText ?? '',
-      config,
+      config: eventConfig,
       license: context?.license,
       projectKey: payload.projectKey || '*',
+      reasoningMode: payload.reasoningMode,
+      outputMode: payload.outputMode,
     };
     // Overwrite any stale result with a 'pending' marker so the polling hook waits
     await entitySet(KEYS.clarifyProgress(payload.sessionId), { type: 'pending', updatedAt: Date.now() });
@@ -300,12 +359,41 @@ resolver.define('getClarifyResult', async ({ payload }) => {
 
 resolver.define('evaluateSufficiency', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
-  return evaluateSufficiency({
+  const config = {
+    ...eventConfig,
+    aiExecutionPolicy: resolveAiExecutionPolicy(eventConfig, payload.projectKey || '*'),
+    generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', payload.reasoningMode),
+    tier: getEffectiveTier(eventConfig, context),
+  };
+  const result = await evaluateSufficiency({
     requirement: payload.requirement,
     answers: payload.answers as ClarifyAnswer[],
     config,
+    reasoningMode: payload.reasoningMode,
   });
+  if (payload?.sessionId) {
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    await persistDiscoveryCoverage(payload.sessionId, accountId, result);
+  }
+  return result;
+});
+
+resolver.define('saveDiscoveryRound', async ({ payload, context }) => {
+  try {
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    await persistDiscoveryRound(
+      payload.sessionId,
+      accountId,
+      Number(payload.roundNumber) || 1,
+      normaliseQuestions(payload.questions),
+      normaliseAnswers(payload.answers),
+      payload.coverage,
+    );
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
 });
 
 // ─── Refine ───────────────────────────────────────────────────────────────────
@@ -803,7 +891,54 @@ resolver.define('getHistory', async ({ payload, context }) => {
   const index = await entityGet<Array<{ sessionId: string; title: string; updatedAt: string; turnCount: number }>>(
     KEYS.userConversationIndex(accountId),
   ) ?? [];
-  return { success: true, conversations: index.slice(0, limit) };
+  const conversations = await Promise.all(
+    index.slice(0, limit).map(async (entry) => {
+      const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(
+        KEYS.userConversations(accountId, entry.sessionId),
+      );
+      const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+      const lastTurn = turns[turns.length - 1];
+      const latestClarifyWithCoverage = [...turns]
+        .reverse()
+        .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryCoverage);
+      const latestTranscriptOwner = [...turns]
+        .reverse()
+        .find(turn => turn?.generationContext?.discoveryTranscript || turn?.clarifyContext?.discoveryTranscript);
+      const discoveryTranscript = latestTranscriptOwner?.generationContext?.discoveryTranscript
+        ?? latestTranscriptOwner?.clarifyContext?.discoveryTranscript
+        ?? [];
+
+      return {
+        ...entry,
+        lastTurnType: lastTurn?.turnType ?? null,
+        lastFeatureCount: Array.isArray(lastTurn?.features) ? lastTurn.features.length : 0,
+        lastScopeMode:
+          lastTurn?.generationContext?.plannerDecision?.scopeMode ??
+          lastTurn?.clarifyContext?.plannerDecision?.scopeMode ??
+          null,
+        lastDiscoveryScore: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.overallScore ?? null,
+        lastDiscoverySummary: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.summary ?? null,
+        lastMissingCriticalCount: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.missingCritical?.length ?? 0,
+        lastDiscoveryRoundCount: Array.isArray(discoveryTranscript) ? discoveryTranscript.length : 0,
+        discoveryTranscriptPreview: Array.isArray(discoveryTranscript)
+          ? discoveryTranscript.slice(0, 4).map((round: Record<string, any>) => ({
+              roundNumber: round?.roundNumber ?? 0,
+              answerCount: Array.isArray(round?.answers) ? round.answers.length : 0,
+              summary: round?.coverage?.summary ?? null,
+              highlights: Array.isArray(round?.answers)
+                ? round.answers
+                    .slice(0, 2)
+                    .map((answer: Record<string, any>) => ({
+                      question: String(answer?.question ?? ''),
+                      answer: String(answer?.answer ?? ''),
+                    }))
+                : [],
+            }))
+          : [],
+      };
+    }),
+  );
+  return { success: true, conversations };
 });
 
 resolver.define('getConversation', async ({ payload, context }) => {
@@ -949,6 +1084,184 @@ async function updateLatestTurnFeatures(
     }
   } catch {
     // ignore
+  }
+}
+
+function mergeTokenUsage(
+  existing?: { input?: number; output?: number; total?: number; byStage?: Record<string, { input: number; output: number; total: number }> },
+  next?: { input?: number; output?: number; total?: number; byStage?: Record<string, { input: number; output: number; total: number }> },
+) {
+  if (!existing && !next) return undefined;
+  return {
+    input: (existing?.input ?? 0) + (next?.input ?? 0),
+    output: (existing?.output ?? 0) + (next?.output ?? 0),
+    total: (existing?.total ?? 0) + (next?.total ?? 0),
+    byStage: {
+      ...(existing?.byStage ?? {}),
+      ...(next?.byStage ?? {}),
+    },
+  };
+}
+
+function normaliseQuestions(raw: unknown): ClarifyQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map(item => ({
+      category: String(item.category ?? 'Functional Flow').trim() || 'Functional Flow',
+      question: String(item.question ?? '').trim(),
+      suggestions: Array.isArray(item.suggestions)
+        ? item.suggestions.map(value => String(value ?? '').trim()).filter(Boolean).slice(0, 5)
+        : [],
+    }))
+    .filter(item => item.question.length > 0);
+}
+
+function normaliseAnswers(raw: unknown): ClarifyAnswer[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map(item => ({
+      question: String(item.question ?? '').trim(),
+      answer: String(item.answer ?? '').trim(),
+    }))
+    .filter(item => item.question.length > 0 || item.answer.length > 0);
+}
+
+async function persistDiscoveryRound(
+  sessionId: string,
+  accountId: string,
+  roundNumber: number,
+  questions: ClarifyQuestion[],
+  answers: ClarifyAnswer[],
+  coverage?: Record<string, any>,
+) {
+  const key = KEYS.userConversations(accountId, sessionId);
+  const existing = await entityGet<{ turns: Array<Record<string, any>> }>(key);
+  if (!existing?.turns?.length) return;
+
+  const clarifyTurn = [...existing.turns]
+    .reverse()
+    .find(turn => turn?.turnType === 'clarify');
+
+  if (!clarifyTurn) return;
+
+  const existingTranscript = Array.isArray(clarifyTurn?.clarifyContext?.discoveryTranscript)
+    ? [...clarifyTurn.clarifyContext.discoveryTranscript]
+    : [];
+
+  const nextRound = {
+    roundNumber,
+    questions,
+    answers,
+    coverage,
+    submittedAt: new Date().toISOString(),
+  };
+
+  const roundIndex = existingTranscript.findIndex((round: Record<string, any>) => Number(round?.roundNumber) === roundNumber);
+  if (roundIndex >= 0) {
+    existingTranscript[roundIndex] = {
+      ...existingTranscript[roundIndex],
+      ...nextRound,
+      questions: questions.length ? questions : existingTranscript[roundIndex].questions ?? [],
+      answers: answers.length ? answers : existingTranscript[roundIndex].answers ?? [],
+      coverage: coverage ?? existingTranscript[roundIndex].coverage,
+    };
+  } else {
+    existingTranscript.push(nextRound);
+    existingTranscript.sort((left: Record<string, any>, right: Record<string, any>) => Number(left.roundNumber) - Number(right.roundNumber));
+  }
+
+  const mergedTokenUsage = clarifyTurn?.clarifyContext?.tokenUsage;
+  const totalDiscoveryQuestions = existingTranscript.reduce(
+    (sum: number, round: Record<string, any>) => sum + (Array.isArray(round?.questions) ? round.questions.length : 0),
+    0,
+  );
+  const totalDiscoveryAnswers = existingTranscript.reduce(
+    (sum: number, round: Record<string, any>) => sum + (Array.isArray(round?.answers) ? round.answers.length : 0),
+    0,
+  );
+  const latestCoverage = coverage ?? clarifyTurn?.clarifyContext?.discoveryCoverage;
+  const plannerDecision = clarifyTurn?.clarifyContext?.plannerDecision;
+
+  clarifyTurn.clarifyContext = {
+    ...(clarifyTurn.clarifyContext ?? {}),
+    discoveryTranscript: existingTranscript,
+    discoveryCoverage: latestCoverage,
+    tokenUsage: mergedTokenUsage,
+  };
+  clarifyTurn.tokenUsage = mergedTokenUsage;
+
+  await entitySet(key, existing);
+
+  await upsertAiSessionInsight({
+    sessionId,
+    projectKey: clarifyTurn?.clarifyContext?.projectKey ?? '*',
+    reasoningMode: plannerDecision?.reasoningMode,
+    outputMode: plannerDecision?.outputMode,
+    scopeMode: plannerDecision?.scopeMode,
+    clarificationMode: plannerDecision?.clarificationMode,
+    plannedFeatureTarget: plannerDecision?.featurePlan?.target,
+    plannedQuestionTarget: plannerDecision?.questionPlan?.target,
+    initialClarifyQuestionCount:
+      typeof clarifyTurn?.clarifyContext?.ambiguityAssessment?.generatedQuestions === 'number'
+        ? clarifyTurn.clarifyContext.ambiguityAssessment.generatedQuestions
+        : undefined,
+    discoveryRounds: existingTranscript.length,
+    totalDiscoveryQuestions,
+    totalDiscoveryAnswers,
+    latestCoverageScore: latestCoverage?.overallScore ?? null,
+    latestMissingCriticalCount: latestCoverage?.missingCritical?.length ?? 0,
+  });
+
+  const progress = await entityGet<Record<string, any>>(KEYS.clarifyProgress(sessionId));
+  if (progress?.contextMeta) {
+    progress.contextMeta = {
+      ...progress.contextMeta,
+      discoveryTranscript: existingTranscript,
+      discoveryCoverage: coverage ?? progress.contextMeta.discoveryCoverage,
+      tokenUsage: progress.contextMeta.tokenUsage,
+    };
+    await entitySet(KEYS.clarifyProgress(sessionId), progress);
+  }
+}
+
+async function persistDiscoveryCoverage(
+  sessionId: string,
+  accountId: string,
+  coverage: Record<string, any>,
+) {
+  try {
+    const key = KEYS.userConversations(accountId, sessionId);
+    const existing = await entityGet<{ turns: Array<Record<string, any>> }>(key);
+    if (existing?.turns?.length) {
+      const clarifyTurn = [...existing.turns]
+        .reverse()
+        .find(turn => turn?.turnType === 'clarify');
+
+      if (clarifyTurn) {
+        const mergedTokenUsage = mergeTokenUsage(clarifyTurn?.clarifyContext?.tokenUsage, coverage?.tokenUsage);
+        clarifyTurn.clarifyContext = {
+          ...(clarifyTurn.clarifyContext ?? {}),
+          discoveryCoverage: coverage,
+          tokenUsage: mergedTokenUsage,
+        };
+        clarifyTurn.tokenUsage = mergedTokenUsage;
+        await entitySet(key, existing);
+      }
+    }
+
+    const progress = await entityGet<Record<string, any>>(KEYS.clarifyProgress(sessionId));
+    if (progress?.contextMeta) {
+      progress.contextMeta = {
+        ...progress.contextMeta,
+        discoveryCoverage: coverage,
+        tokenUsage: mergeTokenUsage(progress.contextMeta.tokenUsage, coverage?.tokenUsage),
+      };
+      await entitySet(KEYS.clarifyProgress(sessionId), progress);
+    }
+  } catch (err) {
+    console.warn('[persistDiscoveryCoverage] Failed to persist discovery coverage:', err);
   }
 }
 
