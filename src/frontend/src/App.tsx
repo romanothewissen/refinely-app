@@ -503,11 +503,15 @@ export default function App() {
     setFeatures([]);
     setGenerationContext(null);
     setClarifyContext(null);
+    setClarifyQuestions([]);
     setDiscoveryCoverage(null);
     setWorkflowTokenUsage(null);
     setDiscoveryAnswers([]);
     setDiscoveryRound(0);
     setIsReviewingDiscovery(false);
+    setPendingSessionId(null);
+    setPendingClarifySessionId(null);
+    setIsGenerationStarted(false);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -519,6 +523,7 @@ export default function App() {
       const res = await api.startClarify(sessionId, requirement, undefined, projectKey, reasoningMode, outputMode) as any;
       console.log('[App] startClarify result', res);
       if (res.success) {
+        setPendingSessionId(null);
         setPendingClarifySessionId(sessionId);
       } else {
         setIsWorking(false);
