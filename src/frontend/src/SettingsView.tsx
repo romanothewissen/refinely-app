@@ -273,6 +273,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [existingBedrockSecretAccessKey, setExistingBedrockSecretAccessKey] = useState('');
   const [existingBedrockSessionToken, setExistingBedrockSessionToken] = useState('');
   
+  // Dynamic model lists (fetched from provider APIs)
+  const [dynamicModels, setDynamicModels] = useState<Record<string, { id: string; label: string }[]>>({});
+  const [isFetchingModels, setIsFetchingModels] = useState<'openai' | 'gemini' | null>(null);
+  const [modelFetchError, setModelFetchError] = useState<Record<string, string>>({});
+
   const [isTestingLlm, setIsTestingLlm] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [workspacePreset, setWorkspacePreset] = useState<AiPolicyPreset>('balanced');
@@ -394,9 +399,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.deepProfileModel) setDeepProfileModel(gc.deepProfileModel);
         else if (gc.decompositionModel) setDeepProfileModel(gc.decompositionModel);
         
-        if (gc.geminiApiKey) setExistingGeminiApiKey(gc.geminiApiKey);
+        if (gc.geminiApiKey) { setExistingGeminiApiKey(gc.geminiApiKey); void fetchModelsForProvider('gemini'); }
         if (gc.geminiBaseUrl) setGeminiBaseUrl(gc.geminiBaseUrl);
-        if (gc.openaiApiKey) setExistingOpenaiApiKey(gc.openaiApiKey);
+        if (gc.openaiApiKey) { setExistingOpenaiApiKey(gc.openaiApiKey); void fetchModelsForProvider('openai'); }
         if (gc.openaiBaseUrl) setOpenaiBaseUrl(gc.openaiBaseUrl);
         if (gc.azureOpenaiApiKey) setExistingAzureOpenaiApiKey(gc.azureOpenaiApiKey);
         if (gc.azureOpenaiEndpoint) setAzureOpenaiEndpoint(gc.azureOpenaiEndpoint);
@@ -916,8 +921,41 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     }
   }, [deepProfileProvider, deepProfileModel]);
 
-  const fastProfileModels = useMemo(() => getProfileModels(fastProfileProvider, 'fast'), [fastProfileProvider]);
-  const deepProfileModels = useMemo(() => getProfileModels(deepProfileProvider, 'deep'), [deepProfileProvider]);
+  const fetchModelsForProvider = useCallback(async (prov: 'openai' | 'gemini') => {
+    setIsFetchingModels(prov);
+    setModelFetchError(prev => ({ ...prev, [prov]: '' }));
+    try {
+      const res = await api.fetchAvailableModels(prov) as any;
+      if (res.success && Array.isArray(res.models) && res.models.length > 0) {
+        setDynamicModels(prev => ({ ...prev, [prov]: res.models }));
+      } else {
+        setModelFetchError(prev => ({ ...prev, [prov]: res.error || 'No models returned' }));
+      }
+    } catch (e: any) {
+      setModelFetchError(prev => ({ ...prev, [prov]: e?.message ?? 'Fetch failed' }));
+    } finally {
+      setIsFetchingModels(null);
+    }
+  }, []);
+
+  const getModelsForProvider = useCallback((prov: LlmProvider): { id: string; label: string }[] => {
+    if ((prov === 'openai' || prov === 'gemini') && dynamicModels[prov]?.length) {
+      return dynamicModels[prov];
+    }
+    return getAvailableModels(prov);
+  }, [dynamicModels]);
+
+  const fastProfileModels = useMemo(() => {
+    const all = getModelsForProvider(fastProfileProvider);
+    const filtered = all.filter(m => isFastProfileModel(m.id));
+    return filtered.length ? filtered : all;
+  }, [fastProfileProvider, getModelsForProvider]);
+
+  const deepProfileModels = useMemo(() => {
+    const all = getModelsForProvider(deepProfileProvider);
+    const filtered = all.filter(m => !isFastProfileModel(m.id));
+    return filtered.length ? filtered : all;
+  }, [deepProfileProvider, getModelsForProvider]);
 
   const settingsNav = [
     { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'Provider and execution profiles' },
@@ -1613,10 +1651,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           </select>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast Profile</label>
+                          <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Fast Profile</label>
+                            {(fastProfileProvider === 'openai' || fastProfileProvider === 'gemini') && (
+                              <button
+                                onClick={() => fetchModelsForProvider(fastProfileProvider as 'openai' | 'gemini')}
+                                disabled={isFetchingModels === fastProfileProvider}
+                                className="flex items-center gap-1 text-[10px] font-bold text-[var(--rf-brand)] hover:underline disabled:opacity-50"
+                                title="Refresh model list from provider API"
+                              >
+                                <RefreshCw className={`w-3 h-3 ${isFetchingModels === fastProfileProvider ? 'animate-spin' : ''}`} />
+                                {dynamicModels[fastProfileProvider]?.length ? 'Refresh' : 'Load models'}
+                              </button>
+                            )}
+                          </div>
                           <select value={fastProfileModel} onChange={e => setFastProfileModel(e.target.value)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
                             {fastProfileModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                           </select>
+                          {modelFetchError[fastProfileProvider] && <p className="text-[11px] text-rose-500 px-1">{modelFetchError[fastProfileProvider]}</p>}
+                          {dynamicModels[fastProfileProvider]?.length ? <p className="text-[11px] text-[var(--rf-brand)] px-1">{dynamicModels[fastProfileProvider].length} models loaded from API</p> : null}
                           <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for lightweight assessment, clarify, refinement, and other short-turn work.</div>
                         </div>
                         <div className="space-y-2">
@@ -1626,10 +1679,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           </select>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Profile</label>
+                          <div className="flex items-center justify-between px-1">
+                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Deep Profile</label>
+                            {(deepProfileProvider === 'openai' || deepProfileProvider === 'gemini') && (
+                              <button
+                                onClick={() => fetchModelsForProvider(deepProfileProvider as 'openai' | 'gemini')}
+                                disabled={isFetchingModels === deepProfileProvider}
+                                className="flex items-center gap-1 text-[10px] font-bold text-[var(--rf-brand)] hover:underline disabled:opacity-50"
+                                title="Refresh model list from provider API"
+                              >
+                                <RefreshCw className={`w-3 h-3 ${isFetchingModels === deepProfileProvider ? 'animate-spin' : ''}`} />
+                                {dynamicModels[deepProfileProvider]?.length ? 'Refresh' : 'Load models'}
+                              </button>
+                            )}
+                          </div>
                           <select value={deepProfileModel} onChange={e => setDeepProfileModel(e.target.value)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
                             {deepProfileModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                           </select>
+                          {modelFetchError[deepProfileProvider] && <p className="text-[11px] text-rose-500 px-1">{modelFetchError[deepProfileProvider]}</p>}
+                          {dynamicModels[deepProfileProvider]?.length ? <p className="text-[11px] text-[var(--rf-brand)] px-1">{dynamicModels[deepProfileProvider].length} models loaded from API</p> : null}
                           <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for feature generation, acceptance requirements, and heavier reasoning.</div>
                         </div>
                       </div>

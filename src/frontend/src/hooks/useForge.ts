@@ -108,6 +108,8 @@ export const api = {
   setLastSession: (sessionId: string) => invoke('setLastSession', { sessionId }),
   getIssueSession: (issueKey: string) => invoke('getIssueSession', { issueKey }),
   setIssueSession: (issueKey: string, sessionId: string) => invoke('setIssueSession', { issueKey, sessionId }),
+  getSidebarWidth: () => invoke('getSidebarWidth'),
+  setSidebarWidth: (width: number) => invoke('setSidebarWidth', { width }),
 
   // Usage
   getUsage: () => invoke('getUsage'),
@@ -120,6 +122,8 @@ export const api = {
 
   // LLM config
   checkIsAdmin: (payload?: any) => invoke('checkIsAdmin', payload),
+  fetchAvailableModels: (provider: 'openai' | 'gemini') =>
+    invoke('fetchAvailableModels', { provider }),
   testLlmConnection: (payload: {
     provider: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
     model: string;

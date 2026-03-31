@@ -553,65 +553,65 @@ function buildQuestionPlan(
 ): ClarifyQuestionPlan {
   // Keep one strong discovery round by default:
   // light: 2-4, standard: 4-8, deep: 8-14.
-  const lightMax = clamp(Math.max(policy?.simpleAskMaxQuestions ?? 4, 2), 2, 4);
-  const deepTargetBase = clamp(Math.max(policy?.deepModeRoundTarget ?? 6, 4), 4, 10);
+  const lightMax = clamp(Math.max(policy?.simpleAskMaxQuestions ?? 6, 3), 3, 6);
+  const deepTargetBase = clamp(Math.max(policy?.deepModeRoundTarget ?? 8, 5), 5, 12);
   const standardMax = clamp(
-    Math.max(lightMax + 2, deepTargetBase - 1),
-    4,
-    8,
+    Math.max(lightMax + 3, deepTargetBase - 1),
+    6,
+    10,
   );
   const deepBaseline = clamp(
-    Math.max(policy?.enterpriseMaxQuestionsPerRound ?? 10, deepTargetBase),
-    8,
-    12,
+    Math.max(policy?.enterpriseMaxQuestionsPerRound ?? 12, deepTargetBase),
+    10,
+    14,
   );
   const deepMax = clamp(
-    Math.max(standardMax + 2, policy?.enterpriseMaxQuestionsPerRound ?? 10, deepBaseline),
-    8,
-    14,
+    Math.max(standardMax + 3, policy?.enterpriseMaxQuestionsPerRound ?? 12, deepBaseline),
+    10,
+    16,
   );
 
   if (clarificationMode === 'none') {
     return {
-      min: 2,
+      min: 3,
       max: lightMax,
-      target: Math.min(3, lightMax),
+      target: Math.min(4, lightMax),
       clarity,
     };
   }
   if (clarificationMode === 'light') {
     return {
-      min: 2,
+      min: 3,
       max: lightMax,
       target:
         clarity === 'clear'
-          ? Math.min(2, lightMax)
-          : Math.min(clarity === 'medium' ? 3 : 4, lightMax),
+          ? Math.min(3, lightMax)
+          : Math.min(clarity === 'medium' ? 4 : 5, lightMax),
       clarity,
     };
   }
   if (clarificationMode === 'standard') {
     return {
-      min: Math.min(4, standardMax),
+      min: Math.min(5, standardMax),
       max: standardMax,
       target:
         clarity === 'clear'
-          ? Math.min(4, standardMax)
+          ? Math.min(6, standardMax)
           : clarity === 'medium'
-            ? Math.min(Math.max(5, deepTargetBase - 1), standardMax)
-            : Math.min(Math.max(6, deepTargetBase), standardMax),
+            ? Math.min(Math.max(7, deepTargetBase - 1), standardMax)
+            : Math.min(Math.max(8, deepTargetBase), standardMax),
       clarity,
     };
   }
   return {
-    min: Math.min(8, deepMax),
+    min: Math.min(10, deepMax),
     max: deepMax,
     target:
       clarity === 'clear'
-        ? Math.min(Math.max(8, deepTargetBase), deepMax)
+        ? Math.min(Math.max(10, deepTargetBase), deepMax)
         : clarity === 'medium'
-          ? Math.min(Math.max(10, deepTargetBase + 1), deepMax)
-          : Math.min(Math.max(12, deepTargetBase + 2), deepMax),
+          ? Math.min(Math.max(12, deepTargetBase + 1), deepMax)
+          : Math.min(Math.max(14, deepTargetBase + 2), deepMax),
     clarity,
   };
 }

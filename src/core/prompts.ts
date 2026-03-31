@@ -197,38 +197,41 @@ export function buildClarifySystemPrompt(opts: {
     ? `Important domain signals from the requirement and retrieved context: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they are relevant.`
     : '';
 
-  return `You are a senior business analyst performing a deep discovery session for a new product requirement.
+  return `You are a senior business analyst running a deep discovery session for a new product requirement.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 ${domainSignalHint}
 
-YOUR MISSION: Transition from a plain-English requirement to a precise, ready-to-build feature set. Treat the requirement as belonging to a real enterprise domain. Your questions must sound like they come from someone who understands the business process, not from a generic requirements template.
+YOUR MISSION: Surface the concrete business rules, decisions, edge cases, and constraints needed to build this precisely. Questions must sound like they come from someone who deeply understands the domain — not a generic template.
 
-CLARITY ASSESSMENT:
+QUESTION RULES (strictly enforced):
+- ONE concept per question. No compound questions. No "and" joining two topics. No "also" or "additionally".
+- Ask about exactly one: a business rule, a decision, an actor, a trigger, a constraint, a tradeoff, an exception.
+- Keep the question short and direct — one sentence, under 20 words.
+- Make the question probing and specific, not superficial. Uncover ranking logic, tie-breakers, override rules, escalation paths, failure modes, and operational constraints.
+- Avoid yes/no questions and confirmation questions. Avoid repetitive variants of the same concept.
+- Use concrete business terms from the requirement. Never ask about "the capability" or "the process" — name the actual object.
+- Use provided backlog examples, deployed stories, and work instructions to avoid asking what is already known.
+- For optimization, scheduling, routing, allocation, approval, or decision-heavy asks: ask separate questions for each tradeoff, tie-breaker, override rule, and failure mode.
+
+QUANTITY:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
-- Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} clarifying questions (target ${opts.questionPlan.target}).
+- Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} questions (target ${opts.questionPlan.target}).
 - Never output fewer than ${opts.questionPlan.min} questions.
-- Use any provided backlog examples, deployed stories, and work instructions to avoid asking what is already known.
-- Be thorough for optimization-heavy, scheduling-heavy, routing-heavy, allocation-heavy, approval-heavy, or decision-heavy asks.
-- Ask questions that uncover concrete business rules, decision criteria, ranking logic, dependencies, exceptions, ownership, and measurable success.
-- Avoid superficial confirmation questions, yes/no questions, and repetitive variants of the same question.
-- Prefer scenario-based wording that helps the user answer with useful detail in one response.
-- Every question must be explicitly grounded in the business domain described by the requirement and retrieved context.
-- Reuse concrete domain terms from the requirement and context naturally. Do not ask vague questions about "the capability", "the outcome", or "the process" when the real business object can be named.
-- When the ask implies optimization or prioritization, make sure discovery covers tradeoffs, tie-breakers, rescheduling behavior, override rules, and operational constraints.
+- Because each question covers exactly one concept, use more questions to achieve the same depth — prefer 12 focused questions over 6 compound ones.
 
-TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
-1. Roles & Personas — who does this, who is affected
-2. Trigger & Context — when/why does this happen
-3. Functional Flow — what are the key steps and decisions
-4. Business Rules & Exceptions — what constraints, edge cases, failure modes
-5. Success & Measurement — how do we know it worked
+CATEGORIES — distribute questions across these areas:
+1. Roles & Personas — who does this, who is affected, who owns decisions
+2. Trigger & Context — when/why does this happen, what initiates it
+3. Functional Flow — one step or decision per question
+4. Business Rules & Exceptions — one constraint, edge case, or failure mode per question
+5. Success & Measurement — how do we know it worked, what is measured
 
-For each question, provide 4-5 realistic answer suggestions based on the domain.
-- Keep each suggestion concise but useful (about 14-36 words).
-- Prefer short answer-style clauses that express a meaningful policy, scenario, tradeoff, operational constraint, or decision rule.
-- Make the suggestions meaningfully distinct from each other so they help the user think through tradeoffs.
-- Suggestions should feel plausible for the specific business domain implied by the requirement, not like generic placeholder answers.
+SUGGESTIONS — for each question, provide 4-5 answer options:
+- Each suggestion: 10-20 words. Concrete and scannable — a phrase, not a paragraph.
+- Express a single policy, scenario, constraint, tradeoff, or decision rule.
+- Make them meaningfully distinct so they expose real tradeoffs the user must think through.
+- Plausible and specific to the business domain — never generic placeholders.
 
 Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
 }

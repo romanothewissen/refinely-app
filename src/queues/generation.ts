@@ -134,8 +134,8 @@ export async function handler(event: { body: GenerationEvent }) {
     const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
     const retrievalBudget = buildGenerationRetrievalBudget(reasoningMode);
     const goldCount = relevantGoldSources.length;
-    const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
-    await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectLabel}. initializing…`);
+    const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'workspace';
+    await sendProgress(sessionId, `Loading context for ${projectLabel}…`);
 
     const [goldItems, wiContext, similarStories] = await Promise.all([
       goldCount
@@ -169,6 +169,14 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
+
+    const contextParts: string[] = [];
+    if (goldItems.length > 0) contextParts.push(`${goldItems.length} curated example${goldItems.length !== 1 ? 's' : ''}`);
+    if (similarStories.length > 0) contextParts.push(`${similarStories.length} related stor${similarStories.length !== 1 ? 'ies' : 'y'}`);
+    if (wiContext.docs.length > 0) contextParts.push(`${wiContext.docs.length} work instruction${wiContext.docs.length !== 1 ? 's' : ''}`);
+    const contextSummary = contextParts.length > 0 ? contextParts.join(', ') : 'no prior context';
+    await sendProgress(sessionId, `Context loaded (${contextSummary}). Planning features…`);
+
     const plannerDecision = buildHeuristicPlannerDecision({
       requirement: maskedRequirement.text,
       clarifyAnswers: maskedAnswers.answers,

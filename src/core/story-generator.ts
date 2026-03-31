@@ -514,15 +514,6 @@ function sumUsage(usages: Array<{ input: number; output: number }>) {
   );
 }
 
-function estimatePass2MaxTokens(
-  featureCount: number,
-  arTarget: number,
-  configuredMaxTokens: number | undefined,
-  hardCap: number,
-) {
-  const estimatedTokens = Math.max(2200, featureCount * Math.max(arTarget, 2) * 180);
-  return Math.min(Math.max(configuredMaxTokens ?? 8192, estimatedTokens), hardCap);
-}
 
 function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasoningMode']) {
   if (reasoningMode === 'deep') {
@@ -943,7 +934,6 @@ async function buildInitiativeGroups(opts: {
       model: getTierModel(config.generatorConfig.themeModel, config.tier),
       systemPrompt,
       userMessage,
-      maxTokens: 4096,
       ...getProviderOpts(config),
     });
 
@@ -1072,17 +1062,11 @@ export async function generateFeatures(opts: {
     reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
   const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
-  const pass2HardCap = decision.reasoningMode === 'deep' ? 16384 : 9000;
   const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(generatorConfig.arModel, config.tier),
     systemPrompt: pass2System,
     userMessage: pass2UserMessage,
-    maxTokens: estimatePass2MaxTokens(
-      pass1Features.length,
-      decision.arPlan.target,
-      generatorConfig.maxTokens,
-      pass2HardCap,
-    ),
+    maxTokens: generatorConfig.maxTokens,
     ...providerOpts,
   });
   const pass2Usage = pass2Result.usage;
@@ -1154,7 +1138,10 @@ export async function generateClarifyingQuestions(opts: {
   const contextCharBudget = decision.reasoningMode === 'deep'
     ? { attachment: 4000, wi: 4000, gold: 5000, similar: 5000 }
     : { attachment: 2800, wi: 2800, gold: 3200, similar: 3200 };
-  const clarifyMaxTokens = decision.reasoningMode === 'deep' ? 3200 : 2400;
+  // No explicit token cap — the response has a natural ceiling (a bounded JSON
+  // array of questions) and truncating it causes silent parse failures.
+  // callLlmJsonWithUsage defaults to 8192 when maxTokens is omitted.
+  const clarifyMaxTokens = undefined;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
@@ -1213,8 +1200,32 @@ export async function generateClarifyingQuestions(opts: {
 
   const filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
 
+  if (filteredQuestions.length === 0) {
+    // LLM returned nothing parseable — fall back to domain-aware template questions
+    // so the user always sees something to answer rather than an error.
+    console.warn('[generateClarifyingQuestions] LLM returned 0 valid questions; using fallback template.');
+    const fallback = buildFallbackClarifyingQuestions(requirement, questionPlan);
+    return {
+      questions: fallback,
+      tokenUsage: {
+        input: raw.usage.input,
+        output: raw.usage.output,
+        total: raw.usage.input + raw.usage.output,
+        byStage: { clarify: { input: raw.usage.input, output: raw.usage.output, total: raw.usage.input + raw.usage.output } },
+      },
+      ambiguityAssessment: {
+        level: questionPlan.clarity,
+        score: decision.ambiguityScore,
+        reasons: decision.ambiguityReasons.slice(0, 4),
+        questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
+        generatedQuestions: fallback.length,
+      },
+    };
+  }
+
   if (filteredQuestions.length < questionPlan.min) {
-    throw new Error(`Clarify generation produced only ${filteredQuestions.length} valid questions; minimum expected ${questionPlan.min}.`);
+    // Fewer questions than ideal but still usable — proceed rather than throwing.
+    console.warn(`[generateClarifyingQuestions] LLM returned ${filteredQuestions.length} questions; target min was ${questionPlan.min}. Proceeding.`);
   }
 
   const totalTokens = raw.usage.input + raw.usage.output;
@@ -1275,7 +1286,6 @@ export async function evaluateSufficiency(opts: {
       scopeMode: decision.scopeMode,
     }),
     userMessage,
-    maxTokens: 4096,
     ...getProviderOpts(opts.config),
   });
 
@@ -1358,7 +1368,6 @@ export async function refineSingleFeature(opts: {
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
     systemPrompt: system,
     userMessage,
-    maxTokens: 4096,
     ...getProviderOpts(config),
   });
 
@@ -1451,7 +1460,6 @@ export async function askQuestion(opts: {
     model: opts.config.generatorConfig.arModel,
     systemPrompt: opts.systemPrompt,
     userMessage,
-    maxTokens: 2048,
     ...getProviderOpts(opts.config),
   });
 

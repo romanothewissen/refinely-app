@@ -262,6 +262,65 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
   }
 });
 
+// ─── Dynamic model list ───────────────────────────────────────────────────────
+
+const MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+resolver.define('fetchAvailableModels', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  const provider: string = payload.provider;
+
+  // Return cached result if fresh
+  const cacheKey = `model_list_${provider}`;
+  try {
+    const cached = await entityGet(cacheKey) as { models: { id: string; label: string }[]; fetchedAt: number } | null;
+    if (cached && Date.now() - cached.fetchedAt < MODEL_CACHE_TTL_MS) {
+      return { success: true, models: cached.models, fromCache: true };
+    }
+  } catch { /* cache miss — continue */ }
+
+  const cfg = await getConfig();
+  const gc = cfg.generatorConfig || {};
+
+  try {
+    let models: { id: string; label: string }[] = [];
+
+    if (provider === 'openai') {
+      const apiKey = gc.openaiApiKey?.trim();
+      if (!apiKey) return { success: false, error: 'OpenAI API key not configured yet.' };
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) return { success: false, error: `OpenAI API returned ${res.status}` };
+      const data = await res.json() as { data: { id: string; object: string }[] };
+      models = (data.data || [])
+        .filter((m) => m.object === 'model' && /^(gpt-|o[0-9]|chatgpt-)/.test(m.id))
+        .sort((a, b) => a.id < b.id ? 1 : -1)
+        .map((m) => ({ id: m.id, label: m.id }));
+
+    } else if (provider === 'gemini') {
+      const apiKey = gc.geminiApiKey?.trim();
+      if (!apiKey) return { success: false, error: 'Gemini API key not configured yet.' };
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`);
+      if (!res.ok) return { success: false, error: `Gemini API returned ${res.status}` };
+      const data = await res.json() as { models: { name: string; displayName: string; supportedGenerationMethods?: string[] }[] };
+      models = (data.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && m.name.includes('gemini'))
+        .map((m) => ({ id: m.name.replace('models/', ''), label: m.displayName || m.name.replace('models/', '') }))
+        .sort((a, b) => a.id < b.id ? 1 : -1);
+
+    } else {
+      return { success: false, error: `Dynamic model list not available for provider: ${provider}` };
+    }
+
+    await entitySet(cacheKey, { models, fetchedAt: Date.now() });
+    return { success: true, models, fromCache: false };
+  } catch (err) {
+    const message = String((err as { message?: unknown })?.message ?? err ?? 'Unknown error');
+    return { success: false, error: message };
+  }
+});
+
 // ─── Generation (queue dispatch) ─────────────────────────────────────────────
 
 resolver.define('startGeneration', async ({ payload, context }) => {
@@ -1054,6 +1113,18 @@ resolver.define('getIssueSession', async ({ payload, context }) => {
 resolver.define('setIssueSession', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   await entitySet(KEYS.userIssueSession(accountId, payload.issueKey), payload.sessionId);
+  return { success: true };
+});
+
+resolver.define('getSidebarWidth', async ({ context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const width = await entityGet<number>(KEYS.userSidebarWidth(accountId));
+  return { success: true, width: width ?? null };
+});
+
+resolver.define('setSidebarWidth', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  await entitySet(KEYS.userSidebarWidth(accountId), Number(payload.width));
   return { success: true };
 });
 

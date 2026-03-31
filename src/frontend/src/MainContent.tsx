@@ -412,14 +412,24 @@ export function MainContent({
   const generationStageProgress = !isGenerating
     ? 100
     : hasFeatures
-      ? 72
-      : /queu|prepar/i.test(generationProgressText)
-        ? 12
-        : /decompos/i.test(generationProgressText)
-          ? 36
-          : /acceptance|drafted|expanding/i.test(generationProgressText)
-            ? 72
-            : 24;
+      ? 88
+      : /acceptance requirement|drafting ar|pass 2/i.test(generationProgressText)
+        ? 75
+        : /decompos|planning feature|pass 1/i.test(generationProgressText)
+          ? 45
+          : /context loaded|curated|related stor|work instruction/i.test(generationProgressText)
+            ? 28
+          : /loading context|initializ/i.test(generationProgressText)
+            ? 18
+            : /queu|prepar|preparing/i.test(generationProgressText)
+              ? 8
+              : /drafting.*question|question_gen/i.test(generationProgressText)
+                ? 60
+                : /loading.*context|contextual signal/i.test(generationProgressText)
+                  ? 25
+                  : /assess|preflight/i.test(generationProgressText)
+                    ? 12
+                    : 10;
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [showTokenDetails, setShowTokenDetails] = useState(false);
   const [isContextModalOpen, setIsContextModalOpen] = useState(false);
@@ -1048,7 +1058,7 @@ export function MainContent({
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header */}
       <motion.header
-        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm"
+        className="relative shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -1118,22 +1128,24 @@ export function MainContent({
         </div>
 
         {isGenerating && (
-          <div className="mt-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/70 px-3.5 py-2.5 flex items-start gap-2.5">
-            <div className="dot-bounce text-[var(--rf-brand)] mt-0.5 shrink-0"><span /><span /><span /></div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-wider">
+          <div className="mt-3 flex items-center gap-2.5">
+            <div className="dot-bounce text-[var(--rf-brand)] shrink-0"><span /><span /><span /></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-wider leading-none">
                 {loadingTitle || 'Working'}
               </p>
-              <p className="text-sm text-[var(--rf-text-secondary)] leading-snug">
+              <p className="text-[13px] text-[var(--rf-text-secondary)] leading-snug mt-0.5 truncate">
                 {progress || 'Preparing your request…'}
               </p>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/80 border border-[var(--rf-border)]">
-                <div
-                  className="h-full rounded-full bg-[var(--rf-brand)] transition-[width] duration-500 ease-out"
-                  style={{ width: `${generationStageProgress}%` }}
-                />
-              </div>
             </div>
+          </div>
+        )}
+        {isGenerating && (
+          <div className="absolute bottom-0 left-0 right-0 h-[3px] overflow-hidden">
+            <div
+              className="h-full bg-[var(--rf-brand)] transition-[width] duration-700 ease-out"
+              style={{ width: `${generationStageProgress}%` }}
+            />
           </div>
         )}
 

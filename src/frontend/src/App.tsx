@@ -147,7 +147,8 @@ function getDefaultSidebarWidth(viewportWidth?: number): number {
 
   if (!width || width <= 0) return 420;
   if (width <= 720) return Math.max(300, width - 48);
-  return Math.min(Math.max(Math.round(width * 0.38), 360), 520);
+  // Default to 50% of window as requested, but clamp it to reasonable max/min
+  return Math.min(Math.max(Math.round(width * 0.5), 360), width * 0.7);
 }
 
 export default function App() {
@@ -198,6 +199,12 @@ export default function App() {
     isResizing.current = false;
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', endResizing);
+    
+    // Persist the new width to Forge Storage
+    const latestWidth = sidebarWidthRef.current;
+    if (latestWidth) {
+      api.setSidebarWidth(latestWidth).catch(err => console.error('Failed to save sidebar width', err));
+    }
   };
 
   const startResizing = (e: React.MouseEvent) => {
@@ -224,6 +231,9 @@ export default function App() {
       ]) as any[];
 
       const generation = generationRes?.progress;
+      const clarify = clarifyRes?.result;
+
+      // A completed generation with features is always safe to restore.
       if (generation?.type === 'complete' && generation?.payload?.features?.length) {
         setFeatures(generation.payload.features);
         setGenerationContext(generation.payload.generationContext ?? null);
@@ -234,18 +244,11 @@ export default function App() {
         return true;
       }
 
-      if (generation?.type === 'progress') {
-        if (generation?.payload?.features?.length) {
-          setFeatures(generation.payload.features);
-        }
-        setPendingClarifySessionId(null);
-        setPendingSessionId(sid);
-        setIsWorking(true);
-        setIsGenerationStarted(true);
-        return true;
-      }
-
-      const clarify = clarifyRes?.result;
+      // An active or newly-queued clarify session must take priority over any
+      // stale generation progress still sitting in storage from a previous run.
+      // Without this check, accountId loading after the user clicks Generate
+      // would re-trigger this effect, find old gen_progress, and clobber the
+      // live clarify session before questions ever reach the frontend.
       if (clarify?.type === 'complete' && Array.isArray(clarify.questions) && clarify.questions.length > 0) {
         setClarifyQuestions(clarify.questions);
         setClarifyContext((clarify.contextMeta as ClarifyContextMeta | undefined) ?? null);
@@ -262,6 +265,17 @@ export default function App() {
         setPendingClarifySessionId(sid);
         setIsWorking(true);
         setIsGenerationStarted(false);
+        return true;
+      }
+
+      if (generation?.type === 'progress') {
+        if (generation?.payload?.features?.length) {
+          setFeatures(generation.payload.features);
+        }
+        setPendingClarifySessionId(null);
+        setPendingSessionId(sid);
+        setIsWorking(true);
+        setIsGenerationStarted(true);
         return true;
       }
     } catch (error) {
@@ -320,6 +334,16 @@ export default function App() {
           const lastRes = await api.getLastSession() as any;
           if (lastRes?.sessionId) setSessionId(lastRes.sessionId);
         } catch {}
+      }
+
+      // Load saved sidebar width
+      try {
+        const widthRes = await api.getSidebarWidth() as any;
+        if (widthRes?.success && typeof widthRes.width === 'number') {
+          setSidebarWidth(widthRes.width);
+        }
+      } catch (e) {
+        console.warn('Failed to load sidebar width', e);
       }
     }).catch(err => console.error('Context error', err));
   }, []); // eslint-disable-line
@@ -538,6 +562,8 @@ export default function App() {
   // Helpers to avoid stale closures in effects
   const requirementRef = useRef(requirement);
   requirementRef.current = requirement;
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
   const discoveryAnswersRef = useRef<any[]>([]);
