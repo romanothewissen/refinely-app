@@ -334,27 +334,10 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
           : Promise.resolve([]),
       ]);
 
-      const goldExamplesText = formatGoldExamplesText(goldItems, 6, 900, 900);
-      const similarStoriesText = formatSimilarStoriesText(similarStories, 8);
-
-      try {
-        plannerDecision = await Promise.race([
-          buildPlannerDecision({
-            requirement: maskedRequirement.text,
-            attachmentText: maskedAttachment.text,
-            wiContextText: wiContext.text,
-            goldExamplesText,
-            similarStoriesText,
-            config,
-            reasoningMode,
-            outputMode,
-            policy: config.aiExecutionPolicy,
-          }),
-          throwAfterTimeout(retrievalStrategy.plannerDeadlineMs, 'context-aware planner assessment'),
-        ]);
-      } catch (plannerErr) {
-        console.warn('[clarify-queue] Context-aware planner timed out, keeping quick decision:', plannerErr);
-      }
+      // Keep the fast preflight decision as the single planner step on the
+      // critical path. The question generator already receives the retrieved
+      // context, so a second planner LLM call adds latency and another point
+      // of failure without materially improving the downstream output.
     }
 
     let questions: Awaited<ReturnType<typeof generateClarifyingQuestions>>['questions'] = [];

@@ -124,8 +124,16 @@ function shouldFallbackToGemini(err: unknown): boolean {
 function mapModelForGemini(model: string): string {
   if (model.startsWith('gemini-')) return model;
   if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
-  // Reasonable default for the Claude-first config in this app.
-  return 'gemini-2.5-flash';
+  const lower = model.toLowerCase();
+
+  // Preserve "fast vs deep" intent when Forge/provider routing falls through to
+  // Gemini. The previous implementation sent every non-Gemini model to Flash,
+  // which made deep generation paths far weaker than intended.
+  if (/(haiku|mini|flash)/i.test(lower)) return 'gemini-2.5-flash';
+  if (/(opus|pro|gpt-4\.5|gpt-4o(?!-mini)|o1|o3|deep)/i.test(lower)) return 'gemini-2.5-pro';
+  if (/(sonnet|gpt-4o-mini)/i.test(lower)) return 'gemini-2.5-flash';
+
+  return 'gemini-2.5-pro';
 }
 
 async function callGemini(opts: {

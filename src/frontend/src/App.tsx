@@ -538,7 +538,21 @@ export default function App() {
         }).catch(err => {
           console.error('Failed to persist discovery round', err);
         });
-        if (sufficiency && sufficiency.shouldContinueDiscovery && Array.isArray(sufficiency.questions) && sufficiency.questions.length > 0) {
+        const allowAnotherDiscoveryRound =
+          currentRoundNumber < Math.min(effectiveAiPolicy.maxDeepDiscoveryRounds, 2);
+        const hasMeaningfulCoverageGap =
+          (sufficiency?.overallScore ?? 100) < 60 ||
+          (Array.isArray(sufficiency?.missingCritical) && sufficiency.missingCritical.length >= 2);
+        const hasMeaningfulFollowUp =
+          Array.isArray(sufficiency?.questions) && sufficiency.questions.length >= 2;
+
+        if (
+          sufficiency &&
+          allowAnotherDiscoveryRound &&
+          sufficiency.shouldContinueDiscovery &&
+          hasMeaningfulCoverageGap &&
+          hasMeaningfulFollowUp
+        ) {
           console.log('[App] continuing discovery', {
             round: currentRoundNumber,
             score: sufficiency.overallScore,

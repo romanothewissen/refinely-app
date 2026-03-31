@@ -218,6 +218,118 @@ export function buildFallbackClarifyingQuestions(
   return buildFallbackQuestions(requirement, desiredQuestionCount);
 }
 
+function throwAfterTimeout(timeoutMs: number, label: string): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(`${label} exceeded ${timeoutMs}ms`)), timeoutMs);
+  });
+}
+
+function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasoningMode']) {
+  if (reasoningMode === 'deep') {
+    return {
+      pass1Ms: 55000,
+      pass2Ms: 85000,
+      groupingMs: 30000,
+    };
+  }
+
+  return {
+    pass1Ms: 35000,
+    pass2Ms: 55000,
+    groupingMs: 20000,
+  };
+}
+
+function buildFallbackFeatureSummary(requirement: string): string {
+  const cleaned = requirement
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^as a .*?,\s*i need to\s+/i, '')
+    .replace(/^to\s+/i, '');
+  const firstSentence = cleaned.split(/[.!?]/)[0]?.trim() ?? '';
+  const summary = firstSentence
+    .replace(/\bso that\b[\s\S]*$/i, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 10)
+    .join(' ');
+
+  if (!summary) return 'Deliver requested business outcome';
+  return summary.charAt(0).toUpperCase() + summary.slice(1);
+}
+
+function inferFallbackRole(requirement: string, config: TenantConfig): string {
+  const explicitRole = requirement.match(/\bAs a[n]?\s+([^,]+),/i)?.[1]?.trim();
+  if (explicitRole) return explicitRole;
+  if (config.domainRoles?.length) return config.domainRoles[0];
+  return 'business user';
+}
+
+function buildFallbackDescription(requirement: string, config: TenantConfig): string {
+  const role = inferFallbackRole(requirement, config);
+  const benefitMatch = requirement.match(/\bso that\s+([^.!?]+)/i)?.[1]?.trim();
+  const benefit = benefitMatch || 'the intended business outcome is delivered consistently';
+  return `As a ${role}, I need to complete the requested business process with the right rules and decisions so that ${benefit}`;
+}
+
+function fallbackStoryPoints(complexity: FeaturePlan['complexity']): number {
+  if (complexity === 'high') return 8;
+  if (complexity === 'medium') return 5;
+  return 3;
+}
+
+function buildFallbackFeatureCandidates(
+  requirement: string,
+  config: TenantConfig,
+  decision: PlannerDecision,
+): RawFeature[] {
+  return [
+    {
+      summary: buildFallbackFeatureSummary(requirement),
+      description: buildFallbackDescription(requirement, config),
+      acceptance_requirements: [],
+      suggested_story_points: fallbackStoryPoints(decision.featurePlan.complexity),
+      process_code:
+        config.processTaxonomyEnabled && config.processTaxonomy.length
+          ? config.processTaxonomy[0].code
+          : undefined,
+    },
+  ];
+}
+
+function buildFallbackAcceptanceRequirements(arPlan: ArPlan): string[] {
+  const templates = [
+    'GIVEN a valid business case exists and the required information is available WHEN the requested business capability is initiated THEN the expected business outcome is delivered for the responsible role',
+    'GIVEN the request is subject to defined business rules or prioritization criteria WHEN the requested business capability evaluates the case THEN the resulting outcome follows those rules consistently',
+    'GIVEN the request cannot be completed under the current conditions or contains conflicting information WHEN the requested business capability is assessed THEN the case is clearly flagged for the appropriate follow-up action',
+    'GIVEN the outcome affects approvals, ownership, or downstream responsibilities WHEN the requested business capability reaches a decision THEN the correct business party receives the resulting responsibility',
+    'GIVEN the request depends on related business context or upstream activity WHEN the requested business capability processes the case THEN the outcome remains consistent with that connected business context',
+  ];
+
+  const target = Math.max(2, Math.min(arPlan.target, arPlan.depth === 'thorough' ? 4 : 3));
+  return templates.slice(0, target);
+}
+
+function ensureAcceptanceRequirements(
+  rawFeatures: RawFeature[],
+  arPlan: ArPlan,
+): RawFeature[] {
+  const minimumRequired = Math.max(2, Math.min(arPlan.min, arPlan.depth === 'thorough' ? 4 : 3));
+
+  return rawFeatures.map((feature) => {
+    const existing = getRawAcceptanceArray(feature);
+    if (existing.length >= minimumRequired) {
+      return feature;
+    }
+
+    const fallbacks = buildFallbackAcceptanceRequirements(arPlan).slice(0, minimumRequired - existing.length);
+    return {
+      ...feature,
+      acceptance_requirements: [...existing, ...fallbacks],
+    };
+  });
+}
+
 function clampFeatureCandidates(rawFeatures: RawFeature[], featurePlan: FeaturePlan): RawFeature[] {
   if (featurePlan.max <= 0) return [];
   return rawFeatures.slice(0, featurePlan.max);
@@ -525,6 +637,7 @@ export async function generateFeatures(opts: {
   const providerOpts = {
     ...getProviderOpts(config),
   } as const;
+  const stageTimeouts = resolveGenerationStageTimeouts(decision.reasoningMode);
 
   // Build user message — include all context
   const contextSections: string[] = [`REQUIREMENT: ${requirement}`];
@@ -563,15 +676,27 @@ export async function generateFeatures(opts: {
     featurePlan: decision.featurePlan,
   });
 
-  const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(generatorConfig.decompositionModel, config.tier),
-    systemPrompt: pass1System,
-    userMessage,
-    maxTokens: generatorConfig.maxTokens,
-    ...providerOpts,
-  });
-
-  const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
+  let pass1Usage = { input: 0, output: 0 };
+  let pass1Features = buildFallbackFeatureCandidates(requirement, config, decision);
+  try {
+    const pass1Result = await Promise.race([
+      callLlmJsonWithUsage<{ features: RawFeature[] }>({
+        model: getTierModel(generatorConfig.decompositionModel, config.tier),
+        systemPrompt: pass1System,
+        userMessage,
+        maxTokens: generatorConfig.maxTokens,
+        ...providerOpts,
+      }),
+      throwAfterTimeout(stageTimeouts.pass1Ms, 'Feature decomposition'),
+    ]);
+    pass1Usage = pass1Result.usage;
+    const candidates = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
+    pass1Features = candidates.length
+      ? candidates
+      : buildFallbackFeatureCandidates(requirement, config, decision);
+  } catch (error) {
+    console.warn('[story-generator] Decomposition failed; using fallback feature seed:', error);
+  }
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
@@ -587,46 +712,70 @@ export async function generateFeatures(opts: {
   // Pass 2 often needs more output tokens than pass 1 (many GWT strings per feature).
   const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 16384);
 
-  const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(generatorConfig.arModel, config.tier),
-    systemPrompt: pass2System,
-    userMessage: pass2UserMessage,
-    maxTokens: pass2MaxTokens,
-    ...providerOpts,
-  });
+  let pass2Usage = { input: 0, output: 0 };
+  let rawFeatures = pass1Features;
+  try {
+    const pass2Result = await Promise.race([
+      callLlmJsonWithUsage<{ features: RawFeature[] }>({
+        model: getTierModel(generatorConfig.arModel, config.tier),
+        systemPrompt: pass2System,
+        userMessage: pass2UserMessage,
+        maxTokens: pass2MaxTokens,
+        ...providerOpts,
+      }),
+      throwAfterTimeout(stageTimeouts.pass2Ms, 'Acceptance requirement generation'),
+    ]);
+    pass2Usage = pass2Result.usage;
+    rawFeatures = pass2Result.data.features?.length
+      ? mergeFeatures(pass1Features, pass2Result.data.features)
+      : pass1Features;
+  } catch (error) {
+    console.warn('[story-generator] Acceptance requirement generation failed; using fallback acceptance requirements:', error);
+    rawFeatures = pass1Features;
+  }
 
-  // Merge: use pass2 ARs; fall back to pass1 if pass2 missing or empty
-  const rawFeatures = pass2Result.data.features?.length
-    ? mergeFeatures(pass1Features, pass2Result.data.features)
-    : pass1Features;
-
-  const features = rawFeatures.map(normaliseFeature);
+  rawFeatures = ensureAcceptanceRequirements(rawFeatures, decision.arPlan);
+  let features = rawFeatures.map(normaliseFeature);
+  if (!features.length) {
+    features = ensureAcceptanceRequirements(
+      buildFallbackFeatureCandidates(requirement, config, decision),
+      decision.arPlan,
+    ).map(normaliseFeature);
+  }
   const violations = validateFeatures(features, config);
   let initiativeGroups: InitiativeGroup[] | undefined;
   let initiativeGroupingUsage: TokenUsageSummary | undefined;
 
   if (decision.useHierarchy && features.length > 0) {
-    const groupingResult = await buildInitiativeGroups({
-      requirement,
-      features,
-      config,
-    });
-    initiativeGroups = groupingResult.initiativeGroups;
-    initiativeGroupingUsage = groupingResult.tokenUsage;
+    try {
+      const groupingResult = await Promise.race([
+        buildInitiativeGroups({
+          requirement,
+          features,
+          config,
+        }),
+        throwAfterTimeout(stageTimeouts.groupingMs, 'Initiative grouping'),
+      ]);
+      initiativeGroups = groupingResult.initiativeGroups;
+      initiativeGroupingUsage = groupingResult.tokenUsage;
+    } catch (error) {
+      console.warn('[story-generator] Initiative grouping timed out; using fallback grouping:', error);
+      initiativeGroups = buildFallbackInitiativeGroups(features);
+    }
   }
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Result.usage.input + pass2Result.usage.input + (initiativeGroupingUsage?.input ?? 0),
-    output: pass1Result.usage.output + pass2Result.usage.output + (initiativeGroupingUsage?.output ?? 0),
+    input: pass1Usage.input + pass2Usage.input + (initiativeGroupingUsage?.input ?? 0),
+    output: pass1Usage.output + pass2Usage.output + (initiativeGroupingUsage?.output ?? 0),
     total:
-      pass1Result.usage.input +
-      pass1Result.usage.output +
-      pass2Result.usage.input +
-      pass2Result.usage.output +
+      pass1Usage.input +
+      pass1Usage.output +
+      pass2Usage.input +
+      pass2Usage.output +
       (initiativeGroupingUsage?.total ?? 0),
     byStage: {
-      decomposition: toStageUsage(pass1Result.usage),
-      acceptanceRequirements: toStageUsage(pass2Result.usage),
+      decomposition: toStageUsage(pass1Usage),
+      acceptanceRequirements: toStageUsage(pass2Usage),
       ...(initiativeGroupingUsage?.byStage ?? {}),
     },
   };

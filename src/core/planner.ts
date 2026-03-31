@@ -518,41 +518,44 @@ function buildQuestionPlan(
     'simpleAskMaxQuestions' | 'deepModeRoundTarget' | 'enterpriseMaxQuestionsPerRound'
   >,
 ): ClarifyQuestionPlan {
-  const lightMax = clamp(policy?.simpleAskMaxQuestions ?? 2, 1, 4);
+  // Keep a meaningful discovery floor whenever we decide clarification is needed.
+  // The previous 1-2 question light path felt too shallow and often produced
+  // brittle follow-up coverage.
+  const lightMax = clamp(Math.max(policy?.simpleAskMaxQuestions ?? 2, 3), 3, 5);
   const standardMax = clamp(
-    Math.max(lightMax + 2, policy?.deepModeRoundTarget ?? 5),
-    3,
+    Math.max(lightMax + 2, policy?.deepModeRoundTarget ?? 5, 5),
+    5,
     8,
   );
   const deepMax = clamp(
-    Math.max(standardMax, policy?.enterpriseMaxQuestionsPerRound ?? 7),
-    4,
+    Math.max(standardMax + 1, policy?.enterpriseMaxQuestionsPerRound ?? 7, 6),
+    6,
     12,
   );
 
   if (clarificationMode === 'none') return { min: 0, max: 0, target: 0, clarity };
   if (clarificationMode === 'light') {
     return {
-      min: clarity === 'clear' ? 0 : 1,
+      min: 2,
       max: lightMax,
-      target: clarity === 'clear' ? Math.min(1, lightMax) : Math.min(Math.max(2, lightMax), lightMax),
+      target: clarity === 'clear' ? Math.min(2, lightMax) : Math.min(3, lightMax),
       clarity,
     };
   }
   if (clarificationMode === 'standard') {
     return {
-      min: Math.min(2, standardMax),
+      min: Math.min(3, standardMax),
       max: standardMax,
-      target: clarity === 'clear' ? Math.min(3, standardMax) : Math.min(4, standardMax),
+      target: clarity === 'clear' ? Math.min(4, standardMax) : Math.min(5, standardMax),
       clarity,
     };
   }
   return {
-    min: Math.min(4, deepMax),
+    min: Math.min(5, deepMax),
     max: deepMax,
     target: clarity === 'vague'
       ? deepMax
-      : Math.min(Math.max(5, policy?.deepModeRoundTarget ?? 5), deepMax),
+      : Math.min(Math.max(6, policy?.deepModeRoundTarget ?? 6), deepMax),
     clarity,
   };
 }

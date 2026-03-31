@@ -208,6 +208,9 @@ CLARITY ASSESSMENT:
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
 - Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
 - Prefer fewer, higher-value questions over exhaustive questionnaires.
+- Each question should uncover a concrete business rule, decision, dependency, exception, or success measure.
+- Avoid superficial confirmation questions, yes/no questions, or generic prompts that would produce short answers.
+- Prefer scenario-based wording that helps the user answer with useful detail in one response.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected
@@ -219,6 +222,7 @@ TASK: Generate targeted clarifying questions total, categorized into the areas b
 For each question, provide 2-3 realistic answer suggestions based on the domain.
 - Keep each suggestion concise (about 3-8 words).
 - Avoid long sentence-style suggestions.
+- Make the suggestions meaningfully distinct from each other so they help the user think through tradeoffs.
 
 Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
 }
