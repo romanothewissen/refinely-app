@@ -609,6 +609,15 @@ export default function App() {
     openSettings();
   };
 
+  const activeWorkingStatus =
+    isWorking && !isGenerating
+      ? (isGenerationStarted
+          ? 'Preparing generation engine…'
+          : isReviewingDiscovery
+            ? 'Reviewing discovery coverage…'
+            : clarifyProgress || 'Preparing discovery workflow…')
+      : progress;
+
   return (
     <div className="flex h-full w-full overflow-hidden text-[var(--rf-text)] font-sans bg-transparent">
       {/* Left Sidebar — animated & resizable */}
@@ -674,6 +683,7 @@ export default function App() {
               setOutputMode={setOutputMode}
               allowReasoningModeOverride={effectiveAiPolicy.allowReasoningModeOverride}
               allowOutputModeOverride={effectiveAiPolicy.allowOutputModeOverride}
+              workingStatus={activeWorkingStatus}
             />
               {/* Resize Handle */}
               {sidebarOpen && (
@@ -747,7 +757,7 @@ export default function App() {
                       ? 'Preparing generation engine...'
                         : isReviewingDiscovery
                           ? 'Reviewing discovery coverage...'
-                        : clarifyProgress || 'Discovery phase: Adaptive requirement analysis...')
+                        : clarifyProgress || 'Preparing discovery workflow...')
                   : progress
               }
               sidebarOpen={sidebarOpen}

@@ -39,6 +39,11 @@ interface PlannerAssessmentResult {
   reasons: string[];
 }
 
+const SCOPE_ORDER: ScopeMode[] = ['atomic', 'focused', 'standard', 'initiative'];
+const CLARITY_ORDER: Array<ClarifyQuestionPlan['clarity']> = ['clear', 'medium', 'vague'];
+const COMPLEXITY_ORDER: Array<FeaturePlan['complexity']> = ['low', 'medium', 'high'];
+const CLARIFICATION_ORDER: ClarificationMode[] = ['none', 'light', 'standard', 'deep'];
+
 function buildPlannerAssessmentPrompt(): string {
   return `You are a universal planning engine for turning a product request into the right discovery and backlog strategy.
 
@@ -156,7 +161,12 @@ function normaliseAssessment(
 export async function buildPlannerDecision(input: PlannerInput): Promise<PlannerDecision> {
   const heuristicDecision = buildHeuristicPlannerDecision(input);
   const config = input.config;
+  const reasoningMode = input.reasoningMode ?? heuristicDecision.reasoningMode;
   if (!config || !input.requirement?.trim()) {
+    return heuristicDecision;
+  }
+
+  if (reasoningMode === 'fast' && (input.clarifyAnswers?.length ?? 0) === 0) {
     return heuristicDecision;
   }
 
@@ -173,26 +183,54 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
       ).data,
       heuristicDecision,
     );
+    const conservativeClarity = CLARITY_ORDER[
+      Math.max(
+        CLARITY_ORDER.indexOf(heuristicDecision.questionPlan.clarity),
+        CLARITY_ORDER.indexOf(assessment.clarity),
+      )
+    ];
+    const conservativeComplexity = COMPLEXITY_ORDER[
+      Math.max(
+        COMPLEXITY_ORDER.indexOf(heuristicDecision.featurePlan.complexity),
+        COMPLEXITY_ORDER.indexOf(assessment.complexity),
+      )
+    ];
+    const conservativeClarificationMode = CLARIFICATION_ORDER[
+      Math.max(
+        CLARIFICATION_ORDER.indexOf(heuristicDecision.clarificationMode),
+        CLARIFICATION_ORDER.indexOf(assessment.clarificationMode),
+      )
+    ];
+    const conservativeScopeMode = SCOPE_ORDER[
+      Math.max(
+        SCOPE_ORDER.indexOf(heuristicDecision.scopeMode),
+        SCOPE_ORDER.indexOf(assessment.scopeMode),
+      )
+    ];
+
     const resolvedScopeMode =
       (input.outputMode ?? heuristicDecision.outputMode) === 'single'
         ? 'atomic'
-        : (input.outputMode ?? heuristicDecision.outputMode) === 'full_breakdown' && assessment.scopeMode === 'atomic'
+        : (input.outputMode ?? heuristicDecision.outputMode) === 'full_breakdown' && conservativeScopeMode === 'atomic'
           ? 'focused'
-          : assessment.scopeMode;
+          : conservativeScopeMode;
 
     const featurePlan = buildFeaturePlan(
       resolvedScopeMode,
-      assessment.complexity,
+      conservativeComplexity,
       input.outputMode ?? heuristicDecision.outputMode,
-      input.reasoningMode ?? heuristicDecision.reasoningMode,
+      reasoningMode,
     );
     const questionPlan = buildQuestionPlan(
-      assessment.clarificationMode,
-      assessment.clarity,
+      conservativeClarificationMode,
+      conservativeClarity,
       input.policy,
     );
-    const rationale = assessment.reasons.length ? [...assessment.reasons] : [...heuristicDecision.rationale];
-    if (resolvedScopeMode !== assessment.scopeMode) {
+    const rationale = Array.from(new Set([
+      ...heuristicDecision.rationale,
+      ...assessment.reasons,
+    ])).slice(0, 5);
+    if (resolvedScopeMode !== conservativeScopeMode) {
       rationale.push(
         (input.outputMode ?? heuristicDecision.outputMode) === 'single'
           ? 'Output override keeps the result to a single-feature scope.'
@@ -201,17 +239,20 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
     }
 
     return {
-      reasoningMode: input.reasoningMode ?? heuristicDecision.reasoningMode,
+      reasoningMode,
       outputMode: input.outputMode ?? heuristicDecision.outputMode,
       scopeMode: resolvedScopeMode,
-      clarificationMode: assessment.clarificationMode,
+      clarificationMode: conservativeClarificationMode,
       questionPlan,
       featurePlan,
-      arPlan: buildArPlan(resolvedScopeMode, assessment.complexity),
+      arPlan: buildArPlan(resolvedScopeMode, conservativeComplexity),
       useHierarchy: resolvedScopeMode === 'initiative',
-      confidence: assessment.confidence,
-      ambiguityScore: toAmbiguityScore(assessment.clarity),
-      ambiguityReasons: assessment.reasons.length ? assessment.reasons : heuristicDecision.ambiguityReasons,
+      confidence: Math.min(assessment.confidence, heuristicDecision.confidence),
+      ambiguityScore: Math.max(heuristicDecision.ambiguityScore, toAmbiguityScore(conservativeClarity)),
+      ambiguityReasons: Array.from(new Set([
+        ...heuristicDecision.ambiguityReasons,
+        ...assessment.reasons,
+      ])).slice(0, 5),
       rationale: rationale.slice(0, 5),
     };
   } catch (error) {
@@ -438,7 +479,7 @@ function pickClarificationMode(
   }
 
   if (scopeMode === 'focused') {
-    if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 3) return 'standard';
+    if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 2) return 'standard';
     return 'light';
   }
 
@@ -446,7 +487,7 @@ function pickClarificationMode(
     return reasoningMode === 'deep' || clarity !== 'clear' ? 'deep' : 'standard';
   }
 
-  if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 3) return 'deep';
+  if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 2) return 'deep';
   return 'standard';
 }
 

@@ -128,72 +128,76 @@ export async function handler(event: { body: ClarifyEvent }) {
       })),
     };
 
-    await upsertAiSessionInsight({
-      sessionId,
-      projectKey,
-      reasoningMode: plannerDecision.reasoningMode,
-      outputMode: plannerDecision.outputMode,
-      scopeMode: plannerDecision.scopeMode,
-      clarificationMode: plannerDecision.clarificationMode,
-      plannedFeatureTarget: plannerDecision.featurePlan.target,
-      plannedQuestionTarget: plannerDecision.questionPlan.target,
-      initialClarifyQuestionCount: questions.length,
-    });
-
-    await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext);
-    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
-      await saveTransparencyReport({
-        sessionId,
-        turnType: 'clarify',
-        actorAccountId: accountId,
-        provider: config.generatorConfig.provider,
-        model: config.generatorConfig.clarifyModel,
-        projectKey,
-        requirementExcerpt: maskedRequirement.text.slice(0, 240),
-        decisionSummary: [
-          `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.clarificationMode} discovery.`,
-          `Generated ${questions.length} clarifying questions for ${ambiguityAssessment.level} ambiguity input.`,
-          `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
-        ],
-        contextUsage: {
-          goldExamplesCount: goldItems.length,
-          similarStoriesCount: similarStories.length,
-          wiDocsCount: wiContext.docs.length,
-          ambiguityScore: ambiguityAssessment.score,
-          scopeMode: plannerDecision.scopeMode,
-          clarificationMode: plannerDecision.clarificationMode,
-        },
-        tokenUsage,
-        piiMasking: {
-          enabled: piiEnabled,
-          totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions,
-          byType: {
-            ...maskedRequirement.stats.byType,
-            ...maskedAttachment.stats.byType,
-          },
-        },
-      });
-    }
-    await appendComplianceAuditEvent({
-      actorAccountId: accountId,
-      category: 'runtime',
-      action: 'CLARIFY_WORKFLOW_EXECUTED',
-      details: {
-        sessionId,
-        projectKey,
-        model: config.generatorConfig.clarifyModel,
-        scopeMode: plannerDecision.scopeMode,
-        clarificationMode: plannerDecision.clarificationMode,
-      },
-      enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
-    });
-
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'complete',
       questions,
       contextMeta: clarifyContext,
       updatedAt: Date.now(),
     });
+
+    try {
+      await upsertAiSessionInsight({
+        sessionId,
+        projectKey,
+        reasoningMode: plannerDecision.reasoningMode,
+        outputMode: plannerDecision.outputMode,
+        scopeMode: plannerDecision.scopeMode,
+        clarificationMode: plannerDecision.clarificationMode,
+        plannedFeatureTarget: plannerDecision.featurePlan.target,
+        plannedQuestionTarget: plannerDecision.questionPlan.target,
+        initialClarifyQuestionCount: questions.length,
+      });
+
+      await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext);
+      if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+        await saveTransparencyReport({
+          sessionId,
+          turnType: 'clarify',
+          actorAccountId: accountId,
+          provider: config.generatorConfig.provider,
+          model: config.generatorConfig.clarifyModel,
+          projectKey,
+          requirementExcerpt: maskedRequirement.text.slice(0, 240),
+          decisionSummary: [
+            `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.clarificationMode} discovery.`,
+            `Generated ${questions.length} clarifying questions for ${ambiguityAssessment.level} ambiguity input.`,
+            `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
+          ],
+          contextUsage: {
+            goldExamplesCount: goldItems.length,
+            similarStoriesCount: similarStories.length,
+            wiDocsCount: wiContext.docs.length,
+            ambiguityScore: ambiguityAssessment.score,
+            scopeMode: plannerDecision.scopeMode,
+            clarificationMode: plannerDecision.clarificationMode,
+          },
+          tokenUsage,
+          piiMasking: {
+            enabled: piiEnabled,
+            totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions,
+            byType: {
+              ...maskedRequirement.stats.byType,
+              ...maskedAttachment.stats.byType,
+            },
+          },
+        });
+      }
+      await appendComplianceAuditEvent({
+        actorAccountId: accountId,
+        category: 'runtime',
+        action: 'CLARIFY_WORKFLOW_EXECUTED',
+        details: {
+          sessionId,
+          projectKey,
+          model: config.generatorConfig.clarifyModel,
+          scopeMode: plannerDecision.scopeMode,
+          clarificationMode: plannerDecision.clarificationMode,
+        },
+        enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+      });
+    } catch (tailErr) {
+      console.warn('[clarify-queue] Non-blocking post-processing failed:', tailErr);
+    }
   } catch (err) {
     console.error('[clarify-queue] Error:', err);
     await entitySet(KEYS.clarifyProgress(sessionId), {

@@ -177,113 +177,113 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     result.generationContext = generationContext;
 
-    await upsertAiSessionInsight({
-      sessionId,
-      projectKey,
-      reasoningMode: plannerDecision.reasoningMode,
-      outputMode: plannerDecision.outputMode,
-      scopeMode: plannerDecision.scopeMode,
-      clarificationMode: plannerDecision.clarificationMode,
-      plannedFeatureTarget: plannerDecision.featurePlan.target,
-      plannedQuestionTarget: plannerDecision.questionPlan.target,
-      latestCoverageScore: latestDiscoveryCoverage?.overallScore ?? null,
-      latestMissingCriticalCount: latestDiscoveryCoverage?.missingCritical?.length ?? 0,
-      discoveryRounds: Array.isArray(latestDiscoveryTranscript) ? latestDiscoveryTranscript.length : undefined,
-      totalDiscoveryQuestions: Array.isArray(latestDiscoveryTranscript)
-        ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.questions) ? round.questions.length : 0), 0)
-        : undefined,
-      totalDiscoveryAnswers: Array.isArray(latestDiscoveryTranscript)
-        ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.answers) ? round.answers.length : 0), 0)
-        : undefined,
-      generatedFeatureCount: result.features.length,
-      initiativeGroupCount: result.initiativeGroups?.length ?? 0,
-    });
-
-    // Record usage
-    await recordGeneration();
-
-    // Save to conversation history
-    await saveConversationTurn(
-      sessionId,
-      accountId,
-      maskedRequirement.text,
-      result.features,
-      similarStories,
-      config.generatorConfig.arModel,
-      generationContext,
-      result.tokenUsage,
-    );
-
-    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
-      await saveTransparencyReport({
-        sessionId,
-        turnType: 'generate',
-        actorAccountId: accountId,
-        provider: config.generatorConfig.provider,
-        model: config.generatorConfig.arModel,
-        projectKey,
-        requirementExcerpt: maskedRequirement.text.slice(0, 240),
-        decisionSummary: [
-          `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.featurePlan.target} target feature(s).`,
-          `Generated features using ${goldItems.length} curated examples and ${similarStories.length} backlog references.`,
-          `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
-          result.initiativeGroups?.length
-            ? `Organized the output into ${result.initiativeGroups.length} initiative group(s) for easier backlog review.`
-            : 'Returned a flat feature list because no initiative grouping was needed.',
-          'Acceptance requirements were produced in a dedicated second pass for consistency.',
-        ],
-        contextUsage: {
-          goldExamplesCount: goldItems.length,
-          similarStoriesCount: similarStories.length,
-          wiDocsCount: wiContext.docs.length,
-          domainRolesCount: config.domainRoles?.length ?? 0,
-          scopeMode: plannerDecision.scopeMode,
-          featureTarget: plannerDecision.featurePlan.target,
-          initiativeGroupCount: result.initiativeGroups?.length ?? 0,
-        },
-        tokenUsage: result.tokenUsage,
-        piiMasking: {
-          enabled: piiEnabled,
-          totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions + maskedAnswers.stats.totalRedactions,
-          byType: {
-            ...maskedRequirement.stats.byType,
-            ...maskedAttachment.stats.byType,
-            ...maskedAnswers.stats.byType,
-          },
-        },
-      });
-    }
-    await appendComplianceAuditEvent({
-      actorAccountId: accountId,
-      category: 'runtime',
-      action: 'GENERATION_WORKFLOW_EXECUTED',
-      details: {
-        sessionId,
-        projectKey,
-        model: config.generatorConfig.arModel,
-        scopeMode: plannerDecision.scopeMode,
-        featureTarget: plannerDecision.featurePlan.target,
-        initiativeGroupCount: result.initiativeGroups?.length ?? 0,
-      },
-      enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
-    });
-
-    // Generate session title (non-critical; should not fail the generation run)
-    try {
-      const title = await generateSessionTitle(maskedRequirement.text, config);
-      await updateConversationTitle(sessionId, accountId, title);
-    } catch (titleErr) {
-      console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
-      await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
-    }
-
-    // Write completed state to storage (frontend polls for this)
     await entitySet(KEYS.generationProgress(sessionId), {
       type: 'complete',
       sessionId,
       payload: result,
       updatedAt: Date.now(),
     } as RealtimeEvent);
+
+    try {
+      await upsertAiSessionInsight({
+        sessionId,
+        projectKey,
+        reasoningMode: plannerDecision.reasoningMode,
+        outputMode: plannerDecision.outputMode,
+        scopeMode: plannerDecision.scopeMode,
+        clarificationMode: plannerDecision.clarificationMode,
+        plannedFeatureTarget: plannerDecision.featurePlan.target,
+        plannedQuestionTarget: plannerDecision.questionPlan.target,
+        latestCoverageScore: latestDiscoveryCoverage?.overallScore ?? null,
+        latestMissingCriticalCount: latestDiscoveryCoverage?.missingCritical?.length ?? 0,
+        discoveryRounds: Array.isArray(latestDiscoveryTranscript) ? latestDiscoveryTranscript.length : undefined,
+        totalDiscoveryQuestions: Array.isArray(latestDiscoveryTranscript)
+          ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.questions) ? round.questions.length : 0), 0)
+          : undefined,
+        totalDiscoveryAnswers: Array.isArray(latestDiscoveryTranscript)
+          ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.answers) ? round.answers.length : 0), 0)
+          : undefined,
+        generatedFeatureCount: result.features.length,
+        initiativeGroupCount: result.initiativeGroups?.length ?? 0,
+      });
+
+      await recordGeneration();
+
+      await saveConversationTurn(
+        sessionId,
+        accountId,
+        maskedRequirement.text,
+        result.features,
+        similarStories,
+        config.generatorConfig.arModel,
+        generationContext,
+        result.tokenUsage,
+      );
+
+      if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+        await saveTransparencyReport({
+          sessionId,
+          turnType: 'generate',
+          actorAccountId: accountId,
+          provider: config.generatorConfig.provider,
+          model: config.generatorConfig.arModel,
+          projectKey,
+          requirementExcerpt: maskedRequirement.text.slice(0, 240),
+          decisionSummary: [
+            `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.featurePlan.target} target feature(s).`,
+            `Generated features using ${goldItems.length} curated examples and ${similarStories.length} backlog references.`,
+            `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
+            result.initiativeGroups?.length
+              ? `Organized the output into ${result.initiativeGroups.length} initiative group(s) for easier backlog review.`
+              : 'Returned a flat feature list because no initiative grouping was needed.',
+            'Acceptance requirements were produced in a dedicated second pass for consistency.',
+          ],
+          contextUsage: {
+            goldExamplesCount: goldItems.length,
+            similarStoriesCount: similarStories.length,
+            wiDocsCount: wiContext.docs.length,
+            domainRolesCount: config.domainRoles?.length ?? 0,
+            scopeMode: plannerDecision.scopeMode,
+            featureTarget: plannerDecision.featurePlan.target,
+            initiativeGroupCount: result.initiativeGroups?.length ?? 0,
+          },
+          tokenUsage: result.tokenUsage,
+          piiMasking: {
+            enabled: piiEnabled,
+            totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions + maskedAnswers.stats.totalRedactions,
+            byType: {
+              ...maskedRequirement.stats.byType,
+              ...maskedAttachment.stats.byType,
+              ...maskedAnswers.stats.byType,
+            },
+          },
+        });
+      }
+      await appendComplianceAuditEvent({
+        actorAccountId: accountId,
+        category: 'runtime',
+        action: 'GENERATION_WORKFLOW_EXECUTED',
+        details: {
+          sessionId,
+          projectKey,
+          model: config.generatorConfig.arModel,
+          scopeMode: plannerDecision.scopeMode,
+          featureTarget: plannerDecision.featurePlan.target,
+          initiativeGroupCount: result.initiativeGroups?.length ?? 0,
+        },
+        enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+      });
+
+      try {
+        const title = await generateSessionTitle(maskedRequirement.text, config);
+        await updateConversationTitle(sessionId, accountId, title);
+      } catch (titleErr) {
+        console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
+        await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
+      }
+    } catch (tailErr) {
+      console.warn('[generation-queue] Non-blocking post-processing failed:', tailErr);
+    }
 
   } catch (err) {
     console.error('[generation-queue] Error:', err);

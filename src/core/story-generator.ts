@@ -690,9 +690,13 @@ export async function generateClarifyingQuestions(opts: {
   let totalInputTokens = raw.usage.input;
   let totalOutputTokens = raw.usage.output;
   let filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
+  const desiredQuestionCount = Math.min(
+    questionPlan.max,
+    Math.max(questionPlan.min, questionPlan.target),
+  );
 
-  if (filteredQuestions.length < questionPlan.min) {
-    const needed = questionPlan.min - filteredQuestions.length;
+  if (filteredQuestions.length < desiredQuestionCount) {
+    const needed = desiredQuestionCount - filteredQuestions.length;
     const topUpUserMessage = [
       contextParts.join('\n\n'),
       `ALREADY GENERATED QUESTIONS (do not repeat):\n${filteredQuestions.map((q, idx) => `${idx + 1}. ${q.question}`).join('\n') || '(none)'}`,
@@ -715,8 +719,8 @@ export async function generateClarifyingQuestions(opts: {
     ]).slice(0, questionPlan.max);
   }
 
-  if (filteredQuestions.length < questionPlan.min) {
-    const needed = questionPlan.min - filteredQuestions.length;
+  if (filteredQuestions.length < desiredQuestionCount) {
+    const needed = desiredQuestionCount - filteredQuestions.length;
     filteredQuestions = dedupeQuestions([
       ...filteredQuestions,
       ...buildFallbackQuestions(requirement, needed),

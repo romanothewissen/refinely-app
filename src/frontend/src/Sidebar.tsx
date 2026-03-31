@@ -34,6 +34,7 @@ interface SidebarProps {
   setOutputMode: (mode: 'single' | 'auto' | 'full_breakdown') => void;
   allowReasoningModeOverride: boolean;
   allowOutputModeOverride: boolean;
+  workingStatus?: string;
 }
 
 const fadeUpVariant = {
@@ -76,6 +77,7 @@ export function Sidebar({
   setOutputMode,
   allowReasoningModeOverride,
   allowOutputModeOverride,
+  workingStatus,
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
@@ -381,6 +383,17 @@ export function Sidebar({
               </>
             )}
           </motion.button>
+          {isWorking && (
+            <div className="rf-sidebar-card px-3.5 py-3 text-xs text-[var(--rf-text-secondary)]">
+              <div className="flex items-center gap-2">
+                <div className="dot-bounce text-[var(--rf-brand)]"><span /><span /><span /></div>
+                <span className="font-semibold text-[var(--rf-text)]">Current stage</span>
+              </div>
+              <p className="mt-2 leading-relaxed text-[var(--rf-text-secondary)]">
+                {workingStatus || 'Preparing your request…'}
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <motion.button
