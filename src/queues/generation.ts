@@ -52,7 +52,8 @@ function resolveRelevantGoldSources(
 
 async function getLatestDiscoveryCoverage(sessionId: string, accountId: string) {
   const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(KEYS.userConversations(accountId, sessionId));
-  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const rawTurns = conversation?.turns;
+  const turns = Array.isArray(rawTurns) ? rawTurns : [];
   const latestClarifyTurn = [...turns]
     .reverse()
     .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryCoverage);
@@ -61,7 +62,8 @@ async function getLatestDiscoveryCoverage(sessionId: string, accountId: string) 
 
 async function getLatestDiscoveryTranscript(sessionId: string, accountId: string) {
   const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(KEYS.userConversations(accountId, sessionId));
-  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const rawTurns = conversation?.turns;
+  const turns = Array.isArray(rawTurns) ? rawTurns : [];
   const latestClarifyTurn = [...turns]
     .reverse()
     .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryTranscript?.length);
