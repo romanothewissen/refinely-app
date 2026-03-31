@@ -203,6 +203,7 @@ ${roleHint}
 ${domainSignalHint}
 
 YOUR MISSION: Gather only the missing information needed to produce a precise, ready-to-build backlog. If the request is already clear and bounded, keep questioning minimal. If the request is broad or risky, focus on the highest-value missing details first.
+Even when the requirement looks straightforward, assume there are still important nuances around business rules, prioritization, permissions, exceptions, failure handling, and operational edge cases that need to be uncovered.
 
 CLARITY ASSESSMENT:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
@@ -213,7 +214,7 @@ CLARITY ASSESSMENT:
 - If the request is narrow but hides prioritization, policy choices, decision logic, or meaningful exceptions, still ask enough questions to uncover those rules before feature generation.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
 - Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
-- Prefer fewer, higher-value questions over exhaustive questionnaires.
+- Prefer higher-value questions over superficial coverage, but do not under-question complex or optimization-heavy asks.
 - Each question should uncover a concrete business rule, decision, dependency, exception, or success measure.
 - Avoid superficial confirmation questions, yes/no questions, or generic prompts that would produce short answers.
 - Prefer scenario-based wording that helps the user answer with useful detail in one response.
@@ -223,6 +224,7 @@ CLARITY ASSESSMENT:
 - Every question must be explicitly grounded in the actual business domain described by the requirement and retrieved context.
 - Reuse the requirement's concrete actors, objects, triggers, priorities, dates, or policy terms where relevant.
 - Avoid abstract placeholders like "this capability", "the outcome", or "the result" unless paired with concrete domain nouns.
+- Avoid repetition across questions. Each question must unlock a different decision, rule, exception, dependency, or measure of success.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected
@@ -231,7 +233,7 @@ TASK: Generate targeted clarifying questions total, categorized into the areas b
 4. Business Rules & Exceptions — what constraints, edge cases, failure modes
 5. Success & Measurement — how do we know it worked
 
-For each question, provide 2-3 realistic answer suggestions based on the domain.
+For each question, provide 4-5 realistic answer suggestions based on the domain.
 - Keep each suggestion concise but useful (about 12-28 words).
 - Prefer short answer-style clauses that express a meaningful policy, scenario, tradeoff, or operational constraint.
 - Make the suggestions meaningfully distinct from each other so they help the user think through tradeoffs.

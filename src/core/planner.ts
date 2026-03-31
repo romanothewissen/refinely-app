@@ -402,7 +402,14 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     complexityScore >= 4 ? 'high' : complexityScore >= 2 ? 'medium' : 'low';
 
   const featurePlan = buildFeaturePlan(scopeMode, complexity, outputMode, reasoningMode);
-  const clarificationMode = pickClarificationMode(scopeMode, clarity, reasoningMode, complexityScore);
+  let clarificationMode = pickClarificationMode(scopeMode, clarity, reasoningMode, complexityScore);
+  const requiresExpandedDiscovery =
+    hasAllocationPlanningSignal ||
+    (hasOptimizationSignal && hasMultiFactorDecisionSignal) ||
+    (hasSchedulingSignal && complexityScore >= 3);
+  if (requiresExpandedDiscovery && clarificationMode !== 'deep') {
+    clarificationMode = 'deep';
+  }
   const questionPlan = buildQuestionPlan(clarificationMode, clarity, policy);
   const arPlan = buildArPlan(scopeMode, complexity);
 

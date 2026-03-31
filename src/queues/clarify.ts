@@ -11,7 +11,7 @@
 import { AsyncEvent } from '@forge/events';
 import { ClarifyContextMeta, ClarifyEvent, PlannerDecision, TokenUsageSummary } from '../types';
 import { buildHeuristicPlannerDecision, buildPlannerDecision } from '../core/planner';
-import { buildFallbackClarifyingQuestions, generateClarifyingQuestions } from '../core/story-generator';
+import { generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
@@ -381,16 +381,15 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
         tokenUsage = clarifyResult.tokenUsage;
         ambiguityAssessment = clarifyResult.ambiguityAssessment;
       } catch (clarifyErr) {
-        console.warn('[clarify-queue] Clarify generation timed out, using fallback questions:', clarifyErr);
-        await sendClarifyProgress(sessionId, runId, 'Model response was slow, so using a fast fallback question set…', {
-          phase: 'fallback_questions',
+        console.error('[clarify-queue] Clarify generation failed:', clarifyErr);
+        await sendClarifyProgress(sessionId, runId, 'Question generation failed before a strong question set was produced.', {
+          phase: 'question_generation_failed',
           retryCount,
           retryReason,
           jobId: event.jobId,
           eventId: event.eventId,
         });
-        questions = buildFallbackClarifyingQuestions(maskedRequirement.text, plannerDecision.questionPlan);
-        ambiguityAssessment = buildAmbiguityAssessment(plannerDecision, questions.length);
+        throw clarifyErr;
       }
     }
 

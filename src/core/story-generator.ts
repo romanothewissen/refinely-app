@@ -1221,11 +1221,6 @@ export async function generateClarifyingQuestions(opts: {
     : isLightClarifyPass
       ? 1400
       : 2600;
-  const clarifyTopUpMaxTokens = decision.reasoningMode === 'deep'
-    ? 2200
-    : isLightClarifyPass
-      ? 900
-      : 1400;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
@@ -1274,19 +1269,23 @@ export async function generateClarifyingQuestions(opts: {
     questionPlan.max,
     Math.max(questionPlan.min, questionPlan.target),
   );
+  const minimumAcceptableQuestionCount = Math.min(questionPlan.min, desiredQuestionCount);
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let filteredQuestions: ClarifyQuestion[] = [];
   const clarifyAttemptTimeoutMs = decision.reasoningMode === 'deep' ? 18000 : 10000;
-  const clarifyTopUpTimeoutMs = decision.reasoningMode === 'deep' ? 12000 : 5000;
-  const clarifyAttemptModels = Array.from(new Set([
-    getTierModel(config.generatorConfig.clarifyModel, config.tier),
-    ...(decision.reasoningMode === 'deep'
-      ? []
-      : [
-          getTierModel(config.generatorConfig.deepProfileModel, config.tier),
-        ]),
-  ]));
+  const prefersDeepClarifyModel =
+    decision.clarificationMode === 'deep' ||
+    decision.scopeMode === 'standard' ||
+    decision.scopeMode === 'initiative' ||
+    desiredQuestionCount >= 8;
+  const primaryClarifyModel = prefersDeepClarifyModel
+    ? getTierModel(config.generatorConfig.deepProfileModel, config.tier)
+    : getTierModel(config.generatorConfig.clarifyModel, config.tier);
+  const secondaryClarifyModel = prefersDeepClarifyModel
+    ? getTierModel(config.generatorConfig.clarifyModel, config.tier)
+    : getTierModel(config.generatorConfig.deepProfileModel, config.tier);
+  const clarifyAttemptModels = Array.from(new Set([primaryClarifyModel, secondaryClarifyModel]));
 
   let clarifyAttemptError: unknown = null;
   for (const model of clarifyAttemptModels) {
@@ -1308,7 +1307,7 @@ export async function generateClarifyingQuestions(opts: {
         dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
       );
 
-      if (filteredQuestions.length >= Math.min(questionPlan.min, desiredQuestionCount)) {
+      if (filteredQuestions.length >= minimumAcceptableQuestionCount) {
         break;
       }
     } catch (error) {
@@ -1317,59 +1316,9 @@ export async function generateClarifyingQuestions(opts: {
     }
   }
 
-  if (!filteredQuestions.length) {
-    console.warn('[story-generator] Clarify question generation exhausted model attempts; using fallback questions:', clarifyAttemptError);
-    filteredQuestions = sortClarifyingQuestions(
-      dedupeQuestions(buildFallbackQuestions(requirement, desiredQuestionCount)).slice(0, questionPlan.max),
-    );
-  }
-
-  const shouldRunTopUpLlm =
-    decision.reasoningMode === 'deep' &&
-    filteredQuestions.length < desiredQuestionCount &&
-    questionPlan.target >= 6;
-
-  if (filteredQuestions.length < desiredQuestionCount && shouldRunTopUpLlm) {
-    const needed = desiredQuestionCount - filteredQuestions.length;
-    const topUpUserMessage = [
-      contextParts.join('\n\n'),
-      `ALREADY GENERATED QUESTIONS (do not repeat):\n${filteredQuestions.map((q, idx) => `${idx + 1}. ${q.question}`).join('\n') || '(none)'}`,
-      `Generate exactly ${needed} additional clarifying questions that are non-overlapping with the existing list.`,
-      'Return JSON array only in this shape: [{"category":"...","question":"...","suggestions":["..."]}]',
-    ].join('\n\n---\n\n');
-
-    try {
-      const topUpRaw = await Promise.race([
-        callLlmJsonWithUsage<ClarifyQuestion[]>({
-          model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-          systemPrompt: system,
-          userMessage: topUpUserMessage,
-          maxTokens: clarifyTopUpMaxTokens,
-          ...getProviderOpts(config),
-        }),
-        throwAfterTimeout(clarifyTopUpTimeoutMs, 'Clarify question top-up'),
-      ]);
-      totalInputTokens += topUpRaw.usage.input;
-      totalOutputTokens += topUpRaw.usage.output;
-
-      filteredQuestions = sortClarifyingQuestions(
-        dedupeQuestions([
-          ...filteredQuestions,
-          ...parseQuestionCandidates(topUpRaw.data),
-        ]).slice(0, questionPlan.max),
-      );
-    } catch (error) {
-      console.warn('[story-generator] Clarify question top-up failed; keeping initial question set and filling heuristically:', error);
-    }
-  }
-
-  if (filteredQuestions.length < desiredQuestionCount) {
-    const needed = desiredQuestionCount - filteredQuestions.length;
-    filteredQuestions = sortClarifyingQuestions(
-      dedupeQuestions([
-        ...filteredQuestions,
-        ...buildFallbackQuestions(requirement, needed),
-      ]).slice(0, questionPlan.max),
+  if (filteredQuestions.length < minimumAcceptableQuestionCount) {
+    throw new Error(
+      `Clarify generation produced only ${filteredQuestions.length} valid questions; minimum expected ${minimumAcceptableQuestionCount}. ${clarifyAttemptError instanceof Error ? clarifyAttemptError.message : ''}`.trim(),
     );
   }
 
