@@ -325,6 +325,58 @@ interface FeatureSection {
   items: Array<{ feature: Feature; index: number }>;
 }
 
+function GeneratingSkeleton({ loadingTitle, progress }: { loadingTitle?: string; progress?: string }) {
+  return (
+    <motion.div
+      className="w-full max-w-4xl mx-auto px-6 py-10 space-y-6 flex-1 flex flex-col items-center justify-center min-h-[400px]"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <motion.div
+        className="flex flex-col items-center gap-4 mb-6"
+        initial={{ opacity: 0, scale: 0.97 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div className="w-14 h-14 rounded-2xl bg-white border border-[var(--rf-border)] shadow-sm flex items-center justify-center relative overflow-hidden">
+          <Sparkles className="w-6 h-6 text-[var(--rf-brand)] relative z-10" />
+          <div className="absolute inset-0 bg-[var(--rf-brand-muted)]/50 animate-pulse" />
+        </div>
+        <div className="text-center">
+          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">{loadingTitle || 'Crafting features'}</h2>
+          <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1 max-w-xl">{progress || 'Processing your request…'}</p>
+        </div>
+        <div className="dot-bounce text-[var(--rf-brand)] mt-2"><span /><span /><span /></div>
+      </motion.div>
+
+      <div className="w-full space-y-4">
+        {[1, 2, 3].map(i => (
+          <motion.div
+            key={i}
+            className="w-full bg-white rounded-2xl border border-[var(--rf-border)] overflow-hidden"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.12, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="flex">
+              <div className="w-2 shrink-0 bg-[var(--rf-surface-soft)]" />
+              <div className="flex-1 p-6 space-y-4">
+                <div className="shimmer h-5 w-2/5 rounded-md" />
+                <div className="shimmer h-4 w-full rounded-md" />
+                <div className="shimmer h-4 w-4/5 rounded-md" />
+                <div className="space-y-2 pt-3">
+                  {[1, 2, 3].map(j => <div key={j} className="shimmer h-3 rounded-md" style={{ width: `${60 + j * 10}%` }} />)}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle,
@@ -701,57 +753,6 @@ export function MainContent({
       return next;
     });
   };
-
-  // ── Generating skeleton ──────────────────────────────────────────────────
-  const GeneratingSkeleton = () => (
-    <motion.div
-      className="w-full max-w-4xl mx-auto px-6 py-10 space-y-6 flex-1 flex flex-col items-center justify-center min-h-[400px]"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-    >
-      <motion.div
-        className="flex flex-col items-center gap-4 mb-6"
-        initial={{ opacity: 0, scale: 0.97 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-      >
-        <div className="w-14 h-14 rounded-2xl bg-white border border-[var(--rf-border)] shadow-sm flex items-center justify-center relative overflow-hidden">
-          <Sparkles className="w-6 h-6 text-[var(--rf-brand)] relative z-10" />
-          <div className="absolute inset-0 bg-[var(--rf-brand-muted)]/50 animate-pulse" />
-        </div>
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">{loadingTitle || 'Crafting features'}</h2>
-          <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1">{progress || 'Processing your request\u2026'}</p>
-        </div>
-        <div className="dot-bounce text-[var(--rf-brand)] mt-2"><span /><span /><span /></div>
-      </motion.div>
-
-      <div className="w-full space-y-4">
-        {[1, 2, 3].map(i => (
-          <motion.div
-            key={i}
-            className="w-full bg-white rounded-2xl border border-[var(--rf-border)] overflow-hidden"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.12, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <div className="flex">
-              <div className="w-2 shrink-0 bg-[var(--rf-surface-soft)]" />
-              <div className="flex-1 p-6 space-y-4">
-                <div className="shimmer h-5 w-2/5 rounded-md" />
-                <div className="shimmer h-4 w-full rounded-md" />
-                <div className="shimmer h-4 w-4/5 rounded-md" />
-                <div className="space-y-2 pt-3">
-                  {[1,2,3].map(j => <div key={j} className="shimmer h-3 rounded-md" style={{ width: `${60 + j * 10}%` }} />)}
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-    </motion.div>
-  );
 
   const renderFeatureCard = (feature: Feature, idx: number, animationIndex: number) => {
     const isEditing = editingIdx === idx;
@@ -1180,7 +1181,7 @@ export function MainContent({
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         {isGenerating ? (
-          <GeneratingSkeleton />
+          <GeneratingSkeleton loadingTitle={loadingTitle} progress={progress} />
         ) : !hasFeatures ? (
           <motion.div
             className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"
