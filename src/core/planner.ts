@@ -166,7 +166,12 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
     return heuristicDecision;
   }
 
-  if (reasoningMode === 'fast') {
+  const shouldUsePlannerLlm = reasoningMode === 'deep'
+    || heuristicDecision.confidence < 0.68
+    || heuristicDecision.ambiguityScore >= 4
+    || heuristicDecision.scopeMode === 'initiative';
+
+  if (!shouldUsePlannerLlm) {
     return heuristicDecision;
   }
 
@@ -177,7 +182,7 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
           model: getTierModel(config.generatorConfig.evaluateModel, config.tier),
           systemPrompt: buildPlannerAssessmentPrompt(),
           userMessage: buildPlannerAssessmentUserMessage(input),
-          maxTokens: 1200,
+          maxTokens: reasoningMode === 'deep' ? 1200 : 700,
           ...getPlannerProviderOpts(config),
         })
       ).data,

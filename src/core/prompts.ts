@@ -216,7 +216,9 @@ TASK: Generate targeted clarifying questions total, categorized into the areas b
 4. Business Rules & Exceptions — what constraints, edge cases, failure modes
 5. Success & Measurement — how do we know it worked
 
-For each question, provide 4-5 realistic, specific answer suggestions based on the domain.
+For each question, provide 2-3 realistic answer suggestions based on the domain.
+- Keep each suggestion concise (about 3-8 words).
+- Avoid long sentence-style suggestions.
 
 Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
 }

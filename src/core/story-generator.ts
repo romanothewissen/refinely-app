@@ -125,6 +125,13 @@ function normaliseQuestionKey(question: string): string {
     .trim();
 }
 
+function compactSuggestion(raw: unknown): string {
+  const text = String(raw ?? '').trim().replace(/\s+/g, ' ');
+  if (!text) return '';
+  const words = text.split(' ');
+  return words.slice(0, 10).join(' ');
+}
+
 function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
   let candidates: any[] = [];
   if (Array.isArray(rawData)) {
@@ -141,7 +148,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
       category: String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow',
       question: String((x as any).question ?? '').trim(),
       suggestions: Array.isArray((x as any).suggestions)
-        ? (x as any).suggestions.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 5)
+        ? (x as any).suggestions.map((s: unknown) => compactSuggestion(s)).filter(Boolean).slice(0, 3)
         : [],
     }))
     .filter(q => q.question.length > 0);
@@ -164,27 +171,27 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
     {
       category: 'Roles & Personas',
       question: 'Which role is responsible for accepting, reordering, or overriding the proposed schedule?',
-      suggestions: ['Dispatcher', 'Team lead', 'Field service engineer (FSE)', 'No one; fully automatic'],
+      suggestions: ['Dispatcher', 'Team lead', 'Fully automatic'],
     },
     {
       category: 'Functional Flow',
       question: 'How should criticality and due date be weighted when they conflict for two jobs?',
-      suggestions: ['Criticality always wins', 'Due date always wins', 'Configurable weighted score', 'Tie-break by travel time'],
+      suggestions: ['Criticality wins', 'Due date wins', 'Configurable weighted score'],
     },
     {
       category: 'Business Rules & Exceptions',
       question: 'What should happen when the optimal slot violates skill, parts, or availability constraints?',
-      suggestions: ['Skip and pick next best', 'Escalate for manual assignment', 'Allow temporary override', 'Flag as unschedulable'],
+      suggestions: ['Pick next best slot', 'Escalate for manual assignment', 'Flag unschedulable'],
     },
     {
       category: 'Trigger & Context',
       question: 'When should schedules be generated or recalculated?',
-      suggestions: ['Nightly batch', 'On each new request', 'On demand by dispatcher', 'On request update events'],
+      suggestions: ['Nightly batch', 'On new request', 'On-demand by dispatcher'],
     },
     {
       category: 'Success & Measurement',
       question: 'What defines an optimal schedule outcome for this process?',
-      suggestions: ['Max SLA compliance', 'Highest critical jobs completed first', 'Balanced utilization', 'Minimum overdue work'],
+      suggestions: ['Max SLA compliance', 'Critical jobs completed first', 'Balanced utilization'],
     },
   ];
 
@@ -636,12 +643,6 @@ export async function generateClarifyingQuestions(opts: {
   plannerDecision?: PlannerDecision;
 }): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
   const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config, plannerDecision } = opts;
-
-  const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
-  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
-  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
-  if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, 5000)}`);
-  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
   const decision = plannerDecision ?? await buildPlannerDecision({
     requirement,
     attachmentText,
@@ -654,6 +655,17 @@ export async function generateClarifyingQuestions(opts: {
     policy: config.aiExecutionPolicy,
   });
   const questionPlan = decision.questionPlan;
+  const contextCharBudget = decision.reasoningMode === 'deep'
+    ? { attachment: 4000, wi: 4000, gold: 5000, similar: 5000 }
+    : { attachment: 2200, wi: 2200, gold: 3000, similar: 3000 };
+  const clarifyMaxTokens = decision.reasoningMode === 'deep' ? 2600 : 1800;
+  const clarifyTopUpMaxTokens = decision.reasoningMode === 'deep' ? 1400 : 900;
+
+  const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
+  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
+  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, contextCharBudget.wi)}`);
+  if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, contextCharBudget.gold)}`);
+  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, contextCharBudget.similar)}`);
 
   if (questionPlan.max <= 0) {
     return {
@@ -684,6 +696,7 @@ export async function generateClarifyingQuestions(opts: {
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
+    maxTokens: clarifyMaxTokens,
     ...getProviderOpts(config),
   });
 
@@ -708,6 +721,7 @@ export async function generateClarifyingQuestions(opts: {
       model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
       systemPrompt: system,
       userMessage: topUpUserMessage,
+      maxTokens: clarifyTopUpMaxTokens,
       ...getProviderOpts(config),
     });
     totalInputTokens += topUpRaw.usage.input;
