@@ -422,9 +422,9 @@ export default function App() {
     }
 
     try {
-      console.debug('[App] startClarify', { sessionId, projectKey, reasoningMode, outputMode });
+      console.log('[App] startClarify', { sessionId, projectKey, reasoningMode, outputMode });
       const res = await api.startClarify(sessionId, requirement, undefined, projectKey, reasoningMode, outputMode) as any;
-      console.debug('[App] startClarify result', res);
+      console.log('[App] startClarify result', res);
       if (res.success) {
         setPendingClarifySessionId(sessionId);
       } else {

@@ -40,6 +40,7 @@ export function useClarifyRealtime(
 
   useEffect(() => {
     if (!sessionId) return;
+    console.log('[useClarifyRealtime] polling started', { sessionId });
     startedAtRef.current = Date.now();
     lastSuccessfulPollAtRef.current = startedAtRef.current;
     let cancelled = false;
@@ -118,7 +119,7 @@ export function useClarifyRealtime(
           });
           if (debugSignature !== lastDebugSignatureRef.current) {
             lastDebugSignatureRef.current = debugSignature;
-            console.debug('[useClarifyRealtime] progress', {
+            console.log('[useClarifyRealtime] progress', {
               sessionId,
               type: result?.type ?? 'pending',
               message: result?.message ?? 'Preparing discovery workflow…',
