@@ -352,10 +352,16 @@ export function MainContent({
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [showTokenDetails, setShowTokenDetails] = useState(false);
   const [isContextModalOpen, setIsContextModalOpen] = useState(false);
+  const [showInlineReferences, setShowInlineReferences] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
   const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
   const initiativeGroups = generationContext?.initiativeGroups ?? [];
+  const hasInlineReferences = Boolean(
+    generationContext?.referencedGoldExamples?.length ||
+    generationContext?.referencedWiDocs?.length ||
+    generationContext?.referencedSimilarStories?.length,
+  );
   const featureIndexById = new Map(features.map((feature, index) => [feature.id, index] as const));
   const featureGroupTitleById = new Map<string, string>();
   const groupedFeatureIds = new Set<string>();
@@ -1247,34 +1253,47 @@ export function MainContent({
                   >
                     View full details
                   </button>
+                  {hasInlineReferences && (
+                    <button
+                      type="button"
+                      onClick={() => setShowInlineReferences(prev => !prev)}
+                      className="text-xs font-bold text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] transition-colors"
+                    >
+                      {showInlineReferences ? 'Hide references' : 'Show references'}
+                    </button>
+                  )}
                 </div>
-                {generationContext.referencedGoldExamples?.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {generationContext.referencedGoldExamples.map((example, i) => (
-                      <span
-                        key={`${example.source}-${example.key}-${i}`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-blue-100"
-                        title={example.summary}
-                      >
-                        {example.source}: {example.key}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-4 pt-4 border-t border-[var(--rf-border)]/60">
-                  <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <div className="font-bold text-[var(--rf-text)]">
-                      Work instructions ({generationContext.wiDocsCount ?? 0}):
-                    </div>
-                    {generationContext.referencedWiDocs?.length ? (
-                      <div className="font-medium text-[var(--rf-text-secondary)]">
-                        {generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')}
+                {showInlineReferences && (
+                  <>
+                    {generationContext.referencedGoldExamples?.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {generationContext.referencedGoldExamples.map((example, i) => (
+                          <span
+                            key={`${example.source}-${example.key}-${i}`}
+                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-blue-100"
+                            title={example.summary}
+                          >
+                            {example.source}: {example.key}
+                          </span>
+                        ))}
                       </div>
-                    ) : (
-                      <div className="text-[var(--rf-text-tertiary)] italic">No matching docs found</div>
                     )}
-                  </div>
-                </div>
+                    <div className="mt-4 pt-4 border-t border-[var(--rf-border)]/60">
+                      <div className="flex flex-wrap items-center gap-3 text-xs">
+                        <div className="font-bold text-[var(--rf-text)]">
+                          Work instructions ({generationContext.wiDocsCount ?? 0}):
+                        </div>
+                        {generationContext.referencedWiDocs?.length ? (
+                          <div className="font-medium text-[var(--rf-text-secondary)]">
+                            {generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')}
+                          </div>
+                        ) : (
+                          <div className="text-[var(--rf-text-tertiary)] italic">No matching docs found</div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </motion.div>
             )}
 
