@@ -87,7 +87,7 @@ export async function retrieveWiContext(
   if (!scopedChunks.length) return { text: '', docs: [] };
 
   const scored = bm25Score(query, scopedChunks);
-  const top = scored.slice(0, topK);
+  const top = selectDiverseTopChunks(scored, topK, 2);
   const parts = top.map(c => c.text);
   const referencedDocIds = new Set(top.map(c => c.docId));
   const docs = cache.docs.filter(doc => referencedDocIds.has(doc.docId) && docMatchesProject(doc, projectKey));
@@ -95,6 +95,29 @@ export async function retrieveWiContext(
   let result = parts.join('\n\n---\n\n');
   if (result.length > maxChars) result = result.slice(0, maxChars);
   return { text: result, docs };
+}
+
+function selectDiverseTopChunks(chunks: WiChunk[], topK: number, maxPerDoc: number): WiChunk[] {
+  const selected: WiChunk[] = [];
+  const perDocCount = new Map<string, number>();
+
+  for (const chunk of chunks) {
+    if (selected.length >= topK) break;
+    const count = perDocCount.get(chunk.docId) ?? 0;
+    if (count >= maxPerDoc) continue;
+    selected.push(chunk);
+    perDocCount.set(chunk.docId, count + 1);
+  }
+
+  if (selected.length < topK) {
+    for (const chunk of chunks) {
+      if (selected.length >= topK) break;
+      if (selected.includes(chunk)) continue;
+      selected.push(chunk);
+    }
+  }
+
+  return selected;
 }
 
 // ─── Document management ──────────────────────────────────────────────────────

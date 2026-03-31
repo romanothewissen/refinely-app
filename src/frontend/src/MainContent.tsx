@@ -15,6 +15,11 @@ function formatPlannerLabel(value: string): string {
     .join(' ');
 }
 
+function formatMatchPercent(score: number): number {
+  if (!Number.isFinite(score)) return 0;
+  return Math.round(Math.max(0, Math.min(score, 1)) * 100);
+}
+
 function wordDiff(oldText: string, newText: string): DiffToken[] {
   const oldWords = (oldText || '').split(/\b/);
   const newWords = (newText || '').split(/\b/);
@@ -1594,7 +1599,7 @@ function GenerationContextModal({
                         )}
                         {typeof story.relevanceScore === 'number' && (
                           <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
-                            Match {Math.round(story.relevanceScore * 100)}%
+                            Match {formatMatchPercent(story.relevanceScore)}%
                           </span>
                         )}
                       </div>

@@ -51,6 +51,9 @@ interface SearchJqlResponse {
 
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_INDEX_ITEMS = 1000;
+const MAX_SIMILAR_STORIES = 12;
+const MIN_STORY_RELEVANCE = 0.26;
+const MIN_BASELINE_STORIES = 4;
 
 export async function findSimilarStories(
   requirement: string,
@@ -73,8 +76,13 @@ export async function findSimilarStories(
       ranked = await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
     }
 
+    const normalized = normalizeSimilarityScores(ranked);
+    const selected = normalized
+      .filter((item, index) => item.relevanceScore >= MIN_STORY_RELEVANCE || index < MIN_BASELINE_STORIES)
+      .slice(0, MAX_SIMILAR_STORIES);
+
     const baseUrl = await getJiraBaseUrl();
-    return ranked.slice(0, 12).map(item => ({
+    return selected.map(item => ({
       key: item.key,
       summary: item.summary,
       description: item.description,
@@ -397,6 +405,28 @@ function lexicalRetrieve(requirement: string, docs: BacklogDoc[]): Array<Backlog
   return scored
     .filter(doc => doc.relevanceScore > 0)
     .sort((a, b) => b.relevanceScore - a.relevanceScore);
+}
+
+function normalizeSimilarityScores(
+  items: Array<BacklogDoc & { relevanceScore: number }>,
+): Array<BacklogDoc & { relevanceScore: number }> {
+  if (!items.length) return [];
+
+  const rawScores = items.map(item => Number.isFinite(item.relevanceScore) ? item.relevanceScore : 0);
+  const maxRaw = Math.max(...rawScores, 0);
+  const minRaw = Math.min(...rawScores, 0);
+  const range = maxRaw - minRaw;
+
+  return items.map((item, index) => {
+    const raw = Number.isFinite(item.relevanceScore) ? item.relevanceScore : 0;
+    const scoreNorm = range > 0 ? (raw - minRaw) / range : 1;
+    const rankNorm = items.length > 1 ? 1 - index / (items.length - 1) : 1;
+    const blended = (scoreNorm * 0.65) + (rankNorm * 0.35);
+    return {
+      ...item,
+      relevanceScore: Math.max(0, Math.min(1, blended)),
+    };
+  });
 }
 
 function buildQueryTerms(requirement: string): string[] {
