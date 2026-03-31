@@ -448,6 +448,14 @@ export default function App() {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
     
+    console.log('[App] startGeneration', {
+      sessionId: sid,
+      requirementLength: req.length,
+      clarifyAnswerCount: clarifyAnswers.length,
+      projectKey,
+      reasoningMode,
+      outputMode,
+    });
     setIsWorking(true);
     setIsGenerationStarted(true);
     setIsReviewingDiscovery(false);
@@ -470,6 +478,8 @@ export default function App() {
         reasoningMode,
         outputMode,
       }) as any;
+
+      console.log('[App] startGeneration result', res);
 
       if (res?.success) {
         // resolver confirmed OK — polling is already running
@@ -529,6 +539,12 @@ export default function App() {
           console.error('Failed to persist discovery round', err);
         });
         if (sufficiency && sufficiency.shouldContinueDiscovery && Array.isArray(sufficiency.questions) && sufficiency.questions.length > 0) {
+          console.log('[App] continuing discovery', {
+            round: currentRoundNumber,
+            score: sufficiency.overallScore,
+            questionCount: sufficiency.questions.length,
+            summary: sufficiency.summary,
+          });
           setClarifyQuestions(sufficiency.questions);
           setDiscoveryRound(prev => prev + 1);
           setIsReviewingDiscovery(false);
@@ -559,6 +575,11 @@ export default function App() {
       });
     }
 
+    console.log('[App] moving from discovery to generation', {
+      round: currentRoundNumber,
+      accumulatedAnswers: nextAnswers.length,
+      reasoningMode,
+    });
     await startGeneration(requirementRef.current, nextAnswers);
   };
 

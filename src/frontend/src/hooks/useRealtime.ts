@@ -220,6 +220,7 @@ export function useGenerationRealtime(
   useEffect(() => {
     if (!sessionId) return;
 
+    console.log('[useGenerationRealtime] polling started', { sessionId });
     setIsGenerating(true);
     setProgress('Queuing generation…');
     startedAtRef.current = Date.now();
@@ -260,6 +261,12 @@ export function useGenerationRealtime(
         }
 
         if (event.type === 'progress') {
+          console.log('[useGenerationRealtime] progress', {
+            sessionId,
+            message: event.message,
+            pass: event.pass,
+            updatedAt: event.updatedAt,
+          });
           const updatedAt = event.updatedAt ?? 0;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > STALE_PROGRESS_MS) {
