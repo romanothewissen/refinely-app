@@ -57,23 +57,29 @@ export function buildPlannerDecision(input: PlannerInput): PlannerDecision {
     .test(requirement);
   const hasEnterpriseSignals = /(enterprise|compliance|audit|governance|permission matrix|cross[- ]functional|cross[- ]team|multiple teams|multiple departments|multiple business units|regional|global rollout)/i
     .test(requirement);
-  const hasIntakeWorkflowSignals = /(email|inbox|mailbox|shared tech support inbox|shared inbox|support inbox|case creation|create cases?|ticket creation|triage|routing|auto(?:matic|mated)?|determine if|product issue|general inquiry|classif(?:y|ication)|categori[sz](?:e|ation))/i
+  const hasAutomationSignal = /\b(auto(?:matic|mated|matically)?|trigger(?:ed)?|upon|when)\b/i
     .test(requirement);
-
-  const roleMentions = (requirement.match(/\b(admin|manager|planner|dispatcher|technician|fse|field service engineer|agent|user|customer|analyst|qa|developer|operator|finance|legal|sales|support|tss|tech support|technical support)\b/ig) ?? []).length;
+  const hasSourceSignal = /\b(from|via|received|submitted|captured|generated from|created from|incoming)\b/i
+    .test(requirement);
+  const hasDecisionSignal = /\b(if|whether|based on|determine|identify|distinguish|decide)\b/i
+    .test(requirement);
+  const hasAlternativeOutcomeSignal = /\bor\b/i.test(requirement);
+  const actorMentions =
+    (requirement.match(/\bas\s+a[n]?\s+[a-z0-9][a-z0-9\s/-]{0,40}/ig) ?? []).length +
+    (requirement.match(/\b(?:used by|visible to|assigned to|owned by)\s+[a-z0-9][a-z0-9\s/-]{0,40}/ig) ?? []).length;
   const exceptionMentions = (requirement.match(/\b(error|fail|exception|edge|invalid|conflict|fallback|retry|permission|duplicate|rollback|escalat)\w*\b/ig) ?? []).length;
-  const integrationMentions = (requirement.match(/\b(integration|sync|import|export|api|feed|data source|vendor|jira|sap|salesforce|erp|crm|billing|email|inbox|mailbox|outlook|gmail)\b/ig) ?? []).length;
-  const classificationMentions = (requirement.match(/\b(classif(?:y|ication)|categori[sz](?:e|ation)|triage|routing|route|determine|product issue|general inquiry)\b/ig) ?? []).length;
+  const integrationMentions = (requirement.match(/\b(integration|sync|import|export|api|feed|data source|vendor|webhook|endpoint|queue|channel)\b/ig) ?? []).length;
+  const workflowVerbMentions = (requirement.match(/\b(create|update|route|assign|determine|identify|validate|notify|sync|extract|parse|match|link|classif(?:y|ication)|categori[sz](?:e|ation))\b/ig) ?? []).length;
 
   const ambiguityScore =
     (reqWords <= 20 ? 1 : 0) +
     (reqSentences <= 1 ? 1 : 0) +
     (hasAmbiguousTokens ? 1 : 0) +
     (!hasRichContext ? 1 : 0) +
-    (roleMentions === 0 ? 1 : 0) +
+    (actorMentions === 0 ? 1 : 0) +
     (exceptionMentions === 0 ? 1 : 0) -
     (hasConstraints ? 1 : 0) +
-    (hasIntakeWorkflowSignals && answers.length === 0 ? 1 : 0);
+    (hasAutomationSignal && hasDecisionSignal && answers.length === 0 ? 1 : 0);
 
   const clarity: ClarifyQuestionPlan['clarity'] =
     ambiguityScore <= 1 ? 'clear' : ambiguityScore >= 4 ? 'vague' : 'medium';
@@ -83,19 +89,21 @@ export function buildPlannerDecision(input: PlannerInput): PlannerDecision {
     (hasEnterpriseSignals ? 1 : 0) +
     (reqWords >= 55 ? 1 : 0) +
     (reqSentences >= 3 ? 1 : 0) +
-    (roleMentions >= 2 ? 1 : 0) +
+    (actorMentions >= 2 ? 1 : 0) +
     (integrationMentions >= 1 ? 1 : 0) +
-    (hasIntakeWorkflowSignals ? 1 : 0) +
-    (classificationMentions >= 1 ? 1 : 0) +
+    (hasAutomationSignal && hasSourceSignal ? 1 : 0) +
+    (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
+    (workflowVerbMentions >= 2 ? 1 : 0) +
     (answers.length >= 4 ? 1 : 0);
 
   const complexityScore =
     (hasConstraints ? 1 : 0) +
     (exceptionMentions >= 2 ? 1 : 0) +
-    (roleMentions >= 2 ? 1 : 0) +
+    (actorMentions >= 2 ? 1 : 0) +
     (integrationMentions >= 1 ? 1 : 0) +
-    (hasIntakeWorkflowSignals ? 1 : 0) +
-    (classificationMentions >= 1 ? 1 : 0) +
+    (hasAutomationSignal && hasSourceSignal ? 1 : 0) +
+    (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
+    (workflowVerbMentions >= 2 ? 1 : 0) +
     (hasEnterpriseSignals ? 1 : 0) +
     (answers.length >= 4 ? 1 : 0);
 
@@ -139,7 +147,7 @@ export function buildPlannerDecision(input: PlannerInput): PlannerDecision {
   if (hasBroadScopeSignals) rationale.push('Requirement contains broad scope signals spanning multiple capabilities.');
   if (hasEnterpriseSignals) rationale.push('Requirement contains enterprise delivery or governance signals.');
   if (integrationMentions >= 1) rationale.push('Integrations or external data dependencies are implied.');
-  if (hasIntakeWorkflowSignals) rationale.push('Request involves intake automation or case-routing logic that usually needs business-rule discovery.');
+  if (hasAutomationSignal && hasDecisionSignal) rationale.push('Request includes automation plus branching decisions, which usually needs business-rule discovery.');
   if (!hasRichContext) rationale.push('Available context is still thin, so discovery should stay adaptive.');
   if (answers.length >= 3) rationale.push('Prior clarifying answers already provide meaningful planning context.');
   if (outputMode === 'single') rationale.push('User requested a single-feature output.');
@@ -173,7 +181,7 @@ export function buildPlannerDecision(input: PlannerInput): PlannerDecision {
       reqSentences,
       hasRichContext,
       hasBroadScopeSignals,
-      roleMentions,
+      roleMentions: actorMentions,
       exceptionMentions,
       hasConstraints,
       hasAmbiguousTokens,
