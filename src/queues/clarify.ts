@@ -11,7 +11,7 @@
 import { AsyncEvent } from '@forge/events';
 import { ClarifyContextMeta, ClarifyEvent, PlannerDecision, TokenUsageSummary } from '../types';
 import { buildHeuristicPlannerDecision } from '../core/planner';
-import { generateClarifyingQuestions } from '../core/story-generator';
+import { generateClarifyingQuestions, normalizeConversationTitle } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
@@ -476,7 +476,7 @@ async function saveClarifyTurn(
       timestamp: new Date().toISOString(),
     });
     await entitySet(key, existing);
-    await updateConversationIndex(sessionId, accountId, requirement.slice(0, 80));
+    await updateConversationIndex(sessionId, accountId, normalizeConversationTitle('', requirement));
   } catch (err) {
     console.warn('[clarify-queue] Failed to save clarify turn:', err);
   }

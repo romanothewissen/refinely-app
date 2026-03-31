@@ -112,7 +112,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-[var(--rf-surface-soft)]/50 p-6">
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-[var(--rf-surface-soft)]/50 p-5">
           {filtered.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-[var(--rf-text-tertiary)] gap-4">
               <div className="w-16 h-16 rounded-2xl bg-white border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
@@ -121,7 +121,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">No conversations found.</p>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-8 pb-8">
+            <div className="max-w-[1100px] mx-auto space-y-6 pb-6">
               
               {/* Pinned Section */}
               {pinned.length > 0 && (
@@ -129,7 +129,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
                   <h3 className="text-xs font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2 mb-4">
                     <Pin className="w-4 h-4 text-[var(--rf-brand)] fill-blue-500" /> Pinned
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {pinned.map((conv, idx) => (
                       <motion.div
                         key={conv.sessionId}
@@ -162,7 +162,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
                   <h3 className={`text-xs font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2 mb-4 ${pinned.length > 0 ? 'mt-8' : ''}`}>
                     <Clock className="w-4 h-4" /> Recent
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {recent.map((conv, idx) => (
                       <motion.div
                         key={conv.sessionId}
@@ -203,14 +203,14 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
   return (
     <motion.div 
       onClick={isEditing ? undefined : onRestore}
-      className={`group relative bg-white border rounded-2xl p-5 flex flex-col gap-4 h-full ${
+      className={`group relative bg-white border rounded-2xl p-4 flex flex-col gap-3 h-full ${
         isCurrent ? 'border-blue-400 shadow-md shadow-blue-500/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
       }`}
       whileHover={!isCurrent && !isEditing ? { y: -2, scale: 1.01 } : {}}
       transition={{ duration: 0.2 }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 overflow-hidden flex-1 mt-0.5">
+        <div className="flex items-start gap-2 overflow-hidden flex-1 mt-0.5 min-w-0">
           {isEditing ? (
             <form onSubmit={(e) => saveEdit(e, conv.sessionId)} className="flex items-center gap-2 flex-1 relative z-10" onClick={e => e.stopPropagation()}>
               <input
@@ -223,13 +223,13 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
               <button type="submit" className="text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] px-2 py-1.5 rounded-md transition">Save</button>
             </form>
           ) : (
-            <h4 className={`text-base font-bold truncate tracking-tight ${isCurrent ? 'text-blue-900' : 'text-[var(--rf-text)]'}`}>
+            <h4 className={`text-[15px] leading-tight font-bold tracking-tight line-clamp-2 min-w-0 ${isCurrent ? 'text-blue-900' : 'text-[var(--rf-text)]'}`}>
               {conv.title || 'Untitled session'}
             </h4>
           )}
         </div>
         
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
           <button 
             onClick={(e) => toggleBookmark(e, conv.sessionId, conv.isPinned)}
             title={conv.isPinned ? "Unpin" : "Pin"}
@@ -247,34 +247,34 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
           </button>
         </div>
         {/* Force showing the pin if pinned even without hover */}
-        {conv.isPinned && <div className="absolute top-5 right-5 group-hover:hidden"><Pin className="w-4 h-4 text-[var(--rf-brand)] fill-current" /></div>}
+        {conv.isPinned && <div className="absolute top-4 right-4 group-hover:hidden"><Pin className="w-4 h-4 text-[var(--rf-brand)] fill-current" /></div>}
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {conv.lastTurnType && (
-          <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+          <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
             {conv.lastTurnType}
           </span>
         )}
         {conv.lastScopeMode && (
-          <span className="rounded-md bg-[var(--rf-brand-muted)]/60 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)] border border-blue-100">
+          <span className="rounded-md bg-[var(--rf-brand-muted)]/60 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)] border border-blue-100">
             {String(conv.lastScopeMode).replace('_', ' ')}
           </span>
         )}
         {typeof conv.lastDiscoveryRoundCount === 'number' && conv.lastDiscoveryRoundCount > 0 && (
-          <span className="rounded-md bg-white px-2.5 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+          <span className="rounded-md bg-white px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
             {conv.lastDiscoveryRoundCount} round{conv.lastDiscoveryRoundCount !== 1 ? 's' : ''}
           </span>
         )}
         {typeof conv.lastFeatureCount === 'number' && conv.lastFeatureCount > 0 && (
-          <span className="rounded-md bg-white px-2.5 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+          <span className="rounded-md bg-white px-2 py-1 text-[10px] font-medium text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
             {conv.lastFeatureCount} feature{conv.lastFeatureCount !== 1 ? 's' : ''}
           </span>
         )}
       </div>
 
       {typeof conv.lastDiscoveryScore === 'number' && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold tracking-widest text-amber-900 border border-amber-200">
               Discovery {conv.lastDiscoveryScore}%
@@ -284,7 +284,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
             </span>
           </div>
           {conv.lastDiscoverySummary && (
-            <div className="mt-2 text-xs text-amber-900/90 leading-relaxed">
+            <div className="mt-1.5 text-[11px] text-amber-900/90 leading-relaxed line-clamp-3">
               {conv.lastDiscoverySummary}
             </div>
           )}
@@ -292,7 +292,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
       )}
 
       {Array.isArray(conv.discoveryTranscriptPreview) && conv.discoveryTranscriptPreview.length > 0 && (
-        <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-3 space-y-3">
+        <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-2.5 space-y-2.5">
           {conv.discoveryTranscriptPreview.map((round: any) => (
             <div key={round.roundNumber} className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -304,16 +304,16 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
                 </span>
               </div>
               {round.summary && (
-                <div className="text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                <div className="text-[11px] text-[var(--rf-text-secondary)] leading-relaxed line-clamp-2">
                   {round.summary}
                 </div>
               )}
               {Array.isArray(round.highlights) && round.highlights.length > 0 && (
                 <div className="space-y-1.5">
                   {round.highlights.map((item: any, index: number) => (
-                    <div key={`${round.roundNumber}-${index}`} className="rounded-lg bg-white px-3 py-2 border border-[var(--rf-border-subtle)]">
+                    <div key={`${round.roundNumber}-${index}`} className="rounded-lg bg-white px-2.5 py-2 border border-[var(--rf-border-subtle)]">
                       <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{item.question}</div>
-                      <div className="mt-1 text-xs text-[var(--rf-text-secondary)] line-clamp-2">{item.answer}</div>
+                      <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)] line-clamp-2">{item.answer}</div>
                     </div>
                   ))}
                 </div>
@@ -323,11 +323,11 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
         </div>
       )}
 
-      <div className="flex items-center justify-between mt-auto pt-2">
-        <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
+      <div className="flex items-center justify-between mt-auto pt-1.5">
+        <span className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </span>
-        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-blue-100 text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
+        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-2.5 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-blue-100 text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
           {isCurrent ? 'Active Now' : <><Play className="w-3 h-3" /> Resume</>}
         </div>
       </div>

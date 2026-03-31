@@ -230,6 +230,8 @@ interface Feature {
   description: string;
   markdown?: string;
   acceptanceRequirements: AcceptanceRequirement[];
+  storyPoints?: number;
+  processCode?: string;
   isAccepted?: boolean;
   pendingRefinement?: Feature;
   pendingRemoval?: boolean;
@@ -778,7 +780,7 @@ export function MainContent({
     return (
       <motion.div
         key={feature.id || idx}
-        className={`group overflow-hidden rounded-2xl border ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)] bg-white' : feature.isAccepted ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/30' : 'border-[var(--rf-border)] bg-white'}`}
+        className={`group overflow-hidden rounded-[22px] border ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)] bg-white' : feature.isAccepted ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/30' : 'border-[var(--rf-border)] bg-white'}`}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: animationIndex * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
@@ -788,8 +790,8 @@ export function MainContent({
         <div className="flex flex-col sm:flex-row">
           <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger)]' : feature.isAccepted ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-border-strong)]'}`} />
 
-          <div className="flex-1 p-5 sm:p-6">
-            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
+          <div className="flex-1 p-4 sm:p-4.5">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 mb-3">
               {isEditing ? (
                 <input
                   type="text"
@@ -799,7 +801,7 @@ export function MainContent({
                 />
               ) : (
                 <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
-                  <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
+                  <h3 className="min-w-0 flex-1 text-[17px] font-bold leading-tight text-[var(--rf-text)] tracking-tight">
                     {feature.title || feature.summary || 'Untitled Feature'}
                   </h3>
                   <div className="shrink-0 flex items-center gap-2">
@@ -811,7 +813,7 @@ export function MainContent({
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                 {isEditing ? (
                   <>
                     <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
@@ -862,6 +864,23 @@ export function MainContent({
                 )}
               </div>
             </div>
+
+            {!isEditing && (
+              <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] leading-none">
+                <span className="font-semibold text-[var(--rf-text-secondary)]">
+                  {feature.acceptanceRequirements?.length || 0} acceptance requirement{(feature.acceptanceRequirements?.length || 0) !== 1 ? 's' : ''}
+                </span>
+                {feature.storyPoints ? (
+                  <span className="text-[var(--rf-text-tertiary)]">SP {feature.storyPoints}</span>
+                ) : null}
+                {feature.processCode ? (
+                  <span className="text-[var(--rf-text-tertiary)]">{feature.processCode}</span>
+                ) : null}
+                {feature.jiraIssueKey ? (
+                  <span className="text-[var(--rf-brand)] font-semibold">{feature.jiraIssueKey}</span>
+                ) : null}
+              </div>
+            )}
 
             {feature.pendingRemoval && (
               <div className="mb-4 p-4 rounded-xl bg-[var(--rf-danger-subtle)] border border-[var(--rf-danger-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -961,7 +980,7 @@ export function MainContent({
                     className="w-full text-[var(--rf-text-secondary)] text-sm bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 min-h-[120px] mb-6 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none resize-y transition"
                   />
                 ) : (
-                  <div className="text-[var(--rf-text-secondary)] text-[13px] sm:text-sm mb-6 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-brand)]/20 pl-4 py-1">
+                  <div className="text-[var(--rf-text-secondary)] text-[13px] sm:text-sm mb-4 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-brand)]/20 pl-3 py-0.5">
                     {feature.markdown || feature.description}
                   </div>
                 )}
@@ -974,9 +993,9 @@ export function MainContent({
                         <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
                       )}
                     </div>
-                    <div className="space-y-2.5">
+                    <div className="space-y-2">
                       {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
-                        <div key={i} className="bg-[var(--rf-surface-soft)]/50 rounded-xl p-4 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)]">
+                        <div key={i} className="bg-[var(--rf-surface-soft)]/50 rounded-xl p-3 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)]">
                           {isEditing && (
                             <button onClick={() => deleteDraftAr(i)} className="absolute top-3 right-3 p-1.5 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
                           )}
@@ -993,7 +1012,7 @@ export function MainContent({
                               ))}
                             </div>
                           ) : (
-                            <div className="space-y-1.5 text-[13px] sm:text-sm">
+                            <div className="space-y-1 text-[13px] sm:text-sm">
                               {ar.given?.trim() && (
                                 <div className="flex gap-4">
                                   <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>

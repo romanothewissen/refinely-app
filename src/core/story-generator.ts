@@ -1415,13 +1415,19 @@ export async function checkRefineFeedbackSufficiency(opts: {
 
 export async function generateSessionTitle(requirement: string, config: TenantConfig): Promise<string> {
   const res = await callLlm({
-    model: config.generatorConfig.themeModel,
-    systemPrompt: 'Generate a concise 5-8 word title summarizing this requirement. Output the title only, no quotes.',
+    model: getTierModel(config.generatorConfig.themeModel, config.tier),
+    systemPrompt: `Generate a concise, concrete conversation title for a backlog-generation session.
+
+Rules:
+- 4 to 7 words
+- Use the real business noun and action from the requirement
+- No quotes, no punctuation at the end, no filler like "feature", "request", or "session"
+- Prefer titles that would look good in a conversation history list`,
     userMessage: requirement,
     maxTokens: 32,
     ...getProviderOpts(config),
   });
-  return res.text.replace(/^["']|["']$/g, '').trim() || requirement.slice(0, 60);
+  return normalizeConversationTitle(res.text, requirement);
 }
 
 // ─── Ask / Chat ───────────────────────────────────────────────────────────────
@@ -1544,6 +1550,33 @@ function mergeFeatures(pass1: RawFeature[], pass2: RawFeature[]): RawFeature[] {
 }
 
 export { formatGoldExample };
+
+export function normalizeConversationTitle(candidate: string, requirement: string): string {
+  const cleaned = String(candidate ?? '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.,;:!?-]+$/g, '')
+    .trim();
+
+  if (cleaned && cleaned.split(/\s+/).length >= 2) {
+    return cleaned.slice(0, 88);
+  }
+
+  const source = String(requirement ?? '').replace(/\s+/g, ' ').trim();
+  const normalized = source
+    .replace(/^\s*as a .*?,\s*i need to\s+/i, '')
+    .replace(/^\s*an?\s+/i, '')
+    .replace(/\s+so that[\s\S]*$/i, '')
+    .replace(/\s+based on[\s\S]*$/i, '')
+    .trim();
+  const words = normalized.split(' ').filter(Boolean);
+  const fallback = words.slice(0, 8).join(' ').trim();
+  if (fallback) {
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
+  return 'Untitled conversation';
+}
 
 function toStageUsage(usage: { input: number; output: number }) {
   return {

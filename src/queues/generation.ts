@@ -9,7 +9,7 @@
 
 import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
 import { buildHeuristicPlannerDecision } from '../core/planner';
-import { generateFeatures, generateSessionTitle } from '../core/story-generator';
+import { generateFeatures, generateSessionTitle, normalizeConversationTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
@@ -343,7 +343,7 @@ export async function handler(event: { body: GenerationEvent }) {
         await updateConversationTitle(sessionId, accountId, title);
       } catch (titleErr) {
         console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
-        await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
+        await updateConversationTitle(sessionId, accountId, normalizeConversationTitle('', requirement));
       }
     } catch (tailErr) {
       console.warn('[generation-queue] Non-blocking post-processing failed:', tailErr);
@@ -388,7 +388,7 @@ async function saveConversationTurn(
     await entitySet(key, existing);
 
     // Update per-user conversation index
-    await updateConversationIndex(sessionId, accountId, requirement.slice(0, 80));
+    await updateConversationIndex(sessionId, accountId, normalizeConversationTitle('', requirement));
   } catch (err) {
     console.warn('[generation-queue] Failed to save conversation turn:', err);
   }
