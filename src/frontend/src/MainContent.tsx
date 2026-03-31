@@ -406,6 +406,18 @@ export function MainContent({
 
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
+  const generationProgressText = progress ?? '';
+  const generationStageProgress = !isGenerating
+    ? 100
+    : hasFeatures
+      ? 72
+      : /queu|prepar/i.test(generationProgressText)
+        ? 12
+        : /decompos/i.test(generationProgressText)
+          ? 36
+          : /acceptance|drafted|expanding/i.test(generationProgressText)
+            ? 72
+            : 24;
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [showTokenDetails, setShowTokenDetails] = useState(false);
   const [isContextModalOpen, setIsContextModalOpen] = useState(false);
@@ -1096,6 +1108,12 @@ export function MainContent({
               <p className="text-sm text-[var(--rf-text-secondary)] leading-snug">
                 {progress || 'Preparing your request…'}
               </p>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/80 border border-[var(--rf-border)]">
+                <div
+                  className="h-full rounded-full bg-[var(--rf-brand)] transition-[width] duration-500 ease-out"
+                  style={{ width: `${generationStageProgress}%` }}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -1199,7 +1217,7 @@ export function MainContent({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
-        {isGenerating ? (
+        {isGenerating && !hasFeatures ? (
           <GeneratingSkeleton loadingTitle={loadingTitle} progress={progress} />
         ) : !hasFeatures ? (
           <motion.div

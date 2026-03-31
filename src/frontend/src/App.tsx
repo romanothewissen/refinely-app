@@ -206,6 +206,61 @@ export default function App() {
   // History
   const [conversations, setConversations] = useState<any[]>([]);
 
+  const restoreInFlightSession = async (sid: string) => {
+    try {
+      const [generationRes, clarifyRes] = await Promise.all([
+        api.getProgress(sid),
+        api.getClarifyResult(sid),
+      ]) as any[];
+
+      const generation = generationRes?.progress;
+      if (generation?.type === 'complete' && generation?.payload?.features?.length) {
+        setFeatures(generation.payload.features);
+        setGenerationContext(generation.payload.generationContext ?? null);
+        setPendingSessionId(null);
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
+        setIsGenerationStarted(false);
+        return true;
+      }
+
+      if (generation?.type === 'progress') {
+        if (generation?.payload?.features?.length) {
+          setFeatures(generation.payload.features);
+        }
+        setPendingClarifySessionId(null);
+        setPendingSessionId(sid);
+        setIsWorking(true);
+        setIsGenerationStarted(true);
+        return true;
+      }
+
+      const clarify = clarifyRes?.result;
+      if (clarify?.type === 'complete' && Array.isArray(clarify.questions) && clarify.questions.length > 0) {
+        setClarifyQuestions(clarify.questions);
+        setClarifyContext((clarify.contextMeta as ClarifyContextMeta | undefined) ?? null);
+        setDiscoveryRound(1);
+        setPendingSessionId(null);
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
+        setIsGenerationStarted(false);
+        return true;
+      }
+
+      if (clarify && (clarify.type === 'pending' || clarify.type === 'progress')) {
+        setPendingSessionId(null);
+        setPendingClarifySessionId(sid);
+        setIsWorking(true);
+        setIsGenerationStarted(false);
+        return true;
+      }
+    } catch (error) {
+      console.warn('Failed to restore in-flight session state', error);
+    }
+
+    return false;
+  };
+
   // Animated sidebar close helper
   const closeSidebar = () => {
     setSidebarExiting(true);
@@ -289,13 +344,22 @@ export default function App() {
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
+        setRequirement(lastTurn?.requirement ?? '');
+        setClarifyContext(lastTurn?.clarifyContext ?? null);
         if (lastTurn?.features?.length > 0) {
           setFeatures(lastTurn.features);
           setGenerationContext(lastTurn.generationContext ?? null);
           setSidebarOpen(false);
+        } else {
+          void restoreInFlightSession(sessionId).then((restored) => {
+            if (restored) setSidebarOpen(false);
+          });
         }
       } else {
         setWorkflowTokenUsage(null);
+        void restoreInFlightSession(sessionId).then((restored) => {
+          if (restored) setSidebarOpen(false);
+        });
       }
     }).catch(() => {});
     loadHistory();
@@ -364,6 +428,12 @@ export default function App() {
       setPendingSessionId(null);
       setIsWorking(false);
       setIsGenerationStarted(false);
+    }
+    ,
+    (payload: any) => {
+      if (payload?.features && Array.isArray(payload.features) && payload.features.length > 0) {
+        setFeatures(payload.features);
+      }
     }
   );
 
@@ -565,6 +635,9 @@ export default function App() {
         setDiscoveryCoverage(null);
         setIsReviewingDiscovery(false);
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
+        if (!lastTurn?.features?.length) {
+          await restoreInFlightSession(res.conversation.sessionId);
+        }
         setViewMode('generate');
       }
     } catch {}

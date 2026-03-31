@@ -205,6 +205,7 @@ export function useGenerationRealtime(
   sessionId: string | null,
   onComplete: (payload: unknown) => void,
   onError: (message: string) => void,
+  onProgressPayload?: (payload: unknown) => void,
 ) {
   const [progress, setProgress] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -216,6 +217,8 @@ export function useGenerationRealtime(
   onCompleteRef.current = onComplete;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onProgressPayloadRef = useRef(onProgressPayload);
+  onProgressPayloadRef.current = onProgressPayload;
 
   useEffect(() => {
     if (!sessionId) return;
@@ -267,6 +270,9 @@ export function useGenerationRealtime(
             pass: event.pass,
             updatedAt: event.updatedAt,
           });
+          if (event.payload !== undefined) {
+            onProgressPayloadRef.current?.(event.payload);
+          }
           const updatedAt = event.updatedAt ?? 0;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > STALE_PROGRESS_MS) {

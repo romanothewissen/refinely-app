@@ -27,12 +27,13 @@ interface RealtimeEvent {
   payload?: unknown;
 }
 
-async function sendProgress(sessionId: string, message: string, pass?: 1 | 2) {
+async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: unknown) {
   await entitySet(KEYS.generationProgress(sessionId), {
     type: 'progress',
     sessionId,
     message,
     pass,
+    payload,
     updatedAt: Date.now(),
   } as RealtimeEvent);
 }
@@ -194,8 +195,16 @@ export async function handler(event: { body: GenerationEvent }) {
       wiContextText: wiContext.text,
       config,
       plannerDecision,
-      onPass1Complete: async (featureCount) => {
-        await sendProgress(sessionId, `Writing acceptance criteria for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
+      onPass1Complete: async ({ featureCount, draftFeatures, arBatchCount }) => {
+        const batchLabel = arBatchCount > 1
+          ? `in ${arBatchCount} parallel batches`
+          : 'for the drafted backlog';
+        await sendProgress(
+          sessionId,
+          `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Expanding acceptance requirements ${batchLabel}…`,
+          2,
+          { features: draftFeatures, draft: true },
+        );
       },
     });
 

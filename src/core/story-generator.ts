@@ -129,7 +129,7 @@ function compactSuggestion(raw: unknown): string {
   const text = String(raw ?? '').trim().replace(/\s+/g, ' ');
   if (!text) return '';
   const words = text.split(' ');
-  return words.slice(0, 10).join(' ');
+  return words.slice(0, 18).join(' ');
 }
 
 function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
@@ -306,6 +306,35 @@ function throwAfterTimeout(timeoutMs: number, label: string): Promise<never> {
   return new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error(`${label} exceeded ${timeoutMs}ms`)), timeoutMs);
   });
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function sumUsage(usages: Array<{ input: number; output: number }>) {
+  return usages.reduce(
+    (total, usage) => ({
+      input: total.input + usage.input,
+      output: total.output + usage.output,
+    }),
+    { input: 0, output: 0 },
+  );
+}
+
+function estimatePass2MaxTokens(
+  featureCount: number,
+  arTarget: number,
+  configuredMaxTokens: number | undefined,
+  hardCap: number,
+) {
+  const estimatedTokens = Math.max(2200, featureCount * Math.max(arTarget, 2) * 180);
+  return Math.min(Math.max(configuredMaxTokens ?? 8192, estimatedTokens), hardCap);
 }
 
 function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasoningMode']) {
@@ -761,7 +790,11 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   plannerDecision?: PlannerDecision;
-  onPass1Complete?: (featureCount: number) => Promise<void>;
+  onPass1Complete?: (payload: {
+    featureCount: number;
+    draftFeatures: Feature[];
+    arBatchCount: number;
+  }) => Promise<void>;
 }): Promise<GenerationResult> {
   const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, plannerDecision, onPass1Complete } = opts;
   const { generatorConfig } = config;
@@ -824,9 +857,6 @@ export async function generateFeatures(opts: {
     console.warn('[story-generator] Decomposition failed; using fallback feature seed:', error);
   }
 
-  // Notify caller so it can emit a progress event before the slow pass 2 LLM call
-  if (onPass1Complete) await onPass1Complete(pass1Features.length);
-
   // ── Pass 2: Acceptance Requirements ──
   const pass2System = buildArSystemPrompt({
     domainContext: config.domainContext,
@@ -843,39 +873,71 @@ export async function generateFeatures(opts: {
     mode: 'pass2',
     reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
-  const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+  const pass2BatchSize = pass1Features.length >= 8
+    ? 4
+    : pass1Features.length >= 5
+      ? 3
+      : pass1Features.length;
+  const pass2Batches = chunkArray(pass1Features, pass2BatchSize);
+  const draftFeatures = pass1Features.map(normaliseFeature);
 
-  // Pass 2 often needs more output tokens than pass 1 (many GWT strings per feature).
-  const estimatedPass2Tokens = Math.max(
-    4096,
-    pass1Features.length * Math.max(decision.arPlan.target, 2) * 180,
-  );
-  const pass2MaxTokens = Math.min(
-    Math.max(generatorConfig.maxTokens ?? 8192, estimatedPass2Tokens),
-    12000,
-  );
+  // Notify caller so it can emit a useful progress event before the slower pass 2 work starts.
+  if (onPass1Complete) {
+    await onPass1Complete({
+      featureCount: pass1Features.length,
+      draftFeatures,
+      arBatchCount: pass2Batches.length,
+    });
+  }
 
   let pass2Usage = { input: 0, output: 0 };
   let rawFeatures = pass1Features;
-  try {
-    const pass2Result = await Promise.race([
-      callLlmJsonWithUsage<{ features: RawFeature[] }>({
-        model: getTierModel(generatorConfig.arModel, config.tier),
-        systemPrompt: pass2System,
-        userMessage: pass2UserMessage,
-        maxTokens: pass2MaxTokens,
-        ...providerOpts,
-      }),
-      throwAfterTimeout(stageTimeouts.pass2Ms, 'Acceptance requirement generation'),
-    ]);
-    pass2Usage = pass2Result.usage;
-    rawFeatures = pass2Result.data.features?.length
-      ? mergeFeatures(pass1Features, pass2Result.data.features)
-      : pass1Features;
-  } catch (error) {
-    console.warn('[story-generator] Acceptance requirement generation failed; using fallback acceptance requirements:', error);
-    rawFeatures = pass1Features;
-  }
+  const pass2HardCap = pass2Batches.length > 1 ? 7000 : 12000;
+  const pass2Results = await Promise.all(pass2Batches.map(async (featureBatch, index) => {
+    const batchLabel = pass2Batches.length > 1
+      ? `Acceptance requirement generation batch ${index + 1}/${pass2Batches.length}`
+      : 'Acceptance requirement generation';
+    const batchUserMessage = [
+      pass2Context,
+      pass2Batches.length > 1
+        ? `FEATURES FROM PASS 1 - BATCH ${index + 1} OF ${pass2Batches.length} (fill in acceptance_requirements only for this batch):\n${JSON.stringify(featureBatch, null, 2)}`
+        : `FEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(featureBatch, null, 2)}`,
+    ].join('\n\n---\n\n');
+
+    try {
+      const batchResult = await Promise.race([
+        callLlmJsonWithUsage<{ features: RawFeature[] }>({
+          model: getTierModel(generatorConfig.arModel, config.tier),
+          systemPrompt: pass2System,
+          userMessage: batchUserMessage,
+          maxTokens: estimatePass2MaxTokens(
+            featureBatch.length,
+            decision.arPlan.target,
+            generatorConfig.maxTokens,
+            pass2HardCap,
+          ),
+          ...providerOpts,
+        }),
+        throwAfterTimeout(stageTimeouts.pass2Ms, batchLabel),
+      ]);
+
+      return {
+        rawFeatures: batchResult.data.features?.length
+          ? mergeFeatures(featureBatch, batchResult.data.features)
+          : featureBatch,
+        usage: batchResult.usage,
+      };
+    } catch (error) {
+      console.warn(`[story-generator] ${batchLabel} failed; using fallback acceptance requirements:`, error);
+      return {
+        rawFeatures: featureBatch,
+        usage: { input: 0, output: 0 },
+      };
+    }
+  }));
+
+  pass2Usage = sumUsage(pass2Results.map(result => result.usage));
+  rawFeatures = pass2Results.flatMap(result => result.rawFeatures);
 
   rawFeatures = ensureAcceptanceRequirements(rawFeatures, decision.arPlan);
   let features = rawFeatures.map(normaliseFeature);
