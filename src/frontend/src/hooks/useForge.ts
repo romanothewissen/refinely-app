@@ -25,6 +25,7 @@ export const api = {
     projectKey?: string;
     reasoningMode?: ReasoningMode;
     outputMode?: OutputMode;
+    outputInstructions?: string;
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)
@@ -35,8 +36,9 @@ export const api = {
     projectKey?: string,
     reasoningMode?: ReasoningMode,
     outputMode?: OutputMode,
+    outputInstructions?: string,
   ) =>
-    invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, reasoningMode, outputMode }),
+    invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, reasoningMode, outputMode, outputInstructions }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
   evaluateSufficiency: (sessionId: string, requirement: string, answers: unknown[], projectKey?: string, reasoningMode?: ReasoningMode) =>
@@ -50,10 +52,10 @@ export const api = {
   }) => invoke('saveDiscoveryRound', payload),
 
   // Refine
-  refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>
-    invoke('refineFeatures', { sessionId, requirement, features, feedback }),
-  refineSingleFeature: (feature: unknown, feedback: string, sessionId?: string) =>
-    invoke('refineSingleFeature', { feature, feedback, sessionId }),
+  refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string, outputInstructions?: string) =>
+    invoke('refineFeatures', { sessionId, requirement, features, feedback, outputInstructions }),
+  refineSingleFeature: (feature: unknown, feedback: string, sessionId?: string, outputInstructions?: string) =>
+    invoke('refineSingleFeature', { feature, feedback, sessionId, outputInstructions }),
   checkRefineFeedback: (feature: unknown, feedback: string) =>
     invoke('checkRefineFeedback', { feature, feedback }),
 

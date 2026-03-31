@@ -357,6 +357,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     projectKey: payload.projectKey || '*',
     reasoningMode: payload.reasoningMode,
     outputMode: payload.outputMode,
+    outputInstructions: payload.outputInstructions,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
@@ -403,6 +404,7 @@ resolver.define('startClarify', async ({ payload, context }) => {
       projectKey: payload.projectKey || '*',
       reasoningMode: payload.reasoningMode,
       outputMode: payload.outputMode,
+      outputInstructions: payload.outputInstructions,
     };
     // Overwrite any stale result with a 'pending' marker so the polling hook waits
     await entitySet(KEYS.clarifyProgress(payload.sessionId), {
@@ -491,6 +493,7 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
       features: payload.features as Feature[],
       feedback: maskedFeedback.text,
       config,
+      outputInstructions: payload.outputInstructions,
     });
 
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
@@ -540,6 +543,7 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
     feature: payload.feature as Feature,
     feedback: maskedFeedback.text,
     config,
+    outputInstructions: payload.outputInstructions,
   });
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : '';
   if (sessionId) {

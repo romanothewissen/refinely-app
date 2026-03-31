@@ -198,7 +198,7 @@ function buildRetrievalStrategy(
 }
 
 export async function handler(event: AsyncEvent<Record<string, unknown>> & { body: ClarifyEvent }) {
-  const { sessionId, accountId, requirement, attachmentText, license, config: eventConfig, projectKey, runId } = event.body;
+  const { sessionId, accountId, requirement, attachmentText, outputInstructions, license, config: eventConfig, projectKey, runId } = event.body;
   const retryCount = event.retryContext?.retryCount ?? 0;
   const retryReason = event.retryContext?.retryReason ?? null;
   
@@ -332,6 +332,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       reasoningMode,
       outputMode,
       plannerDecision,
+      outputInstructions,
     });
     questions = clarifyResult.questions;
     tokenUsage = clarifyResult.tokenUsage;
@@ -462,6 +463,7 @@ async function saveClarifyTurn(
   accountId: string,
   requirement: string,
   clarifyContext: ClarifyContextMeta,
+  outputInstructions?: string,
 ) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
@@ -469,6 +471,7 @@ async function saveClarifyTurn(
     existing.turns.push({
       turnType: 'clarify',
       requirement,
+      outputInstructions,
       features: [],
       similarStories: [],
       clarifyContext,
