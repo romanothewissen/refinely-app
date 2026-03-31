@@ -140,6 +140,16 @@ function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
   return total;
 }
 
+function getDefaultSidebarWidth(viewportWidth?: number): number {
+  const width = typeof viewportWidth === 'number'
+    ? viewportWidth
+    : (typeof window !== 'undefined' ? window.innerWidth : 0);
+
+  if (!width || width <= 0) return 420;
+  if (width <= 720) return Math.max(300, width - 48);
+  return Math.min(Math.max(Math.round(width * 0.38), 360), 520);
+}
+
 export default function App() {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>('generate');
   const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
@@ -174,7 +184,7 @@ export default function App() {
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tier, setTier] = useState('free');
-  const [sidebarWidth, setSidebarWidth] = useState(window.innerWidth / 2);
+  const [sidebarWidth, setSidebarWidth] = useState(() => getDefaultSidebarWidth());
   const isResizing = useRef(false);
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -333,6 +343,22 @@ export default function App() {
       })
       .catch(() => {});
   }, [projectKey]);
+
+  useEffect(() => {
+    const syncSidebarWidth = () => {
+      setSidebarWidth((current) => {
+        const maxAllowed = window.innerWidth * 0.7;
+        if (!current || current < 300) {
+          return getDefaultSidebarWidth(window.innerWidth);
+        }
+        return Math.min(current, maxAllowed);
+      });
+    };
+
+    syncSidebarWidth();
+    window.addEventListener('resize', syncSidebarWidth);
+    return () => window.removeEventListener('resize', syncSidebarWidth);
+  }, []);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
