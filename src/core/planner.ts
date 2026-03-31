@@ -45,22 +45,19 @@ const COMPLEXITY_ORDER: Array<FeaturePlan['complexity']> = ['low', 'medium', 'hi
 const CLARIFICATION_ORDER: ClarificationMode[] = ['none', 'light', 'standard', 'deep'];
 
 function buildPlannerAssessmentPrompt(): string {
-  return `You are a universal planning engine for turning a product request into the right discovery and backlog strategy.
+  return `You are a fast classifier for enterprise requirement complexity.
 
-Assess the request based on structural signals only:
-- ambiguity
-- branching decisions
-- external dependencies
-- number of interacting steps
-- number of possible outcomes
-- missing business rules
-- scope breadth
-- competing prioritization or optimization criteria
-- scheduling, routing, assignment, or sequencing logic
+Assess structural complexity only. Ignore domain-specific nouns and industry labels.
 
-Do not rely on domain-specific role names, industry jargon, or organization-specific terminology as a shortcut for complexity.
+Focus on whether the request implies:
+- hidden business rules or tie-breakers
+- multi-factor prioritization or optimization
+- allocation, scheduling, sequencing, routing, or approvals
+- dependencies, handoffs, or external context
+- meaningful exception handling
+- one bounded capability versus a broader workflow
 
-Return strict JSON only in this shape:
+Return strict JSON only:
 {
   "clarity": "clear | medium | vague",
   "complexity": "low | medium | high",
@@ -91,31 +88,27 @@ function getPlannerProviderOpts(config: TenantConfig) {
 }
 
 function buildPlannerAssessmentUserMessage(input: PlannerInput): string {
-  const contextNotes = [
-    `Reasoning mode preference: ${input.reasoningMode ?? 'fast'}`,
-    `Output mode preference: ${input.outputMode ?? 'auto'}`,
-    `Attachment provided: ${Boolean(input.attachmentText?.trim())}`,
-    `Work-instruction context available: ${Boolean(input.wiContextText?.trim())}`,
-    `Reference examples available: ${Boolean(input.goldExamplesText?.trim())}`,
-    `Similar stories available: ${Boolean(input.similarStoriesText?.trim())}`,
-    `Existing clarification answers: ${input.clarifyAnswers?.length ?? 0}`,
-  ];
-
   const sections = [
     `REQUEST:\n${(input.requirement ?? '').trim()}`,
-    `CONTEXT SNAPSHOT:\n${contextNotes.join('\n')}`,
+    `STRUCTURAL CONTEXT:
+- reasoning_mode: ${input.reasoningMode ?? 'fast'}
+- output_mode: ${input.outputMode ?? 'auto'}
+- attachment_present: ${Boolean(input.attachmentText?.trim())}
+- wi_context_present: ${Boolean(input.wiContextText?.trim())}
+- examples_present: ${Boolean(input.goldExamplesText?.trim() || input.similarStoriesText?.trim())}
+- clarification_answers_count: ${input.clarifyAnswers?.length ?? 0}`,
   ];
 
   if (input.clarifyAnswers?.length) {
     sections.push(
-      `EXISTING ANSWERS:\n${input.clarifyAnswers
-        .slice(0, 6)
-        .map((answer) => `Q: ${answer.question}\nA: ${answer.answer}`)
-        .join('\n\n')}`,
+      `ANSWER SNAPSHOT:\n${input.clarifyAnswers
+        .slice(0, 3)
+        .map((answer) => `- ${answer.question}: ${String(answer.answer ?? '').slice(0, 140)}`)
+        .join('\n')}`,
     );
   }
 
-  return sections.join('\n\n---\n\n');
+  return sections.join('\n\n');
 }
 
 function toAmbiguityScore(clarity: ClarifyQuestionPlan['clarity']): number {
@@ -168,26 +161,21 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
     return heuristicDecision;
   }
 
-  const shouldUsePlannerLlm = reasoningMode === 'deep'
-    || heuristicDecision.confidence < 0.68
-    || heuristicDecision.ambiguityScore >= 4
-    || heuristicDecision.scopeMode === 'initiative';
-
-  if (!shouldUsePlannerLlm) {
-    return heuristicDecision;
-  }
-
   try {
+    const assessmentTimeoutMs = reasoningMode === 'deep' ? 4000 : 2500;
     const assessment = normaliseAssessment(
-      (
-        await callLlmJsonWithUsage<PlannerAssessmentResult>({
+      (await Promise.race([
+        callLlmJsonWithUsage<PlannerAssessmentResult>({
           model: getTierModel(config.generatorConfig.evaluateModel, config.tier),
           systemPrompt: buildPlannerAssessmentPrompt(),
           userMessage: buildPlannerAssessmentUserMessage(input),
-          maxTokens: reasoningMode === 'deep' ? 1200 : 700,
+          maxTokens: 240,
           ...getPlannerProviderOpts(config),
-        })
-      ).data,
+        }),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Planner assessment exceeded ${assessmentTimeoutMs}ms`)), assessmentTimeoutMs);
+        }),
+      ])).data,
       heuristicDecision,
     );
     const conservativeClarity = CLARITY_ORDER[
