@@ -156,7 +156,8 @@ export function useClarifyRealtime(
           console.warn('[useClarifyRealtime] complete but no questions — planner decided none needed');
           finishWith('no_questions');
         } else if (result.type === 'error') {
-          console.error('[useClarifyRealtime] error result from backend', {
+          console.error(`[useClarifyRealtime] error result from backend: ${result.error ?? 'Unknown error'}`);
+          console.error('[useClarifyRealtime] error details', {
             sessionId,
             runId: result.runId,
             jobId: result.jobId,

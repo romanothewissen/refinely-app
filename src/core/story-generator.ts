@@ -713,21 +713,30 @@ export async function generateClarifyingQuestions(opts: {
     questionPlan,
   });
 
-  const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
-    model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-    systemPrompt: system,
-    userMessage: contextParts.join('\n\n'),
-    maxTokens: clarifyMaxTokens,
-    ...getProviderOpts(config),
-  });
-
-  let totalInputTokens = raw.usage.input;
-  let totalOutputTokens = raw.usage.output;
-  let filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
   const desiredQuestionCount = Math.min(
     questionPlan.max,
     Math.max(questionPlan.min, questionPlan.target),
   );
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let filteredQuestions: ClarifyQuestion[] = [];
+
+  try {
+    const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
+      model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+      systemPrompt: system,
+      userMessage: contextParts.join('\n\n'),
+      maxTokens: clarifyMaxTokens,
+      ...getProviderOpts(config),
+    });
+
+    totalInputTokens = raw.usage.input;
+    totalOutputTokens = raw.usage.output;
+    filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
+  } catch (error) {
+    console.warn('[story-generator] Clarify question generation failed; using fallback questions:', error);
+    filteredQuestions = dedupeQuestions(buildFallbackQuestions(requirement, desiredQuestionCount)).slice(0, questionPlan.max);
+  }
 
   const shouldRunTopUpLlm =
     decision.reasoningMode === 'deep' ||
@@ -743,20 +752,24 @@ export async function generateClarifyingQuestions(opts: {
       'Return JSON array only in this shape: [{"category":"...","question":"...","suggestions":["..."]}]',
     ].join('\n\n---\n\n');
 
-    const topUpRaw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
-      model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-      systemPrompt: system,
-      userMessage: topUpUserMessage,
-      maxTokens: clarifyTopUpMaxTokens,
-      ...getProviderOpts(config),
-    });
-    totalInputTokens += topUpRaw.usage.input;
-    totalOutputTokens += topUpRaw.usage.output;
+    try {
+      const topUpRaw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
+        model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+        systemPrompt: system,
+        userMessage: topUpUserMessage,
+        maxTokens: clarifyTopUpMaxTokens,
+        ...getProviderOpts(config),
+      });
+      totalInputTokens += topUpRaw.usage.input;
+      totalOutputTokens += topUpRaw.usage.output;
 
-    filteredQuestions = dedupeQuestions([
-      ...filteredQuestions,
-      ...parseQuestionCandidates(topUpRaw.data),
-    ]).slice(0, questionPlan.max);
+      filteredQuestions = dedupeQuestions([
+        ...filteredQuestions,
+        ...parseQuestionCandidates(topUpRaw.data),
+      ]).slice(0, questionPlan.max);
+    } catch (error) {
+      console.warn('[story-generator] Clarify question top-up failed; keeping fallback questions:', error);
+    }
   }
 
   if (filteredQuestions.length < desiredQuestionCount) {
