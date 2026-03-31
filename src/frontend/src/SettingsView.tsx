@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
-import { AiInsightsReport, AiPolicyPreset, AiProfileMode, LlmProvider, OutputMode, ProjectAiPolicy, REDACTED, ReasoningMode } from './types';
+import { AiInsightsReport, AiPolicyPreset, LlmProvider, OutputMode, ProjectAiPolicy, REDACTED, ReasoningMode } from './types';
 
 interface GoldSource {
   key: string;
@@ -179,9 +179,9 @@ function modelMatchesProvider(model: string, provider: LlmProvider): boolean {
 
 function getProviderDefaults(provider: LlmProvider): { fastModel: string; deepModel: string } {
   if (provider === 'gemini') return { fastModel: 'gemini-2.5-flash', deepModel: 'gemini-2.5-pro' };
-  if (provider === 'openai' || provider === 'azure_openai') return { fastModel: 'gpt-4o-mini', deepModel: 'gpt-4o' };
-  if (provider === 'bedrock') return { fastModel: 'anthropic.claude-3-5-haiku-20241022-v1:0', deepModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' };
-  return { fastModel: 'claude-sonnet-4-5-20250929', deepModel: 'claude-opus-4-6' };
+  if (provider === 'openai' || provider === 'azure_openai') return { fastModel: 'gpt-4o-mini', deepModel: 'gpt-4.5-preview' };
+  if (provider === 'bedrock') return { fastModel: 'anthropic.claude-3-5-haiku-20241022-v1:0', deepModel: 'anthropic.claude-3-7-sonnet-20250219-v1:0' };
+  return { fastModel: 'claude-haiku-4-5-20251001', deepModel: 'claude-opus-4-6' };
 }
 
 function getAvailableModels(provider: LlmProvider) {
@@ -189,6 +189,19 @@ function getAvailableModels(provider: LlmProvider) {
   if (provider === 'openai' || provider === 'azure_openai') return OPENAI_MODELS;
   if (provider === 'bedrock') return BEDROCK_MODELS;
   return CLAUDE_MODELS;
+}
+
+function isFastProfileModel(modelId: string) {
+  const normalized = modelId.toLowerCase();
+  return normalized.includes('haiku') || normalized.includes('flash') || normalized.includes('mini');
+}
+
+function getProfileModels(provider: LlmProvider, profile: 'fast' | 'deep') {
+  const models = getAvailableModels(provider);
+  const filtered = models.filter((model) =>
+    profile === 'fast' ? isFastProfileModel(model.id) : !isFastProfileModel(model.id),
+  );
+  return filtered.length ? filtered : models;
 }
 
 function getModelLabel(model: string): string {
@@ -234,17 +247,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // AI infrastructure state
   const [provider, setProvider] = useState<LlmProvider>('forge_llms');
-  const [profileMode, setProfileMode] = useState<AiProfileMode>('simplified');
   const [fastProfileProvider, setFastProfileProvider] = useState<LlmProvider>('forge_llms');
   const [deepProfileProvider, setDeepProfileProvider] = useState<LlmProvider>('forge_llms');
-  const [fastProfileModel, setFastProfileModel] = useState('claude-sonnet-4-5-20250929');
+  const [fastProfileModel, setFastProfileModel] = useState('claude-haiku-4-5-20251001');
   const [deepProfileModel, setDeepProfileModel] = useState('claude-opus-4-6');
-  const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-6');
-  const [arModel, setArModel] = useState('claude-opus-4-6');
-  const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-5-20250929');
-  const [evaluateModel, setEvaluateModel] = useState('claude-sonnet-4-5-20250929');
-  const [refineModel, setRefineModel] = useState('claude-sonnet-4-5-20250929');
-  const [themeModel, setThemeModel] = useState('claude-sonnet-4-5-20250929');
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
@@ -379,7 +385,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (existingConfig) {
         const gc = existingConfig.generatorConfig || {};
         if (gc.provider) setProvider(gc.provider);
-        if (gc.profileMode) setProfileMode(gc.profileMode);
         if (gc.fastProfileProvider) setFastProfileProvider(gc.fastProfileProvider);
         else if (gc.provider) setFastProfileProvider(gc.provider);
         if (gc.deepProfileProvider) setDeepProfileProvider(gc.deepProfileProvider);
@@ -388,12 +393,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         else if (gc.clarifyModel) setFastProfileModel(gc.clarifyModel);
         if (gc.deepProfileModel) setDeepProfileModel(gc.deepProfileModel);
         else if (gc.decompositionModel) setDeepProfileModel(gc.decompositionModel);
-        if (gc.decompositionModel) setDecompositionModel(gc.decompositionModel);
-        if (gc.arModel) setArModel(gc.arModel);
-        if (gc.clarifyModel) setClarifyModel(gc.clarifyModel);
-        if (gc.evaluateModel) setEvaluateModel(gc.evaluateModel);
-        if (gc.refineModel) setRefineModel(gc.refineModel);
-        if (gc.themeModel) setThemeModel(gc.themeModel);
         
         if (gc.geminiApiKey) setExistingGeminiApiKey(gc.geminiApiKey);
         if (gc.geminiBaseUrl) setGeminiBaseUrl(gc.geminiBaseUrl);
@@ -734,22 +733,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         enterpriseMaxQuestionsPerRound: policy.enterpriseMaxQuestionsPerRound === undefined ? undefined : normalizePolicyNumber(policy.enterpriseMaxQuestionsPerRound, 8, 14),
         maxDeepDiscoveryRounds: policy.maxDeepDiscoveryRounds === undefined ? undefined : normalizePolicyNumber(policy.maxDeepDiscoveryRounds, 1, 6),
       }));
-      const routedModels = profileMode === 'advanced'
-        ? {
-            decompositionModel,
-            arModel,
-            clarifyModel,
-            refineModel: refineModel || fastProfileModel,
-            evaluateModel,
-            themeModel: themeModel || evaluateModel,
-          }
-        : applySimplifiedRouting(fastProfileModel, deepProfileModel);
+      const routedModels = applySimplifiedRouting(fastProfileModel, deepProfileModel);
 
       await api.saveConfig({
         goldSources,
         generatorConfig: {
           provider,
-          profileMode,
+          profileMode: 'simplified',
           fastProfileProvider,
           deepProfileProvider,
           fastProfileModel,
@@ -829,21 +819,33 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   async function testLlmConnection() {
     setIsTestingLlm(true); setLlmTestResult(null);
     try {
+      const selectedProvider =
+        provider === deepProfileProvider
+          ? deepProfileProvider
+          : provider === fastProfileProvider
+            ? fastProfileProvider
+            : provider;
+      const selectedModel =
+        selectedProvider === deepProfileProvider
+          ? deepProfileModel
+          : selectedProvider === fastProfileProvider
+            ? fastProfileModel
+            : getDefaultModelForProvider(selectedProvider, 'fast');
       const res = await api.testLlmConnection({
-        provider,
-        model: profileMode === 'advanced' ? clarifyModel : fastProfileModel,
-        geminiApiKey: provider === 'gemini' ? (geminiApiKey.trim() || existingGeminiApiKey || undefined) : undefined,
-        geminiBaseUrl: provider === 'gemini' ? (geminiBaseUrl.trim() || undefined) : undefined,
-        openaiApiKey: provider === 'openai' ? (openaiApiKey.trim() || existingOpenaiApiKey || undefined) : undefined,
-        openaiBaseUrl: provider === 'openai' ? (openaiBaseUrl.trim() || undefined) : undefined,
-        azureOpenaiApiKey: provider === 'azure_openai' ? (azureOpenaiApiKey.trim() || existingAzureOpenaiApiKey || undefined) : undefined,
-        azureOpenaiEndpoint: provider === 'azure_openai' ? (azureOpenaiEndpoint.trim() || undefined) : undefined,
-        azureOpenaiDeployment: provider === 'azure_openai' ? (azureOpenaiDeployment.trim() || undefined) : undefined,
-        azureOpenaiApiVersion: provider === 'azure_openai' ? (azureOpenaiApiVersion.trim() || undefined) : undefined,
-        bedrockAccessKeyId: provider === 'bedrock' ? (bedrockAccessKeyId.trim() || existingBedrockAccessKeyId || undefined) : undefined,
-        bedrockSecretAccessKey: provider === 'bedrock' ? (bedrockSecretAccessKey.trim() || existingBedrockSecretAccessKey || undefined) : undefined,
-        bedrockSessionToken: provider === 'bedrock' ? (bedrockSessionToken.trim() || existingBedrockSessionToken || undefined) : undefined,
-        bedrockRegion: provider === 'bedrock' ? (bedrockRegion.trim() || undefined) : undefined,
+        provider: selectedProvider,
+        model: selectedModel,
+        geminiApiKey: selectedProvider === 'gemini' ? (geminiApiKey.trim() || existingGeminiApiKey || undefined) : undefined,
+        geminiBaseUrl: selectedProvider === 'gemini' ? (geminiBaseUrl.trim() || undefined) : undefined,
+        openaiApiKey: selectedProvider === 'openai' ? (openaiApiKey.trim() || existingOpenaiApiKey || undefined) : undefined,
+        openaiBaseUrl: selectedProvider === 'openai' ? (openaiBaseUrl.trim() || undefined) : undefined,
+        azureOpenaiApiKey: selectedProvider === 'azure_openai' ? (azureOpenaiApiKey.trim() || existingAzureOpenaiApiKey || undefined) : undefined,
+        azureOpenaiEndpoint: selectedProvider === 'azure_openai' ? (azureOpenaiEndpoint.trim() || undefined) : undefined,
+        azureOpenaiDeployment: selectedProvider === 'azure_openai' ? (azureOpenaiDeployment.trim() || undefined) : undefined,
+        azureOpenaiApiVersion: selectedProvider === 'azure_openai' ? (azureOpenaiApiVersion.trim() || undefined) : undefined,
+        bedrockAccessKeyId: selectedProvider === 'bedrock' ? (bedrockAccessKeyId.trim() || existingBedrockAccessKeyId || undefined) : undefined,
+        bedrockSecretAccessKey: selectedProvider === 'bedrock' ? (bedrockSecretAccessKey.trim() || existingBedrockSecretAccessKey || undefined) : undefined,
+        bedrockSessionToken: selectedProvider === 'bedrock' ? (bedrockSessionToken.trim() || existingBedrockSessionToken || undefined) : undefined,
+        bedrockRegion: selectedProvider === 'bedrock' ? (bedrockRegion.trim() || undefined) : undefined,
       }) as any;
       setLlmTestResult(res.success ? { ok: true, message: 'Connection successful.' } : { ok: false, message: res.error || 'Connection failed.' });
     } catch (err: any) { setLlmTestResult({ ok: false, message: err.message || 'Connection failed.' }); }
@@ -902,49 +904,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   useEffect(() => {
     const fastDefaults = getProviderDefaults(fastProfileProvider);
-    const deepDefaults = getProviderDefaults(deepProfileProvider);
-    const advancedDefaults = getProviderDefaults(provider);
-
-    if (!modelMatchesProvider(fastProfileModel, fastProfileProvider)) setFastProfileModel(fastDefaults.fastModel);
-    if (!modelMatchesProvider(deepProfileModel, deepProfileProvider)) setDeepProfileModel(deepDefaults.deepModel);
-
-    if (profileMode === 'advanced') {
-      if (!modelMatchesProvider(decompositionModel, provider)) setDecompositionModel(advancedDefaults.deepModel);
-      if (!modelMatchesProvider(arModel, provider)) setArModel(advancedDefaults.deepModel);
-      if (!modelMatchesProvider(clarifyModel, provider)) setClarifyModel(advancedDefaults.fastModel);
-      if (!modelMatchesProvider(refineModel, provider)) setRefineModel(advancedDefaults.fastModel);
-      if (!modelMatchesProvider(evaluateModel, provider)) setEvaluateModel(advancedDefaults.fastModel);
-      if (!modelMatchesProvider(themeModel, provider)) setThemeModel(advancedDefaults.fastModel);
+    if (!modelMatchesProvider(fastProfileModel, fastProfileProvider) || !isFastProfileModel(fastProfileModel)) {
+      setFastProfileModel(fastDefaults.fastModel);
     }
-  }, [
-    provider,
-    fastProfileProvider,
-    deepProfileProvider,
-    profileMode,
-    fastProfileModel,
-    deepProfileModel,
-    decompositionModel,
-    arModel,
-    clarifyModel,
-    refineModel,
-    evaluateModel,
-    themeModel,
-  ]);
+  }, [fastProfileProvider, fastProfileModel]);
 
   useEffect(() => {
-    if (profileMode !== 'simplified') return;
-    const routed = applySimplifiedRouting(fastProfileModel, deepProfileModel);
-    setDecompositionModel(routed.decompositionModel);
-    setArModel(routed.arModel);
-    setClarifyModel(routed.clarifyModel);
-    setRefineModel(routed.refineModel);
-    setEvaluateModel(routed.evaluateModel);
-    setThemeModel(routed.themeModel);
-  }, [profileMode, fastProfileModel, deepProfileModel]);
+    const deepDefaults = getProviderDefaults(deepProfileProvider);
+    if (!modelMatchesProvider(deepProfileModel, deepProfileProvider) || isFastProfileModel(deepProfileModel)) {
+      setDeepProfileModel(deepDefaults.deepModel);
+    }
+  }, [deepProfileProvider, deepProfileModel]);
 
-  const availableModels = useMemo(() => getAvailableModels(provider), [provider]);
-  const fastProfileModels = useMemo(() => getAvailableModels(fastProfileProvider), [fastProfileProvider]);
-  const deepProfileModels = useMemo(() => getAvailableModels(deepProfileProvider), [deepProfileProvider]);
+  const fastProfileModels = useMemo(() => getProfileModels(fastProfileProvider, 'fast'), [fastProfileProvider]);
+  const deepProfileModels = useMemo(() => getProfileModels(deepProfileProvider, 'deep'), [deepProfileProvider]);
 
   const settingsNav = [
     { id: 'models', label: 'AI Infrastructure', icon: BrainCircuit, sub: 'Provider and execution profiles' },
@@ -1067,7 +1040,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Admin Panel</div>
                         <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getProviderLabel(provider)}</div>
-                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used for credential management and advanced routing.</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used to manage credentials and run provider connection checks.</div>
                       </div>
                       <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Fast Profile</div>
@@ -1220,7 +1193,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
 
                     <div className="space-y-3">
-                      <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Provider Route</label>
+                      <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Credential Provider</label>
+                      <p className="text-sm text-[var(--rf-text-tertiary)]">Choose which provider credentials you want to review or test. Routing itself is controlled only by the Fast and Deep profiles below.</p>
                       <div className="grid gap-3 md:grid-cols-2">
                         {PROVIDER_OPTIONS.map((option) => (
                           <button
@@ -1559,7 +1533,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                     onChange={e => updateProjectAiPolicy({ fastProfileModel: e.target.value })}
                                     className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
                                   >
-                                    {getAvailableModels(currentProjectAiPolicy.fastProfileProvider ?? fastProfileProvider).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                    {getProfileModels(currentProjectAiPolicy.fastProfileProvider ?? fastProfileProvider, 'fast').map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                                   </select>
                                 </div>
                                 <div className="space-y-2">
@@ -1579,7 +1553,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                     onChange={e => updateProjectAiPolicy({ deepProfileModel: e.target.value })}
                                     className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
                                   >
-                                    {getAvailableModels(currentProjectAiPolicy.deepProfileProvider ?? deepProfileProvider).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                    {getProfileModels(currentProjectAiPolicy.deepProfileProvider ?? deepProfileProvider, 'deep').map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                                   </select>
                                 </div>
                               </div>
@@ -1643,7 +1617,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <select value={fastProfileModel} onChange={e => setFastProfileModel(e.target.value)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
                             {fastProfileModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                           </select>
-                          <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for clarify, evaluation, refinement, and titles in simplified mode.</div>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for lightweight assessment, clarify, refinement, and other short-turn work.</div>
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Provider</label>
@@ -1656,48 +1630,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <select value={deepProfileModel} onChange={e => setDeepProfileModel(e.target.value)} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
                             {deepProfileModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                           </select>
-                          <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for feature decomposition and acceptance-requirement generation in simplified mode.</div>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)] px-1">Used for feature generation, acceptance requirements, and heavier reasoning.</div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)] w-fit">
-                        {([
-                          { id: 'simplified', label: 'Profiles Only' },
-                          { id: 'advanced', label: 'Advanced Routing' },
-                        ] as const).map((modeOption) => (
-                          <button
-                            key={modeOption.id}
-                            onClick={() => setProfileMode(modeOption.id)}
-                            className={`px-4 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
-                              profileMode === modeOption.id
-                                ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
-                                : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
-                            }`}
-                          >
-                            {modeOption.label}
-                          </button>
-                        ))}
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4 text-sm text-[var(--rf-text-secondary)]">
+                        Routing is fixed to two lanes only: <span className="font-bold text-[var(--rf-text)]">Fast</span> handles quick analysis and clarifying work, while <span className="font-bold text-[var(--rf-text)]">Deep</span> handles the heavy generation passes. There is no separate stage-by-stage model routing anymore.
                       </div>
-
-                      {profileMode === 'advanced' && (
-                        <div className="space-y-4 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
-                          {[
-                            { label: 'Decomposition', val: decompositionModel, set: setDecompositionModel },
-                            { label: 'Acceptance Requirements', val: arModel, set: setArModel },
-                            { label: 'Clarify', val: clarifyModel, set: setClarifyModel },
-                            { label: 'Refine', val: refineModel, set: setRefineModel },
-                            { label: 'Evaluate', val: evaluateModel, set: setEvaluateModel },
-                            { label: 'Themes / Titles', val: themeModel, set: setThemeModel },
-                          ].map((item) => (
-                            <div key={item.label} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
-                              <select value={item.val} onChange={e => item.set(e.target.value)} className="bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[260px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
-                                {availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
 
                     <div className="pt-6 border-t border-[var(--rf-border-subtle)] flex flex-col gap-4 sm:flex-row sm:items-center">

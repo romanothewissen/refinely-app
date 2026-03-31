@@ -130,8 +130,7 @@ function mapModelForGemini(model: string): string {
   // Gemini. The previous implementation sent every non-Gemini model to Flash,
   // which made deep generation paths far weaker than intended.
   if (/(haiku|mini|flash)/i.test(lower)) return 'gemini-2.5-flash';
-  if (/(opus|pro|gpt-4\.5|gpt-4o(?!-mini)|o1|o3|deep)/i.test(lower)) return 'gemini-2.5-pro';
-  if (/(sonnet|gpt-4o-mini)/i.test(lower)) return 'gemini-2.5-flash';
+  if (/(opus|sonnet|pro|gpt-4\.5|gpt-4o(?!-mini)|o1|o3|deep)/i.test(lower)) return 'gemini-2.5-pro';
 
   return 'gemini-2.5-pro';
 }

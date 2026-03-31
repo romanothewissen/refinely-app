@@ -34,17 +34,30 @@ export function getTierModel(
 ): string {
   if (tier === 'premium' || tier === 'enterprise') return requestedModel; // Top tiers can use anything
 
-  // Define "Safe/Mini" models for Free/Standard
-  const MINI_MODELS: Record<string, string> = {
-    'claude-opus-4-6': 'claude-sonnet-4-5-20250929', 
-    'claude-3-5-sonnet': 'claude-3-haiku-20240307',
-    'gpt-4o': 'gpt-4o-mini',
-    'gemini-1.5-pro': 'gemini-1.5-flash',
-  };
-
   if (tier === 'free') {
-    // Force downgrade to mini for ALL free requests
-    return MINI_MODELS[requestedModel] || 'claude-3-haiku-20240307';
+    const model = requestedModel.toLowerCase();
+
+    if (requestedModel.startsWith('gemini-')) {
+      if (model.includes('pro')) return requestedModel.replace(/pro/i, 'flash');
+      if (model.includes('flash')) return requestedModel;
+      return 'gemini-2.5-flash';
+    }
+
+    if (requestedModel.startsWith('gpt-') || requestedModel.startsWith('o1-') || requestedModel.startsWith('o3-')) {
+      return 'gpt-4o-mini';
+    }
+
+    if (requestedModel.startsWith('anthropic.')) {
+      if (model.includes('haiku')) return requestedModel;
+      return 'anthropic.claude-3-5-haiku-20241022-v1:0';
+    }
+
+    if (model.includes('haiku')) return requestedModel;
+    if (model.includes('sonnet') || model.includes('opus') || model.includes('claude')) {
+      return 'claude-haiku-4-5-20251001';
+    }
+
+    return 'claude-haiku-4-5-20251001';
   }
 
   // Standard can use Pro models but maybe not the "Ultra" ones?

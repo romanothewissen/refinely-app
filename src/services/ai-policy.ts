@@ -85,28 +85,14 @@ export function resolveGeneratorConfig(
     projectPolicy?.deepProfileModel ??
     baseConfig.deepProfileModel ??
     baseConfig.decompositionModel;
-  const projectHasProfileRouteOverride = Boolean(
-    projectPolicy?.fastProfileProvider ||
-    projectPolicy?.fastProfileModel ||
-    projectPolicy?.deepProfileProvider ||
-    projectPolicy?.deepProfileModel,
-  );
-  const profileMode =
-    projectPolicy?.profileMode ??
-    (projectHasProfileRouteOverride ? 'simplified' : baseConfig.profileMode);
-
   const resolvedConfig: GeneratorConfig = {
     ...baseConfig,
-    profileMode,
+    profileMode: 'simplified',
     fastProfileProvider,
     fastProfileModel,
     deepProfileProvider,
     deepProfileModel,
   };
-
-  if (profileMode !== 'simplified') {
-    return resolvedConfig;
-  }
 
   const selectedProvider =
     effectiveReasoningMode === 'deep' ? deepProfileProvider : fastProfileProvider;

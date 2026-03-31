@@ -47,7 +47,7 @@ export interface GeneratorConfig {
 }
 
 export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
-export type AiProfileMode = 'simplified' | 'advanced';
+export type AiProfileMode = 'simplified';
 export type AiPolicyPreset = 'balanced' | 'delivery' | 'discovery' | 'enterprise';
 export type ReasoningMode = 'fast' | 'deep';
 export type OutputMode = 'single' | 'auto' | 'full_breakdown';
@@ -238,14 +238,14 @@ export const DEFAULT_CONFIG: TenantConfig = {
     profileMode: 'simplified',
     fastProfileProvider: 'forge_llms',
     deepProfileProvider: 'forge_llms',
-    fastProfileModel: 'claude-sonnet-4-5-20250929',
+    fastProfileModel: 'claude-haiku-4-5-20251001',
     deepProfileModel: 'claude-opus-4-6',
     decompositionModel: 'claude-opus-4-6',
     arModel: 'claude-opus-4-6',
-    clarifyModel: 'claude-sonnet-4-5-20250929',
-    refineModel: 'claude-sonnet-4-5-20250929',
-    evaluateModel: 'claude-sonnet-4-5-20250929',
-    themeModel: 'claude-sonnet-4-5-20250929',
+    clarifyModel: 'claude-haiku-4-5-20251001',
+    refineModel: 'claude-haiku-4-5-20251001',
+    evaluateModel: 'claude-haiku-4-5-20251001',
+    themeModel: 'claude-haiku-4-5-20251001',
     maxTokens: 8192,
     azureOpenaiApiVersion: '2024-10-21',
     bedrockRegion: 'us-east-1',
