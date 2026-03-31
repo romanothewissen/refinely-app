@@ -326,7 +326,7 @@ export function Sidebar({
 
         {/* Textarea */}
         <motion.div
-          className="rf-sidebar-card flex flex-col overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/30 transition-shadow bg-white"
+          className="rf-sidebar-card flex min-h-[320px] flex-col overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/30 transition-shadow bg-white"
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
@@ -337,7 +337,8 @@ export function Sidebar({
             onChange={(e) => setRequirement(e.target.value)}
             placeholder="Describe your feature requirement in detail... e.g. 'As a user, I want to be able to reset my password using an email link...'"
             disabled={isWorking}
-            className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
+            rows={12}
+            className="block min-h-[260px] w-full flex-1 bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-y disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
           />
           <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-sidebar-border)] px-4 py-2.5 bg-[var(--rf-bg-sidebar)]">
             <motion.button
