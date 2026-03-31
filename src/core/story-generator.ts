@@ -207,6 +207,17 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
   return seed.slice(0, Math.max(0, needed));
 }
 
+export function buildFallbackClarifyingQuestions(
+  requirement: string,
+  questionPlan: Pick<ClarifyQuestionPlan, 'min' | 'max' | 'target'>,
+): ClarifyQuestion[] {
+  const desiredQuestionCount = Math.min(
+    questionPlan.max,
+    Math.max(questionPlan.min, questionPlan.target),
+  );
+  return buildFallbackQuestions(requirement, desiredQuestionCount);
+}
+
 function clampFeatureCandidates(rawFeatures: RawFeature[], featurePlan: FeaturePlan): RawFeature[] {
   if (featurePlan.max <= 0) return [];
   return rawFeatures.slice(0, featurePlan.max);
@@ -655,10 +666,20 @@ export async function generateClarifyingQuestions(opts: {
     policy: config.aiExecutionPolicy,
   });
   const questionPlan = decision.questionPlan;
+  const isLightClarifyPass =
+    decision.reasoningMode !== 'deep' &&
+    decision.scopeMode === 'atomic' &&
+    questionPlan.max <= 2;
   const contextCharBudget = decision.reasoningMode === 'deep'
     ? { attachment: 4000, wi: 4000, gold: 5000, similar: 5000 }
-    : { attachment: 2200, wi: 2200, gold: 3000, similar: 3000 };
-  const clarifyMaxTokens = decision.reasoningMode === 'deep' ? 2600 : 1800;
+    : isLightClarifyPass
+      ? { attachment: 1400, wi: 1400, gold: 1800, similar: 1200 }
+      : { attachment: 2200, wi: 2200, gold: 3000, similar: 3000 };
+  const clarifyMaxTokens = decision.reasoningMode === 'deep'
+    ? 2600
+    : isLightClarifyPass
+      ? 1000
+      : 1800;
   const clarifyTopUpMaxTokens = decision.reasoningMode === 'deep' ? 1400 : 900;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
@@ -708,7 +729,12 @@ export async function generateClarifyingQuestions(opts: {
     Math.max(questionPlan.min, questionPlan.target),
   );
 
-  if (filteredQuestions.length < desiredQuestionCount) {
+  const shouldRunTopUpLlm =
+    decision.reasoningMode === 'deep' ||
+    questionPlan.target >= 5 ||
+    questionPlan.max >= 6;
+
+  if (filteredQuestions.length < desiredQuestionCount && shouldRunTopUpLlm) {
     const needed = desiredQuestionCount - filteredQuestions.length;
     const topUpUserMessage = [
       contextParts.join('\n\n'),

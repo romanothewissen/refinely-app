@@ -8,9 +8,9 @@
  * Result is stored in Forge Storage; the frontend polls getClarifyResult.
  */
 
-import { ClarifyContextMeta, ClarifyEvent } from '../types';
-import { buildPlannerDecision } from '../core/planner';
-import { generateClarifyingQuestions } from '../core/story-generator';
+import { ClarifyContextMeta, ClarifyEvent, PlannerDecision, TokenUsageSummary } from '../types';
+import { buildHeuristicPlannerDecision, buildPlannerDecision } from '../core/planner';
+import { buildFallbackClarifyingQuestions, generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
@@ -69,6 +69,104 @@ function resolveRelevantGoldSources(
   return Array.from(deduped.values());
 }
 
+interface ClarifyRetrievalStrategy {
+  wiTopK: number;
+  wiMaxChars: number;
+  goldLimit: number;
+  includeSimilarStories: boolean;
+  contextTimeoutMs: number;
+  plannerDeadlineMs: number;
+  questionDeadlineMs: number;
+  contextMessage: string;
+}
+
+function zeroClarifyTokenUsage(): TokenUsageSummary {
+  return {
+    input: 0,
+    output: 0,
+    total: 0,
+    byStage: {
+      clarify: { input: 0, output: 0, total: 0 },
+    },
+  };
+}
+
+function buildAmbiguityAssessment(decision: PlannerDecision, generatedQuestions: number) {
+  return {
+    level: decision.questionPlan.clarity,
+    score: decision.ambiguityScore,
+    reasons: decision.ambiguityReasons.slice(0, 4),
+    questionPlan: {
+      min: decision.questionPlan.min,
+      max: decision.questionPlan.max,
+      target: decision.questionPlan.target,
+    },
+    generatedQuestions,
+  };
+}
+
+function formatAssessmentMessage(decision: PlannerDecision): string {
+  if (decision.questionPlan.max <= 0) {
+    return 'Quick assessment: this looks clear and bounded, so clarifying questions can be skipped.';
+  }
+
+  const target = Math.max(decision.questionPlan.min, decision.questionPlan.target);
+  const questionLabel = `${target} clarifying question${target === 1 ? '' : 's'}`;
+  return `Quick assessment: ${decision.questionPlan.clarity} ambiguity and ${decision.scopeMode} scope. Aiming for ${questionLabel}.`;
+}
+
+function buildRetrievalStrategy(
+  decision: PlannerDecision,
+  wiConfig: { topKChunks: number; maxChars: number },
+  reasoningMode: 'fast' | 'deep',
+  includeSimilarStories: boolean,
+): ClarifyRetrievalStrategy {
+  const isDeepPass =
+    reasoningMode === 'deep' ||
+    decision.clarificationMode === 'deep' ||
+    decision.scopeMode === 'initiative';
+  const isLightPass =
+    !isDeepPass &&
+    (decision.clarificationMode === 'light' || (decision.scopeMode === 'atomic' && decision.questionPlan.max <= 2));
+
+  if (isDeepPass) {
+    return {
+      wiTopK: Math.min(wiConfig.topKChunks, 6),
+      wiMaxChars: Math.min(wiConfig.maxChars, 22000),
+      goldLimit: 6,
+      includeSimilarStories,
+      contextTimeoutMs: 18000,
+      plannerDeadlineMs: 12000,
+      questionDeadlineMs: 45000,
+      contextMessage: 'Loading a deeper context pass to sharpen discovery coverage…',
+    };
+  }
+
+  if (isLightPass) {
+    return {
+      wiTopK: Math.min(wiConfig.topKChunks, 2),
+      wiMaxChars: Math.min(wiConfig.maxChars, 6000),
+      goldLimit: 2,
+      includeSimilarStories: false,
+      contextTimeoutMs: 9000,
+      plannerDeadlineMs: 7000,
+      questionDeadlineMs: 18000,
+      contextMessage: 'Loading a light context pass to refine the most important questions…',
+    };
+  }
+
+  return {
+    wiTopK: Math.min(wiConfig.topKChunks, 4),
+    wiMaxChars: Math.min(wiConfig.maxChars, 12000),
+    goldLimit: 4,
+    includeSimilarStories,
+    contextTimeoutMs: 14000,
+    plannerDeadlineMs: 9000,
+    questionDeadlineMs: 30000,
+    contextMessage: 'Loading supporting context to tighten the discovery plan…',
+  };
+}
+
 export async function handler(event: { body: ClarifyEvent }) {
   const { sessionId, accountId, requirement, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
@@ -85,72 +183,145 @@ export async function handler(event: { body: ClarifyEvent }) {
   };
 
   try {
-    await sendClarifyProgress(sessionId, 'Gathering reference context and work instructions…');
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
-    const contextTimeoutMs = reasoningMode === 'deep' ? 30000 : 18000;
-    const [wiContext, goldItems, similarStories] = await Promise.all([
-      config.wiConfig.enabled
-        ? withTimeoutFallback(
-            retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey),
-            contextTimeoutMs,
-            { text: '', docs: [] },
-            'work-instruction context',
-          )
-        : Promise.resolve({ text: '', docs: [] }),
-      config.goldSources.length
-        ? withTimeoutFallback(
-            fetchGoldExamples(config.goldSources, 6),
-            contextTimeoutMs,
-            [],
-            'gold examples',
-          )
-        : Promise.resolve([]),
-      config.tier !== 'free'
-        ? withTimeoutFallback(
-            findSimilarStories(maskedRequirement.text, config, projectKey),
-            contextTimeoutMs,
-            [],
-            'similar stories',
-          )
-        : Promise.resolve([]),
-    ]);
+    const outputMode = event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode;
+    const quickPlannerInput = {
+      requirement: maskedRequirement.text,
+      attachmentText: maskedAttachment.text,
+      config,
+      reasoningMode,
+      outputMode,
+      policy: config.aiExecutionPolicy,
+    } as const;
+    const heuristicPlannerDecision = buildHeuristicPlannerDecision(quickPlannerInput);
 
-    // LLM calls have no built-in timeout; race against a deadline so the queue job
-    // self-aborts and stores type:'error' instead of hanging until Forge kills it.
-    const llmDeadlineMs = reasoningMode === 'deep' ? 150000 : 80000;
+    await sendClarifyProgress(sessionId, 'Quickly assessing request clarity and ambiguity…');
+    let plannerDecision: PlannerDecision;
+    try {
+      plannerDecision = await Promise.race([
+        buildPlannerDecision(quickPlannerInput),
+        throwAfterTimeout(reasoningMode === 'deep' ? 10000 : 7000, 'quick planner assessment'),
+      ]);
+    } catch (assessmentErr) {
+      console.warn('[clarify-queue] Quick assessment timed out, using heuristic decision:', assessmentErr);
+      plannerDecision = heuristicPlannerDecision;
+    }
 
-    await sendClarifyProgress(sessionId, 'Assessing request clarity and complexity…');
-    const plannerDecision = await Promise.race([
-      buildPlannerDecision({
-        requirement: maskedRequirement.text,
-        attachmentText: maskedAttachment.text,
-        wiContextText: wiContext.text,
-        goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
-        similarStoriesText: formatSimilarStoriesText(similarStories, 8),
-        config,
-        reasoningMode,
-        outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
-        policy: config.aiExecutionPolicy,
-      }),
-      throwAfterTimeout(llmDeadlineMs, 'planner LLM'),
-    ]);
+    await sendClarifyProgress(sessionId, formatAssessmentMessage(plannerDecision));
 
-    await sendClarifyProgress(sessionId, 'Drafting the highest-value clarifying questions…');
-    const { questions, tokenUsage, ambiguityAssessment } = await Promise.race([
-      generateClarifyingQuestions({
-        requirement: maskedRequirement.text,
-        attachmentText: maskedAttachment.text,
-        wiContextText: wiContext.text,
-        goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
-        similarStoriesText: formatSimilarStoriesText(similarStories, 8),
-        config,
+    let wiContext = { text: '', docs: [] as Array<{ docId: string; filename: string; chunkCount: number }> };
+    let goldItems: Awaited<ReturnType<typeof fetchGoldExamples>> = [];
+    let similarStories: Awaited<ReturnType<typeof findSimilarStories>> = [];
+
+    const shouldSkipClarify =
+      plannerDecision.questionPlan.max <= 0 &&
+      plannerDecision.confidence >= 0.65;
+
+    if (!shouldSkipClarify) {
+      const retrievalStrategy = buildRetrievalStrategy(
         plannerDecision,
-      }),
-      throwAfterTimeout(llmDeadlineMs, 'clarify question generation'),
-    ]);
+        config.wiConfig,
+        reasoningMode,
+        config.tier !== 'free',
+      );
+
+      await sendClarifyProgress(sessionId, retrievalStrategy.contextMessage);
+      [wiContext, goldItems, similarStories] = await Promise.all([
+        config.wiConfig.enabled
+          ? withTimeoutFallback(
+              retrieveWiContext(maskedRequirement.text, retrievalStrategy.wiTopK, retrievalStrategy.wiMaxChars, projectKey),
+              retrievalStrategy.contextTimeoutMs,
+              { text: '', docs: [] },
+              'work-instruction context',
+            )
+          : Promise.resolve({ text: '', docs: [] }),
+        config.goldSources.length
+          ? withTimeoutFallback(
+              fetchGoldExamples(config.goldSources, retrievalStrategy.goldLimit),
+              retrievalStrategy.contextTimeoutMs,
+              [],
+              'gold examples',
+            )
+          : Promise.resolve([]),
+        retrievalStrategy.includeSimilarStories
+          ? withTimeoutFallback(
+              findSimilarStories(maskedRequirement.text, config, projectKey),
+              retrievalStrategy.contextTimeoutMs,
+              [],
+              'similar stories',
+            )
+          : Promise.resolve([]),
+      ]);
+
+      const goldExamplesText = formatGoldExamplesText(goldItems, 6, 900, 900);
+      const similarStoriesText = formatSimilarStoriesText(similarStories, 8);
+
+      try {
+        plannerDecision = await Promise.race([
+          buildPlannerDecision({
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            wiContextText: wiContext.text,
+            goldExamplesText,
+            similarStoriesText,
+            config,
+            reasoningMode,
+            outputMode,
+            policy: config.aiExecutionPolicy,
+          }),
+          throwAfterTimeout(retrievalStrategy.plannerDeadlineMs, 'context-aware planner assessment'),
+        ]);
+      } catch (plannerErr) {
+        console.warn('[clarify-queue] Context-aware planner timed out, keeping quick decision:', plannerErr);
+      }
+    }
+
+    let questions: Awaited<ReturnType<typeof generateClarifyingQuestions>>['questions'] = [];
+    let tokenUsage: TokenUsageSummary = zeroClarifyTokenUsage();
+    let ambiguityAssessment = buildAmbiguityAssessment(plannerDecision, 0);
+
+    if (!shouldSkipClarify && plannerDecision.questionPlan.max > 0) {
+      const retrievalStrategy = buildRetrievalStrategy(
+        plannerDecision,
+        config.wiConfig,
+        reasoningMode,
+        config.tier !== 'free',
+      );
+      const targetQuestionCount = Math.max(
+        plannerDecision.questionPlan.min,
+        plannerDecision.questionPlan.target,
+      );
+      await sendClarifyProgress(
+        sessionId,
+        `Drafting ${targetQuestionCount} high-value clarifying question${targetQuestionCount === 1 ? '' : 's'}…`,
+      );
+
+      try {
+        const clarifyResult = await Promise.race([
+          generateClarifyingQuestions({
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            wiContextText: wiContext.text,
+            goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
+            similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+            config,
+            plannerDecision,
+          }),
+          throwAfterTimeout(retrievalStrategy.questionDeadlineMs, 'clarify question generation'),
+        ]);
+        questions = clarifyResult.questions;
+        tokenUsage = clarifyResult.tokenUsage;
+        ambiguityAssessment = clarifyResult.ambiguityAssessment;
+      } catch (clarifyErr) {
+        console.warn('[clarify-queue] Clarify generation timed out, using fallback questions:', clarifyErr);
+        await sendClarifyProgress(sessionId, 'Model response was slow, so using a fast fallback question set…');
+        questions = buildFallbackClarifyingQuestions(maskedRequirement.text, plannerDecision.questionPlan);
+        ambiguityAssessment = buildAmbiguityAssessment(plannerDecision, questions.length);
+      }
+    }
 
     const clarifyContext: ClarifyContextMeta = {
       projectKey,
@@ -175,7 +346,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         ...ambiguityAssessment,
         generatedQuestions: questions.length,
       },
-      tokenUsage,
+      tokenUsage: questions.length > 0 || tokenUsage.total > 0 ? tokenUsage : zeroClarifyTokenUsage(),
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
         docId: doc.docId,

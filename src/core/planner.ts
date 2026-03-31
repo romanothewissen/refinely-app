@@ -266,7 +266,7 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
   }
 }
 
-function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
+export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
   const requirement = input.requirement?.trim() ?? '';
   const attachment = input.attachmentText?.trim() ?? '';
   const wi = input.wiContextText?.trim() ?? '';

@@ -13,7 +13,8 @@ export interface GenerationProgress {
 const NO_FIRST_EVENT_MS = 90000;       // 90s to receive first queue event before giving up
 const STALE_PROGRESS_MS = 6 * 60 * 1000; // fail fast on stalled runs instead of spinning indefinitely
 
-const CLARIFY_TIMEOUT_MS = 180000; // 3 min — generous for Pro thinking mode
+const CLARIFY_TIMEOUT_MS = 120000; // fail sooner so clarify never feels frozen
+const CLARIFY_STALE_PROGRESS_MS = 75000;
 const CLARIFY_POLL_INTERVAL_MS = 3500;
 const GENERATION_POLL_INTERVAL_MS = 4000;
 
@@ -67,6 +68,14 @@ export function useClarifyRealtime(
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
         if (!result || result.type === 'pending') {
           setProgress(result?.message ?? 'Preparing discovery workflow…');
+          const updatedAt = result?.updatedAt ?? 0;
+          const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
+          if (ageMs > CLARIFY_STALE_PROGRESS_MS) {
+            clearTimer();
+            setProgress('');
+            onFallthroughRef.current('timeout');
+            return;
+          }
           if (Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS) {
             clearTimer();
             setProgress('');
