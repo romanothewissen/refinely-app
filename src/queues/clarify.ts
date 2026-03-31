@@ -288,11 +288,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
     let goldItems: Awaited<ReturnType<typeof fetchGoldExamples>> = [];
     let similarStories: Awaited<ReturnType<typeof findSimilarStories>> = [];
 
-    const shouldSkipClarify =
-      plannerDecision.questionPlan.max <= 0 &&
-      plannerDecision.confidence >= 0.65;
-
-    if (!shouldSkipClarify) {
+    {
       const retrievalStrategy = buildRetrievalStrategy(
         plannerDecision,
         config.wiConfig,
@@ -344,7 +340,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
     let tokenUsage: TokenUsageSummary = zeroClarifyTokenUsage();
     let ambiguityAssessment = buildAmbiguityAssessment(plannerDecision, 0);
 
-    if (!shouldSkipClarify && plannerDecision.questionPlan.max > 0) {
+    if (plannerDecision.questionPlan.max > 0) {
       const retrievalStrategy = buildRetrievalStrategy(
         plannerDecision,
         config.wiConfig,

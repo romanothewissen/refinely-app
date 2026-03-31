@@ -503,12 +503,8 @@ function pickClarificationMode(
   reasoningMode: ReasoningMode,
   complexityScore: number,
 ): ClarificationMode {
-  if (scopeMode === 'atomic' && clarity === 'clear' && reasoningMode === 'fast') {
-    return 'none';
-  }
-
   if (scopeMode === 'atomic') {
-    return reasoningMode === 'deep' || clarity !== 'clear' ? 'light' : 'none';
+    return 'light';
   }
 
   if (scopeMode === 'focused') {
@@ -547,7 +543,16 @@ function buildQuestionPlan(
     12,
   );
 
-  if (clarificationMode === 'none') return { min: 0, max: 0, target: 0, clarity };
+  // "No discovery" should only exist as an explicit future UX choice, not as an
+  // implicit planner outcome. Keep a small but meaningful question floor.
+  if (clarificationMode === 'none') {
+    return {
+      min: 2,
+      max: lightMax,
+      target: Math.min(2, lightMax),
+      clarity,
+    };
+  }
   if (clarificationMode === 'light') {
     return {
       min: 2,
