@@ -27,7 +27,9 @@ export function useClarifyRealtime(
 ) {
   const [progress, setProgress] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAtRef = useRef<number>(0);
+  const lastSuccessfulPollAtRef = useRef<number>(0);
   const inFlightRef = useRef(false);
   // Keep callbacks in refs so the polling interval always calls the latest version
   const onCompleteRef = useRef(onComplete);
@@ -38,6 +40,7 @@ export function useClarifyRealtime(
   useEffect(() => {
     if (!sessionId) return;
     startedAtRef.current = Date.now();
+    lastSuccessfulPollAtRef.current = startedAtRef.current;
     let cancelled = false;
 
     const clearTimer = () => {
@@ -46,6 +49,27 @@ export function useClarifyRealtime(
         timerRef.current = null;
       }
     };
+
+    const clearWatchdog = () => {
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+    };
+
+    const finishWith = (reason: ClarifyFallthroughReason) => {
+      if (cancelled) return;
+      cancelled = true;
+      clearTimer();
+      clearWatchdog();
+      inFlightRef.current = false;
+      setProgress('');
+      onFallthroughRef.current(reason);
+    };
+
+    watchdogRef.current = setTimeout(() => {
+      finishWith('timeout');
+    }, CLARIFY_TIMEOUT_MS);
 
     const scheduleNext = (delay = CLARIFY_POLL_INTERVAL_MS) => {
       if (cancelled) return;
@@ -63,6 +87,7 @@ export function useClarifyRealtime(
           success: boolean;
           result?: { type: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number; message?: string };
         };
+        lastSuccessfulPollAtRef.current = Date.now();
         const result = res.result;
 
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
@@ -71,15 +96,11 @@ export function useClarifyRealtime(
           const updatedAt = result?.updatedAt ?? 0;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > CLARIFY_STALE_PROGRESS_MS) {
-            clearTimer();
-            setProgress('');
-            onFallthroughRef.current('timeout');
+            finishWith('timeout');
             return;
           }
           if (Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS) {
-            clearTimer();
-            setProgress('');
-            onFallthroughRef.current('timeout');
+            finishWith('timeout');
             return;
           }
           scheduleNext();
@@ -89,24 +110,29 @@ export function useClarifyRealtime(
         if (result.type === 'complete' && Array.isArray(result.questions) && result.questions.length > 0) {
           console.log('[useClarifyRealtime] session complete with', result.questions.length, 'questions');
           clearTimer();
+          clearWatchdog();
           setProgress('');
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
           console.warn('[useClarifyRealtime] complete but no questions — planner decided none needed');
-          clearTimer();
-          setProgress('');
-          onFallthroughRef.current('no_questions');
+          finishWith('no_questions');
         } else if (result.type === 'error') {
           console.error('[useClarifyRealtime] error result from backend');
-          clearTimer();
-          setProgress('');
-          onFallthroughRef.current('error');
+          finishWith('error');
         } else {
           // Unknown shape from storage; keep polling instead of getting stuck.
           scheduleNext();
         }
       } catch {
-        // transient polling error — keep trying
+        const silentPollAgeMs = Date.now() - lastSuccessfulPollAtRef.current;
+        if (
+          Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS ||
+          silentPollAgeMs > CLARIFY_STALE_PROGRESS_MS
+        ) {
+          finishWith('timeout');
+          return;
+        }
+        // transient polling error — keep trying, but the watchdog still enforces a hard stop
         scheduleNext();
       } finally {
         inFlightRef.current = false;
@@ -118,6 +144,7 @@ export function useClarifyRealtime(
     return () => {
       cancelled = true;
       clearTimer();
+      clearWatchdog();
       inFlightRef.current = false;
       setProgress('');
     };
