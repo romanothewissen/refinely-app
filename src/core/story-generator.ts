@@ -145,7 +145,7 @@ function compactSuggestion(raw: unknown): string {
   const text = String(raw ?? '').trim().replace(/\s+/g, ' ');
   if (!text) return '';
   const words = text.split(' ');
-  return words.slice(0, 18).join(' ');
+  return words.slice(0, 28).join(' ');
 }
 
 function canonicalizeClarifyCategory(category: string): (typeof CLARIFY_CATEGORY_ORDER)[number] {
@@ -178,6 +178,38 @@ function buildRequirementAnchor(requirement: string): string {
   if (!cleaned) return 'this requirement';
   const words = cleaned.split(' ');
   return words.length <= 12 ? cleaned : `${words.slice(0, 12).join(' ')}...`;
+}
+
+function buildFallbackRequirementSignals(requirement: string) {
+  const signals = extractDomainSignals([requirement]).slice(0, 8);
+  const actor =
+    requirement.match(/^\s*an?\s+([A-Za-z0-9/-]{2,}(?:\s+[A-Za-z0-9/-]{2,}){0,2})\s+must\b/i)?.[1] ??
+    requirement.match(/\bas\s+an?\s+([A-Za-z0-9/-]{2,}(?:\s+[A-Za-z0-9/-]{2,}){0,2})\b/i)?.[1] ??
+    signals[0] ??
+    'the primary user';
+  const decisionObject =
+    requirement.match(/\b(?:provided|shown|assigned|generated|created|given|offered)\s+an?\s+([^,.]+)/i)?.[1]?.trim() ??
+    requirement.match(/\b(?:determine|schedule|assign|route|prioritize|recommend)\s+([^,.]+)/i)?.[1]?.trim() ??
+    signals.slice(0, 3).join(' ') ??
+    'the final decision';
+  const factors = (
+    requirement.match(/\bbased on\s+([^,.]+)/i)?.[1] ??
+    requirement.match(/\busing\s+([^,.]+)/i)?.[1] ??
+    ''
+  )
+    .split(/\s+(?:and|or)\s+|,\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+
+  return {
+    actor,
+    decisionObject,
+    factorA: factors[0] ?? signals[1] ?? 'priority factors',
+    factorB: factors[1] ?? signals[2] ?? 'timing constraints',
+    contextA: signals[1] ?? factors[0] ?? 'business context',
+    contextB: signals[2] ?? factors[1] ?? 'operational constraints',
+  };
 }
 
 const DOMAIN_SIGNAL_STOPWORDS = new Set([
@@ -246,45 +278,66 @@ function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
 function buildFallbackQuestions(requirement: string, needed: number): ClarifyQuestion[] {
   const normalizedRequirement = requirement.toLowerCase();
   const anchor = buildRequirementAnchor(requirement);
+  const focus = buildFallbackRequirementSignals(requirement);
   const targetedTemplates: Array<{ matches: RegExp; question: ClarifyQuestion }> = [
     {
       matches: /\b(optimal|optimi[sz]e|optimization|priority|prioriti[sz]|criticality|due date|sla|weight|score|trade[- ]off|ranking|rank|urgency)\b/i,
       question: {
         category: 'Business Rules & Exceptions',
-        question: `For "${anchor}", when multiple valid outcomes compete, how should the system rank them and how should ties be broken?`,
-        suggestions: ['Single fixed priority order', 'Weighted scoring model', 'Configurable policy by business unit'],
+        question: `For "${anchor}", when ${focus.factorA} conflicts with ${focus.factorB}, how should the system rank options and break ties?`,
+        suggestions: [
+          `Always prioritize ${focus.factorA}, then use ${focus.factorB} as a secondary tiebreaker.`,
+          `Use a weighted scoring model that balances ${focus.factorA}, ${focus.factorB}, and operational feasibility.`,
+          `Allow configurable precedence rules so each business unit can tune the ranking logic.`,
+        ],
       },
     },
     {
       matches: /\b(schedule|assign|allocation|allocate|dispatch|route|queue|sequence|sequencing|slot|calendar|timeline|reschedul)\w*\b/i,
       question: {
         category: 'Trigger & Context',
-        question: `For "${anchor}", what events should create, recalculate, or adjust the outcome as conditions change?`,
-        suggestions: ['On every relevant change', 'At scheduled checkpoints', 'Manual refresh plus key events'],
+        question: `For "${anchor}", what events should create, recalculate, or adjust ${focus.decisionObject} as ${focus.contextA} or ${focus.contextB} change?`,
+        suggestions: [
+          `Recalculate immediately when critical inputs, availability, or priorities change.`,
+          `Refresh on scheduled planning checkpoints plus exceptional business events.`,
+          `Let users trigger recalculation manually, but also automate it for high-impact changes.`,
+        ],
       },
     },
     {
       matches: /\b(approval|approve|review|override|manual|escalat)\w*\b/i,
       question: {
         category: 'Roles & Personas',
-        question: `For "${anchor}", who can review, override, or approve the proposed outcome, and under what conditions?`,
-        suggestions: ['Operational owner only', 'Manager approval for exceptions', 'No manual override allowed'],
+        question: `For "${anchor}", who can review, override, or approve ${focus.decisionObject}, and under what conditions?`,
+        suggestions: [
+          `Only the operational owner can change it, with all overrides fully logged.`,
+          `Supervisors can approve exception cases when the normal policy would miss commitments.`,
+          `No manual override is allowed once the decision has been published downstream.`,
+        ],
       },
     },
     {
       matches: /\b(integration|sync|import|export|api|feed|source|external|vendor|upstream|downstream)\b/i,
       question: {
         category: 'Trigger & Context',
-        question: `For "${anchor}", what upstream data or dependent processes must be available, and what should happen when they are missing or stale?`,
-        suggestions: ['Block until valid', 'Use last known good data', 'Proceed with warning and review'],
+        question: `For "${anchor}", what upstream data or dependent processes must be available before ${focus.decisionObject} can be trusted, and what should happen when they are missing or stale?`,
+        suggestions: [
+          `Block the decision until required source data is present and validated.`,
+          `Use the last known good data, but flag the result for operational review.`,
+          `Proceed with a degraded result only when the business impact is low and visible.`,
+        ],
       },
     },
     {
       matches: /\b(notif|alert|visible|dashboard|report|audit|history|trace)\w*\b/i,
       question: {
         category: 'Success & Measurement',
-        question: `For "${anchor}", who needs visibility into the outcome and what level of traceability or explanation is required?`,
-        suggestions: ['Basic status only', 'Full decision rationale', 'Audit trail for every change'],
+        question: `For "${anchor}", who needs visibility into ${focus.decisionObject}, and what level of traceability or explanation is required?`,
+        suggestions: [
+          `Show only the final outcome and the most important reason behind it.`,
+          `Expose the key ranking factors so planners can understand why this option won.`,
+          `Keep a full audit trail of every recalculation, override, and downstream change.`,
+        ],
       },
     },
   ];
@@ -292,73 +345,129 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
   const templates: ClarifyQuestion[] = [
     {
       category: 'Roles & Personas',
-      question: `For "${anchor}", which role owns the final business outcome and which roles are directly affected by it?`,
-      suggestions: ['One primary owner', 'Shared across two roles', 'Different owner by process step'],
+      question: `For "${anchor}", which role owns ${focus.decisionObject}, and which other roles are directly affected when it changes?`,
+      suggestions: [
+        `One accountable owner manages the final outcome, with others only informed afterward.`,
+        `Operational planning owns it, but downstream execution teams are directly impacted.`,
+        `Ownership shifts by process step, with one role proposing and another approving.`,
+      ],
     },
     {
       category: 'Trigger & Context',
-      question: `For "${anchor}", what business event or condition should trigger this capability, and what context must already be known at that point?`,
-      suggestions: ['Triggered by a new request', 'Triggered by a status change', 'Triggered on a planned cadence'],
+      question: `For "${anchor}", what business event should trigger ${focus.decisionObject}, and what context about ${focus.actor}, ${focus.contextA}, or ${focus.contextB} must already be known?`,
+      suggestions: [
+        `Trigger it when a new business need enters planning and core inputs are complete.`,
+        `Trigger it when a relevant status, priority, or timing condition changes materially.`,
+        `Run it on a scheduled planning cadence, with extra runs for exception events.`,
+      ],
     },
     {
       category: 'Functional Flow',
-      question: `For "${anchor}", what should the happy-path flow look like from the first trigger through the final business outcome?`,
-      suggestions: ['Single straight-through flow', 'Flow with review checkpoint', 'Flow varies by scenario'],
+      question: `For "${anchor}", what should the happy-path flow look like from the first trigger to a finalized ${focus.decisionObject} for ${focus.actor}?`,
+      suggestions: [
+        `A straight-through flow calculates the recommendation and immediately publishes it.`,
+        `The system proposes an outcome first, then a planner reviews it before release.`,
+        `The flow varies depending on urgency, policy constraints, or business segment.`,
+      ],
     },
     {
       category: 'Functional Flow',
-      question: `For "${anchor}", what inputs or facts should the system consider before it determines the right outcome?`,
-      suggestions: ['Only current request data', 'Request plus reference context', 'Request, history, and policy data'],
+      question: `For "${anchor}", what inputs or facts about ${focus.actor}, ${focus.contextA}, and ${focus.contextB} should the system consider before finalizing ${focus.decisionObject}?`,
+      suggestions: [
+        `Use only the current request and the operational data available right now.`,
+        `Combine the request with historical patterns, reference rules, and live constraints.`,
+        `Blend policy data, recent changes, and execution capacity before making the decision.`,
+      ],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: `For "${anchor}", what rules or constraints must always be respected, even when they conflict with the preferred outcome?`,
-      suggestions: ['Regulatory or policy rules', 'Role-based permissions', 'Operational capacity limits'],
+      question: `For "${anchor}", what rules or constraints must always be respected, even when they conflict with the preferred ${focus.decisionObject}?`,
+      suggestions: [
+        `Hard business policies always override optimization or convenience goals.`,
+        `Role permissions and contractual commitments limit which outcomes are allowed.`,
+        `Operational capacity, timing windows, and required capabilities cannot be violated.`,
+      ],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: `For "${anchor}", what should happen when the ideal outcome cannot be completed as expected or when required information is missing?`,
-      suggestions: ['Stop and request action', 'Proceed with warning', 'Use fallback policy'],
+      question: `For "${anchor}", what should happen when the ideal ${focus.decisionObject} cannot be achieved or the required information is missing?`,
+      suggestions: [
+        `Stop and request human action whenever the missing data could change the decision materially.`,
+        `Proceed with a visible warning when the business can tolerate a lower-confidence result.`,
+        `Apply a defined fallback policy and capture why the preferred option was not possible.`,
+      ],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: `For "${anchor}", where are the key tradeoffs or policy decisions that could change the result for different scenarios?`,
-      suggestions: ['Fixed enterprise-wide policy', 'Configurable by team', 'Depends on case attributes'],
+      question: `For "${anchor}", where are the key tradeoffs or policy decisions that could change ${focus.decisionObject} across different scenarios?`,
+      suggestions: [
+        `One enterprise-wide rule set should govern every scenario consistently.`,
+        `Teams can tune thresholds, but the core ranking policy stays centrally managed.`,
+        `The policy changes by case attributes, service tier, or operational urgency.`,
+      ],
     },
     {
       category: 'Success & Measurement',
-      question: `For "${anchor}", how should users know the result is correct, and what business outcome defines success?`,
-      suggestions: ['Meets agreed policy', 'Improves turnaround time', 'Reduces manual rework'],
+      question: `For "${anchor}", how should users know ${focus.decisionObject} is correct, and what business outcome defines success?`,
+      suggestions: [
+        `Success means the outcome follows policy and rarely requires manual correction.`,
+        `Success means better turnaround time without sacrificing high-priority commitments.`,
+        `Success means planners trust the recommendation and spend less time reworking it.`,
+      ],
     },
     {
       category: 'Roles & Personas',
-      question: `For "${anchor}", who needs to see, validate, act on, or be notified about the result after it is produced?`,
-      suggestions: ['Only the request owner', 'Owner plus operational team', 'Multiple downstream stakeholders'],
+      question: `For "${anchor}", who needs to see, validate, act on, or be notified after ${focus.decisionObject} is produced?`,
+      suggestions: [
+        `Only the direct owner and the person executing the work need immediate visibility.`,
+        `The owner plus the operational coordination team need to review and act on it.`,
+        `Multiple downstream stakeholders need updates because the decision affects follow-on work.`,
+      ],
     },
     {
       category: 'Trigger & Context',
-      question: `For "${anchor}", what related processes, systems, or teams does this depend on, and how should those dependencies affect behavior?`,
-      suggestions: ['Independent capability', 'Depends on one upstream source', 'Depends on multiple handoffs'],
+      question: `For "${anchor}", what related processes, systems, or teams does ${focus.decisionObject} depend on, and how should those dependencies affect behavior?`,
+      suggestions: [
+        `It is mostly independent, with only one source system supplying required facts.`,
+        `It depends on one upstream planning process that must complete before calculation.`,
+        `It spans multiple teams or systems, so handoff failures must change the behavior visibly.`,
+      ],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: `For "${anchor}", which exceptions need their own handling because the standard flow would be risky, invalid, or misleading?`,
-      suggestions: ['Permission or policy exceptions', 'Data quality exceptions', 'Capacity or timing exceptions'],
+      question: `For "${anchor}", which exceptions need their own handling because the standard path to ${focus.decisionObject} would be risky, invalid, or misleading?`,
+      suggestions: [
+        `Permission or policy exceptions require a separate approval or review path.`,
+        `Data quality problems should suspend the decision until the missing facts are corrected.`,
+        `Capacity, timing, or dependency conflicts need their own fallback handling.`,
+      ],
     },
     {
       category: 'Success & Measurement',
-      question: `For "${anchor}", what level of explanation, auditability, or history should be retained so teams can trust and review the outcome later?`,
-      suggestions: ['Minimal audit trail', 'Explain major decisions', 'Full traceability for all changes'],
+      question: `For "${anchor}", what level of explanation, auditability, or history should be retained so teams can trust and review ${focus.decisionObject} later?`,
+      suggestions: [
+        `Keep only the final choice and the top reasons that influenced it.`,
+        `Capture the major decisions, overrides, and recalculation triggers for later review.`,
+        `Store full traceability for every change because auditability is business-critical.`,
+      ],
     },
     {
       category: 'Success & Measurement',
-      question: `For "${anchor}", what should be configurable versus fixed so different business units or teams can use this consistently?`,
-      suggestions: ['Globally fixed behavior', 'Configurable thresholds only', 'Configurable policies by context'],
+      question: `For "${anchor}", what should be configurable versus fixed so different business units or teams can use ${focus.decisionObject} consistently?`,
+      suggestions: [
+        `Keep the core logic fixed globally and allow only a few threshold settings.`,
+        `Allow configuration of thresholds, windows, and tie-break priorities by context.`,
+        `Let each business unit configure policies while keeping one common audit model.`,
+      ],
     },
     {
       category: 'Functional Flow',
-      question: `For "${anchor}", what volume, timing, or responsiveness expectations would materially change how this capability should behave?`,
-      suggestions: ['Low volume, manual review ok', 'Near real-time needed', 'High volume with strict SLAs'],
+      question: `For "${anchor}", what volume, timing, or responsiveness expectations would materially change how ${focus.decisionObject} should behave?`,
+      suggestions: [
+        `Low volume is acceptable, so some manual validation can remain in the loop.`,
+        `Near real-time decisions are needed because delays materially hurt operations.`,
+        `High volume and strict SLAs require stable automation with minimal human intervention.`,
+      ],
     },
   ];
 
@@ -450,12 +559,12 @@ function buildGenerationContextSections(opts: {
     ? (
       opts.reasoningMode === 'deep'
         ? { attachment: 5000, wi: 12000, gold: 6000, similar: 5000 }
-        : { attachment: 2500, wi: 7000, gold: 3500, similar: 3000 }
+        : { attachment: 1800, wi: 4500, gold: 2400, similar: 1800 }
     )
     : (
       opts.reasoningMode === 'deep'
         ? { attachment: 2500, wi: 5000, gold: 2200, similar: 2000 }
-        : { attachment: 1400, wi: 2800, gold: 1400, similar: 1200 }
+        : { attachment: 900, wi: 1600, gold: 900, similar: 800 }
     );
 
   const sections: string[] = [`REQUIREMENT: ${opts.requirement}`];
@@ -1106,7 +1215,7 @@ export async function generateClarifyingQuestions(opts: {
     ? { attachment: 5000, wi: 6000, gold: 6500, similar: 6000 }
     : isLightClarifyPass
       ? { attachment: 1800, wi: 1800, gold: 2200, similar: 1800 }
-      : { attachment: 3200, wi: 3200, gold: 4200, similar: 4200 };
+      : { attachment: 2200, wi: 2200, gold: 2600, similar: 2400 };
   const clarifyMaxTokens = decision.reasoningMode === 'deep'
     ? 3600
     : isLightClarifyPass
@@ -1168,32 +1277,57 @@ export async function generateClarifyingQuestions(opts: {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let filteredQuestions: ClarifyQuestion[] = [];
+  const clarifyAttemptTimeoutMs = decision.reasoningMode === 'deep' ? 18000 : 10000;
+  const clarifyTopUpTimeoutMs = decision.reasoningMode === 'deep' ? 12000 : 5000;
+  const clarifyAttemptModels = Array.from(new Set([
+    getTierModel(config.generatorConfig.clarifyModel, config.tier),
+    ...(decision.reasoningMode === 'deep'
+      ? []
+      : [
+          getTierModel(config.generatorConfig.deepProfileModel, config.tier),
+        ]),
+  ]));
 
-  try {
-    const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
-      model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-      systemPrompt: system,
-      userMessage: contextParts.join('\n\n'),
-      maxTokens: clarifyMaxTokens,
-      ...getProviderOpts(config),
-    });
+  let clarifyAttemptError: unknown = null;
+  for (const model of clarifyAttemptModels) {
+    try {
+      const raw = await Promise.race([
+        callLlmJsonWithUsage<ClarifyQuestion[]>({
+          model,
+          systemPrompt: system,
+          userMessage: contextParts.join('\n\n'),
+          maxTokens: clarifyMaxTokens,
+          ...getProviderOpts(config),
+        }),
+        throwAfterTimeout(clarifyAttemptTimeoutMs, `Clarify question generation (${model})`),
+      ]);
 
-    totalInputTokens = raw.usage.input;
-    totalOutputTokens = raw.usage.output;
-    filteredQuestions = sortClarifyingQuestions(
-      dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
-    );
-  } catch (error) {
-    console.warn('[story-generator] Clarify question generation failed; using fallback questions:', error);
+      totalInputTokens += raw.usage.input;
+      totalOutputTokens += raw.usage.output;
+      filteredQuestions = sortClarifyingQuestions(
+        dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
+      );
+
+      if (filteredQuestions.length >= Math.min(questionPlan.min, desiredQuestionCount)) {
+        break;
+      }
+    } catch (error) {
+      clarifyAttemptError = error;
+      console.warn('[story-generator] Clarify question generation attempt failed:', { model, error });
+    }
+  }
+
+  if (!filteredQuestions.length) {
+    console.warn('[story-generator] Clarify question generation exhausted model attempts; using fallback questions:', clarifyAttemptError);
     filteredQuestions = sortClarifyingQuestions(
       dedupeQuestions(buildFallbackQuestions(requirement, desiredQuestionCount)).slice(0, questionPlan.max),
     );
   }
 
   const shouldRunTopUpLlm =
-    decision.reasoningMode === 'deep' ||
-    questionPlan.target >= 4 ||
-    questionPlan.max >= 5;
+    decision.reasoningMode === 'deep' &&
+    filteredQuestions.length < desiredQuestionCount &&
+    questionPlan.target >= 6;
 
   if (filteredQuestions.length < desiredQuestionCount && shouldRunTopUpLlm) {
     const needed = desiredQuestionCount - filteredQuestions.length;
@@ -1205,13 +1339,16 @@ export async function generateClarifyingQuestions(opts: {
     ].join('\n\n---\n\n');
 
     try {
-      const topUpRaw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
-        model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-        systemPrompt: system,
-        userMessage: topUpUserMessage,
-        maxTokens: clarifyTopUpMaxTokens,
-        ...getProviderOpts(config),
-      });
+      const topUpRaw = await Promise.race([
+        callLlmJsonWithUsage<ClarifyQuestion[]>({
+          model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+          systemPrompt: system,
+          userMessage: topUpUserMessage,
+          maxTokens: clarifyTopUpMaxTokens,
+          ...getProviderOpts(config),
+        }),
+        throwAfterTimeout(clarifyTopUpTimeoutMs, 'Clarify question top-up'),
+      ]);
       totalInputTokens += topUpRaw.usage.input;
       totalOutputTokens += topUpRaw.usage.output;
 
@@ -1222,7 +1359,7 @@ export async function generateClarifyingQuestions(opts: {
         ]).slice(0, questionPlan.max),
       );
     } catch (error) {
-      console.warn('[story-generator] Clarify question top-up failed; keeping fallback questions:', error);
+      console.warn('[story-generator] Clarify question top-up failed; keeping initial question set and filling heuristically:', error);
     }
   }
 

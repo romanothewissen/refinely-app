@@ -232,8 +232,8 @@ TASK: Generate targeted clarifying questions total, categorized into the areas b
 5. Success & Measurement — how do we know it worked
 
 For each question, provide 2-3 realistic answer suggestions based on the domain.
-- Keep each suggestion concise but useful (about 8-18 words).
-- Prefer short answer-style clauses that express a meaningful policy, scenario, or choice.
+- Keep each suggestion concise but useful (about 12-28 words).
+- Prefer short answer-style clauses that express a meaningful policy, scenario, tradeoff, or operational constraint.
 - Make the suggestions meaningfully distinct from each other so they help the user think through tradeoffs.
 
 Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
