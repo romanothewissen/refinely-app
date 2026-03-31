@@ -240,6 +240,65 @@ function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasonin
   };
 }
 
+function truncateContext(text: string, maxChars: number): string {
+  if (!text) return '';
+  return text.length > maxChars ? `${text.slice(0, maxChars)}\n...[truncated]` : text;
+}
+
+function buildGenerationContextSections(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  wiContextText: string;
+  goldExamplesText: string;
+  similarStoriesText: string;
+  mode: 'pass1' | 'pass2';
+  reasoningMode: PlannerDecision['reasoningMode'];
+}): string[] {
+  const budgets = opts.mode === 'pass1'
+    ? (
+      opts.reasoningMode === 'deep'
+        ? { attachment: 5000, wi: 12000, gold: 6000, similar: 5000 }
+        : { attachment: 2500, wi: 7000, gold: 3500, similar: 3000 }
+    )
+    : (
+      opts.reasoningMode === 'deep'
+        ? { attachment: 2500, wi: 5000, gold: 2200, similar: 2000 }
+        : { attachment: 1400, wi: 2800, gold: 1400, similar: 1200 }
+    );
+
+  const sections: string[] = [`REQUIREMENT: ${opts.requirement}`];
+
+  if (opts.clarifyAnswers.length) {
+    const qaText = opts.clarifyAnswers
+      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
+      .join('\n\n');
+    sections.push(`CLARIFICATION Q&A:\n${qaText}`);
+  }
+
+  if (opts.attachmentText) {
+    sections.push(`ATTACHMENT CONTEXT:\n${truncateContext(opts.attachmentText, budgets.attachment)}`);
+  }
+
+  if (opts.wiContextText) {
+    sections.push(`WORK INSTRUCTIONS:\n${truncateContext(opts.wiContextText, budgets.wi)}`);
+  }
+
+  if (opts.mode === 'pass1' && opts.goldExamplesText) {
+    sections.push(`GOLD STANDARD EXAMPLES (for high-level format reference):\n${truncateContext(opts.goldExamplesText, budgets.gold)}`);
+  }
+
+  if (opts.mode === 'pass1' && opts.similarStoriesText) {
+    sections.push(`SIMILAR STORIES FROM BACKLOG (for business context and writing style cues):\n${truncateContext(opts.similarStoriesText, budgets.similar)}`);
+  }
+
+  if (opts.mode === 'pass2' && opts.similarStoriesText) {
+    sections.push(`BACKLOG REFERENCE SNAPSHOT:\n${truncateContext(opts.similarStoriesText, budgets.similar)}`);
+  }
+
+  return sections;
+}
+
 function buildFallbackFeatureSummary(requirement: string): string {
   const cleaned = requirement
     .replace(/\s+/g, ' ')
@@ -639,33 +698,16 @@ export async function generateFeatures(opts: {
   } as const;
   const stageTimeouts = resolveGenerationStageTimeouts(decision.reasoningMode);
 
-  // Build user message — include all context
-  const contextSections: string[] = [`REQUIREMENT: ${requirement}`];
-
-  if (clarifyAnswers.length) {
-    const qaText = clarifyAnswers
-      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
-      .join('\n\n');
-    contextSections.push(`CLARIFICATION Q&A:\n${qaText}`);
-  }
-
-  if (attachmentText) {
-    contextSections.push(`ATTACHMENT CONTEXT:\n${attachmentText.slice(0, 8000)}`);
-  }
-
-  if (wiContextText) {
-    contextSections.push(`WORK INSTRUCTIONS:\n${wiContextText}`);
-  }
-
-  if (goldExamplesText) {
-    contextSections.push(`GOLD STANDARD EXAMPLES (for high-level format reference):\n${goldExamplesText}`);
-  }
-
-  if (similarStoriesText) {
-    contextSections.push(`SIMILAR STORIES FROM BACKLOG (most relevant matching stories for business context — use these to understand how this organization typically writes stories and ARs for this specific domain):\n${similarStoriesText}`);
-  }
-
-  const userMessage = contextSections.join('\n\n---\n\n');
+  const userMessage = buildGenerationContextSections({
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+    mode: 'pass1',
+    reasoningMode: decision.reasoningMode,
+  }).join('\n\n---\n\n');
 
   // ── Pass 1: Decomposition ──
   const pass1System = buildDecompositionSystemPrompt({
@@ -707,10 +749,27 @@ export async function generateFeatures(opts: {
     arPlan: decision.arPlan,
   });
 
-  const pass2UserMessage = `${userMessage}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+  const pass2Context = buildGenerationContextSections({
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+    mode: 'pass2',
+    reasoningMode: decision.reasoningMode,
+  }).join('\n\n---\n\n');
+  const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
 
   // Pass 2 often needs more output tokens than pass 1 (many GWT strings per feature).
-  const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 16384);
+  const estimatedPass2Tokens = Math.max(
+    4096,
+    pass1Features.length * Math.max(decision.arPlan.target, 2) * 180,
+  );
+  const pass2MaxTokens = Math.min(
+    Math.max(generatorConfig.maxTokens ?? 8192, estimatedPass2Tokens),
+    12000,
+  );
 
   let pass2Usage = { input: 0, output: 0 };
   let rawFeatures = pass1Features;

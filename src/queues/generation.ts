@@ -57,6 +57,24 @@ async function withTimeoutFallback<T>(
   }
 }
 
+function buildGenerationRetrievalBudget(reasoningMode: 'fast' | 'deep') {
+  if (reasoningMode === 'deep') {
+    return {
+      wiTopK: 6,
+      wiMaxChars: 18000,
+      goldLimit: 6,
+      contextTimeoutMs: 40000,
+    };
+  }
+
+  return {
+    wiTopK: 4,
+    wiMaxChars: 9000,
+    goldLimit: 4,
+    contextTimeoutMs: 22000,
+  };
+}
+
 function resolveRelevantGoldSources(
   sources: GenerationEvent['config']['goldSources'],
   projectKey: string,
@@ -113,38 +131,40 @@ export async function handler(event: { body: GenerationEvent }) {
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
+    const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
+    const retrievalBudget = buildGenerationRetrievalBudget(reasoningMode);
     const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
     await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectLabel}. initializing…`);
-    const contextTimeoutMs = (event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode) === 'deep'
-      ? 45000
-      : 25000;
 
     const [goldItems, wiContext, similarStories] = await Promise.all([
       goldCount
         ? withTimeoutFallback(
-            fetchGoldExamples(config.goldSources, 8),
-            contextTimeoutMs,
+            fetchGoldExamples(config.goldSources, retrievalBudget.goldLimit),
+            retrievalBudget.contextTimeoutMs,
             [],
             'gold examples',
           )
         : Promise.resolve([]),
       config.wiConfig.enabled
         ? withTimeoutFallback(
-            retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey),
-            contextTimeoutMs,
+            retrieveWiContext(
+              maskedRequirement.text,
+              Math.min(config.wiConfig.topKChunks, retrievalBudget.wiTopK),
+              Math.min(config.wiConfig.maxChars, retrievalBudget.wiMaxChars),
+              projectKey,
+            ),
+            retrievalBudget.contextTimeoutMs,
             { text: '', docs: [] },
             'work-instruction context',
           )
         : Promise.resolve({ text: '', docs: [] }),
-      config.tier !== 'free'
-        ? withTimeoutFallback(
-            findSimilarStories(maskedRequirement.text, config, projectKey),
-            contextTimeoutMs,
-            [],
-            'similar stories',
-          )
-        : Promise.resolve([]),
+      withTimeoutFallback(
+        findSimilarStories(maskedRequirement.text, config, projectKey),
+        retrievalBudget.contextTimeoutMs,
+        [],
+        'similar stories',
+      ),
     ]);
 
     const goldExamplesText = formatGoldExamplesText(goldItems);

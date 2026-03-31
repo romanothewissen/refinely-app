@@ -72,7 +72,7 @@ export async function findSimilarStories(
     if (!candidates.length) return [];
 
     let ranked = candidates;
-    if (config.similarityConfig.useLlmRerank && candidates.length > 5) {
+    if (config.similarityConfig.useLlmRerank && config.tier !== 'free' && candidates.length > 5) {
       ranked = await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
     }
 
