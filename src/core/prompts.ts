@@ -182,6 +182,7 @@ Output JSON: same features array with acceptance_requirements arrays filled in. 
 export function buildClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
+  domainSignals?: string[];
   questionPlan: {
     min: number;
     max: number;
@@ -192,10 +193,14 @@ export function buildClarifySystemPrompt(opts: {
   const roleHint = opts.domainRoles.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}.`
     : '';
+  const domainSignalHint = opts.domainSignals?.length
+    ? `Important domain signals from the requirement and retrieved context: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they are relevant.`
+    : '';
 
   return `You are a senior business analyst performing adaptive discovery for a new product requirement.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
+${domainSignalHint}
 
 YOUR MISSION: Gather only the missing information needed to produce a precise, ready-to-build backlog. If the request is already clear and bounded, keep questioning minimal. If the request is broad or risky, focus on the highest-value missing details first.
 
@@ -215,6 +220,9 @@ CLARITY ASSESSMENT:
 - Each question should be specific enough to invite a multi-sentence answer or a meaningful tradeoff decision.
 - Prefer "What should happen when...", "How should the system decide...", and "Who can override..." over vague prompts like "Any other requirements?".
 - Cover the most important missing decision dimensions before drilling deeper into one area.
+- Every question must be explicitly grounded in the actual business domain described by the requirement and retrieved context.
+- Reuse the requirement's concrete actors, objects, triggers, priorities, dates, or policy terms where relevant.
+- Avoid abstract placeholders like "this capability", "the outcome", or "the result" unless paired with concrete domain nouns.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected

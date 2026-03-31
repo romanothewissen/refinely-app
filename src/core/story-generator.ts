@@ -98,6 +98,22 @@ interface ClarifyAmbiguityAssessment {
   generatedQuestions: number;
 }
 
+const CLARIFY_CATEGORY_ORDER = [
+  'Roles & Personas',
+  'Trigger & Context',
+  'Functional Flow',
+  'Business Rules & Exceptions',
+  'Success & Measurement',
+] as const;
+
+const CLARIFY_CATEGORY_ALIASES: Array<{ match: RegExp; canonical: (typeof CLARIFY_CATEGORY_ORDER)[number] }> = [
+  { match: /(role|persona|user|actor|stakeholder|owner)/i, canonical: 'Roles & Personas' },
+  { match: /(trigger|context|event|timing|dependency|integration|input)/i, canonical: 'Trigger & Context' },
+  { match: /(flow|workflow|journey|process|step)/i, canonical: 'Functional Flow' },
+  { match: /(rule|exception|policy|constraint|edge|permission|override)/i, canonical: 'Business Rules & Exceptions' },
+  { match: /(success|measurement|metric|audit|trace|report|outcome)/i, canonical: 'Success & Measurement' },
+];
+
 function getProviderOpts(config: TenantConfig) {
   return {
     provider: config.generatorConfig.provider,
@@ -132,6 +148,67 @@ function compactSuggestion(raw: unknown): string {
   return words.slice(0, 18).join(' ');
 }
 
+function canonicalizeClarifyCategory(category: string): (typeof CLARIFY_CATEGORY_ORDER)[number] {
+  const cleaned = String(category ?? '').trim();
+  const directMatch = CLARIFY_CATEGORY_ORDER.find((item) => item.toLowerCase() === cleaned.toLowerCase());
+  if (directMatch) return directMatch;
+  return CLARIFY_CATEGORY_ALIASES.find((item) => item.match.test(cleaned))?.canonical ?? 'Functional Flow';
+}
+
+function sortClarifyingQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
+  return questions
+    .map((question, index) => ({
+      index,
+      question: {
+        ...question,
+        category: canonicalizeClarifyCategory(question.category),
+      },
+    }))
+    .sort((left, right) => {
+      const categoryDelta =
+        CLARIFY_CATEGORY_ORDER.indexOf(left.question.category as (typeof CLARIFY_CATEGORY_ORDER)[number]) -
+        CLARIFY_CATEGORY_ORDER.indexOf(right.question.category as (typeof CLARIFY_CATEGORY_ORDER)[number]);
+      return categoryDelta !== 0 ? categoryDelta : left.index - right.index;
+    })
+    .map((item) => item.question);
+}
+
+function buildRequirementAnchor(requirement: string): string {
+  const cleaned = requirement.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return 'this requirement';
+  const words = cleaned.split(' ');
+  return words.length <= 12 ? cleaned : `${words.slice(0, 12).join(' ')}...`;
+}
+
+const DOMAIN_SIGNAL_STOPWORDS = new Set([
+  'about', 'after', 'again', 'against', 'also', 'among', 'and', 'any', 'are', 'around', 'because',
+  'been', 'before', 'being', 'between', 'both', 'business', 'but', 'capability', 'can', 'could',
+  'does', 'each', 'from', 'have', 'into', 'must', 'need', 'needs', 'only', 'other', 'over',
+  'same', 'should', 'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those',
+  'through', 'under', 'using', 'when', 'where', 'which', 'while', 'with', 'would',
+]);
+
+function extractDomainSignals(parts: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const part of parts) {
+    const matches = part.match(/\b[A-Za-z][A-Za-z0-9/-]{2,}\b/g) ?? [];
+    for (const raw of matches) {
+      const normalized = raw.trim();
+      const lower = normalized.toLowerCase();
+      if (DOMAIN_SIGNAL_STOPWORDS.has(lower)) continue;
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => {
+      const frequencyDelta = right[1] - left[1];
+      return frequencyDelta !== 0 ? frequencyDelta : right[0].length - left[0].length;
+    })
+    .map(([signal]) => signal)
+    .slice(0, 14);
+}
+
 function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
   let candidates: any[] = [];
   if (Array.isArray(rawData)) {
@@ -145,7 +222,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
   return candidates
     .filter(x => typeof x === 'object' && x !== null && typeof (x as any).question === 'string')
     .map(x => ({
-      category: String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow',
+      category: canonicalizeClarifyCategory(String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow'),
       question: String((x as any).question ?? '').trim(),
       suggestions: Array.isArray((x as any).suggestions)
         ? (x as any).suggestions.map((s: unknown) => compactSuggestion(s)).filter(Boolean).slice(0, 3)
@@ -168,12 +245,13 @@ function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
 
 function buildFallbackQuestions(requirement: string, needed: number): ClarifyQuestion[] {
   const normalizedRequirement = requirement.toLowerCase();
+  const anchor = buildRequirementAnchor(requirement);
   const targetedTemplates: Array<{ matches: RegExp; question: ClarifyQuestion }> = [
     {
       matches: /\b(optimal|optimi[sz]e|optimization|priority|prioriti[sz]|criticality|due date|sla|weight|score|trade[- ]off|ranking|rank|urgency)\b/i,
       question: {
         category: 'Business Rules & Exceptions',
-        question: 'When multiple valid outcomes compete, how should the system rank them and how should ties be broken?',
+        question: `For "${anchor}", when multiple valid outcomes compete, how should the system rank them and how should ties be broken?`,
         suggestions: ['Single fixed priority order', 'Weighted scoring model', 'Configurable policy by business unit'],
       },
     },
@@ -181,7 +259,7 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
       matches: /\b(schedule|assign|allocation|allocate|dispatch|route|queue|sequence|sequencing|slot|calendar|timeline|reschedul)\w*\b/i,
       question: {
         category: 'Trigger & Context',
-        question: 'What events should create, recalculate, or adjust the outcome as conditions change?',
+        question: `For "${anchor}", what events should create, recalculate, or adjust the outcome as conditions change?`,
         suggestions: ['On every relevant change', 'At scheduled checkpoints', 'Manual refresh plus key events'],
       },
     },
@@ -189,7 +267,7 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
       matches: /\b(approval|approve|review|override|manual|escalat)\w*\b/i,
       question: {
         category: 'Roles & Personas',
-        question: 'Who can review, override, or approve the proposed outcome, and under what conditions?',
+        question: `For "${anchor}", who can review, override, or approve the proposed outcome, and under what conditions?`,
         suggestions: ['Operational owner only', 'Manager approval for exceptions', 'No manual override allowed'],
       },
     },
@@ -197,7 +275,7 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
       matches: /\b(integration|sync|import|export|api|feed|source|external|vendor|upstream|downstream)\b/i,
       question: {
         category: 'Trigger & Context',
-        question: 'What upstream data or dependent processes must be available, and what should happen when they are missing or stale?',
+        question: `For "${anchor}", what upstream data or dependent processes must be available, and what should happen when they are missing or stale?`,
         suggestions: ['Block until valid', 'Use last known good data', 'Proceed with warning and review'],
       },
     },
@@ -205,7 +283,7 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
       matches: /\b(notif|alert|visible|dashboard|report|audit|history|trace)\w*\b/i,
       question: {
         category: 'Success & Measurement',
-        question: 'Who needs visibility into the outcome and what level of traceability or explanation is required?',
+        question: `For "${anchor}", who needs visibility into the outcome and what level of traceability or explanation is required?`,
         suggestions: ['Basic status only', 'Full decision rationale', 'Audit trail for every change'],
       },
     },
@@ -214,72 +292,72 @@ function buildFallbackQuestions(requirement: string, needed: number): ClarifyQue
   const templates: ClarifyQuestion[] = [
     {
       category: 'Roles & Personas',
-      question: 'Which role owns the final business outcome and which roles are directly affected by it?',
+      question: `For "${anchor}", which role owns the final business outcome and which roles are directly affected by it?`,
       suggestions: ['One primary owner', 'Shared across two roles', 'Different owner by process step'],
     },
     {
       category: 'Trigger & Context',
-      question: 'What business event or condition should trigger this capability, and what context must already be known at that point?',
+      question: `For "${anchor}", what business event or condition should trigger this capability, and what context must already be known at that point?`,
       suggestions: ['Triggered by a new request', 'Triggered by a status change', 'Triggered on a planned cadence'],
     },
     {
       category: 'Functional Flow',
-      question: 'What should the happy-path flow look like from the first trigger through the final business outcome?',
+      question: `For "${anchor}", what should the happy-path flow look like from the first trigger through the final business outcome?`,
       suggestions: ['Single straight-through flow', 'Flow with review checkpoint', 'Flow varies by scenario'],
     },
     {
       category: 'Functional Flow',
-      question: 'What inputs or facts should the system consider before it determines the right outcome?',
+      question: `For "${anchor}", what inputs or facts should the system consider before it determines the right outcome?`,
       suggestions: ['Only current request data', 'Request plus reference context', 'Request, history, and policy data'],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: 'What rules or constraints must always be respected, even when they conflict with the preferred outcome?',
+      question: `For "${anchor}", what rules or constraints must always be respected, even when they conflict with the preferred outcome?`,
       suggestions: ['Regulatory or policy rules', 'Role-based permissions', 'Operational capacity limits'],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: 'What should happen when the ideal outcome cannot be completed as expected or when required information is missing?',
+      question: `For "${anchor}", what should happen when the ideal outcome cannot be completed as expected or when required information is missing?`,
       suggestions: ['Stop and request action', 'Proceed with warning', 'Use fallback policy'],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: 'Where are the key tradeoffs or policy decisions that could change the result for different scenarios?',
+      question: `For "${anchor}", where are the key tradeoffs or policy decisions that could change the result for different scenarios?`,
       suggestions: ['Fixed enterprise-wide policy', 'Configurable by team', 'Depends on case attributes'],
     },
     {
       category: 'Success & Measurement',
-      question: 'How should users know the result is correct, and what business outcome defines success?',
+      question: `For "${anchor}", how should users know the result is correct, and what business outcome defines success?`,
       suggestions: ['Meets agreed policy', 'Improves turnaround time', 'Reduces manual rework'],
     },
     {
       category: 'Roles & Personas',
-      question: 'Who needs to see, validate, act on, or be notified about the result after it is produced?',
+      question: `For "${anchor}", who needs to see, validate, act on, or be notified about the result after it is produced?`,
       suggestions: ['Only the request owner', 'Owner plus operational team', 'Multiple downstream stakeholders'],
     },
     {
       category: 'Trigger & Context',
-      question: 'What related processes, systems, or teams does this depend on, and how should those dependencies affect behavior?',
+      question: `For "${anchor}", what related processes, systems, or teams does this depend on, and how should those dependencies affect behavior?`,
       suggestions: ['Independent capability', 'Depends on one upstream source', 'Depends on multiple handoffs'],
     },
     {
       category: 'Business Rules & Exceptions',
-      question: 'Which exceptions need their own handling because the standard flow would be risky, invalid, or misleading?',
+      question: `For "${anchor}", which exceptions need their own handling because the standard flow would be risky, invalid, or misleading?`,
       suggestions: ['Permission or policy exceptions', 'Data quality exceptions', 'Capacity or timing exceptions'],
     },
     {
       category: 'Success & Measurement',
-      question: 'What level of explanation, auditability, or history should be retained so teams can trust and review the outcome later?',
+      question: `For "${anchor}", what level of explanation, auditability, or history should be retained so teams can trust and review the outcome later?`,
       suggestions: ['Minimal audit trail', 'Explain major decisions', 'Full traceability for all changes'],
     },
     {
       category: 'Success & Measurement',
-      question: 'What should be configurable versus fixed so different business units or teams can use this consistently?',
+      question: `For "${anchor}", what should be configurable versus fixed so different business units or teams can use this consistently?`,
       suggestions: ['Globally fixed behavior', 'Configurable thresholds only', 'Configurable policies by context'],
     },
     {
       category: 'Functional Flow',
-      question: 'What volume, timing, or responsiveness expectations would materially change how this capability should behave?',
+      question: `For "${anchor}", what volume, timing, or responsiveness expectations would materially change how this capability should behave?`,
       suggestions: ['Low volume, manual review ok', 'Near real-time needed', 'High volume with strict SLAs'],
     },
   ];
@@ -1045,6 +1123,17 @@ export async function generateClarifyingQuestions(opts: {
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, contextCharBudget.wi)}`);
   if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, contextCharBudget.gold)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, contextCharBudget.similar)}`);
+  const domainSignals = extractDomainSignals([
+    requirement,
+    attachmentText.slice(0, 1200),
+    wiContextText.slice(0, 2200),
+    goldExamplesText.slice(0, 2200),
+    similarStoriesText.slice(0, 2200),
+    ...(config.domainRoles ?? []),
+  ]);
+  if (domainSignals.length) {
+    contextParts.push(`DOMAIN SIGNALS TO REUSE: ${domainSignals.join(', ')}`);
+  }
 
   if (questionPlan.max <= 0) {
     return {
@@ -1068,6 +1157,7 @@ export async function generateClarifyingQuestions(opts: {
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
     domainRoles: config.domainRoles,
+    domainSignals,
     questionPlan,
   });
 
@@ -1090,10 +1180,14 @@ export async function generateClarifyingQuestions(opts: {
 
     totalInputTokens = raw.usage.input;
     totalOutputTokens = raw.usage.output;
-    filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
+    filteredQuestions = sortClarifyingQuestions(
+      dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
+    );
   } catch (error) {
     console.warn('[story-generator] Clarify question generation failed; using fallback questions:', error);
-    filteredQuestions = dedupeQuestions(buildFallbackQuestions(requirement, desiredQuestionCount)).slice(0, questionPlan.max);
+    filteredQuestions = sortClarifyingQuestions(
+      dedupeQuestions(buildFallbackQuestions(requirement, desiredQuestionCount)).slice(0, questionPlan.max),
+    );
   }
 
   const shouldRunTopUpLlm =
@@ -1121,10 +1215,12 @@ export async function generateClarifyingQuestions(opts: {
       totalInputTokens += topUpRaw.usage.input;
       totalOutputTokens += topUpRaw.usage.output;
 
-      filteredQuestions = dedupeQuestions([
-        ...filteredQuestions,
-        ...parseQuestionCandidates(topUpRaw.data),
-      ]).slice(0, questionPlan.max);
+      filteredQuestions = sortClarifyingQuestions(
+        dedupeQuestions([
+          ...filteredQuestions,
+          ...parseQuestionCandidates(topUpRaw.data),
+        ]).slice(0, questionPlan.max),
+      );
     } catch (error) {
       console.warn('[story-generator] Clarify question top-up failed; keeping fallback questions:', error);
     }
@@ -1132,10 +1228,12 @@ export async function generateClarifyingQuestions(opts: {
 
   if (filteredQuestions.length < desiredQuestionCount) {
     const needed = desiredQuestionCount - filteredQuestions.length;
-    filteredQuestions = dedupeQuestions([
-      ...filteredQuestions,
-      ...buildFallbackQuestions(requirement, needed),
-    ]).slice(0, questionPlan.max);
+    filteredQuestions = sortClarifyingQuestions(
+      dedupeQuestions([
+        ...filteredQuestions,
+        ...buildFallbackQuestions(requirement, needed),
+      ]).slice(0, questionPlan.max),
+    );
   }
 
   const totalTokens = totalInputTokens + totalOutputTokens;

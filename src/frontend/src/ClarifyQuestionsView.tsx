@@ -101,6 +101,14 @@ interface ClarifyProps {
   setSidebarOpen: (o: boolean) => void;
 }
 
+const CLARIFY_CATEGORY_ORDER = [
+  'Roles & Personas',
+  'Trigger & Context',
+  'Functional Flow',
+  'Business Rules & Exceptions',
+  'Success & Measurement',
+] as const;
+
 function formatPlannerLabel(value: string): string {
   return value
     .split('_')
@@ -161,10 +169,19 @@ export function ClarifyQuestionsView({
   }
 
   const categories: Record<string, { idx: number; q: Question }[]> = {};
-  questions.forEach((q, i) => {
+  const orderedQuestions = [...questions].sort((left, right) => {
+    const leftOrder = CLARIFY_CATEGORY_ORDER.indexOf(left.category as (typeof CLARIFY_CATEGORY_ORDER)[number]);
+    const rightOrder = CLARIFY_CATEGORY_ORDER.indexOf(right.category as (typeof CLARIFY_CATEGORY_ORDER)[number]);
+    return (leftOrder === -1 ? CLARIFY_CATEGORY_ORDER.length : leftOrder) - (rightOrder === -1 ? CLARIFY_CATEGORY_ORDER.length : rightOrder);
+  });
+
+  orderedQuestions.forEach((q) => {
+    const i = questions.findIndex((candidate) => candidate.question === q.question && candidate.category === q.category);
     if (!categories[q.category]) categories[q.category] = [];
     categories[q.category].push({ idx: i, q });
   });
+
+  let displayCounter = 0;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
@@ -327,6 +344,8 @@ export function ClarifyQuestionsView({
                 {items.map(({ idx, q }) => {
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.custom.trim().length > 0 || ans.selected.length > 0;
+                  displayCounter += 1;
+                  const displayNumber = displayCounter;
 
                   return (
                     <div
@@ -335,7 +354,7 @@ export function ClarifyQuestionsView({
                     >
                       <div className="p-5 flex items-start gap-4">
                         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
-                          {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
+                          {isAnswered ? <Check className="w-4 h-4" /> : <span>{displayNumber}</span>}
                         </div>
                         <div className="flex-1 space-y-4">
                           <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug pt-1">{q.question}</p>
