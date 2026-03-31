@@ -498,10 +498,12 @@ export default function App() {
       if (res.success) {
         setPendingClarifySessionId(sessionId);
       } else {
-        await startGeneration(requirement, []);
+        setIsWorking(false);
+        setGenerationError(`Discovery could not start: ${res?.error || 'Unknown error'}`);
       }
-    } catch {
-      await startGeneration(requirement, []);
+    } catch (err: any) {
+      setIsWorking(false);
+      setGenerationError(`Discovery could not start: ${err?.message || 'Unknown error'}`);
     }
   };
 

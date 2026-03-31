@@ -1207,20 +1207,10 @@ export async function generateClarifyingQuestions(opts: {
     policy: config.aiExecutionPolicy,
   });
   const questionPlan = decision.questionPlan;
-  const isLightClarifyPass =
-    decision.clarificationMode === 'light' &&
-    decision.reasoningMode !== 'deep' &&
-    questionPlan.max <= 4;
   const contextCharBudget = decision.reasoningMode === 'deep'
-    ? { attachment: 5000, wi: 6000, gold: 6500, similar: 6000 }
-    : isLightClarifyPass
-      ? { attachment: 1800, wi: 1800, gold: 2200, similar: 1800 }
-      : { attachment: 2200, wi: 2200, gold: 2600, similar: 2400 };
-  const clarifyMaxTokens = decision.reasoningMode === 'deep'
-    ? 3600
-    : isLightClarifyPass
-      ? 1400
-      : 2600;
+    ? { attachment: 4000, wi: 4000, gold: 5000, similar: 5000 }
+    : { attachment: 2800, wi: 2800, gold: 3200, similar: 3200 };
+  const clarifyMaxTokens = decision.reasoningMode === 'deep' ? 3200 : 2400;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
@@ -1269,68 +1259,39 @@ export async function generateClarifyingQuestions(opts: {
     questionPlan.max,
     Math.max(questionPlan.min, questionPlan.target),
   );
-  const minimumAcceptableQuestionCount = Math.min(questionPlan.min, desiredQuestionCount);
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let filteredQuestions: ClarifyQuestion[] = [];
-  const clarifyAttemptTimeoutMs = decision.reasoningMode === 'deep' ? 18000 : 10000;
-  const prefersDeepClarifyModel =
-    decision.clarificationMode === 'deep' ||
-    decision.scopeMode === 'standard' ||
-    decision.scopeMode === 'initiative' ||
-    desiredQuestionCount >= 8;
-  const primaryClarifyModel = prefersDeepClarifyModel
-    ? getTierModel(config.generatorConfig.deepProfileModel, config.tier)
-    : getTierModel(config.generatorConfig.clarifyModel, config.tier);
-  const secondaryClarifyModel = prefersDeepClarifyModel
-    ? getTierModel(config.generatorConfig.clarifyModel, config.tier)
-    : getTierModel(config.generatorConfig.deepProfileModel, config.tier);
-  const clarifyAttemptModels = Array.from(new Set([primaryClarifyModel, secondaryClarifyModel]));
+  const preferredClarifyModel =
+    decision.reasoningMode === 'deep' || desiredQuestionCount >= 8
+      ? getTierModel(config.generatorConfig.deepProfileModel, config.tier)
+      : getTierModel(config.generatorConfig.clarifyModel, config.tier);
 
-  let clarifyAttemptError: unknown = null;
-  for (const model of clarifyAttemptModels) {
-    try {
-      const raw = await Promise.race([
-        callLlmJsonWithUsage<ClarifyQuestion[]>({
-          model,
-          systemPrompt: system,
-          userMessage: contextParts.join('\n\n'),
-          maxTokens: clarifyMaxTokens,
-          ...getProviderOpts(config),
-        }),
-        throwAfterTimeout(clarifyAttemptTimeoutMs, `Clarify question generation (${model})`),
-      ]);
+  const raw = await Promise.race([
+    callLlmJsonWithUsage<ClarifyQuestion[]>({
+      model: preferredClarifyModel,
+      systemPrompt: system,
+      userMessage: contextParts.join('\n\n'),
+      maxTokens: clarifyMaxTokens,
+      ...getProviderOpts(config),
+    }),
+    throwAfterTimeout(decision.reasoningMode === 'deep' ? 25000 : 16000, 'Clarify question generation'),
+  ]);
 
-      totalInputTokens += raw.usage.input;
-      totalOutputTokens += raw.usage.output;
-      filteredQuestions = sortClarifyingQuestions(
-        dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
-      );
+  const filteredQuestions = sortClarifyingQuestions(
+    dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
+  );
 
-      if (filteredQuestions.length >= minimumAcceptableQuestionCount) {
-        break;
-      }
-    } catch (error) {
-      clarifyAttemptError = error;
-      console.warn('[story-generator] Clarify question generation attempt failed:', { model, error });
-    }
+  if (filteredQuestions.length < questionPlan.min) {
+    throw new Error(`Clarify generation produced only ${filteredQuestions.length} valid questions; minimum expected ${questionPlan.min}.`);
   }
 
-  if (filteredQuestions.length < minimumAcceptableQuestionCount) {
-    throw new Error(
-      `Clarify generation produced only ${filteredQuestions.length} valid questions; minimum expected ${minimumAcceptableQuestionCount}. ${clarifyAttemptError instanceof Error ? clarifyAttemptError.message : ''}`.trim(),
-    );
-  }
-
-  const totalTokens = totalInputTokens + totalOutputTokens;
+  const totalTokens = raw.usage.input + raw.usage.output;
 
   return {
     questions: filteredQuestions,
     tokenUsage: {
-      input: totalInputTokens,
-      output: totalOutputTokens,
+      input: raw.usage.input,
+      output: raw.usage.output,
       total: totalTokens,
-      byStage: { clarify: { input: totalInputTokens, output: totalOutputTokens, total: totalTokens } },
+      byStage: { clarify: { input: raw.usage.input, output: raw.usage.output, total: totalTokens } },
     },
     ambiguityAssessment: {
       level: questionPlan.clarity,
