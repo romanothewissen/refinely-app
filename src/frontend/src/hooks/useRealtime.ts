@@ -153,7 +153,7 @@ export function useClarifyRealtime(
           setProgress('');
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
-          console.warn('[useClarifyRealtime] complete but no questions — planner decided none needed');
+          console.warn('[useClarifyRealtime] complete but no questions were returned');
           finishWith('no_questions');
         } else if (result.type === 'error') {
           console.error(`[useClarifyRealtime] error result from backend: ${result.error ?? 'Unknown error'}`);

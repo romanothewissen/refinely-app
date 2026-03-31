@@ -1072,6 +1072,7 @@ export async function generateFeatures(opts: {
     reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
   const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+  const pass2HardCap = decision.reasoningMode === 'deep' ? 16384 : 9000;
   const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(generatorConfig.arModel, config.tier),
     systemPrompt: pass2System,
@@ -1080,7 +1081,7 @@ export async function generateFeatures(opts: {
       pass1Features.length,
       decision.arPlan.target,
       generatorConfig.maxTokens,
-      16384,
+      pass2HardCap,
     ),
     ...providerOpts,
   });

@@ -477,25 +477,22 @@ export default function App() {
         setDiscoveryRound(1);
         setIsWorking(false);
       } else {
-        startGeneration(requirement, []);
+        setIsWorking(false);
+        setGenerationError('Discovery completed without returning questions. Please try again.');
       }
     },
     (reason: ClarifyFallthroughReason) => {
       setPendingClarifySessionId(null);
       setIsReviewingDiscovery(false);
       setDiscoveryCoverage(null);
-      if (reason === 'no_questions') {
-        // Planner determined no clarification is needed — proceed directly.
-        startGeneration(requirement, []);
-      } else {
-        // Error or timeout — surface to the user rather than silently generating.
-        setIsWorking(false);
-        setGenerationError(
-          reason === 'timeout'
-            ? 'Discovery timed out. Please try again, or use Fast mode for quicker results.'
+      setIsWorking(false);
+      setGenerationError(
+        reason === 'timeout'
+          ? 'Discovery timed out. Please try again, or use Fast mode for quicker results.'
+          : reason === 'no_questions'
+            ? 'Discovery returned no questions. Please try again.'
             : 'Discovery could not complete. Please try again.',
-        );
-      }
+      );
     },
   );
 
