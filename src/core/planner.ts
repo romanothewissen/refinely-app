@@ -166,7 +166,7 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
     return heuristicDecision;
   }
 
-  if (reasoningMode === 'fast' && (input.clarifyAnswers?.length ?? 0) === 0) {
+  if (reasoningMode === 'fast') {
     return heuristicDecision;
   }
 
@@ -288,7 +288,7 @@ function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
     .test(requirement);
   const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|optimal|better|faster|enhance|fix this|update this|handle this|do it)/i
     .test(requirement);
-  const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception|rollout|migration|program|portfolio|operating model)/i
+  const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|various|different|complex|including|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception|rollout|migration|program|portfolio|operating model)/i
     .test(requirement);
   const hasEnterpriseSignals = /(enterprise|compliance|audit|governance|permission matrix|cross[- ]functional|cross[- ]team|multiple teams|multiple departments|multiple business units|regional|global rollout)/i
     .test(requirement);
@@ -299,6 +299,13 @@ function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
   const hasDecisionSignal = /\b(if|whether|based on|determine|identify|distinguish|decide)\b/i
     .test(requirement);
   const hasAlternativeOutcomeSignal = /\bor\b/i.test(requirement);
+  const listSeparatorCount = (requirement.match(/,/g) ?? []).length;
+  const hasEnumerationSignal = /\b(including|such as|for example|e\.g\.)\b/i.test(requirement);
+  const hasComplexityLanguageSignal = /\b(complex|various|different|multi[- ]step|multi[- ]scenario)\b/i.test(requirement);
+  const hasMultiScenarioSignal =
+    hasEnumerationSignal ||
+    listSeparatorCount >= 2 ||
+    /\betc\b/i.test(requirement);
   const actorMentions =
     (requirement.match(/\bas\s+a[n]?\s+[a-z0-9][a-z0-9\s/-]{0,40}/ig) ?? []).length +
     (requirement.match(/\b(?:used by|visible to|assigned to|owned by)\s+[a-z0-9][a-z0-9\s/-]{0,40}/ig) ?? []).length;
@@ -314,7 +321,8 @@ function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
     (actorMentions === 0 ? 1 : 0) +
     (exceptionMentions === 0 ? 1 : 0) -
     (hasConstraints ? 1 : 0) +
-    (hasAutomationSignal && hasDecisionSignal && answers.length === 0 ? 1 : 0);
+    (hasAutomationSignal && hasDecisionSignal && answers.length === 0 ? 1 : 0) +
+    (hasMultiScenarioSignal && exceptionMentions === 0 ? 1 : 0);
 
   const clarity: ClarifyQuestionPlan['clarity'] =
     ambiguityScore <= 1 ? 'clear' : ambiguityScore >= 4 ? 'vague' : 'medium';
@@ -328,6 +336,8 @@ function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
     (integrationMentions >= 1 ? 1 : 0) +
     (hasAutomationSignal && hasSourceSignal ? 1 : 0) +
     (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
+    (hasMultiScenarioSignal ? 1 : 0) +
+    (hasComplexityLanguageSignal ? 1 : 0) +
     (workflowVerbMentions >= 2 ? 1 : 0) +
     (answers.length >= 4 ? 1 : 0);
 
@@ -338,6 +348,8 @@ function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
     (integrationMentions >= 1 ? 1 : 0) +
     (hasAutomationSignal && hasSourceSignal ? 1 : 0) +
     (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
+    (hasMultiScenarioSignal ? 1 : 0) +
+    (hasComplexityLanguageSignal ? 1 : 0) +
     (workflowVerbMentions >= 2 ? 1 : 0) +
     (hasEnterpriseSignals ? 1 : 0) +
     (answers.length >= 4 ? 1 : 0);
@@ -381,6 +393,8 @@ function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
   if (scopeMode === 'initiative') rationale.push('Request appears broad enough to require an initiative-style breakdown.');
   if (hasBroadScopeSignals) rationale.push('Requirement contains broad scope signals spanning multiple capabilities.');
   if (hasEnterpriseSignals) rationale.push('Requirement contains enterprise delivery or governance signals.');
+  if (hasMultiScenarioSignal) rationale.push('Requirement includes multiple scenarios or activity variants that increase discovery needs.');
+  if (hasComplexityLanguageSignal) rationale.push('Requirement explicitly indicates complexity and likely hidden business rules.');
   if (integrationMentions >= 1) rationale.push('Integrations or external data dependencies are implied.');
   if (hasAutomationSignal && hasDecisionSignal) rationale.push('Request includes automation plus branching decisions, which usually needs business-rule discovery.');
   if (!hasRichContext) rationale.push('Available context is still thin, so discovery should stay adaptive.');

@@ -11,7 +11,7 @@ export interface GenerationProgress {
 }
 
 const NO_FIRST_EVENT_MS = 90000;       // 90s to receive first queue event before giving up
-const STALE_PROGRESS_MS = 20 * 60 * 1000; // 20 min since last update (generous for Pro thinking)
+const STALE_PROGRESS_MS = 6 * 60 * 1000; // fail fast on stalled runs instead of spinning indefinitely
 
 const CLARIFY_TIMEOUT_MS = 180000; // 3 min — generous for Pro thinking mode
 const CLARIFY_POLL_INTERVAL_MS = 3500;
@@ -90,6 +90,9 @@ export function useClarifyRealtime(
           clearTimer();
           setProgress('');
           onFallthroughRef.current();
+        } else {
+          // Unknown shape from storage; keep polling instead of getting stuck.
+          scheduleNext();
         }
       } catch {
         // transient polling error — keep trying
@@ -203,6 +206,9 @@ export function useGenerationRealtime(
           setIsGenerating(false);
           setProgress('');
           onErrorRef.current(event.message ?? 'Generation failed');
+        } else {
+          // Unknown progress payload should not freeze polling.
+          scheduleNext();
         }
       } catch {
         // polling errors are transient — keep trying

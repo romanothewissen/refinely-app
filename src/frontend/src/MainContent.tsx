@@ -1081,6 +1081,20 @@ export function MainContent({
           </div>
         </div>
 
+        {isGenerating && (
+          <div className="mt-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/70 px-3.5 py-2.5 flex items-start gap-2.5">
+            <div className="dot-bounce text-[var(--rf-brand)] mt-0.5 shrink-0"><span /><span /><span /></div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-wider">
+                {loadingTitle || 'Working'}
+              </p>
+              <p className="text-sm text-[var(--rf-text-secondary)] leading-snug">
+                {progress || 'Preparing your request…'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {hasFeatures && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--rf-border)] pt-4">
             <div className="flex flex-wrap items-center gap-3">
