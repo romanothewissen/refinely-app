@@ -37,6 +37,26 @@ async function sendProgress(sessionId: string, message: string, pass?: 1 | 2) {
   } as RealtimeEvent);
 }
 
+async function withTimeoutFallback<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutPromise = new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), timeoutMs);
+    });
+    return await Promise.race([promise, timeoutPromise]);
+  } catch (err) {
+    console.warn(`[generation-queue] ${label} lookup failed, continuing without it:`, err);
+    return fallback;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function resolveRelevantGoldSources(
   sources: GenerationEvent['config']['goldSources'],
   projectKey: string,
@@ -96,16 +116,34 @@ export async function handler(event: { body: GenerationEvent }) {
     const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
     await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectLabel}. initializing…`);
+    const contextTimeoutMs = (event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode) === 'deep'
+      ? 45000
+      : 25000;
 
     const [goldItems, wiContext, similarStories] = await Promise.all([
       goldCount
-        ? fetchGoldExamples(config.goldSources, 8)
+        ? withTimeoutFallback(
+            fetchGoldExamples(config.goldSources, 8),
+            contextTimeoutMs,
+            [],
+            'gold examples',
+          )
         : Promise.resolve([]),
       config.wiConfig.enabled
-        ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
+        ? withTimeoutFallback(
+            retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey),
+            contextTimeoutMs,
+            { text: '', docs: [] },
+            'work-instruction context',
+          )
         : Promise.resolve({ text: '', docs: [] }),
       config.tier !== 'free'
-        ? findSimilarStories(maskedRequirement.text, config, projectKey)
+        ? withTimeoutFallback(
+            findSimilarStories(maskedRequirement.text, config, projectKey),
+            contextTimeoutMs,
+            [],
+            'similar stories',
+          )
         : Promise.resolve([]),
     ]);
 

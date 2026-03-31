@@ -27,6 +27,26 @@ async function sendClarifyProgress(sessionId: string, message: string) {
   });
 }
 
+async function withTimeoutFallback<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutPromise = new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), timeoutMs);
+    });
+    return await Promise.race([promise, timeoutPromise]);
+  } catch (err) {
+    console.warn(`[clarify-queue] ${label} lookup failed, continuing without it:`, err);
+    return fallback;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function resolveRelevantGoldSources(
   sources: ClarifyEvent['config']['goldSources'],
   projectKey: string,
@@ -60,15 +80,33 @@ export async function handler(event: { body: ClarifyEvent }) {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
+    const contextTimeoutMs = (event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode) === 'deep'
+      ? 30000
+      : 18000;
     const [wiContext, goldItems, similarStories] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
+        ? withTimeoutFallback(
+            retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey),
+            contextTimeoutMs,
+            { text: '', docs: [] },
+            'work-instruction context',
+          )
         : Promise.resolve({ text: '', docs: [] }),
       config.goldSources.length
-        ? fetchGoldExamples(config.goldSources, 6)
+        ? withTimeoutFallback(
+            fetchGoldExamples(config.goldSources, 6),
+            contextTimeoutMs,
+            [],
+            'gold examples',
+          )
         : Promise.resolve([]),
       config.tier !== 'free'
-        ? findSimilarStories(maskedRequirement.text, config, projectKey)
+        ? withTimeoutFallback(
+            findSimilarStories(maskedRequirement.text, config, projectKey),
+            contextTimeoutMs,
+            [],
+            'similar stories',
+          )
         : Promise.resolve([]),
     ]);
 
