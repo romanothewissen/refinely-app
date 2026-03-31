@@ -90,60 +90,12 @@ interface ArPlan {
   depth: 'lean' | 'standard' | 'thorough';
 }
 
-interface RequirementAssessment {
-  questionPlan: ClarifyQuestionPlan;
-  featurePlan: FeaturePlan;
-  arPlan: ArPlan;
-  ambiguityScore: number;
-  ambiguityReasons: string[];
-}
-
 interface ClarifyAmbiguityAssessment {
   level: 'clear' | 'medium' | 'vague';
   score: number;
   reasons: string[];
   questionPlan: { min: number; max: number; target: number };
   generatedQuestions: number;
-}
-
-function assessRequirement(input: {
-  requirement: string;
-  attachmentText: string;
-  wiContextText: string;
-  goldExamplesText?: string;
-  similarStoriesText?: string;
-  clarifyAnswers?: ClarifyAnswer[];
-}): RequirementAssessment {
-  const decision = buildPlannerDecision({
-    ...input,
-    reasoningMode: 'fast',
-    outputMode: 'auto',
-    policy: undefined,
-  });
-
-  return {
-    questionPlan: decision.questionPlan,
-    featurePlan: decision.featurePlan,
-    arPlan: decision.arPlan,
-    ambiguityScore: decision.ambiguityScore,
-    ambiguityReasons: decision.ambiguityReasons,
-  };
-}
-
-function inferClarifyAssessment(input: {
-  requirement: string;
-  attachmentText: string;
-  wiContextText: string;
-  goldExamplesText?: string;
-  similarStoriesText?: string;
-  clarifyAnswers?: ClarifyAnswer[];
-}): { questionPlan: ClarifyQuestionPlan; ambiguityScore: number; ambiguityReasons: string[] } {
-  const assessed = assessRequirement(input);
-  return {
-    questionPlan: assessed.questionPlan,
-    ambiguityScore: assessed.ambiguityScore,
-    ambiguityReasons: assessed.ambiguityReasons,
-  };
 }
 
 function getProviderOpts(config: TenantConfig) {
@@ -540,24 +492,18 @@ export async function generateFeatures(opts: {
 }): Promise<GenerationResult> {
   const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, plannerDecision, onPass1Complete } = opts;
   const { generatorConfig } = config;
-  const decision = plannerDecision ?? buildPlannerDecision({
+  const decision = plannerDecision ?? await buildPlannerDecision({
     requirement,
     clarifyAnswers,
     attachmentText,
     wiContextText,
     goldExamplesText,
     similarStoriesText,
+    config,
     reasoningMode: config.aiExecutionPolicy.defaultReasoningMode,
     outputMode: config.aiExecutionPolicy.defaultOutputMode,
     policy: config.aiExecutionPolicy,
   });
-  const assessment: RequirementAssessment = {
-    questionPlan: decision.questionPlan,
-    featurePlan: decision.featurePlan,
-    arPlan: decision.arPlan,
-    ambiguityScore: decision.ambiguityScore,
-    ambiguityReasons: decision.ambiguityReasons,
-  };
   const providerOpts = {
     ...getProviderOpts(config),
   } as const;
@@ -596,7 +542,7 @@ export async function generateFeatures(opts: {
     domainRoles: config.domainRoles,
     processTaxonomy: config.processTaxonomy,
     processTaxonomyEnabled: config.processTaxonomyEnabled,
-    featurePlan: assessment.featurePlan,
+    featurePlan: decision.featurePlan,
   });
 
   const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
@@ -607,7 +553,7 @@ export async function generateFeatures(opts: {
     ...providerOpts,
   });
 
-  const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], assessment.featurePlan);
+  const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
@@ -615,7 +561,7 @@ export async function generateFeatures(opts: {
   // ── Pass 2: Acceptance Requirements ──
   const pass2System = buildArSystemPrompt({
     domainContext: config.domainContext,
-    arPlan: assessment.arPlan,
+    arPlan: decision.arPlan,
   });
 
   const pass2UserMessage = `${userMessage}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
@@ -696,22 +642,18 @@ export async function generateClarifyingQuestions(opts: {
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
   if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, 5000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
-  const decision = plannerDecision ?? buildPlannerDecision({
+  const decision = plannerDecision ?? await buildPlannerDecision({
     requirement,
     attachmentText,
     wiContextText,
     goldExamplesText,
     similarStoriesText,
+    config,
     reasoningMode: config.aiExecutionPolicy.defaultReasoningMode,
     outputMode: config.aiExecutionPolicy.defaultOutputMode,
     policy: config.aiExecutionPolicy,
   });
-  const assessment = {
-    questionPlan: decision.questionPlan,
-    ambiguityScore: decision.ambiguityScore,
-    ambiguityReasons: decision.ambiguityReasons,
-  };
-  const questionPlan = assessment.questionPlan;
+  const questionPlan = decision.questionPlan;
 
   if (questionPlan.max <= 0) {
     return {
@@ -724,8 +666,8 @@ export async function generateClarifyingQuestions(opts: {
       },
       ambiguityAssessment: {
         level: questionPlan.clarity,
-        score: assessment.ambiguityScore,
-        reasons: assessment.ambiguityReasons.slice(0, 4),
+        score: decision.ambiguityScore,
+        reasons: decision.ambiguityReasons.slice(0, 4),
         questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
         generatedQuestions: 0,
       },
@@ -793,8 +735,8 @@ export async function generateClarifyingQuestions(opts: {
     },
     ambiguityAssessment: {
       level: questionPlan.clarity,
-      score: assessment.ambiguityScore,
-      reasons: assessment.ambiguityReasons.slice(0, 4),
+      score: decision.ambiguityScore,
+      reasons: decision.ambiguityReasons.slice(0, 4),
       questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
       generatedQuestions: filteredQuestions.length,
     },
@@ -809,13 +751,14 @@ export async function evaluateSufficiency(opts: {
   config: TenantConfig;
   reasoningMode?: 'fast' | 'deep';
 }): Promise<DiscoveryCoverageResult> {
-  const decision = buildPlannerDecision({
+  const decision = await buildPlannerDecision({
     requirement: opts.requirement,
     clarifyAnswers: opts.answers,
     attachmentText: '',
     wiContextText: '',
     goldExamplesText: '',
     similarStoriesText: '',
+    config: opts.config,
     reasoningMode: opts.reasoningMode ?? opts.config.aiExecutionPolicy.defaultReasoningMode,
     outputMode: opts.config.aiExecutionPolicy.defaultOutputMode,
     policy: opts.config.aiExecutionPolicy,

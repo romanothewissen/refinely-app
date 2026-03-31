@@ -367,7 +367,7 @@ export default function App() {
     }
   );
 
-  useClarifyRealtime(
+  const { progress: clarifyProgress } = useClarifyRealtime(
     pendingClarifySessionId,
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
@@ -745,9 +745,9 @@ export default function App() {
                 isWorking && !isGenerating 
                   ? (isGenerationStarted
                       ? 'Preparing generation engine...'
-                      : isReviewingDiscovery
-                        ? 'Reviewing discovery coverage...'
-                        : 'Discovery phase: Adaptive requirement analysis...')
+                        : isReviewingDiscovery
+                          ? 'Reviewing discovery coverage...'
+                        : clarifyProgress || 'Discovery phase: Adaptive requirement analysis...')
                   : progress
               }
               sidebarOpen={sidebarOpen}

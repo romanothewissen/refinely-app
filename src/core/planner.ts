@@ -9,7 +9,10 @@ import {
   PlannerDecision,
   ReasoningMode,
   ScopeMode,
+  TenantConfig,
 } from '../types';
+import { callLlmJsonWithUsage } from './llm';
+import { getTierModel } from '../services/billing';
 
 interface PlannerInput {
   requirement: string;
@@ -20,13 +23,204 @@ interface PlannerInput {
   clarifyAnswers?: ClarifyAnswer[];
   reasoningMode?: ReasoningMode;
   outputMode?: OutputMode;
+  config?: TenantConfig;
   policy?: Pick<
     AiExecutionPolicy,
     'simpleAskMaxQuestions' | 'deepModeRoundTarget' | 'enterpriseMaxQuestionsPerRound'
   >;
 }
 
-export function buildPlannerDecision(input: PlannerInput): PlannerDecision {
+interface PlannerAssessmentResult {
+  clarity: 'clear' | 'medium' | 'vague';
+  complexity: 'low' | 'medium' | 'high';
+  scopeMode: ScopeMode;
+  clarificationMode: ClarificationMode;
+  confidence: number;
+  reasons: string[];
+}
+
+function buildPlannerAssessmentPrompt(): string {
+  return `You are a universal planning engine for turning a product request into the right discovery and backlog strategy.
+
+Assess the request based on structural signals only:
+- ambiguity
+- branching decisions
+- external dependencies
+- number of interacting steps
+- number of possible outcomes
+- missing business rules
+- scope breadth
+
+Do not rely on domain-specific role names, industry jargon, or organization-specific terminology as a shortcut for complexity.
+
+Return strict JSON only in this shape:
+{
+  "clarity": "clear | medium | vague",
+  "complexity": "low | medium | high",
+  "scopeMode": "atomic | focused | standard | initiative",
+  "clarificationMode": "none | light | standard | deep",
+  "confidence": 0.0,
+  "reasons": ["short reason", "short reason"]
+}`;
+}
+
+function getPlannerProviderOpts(config: TenantConfig) {
+  return {
+    provider: config.generatorConfig.provider,
+    geminiApiKey: config.generatorConfig.geminiApiKey,
+    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
+    azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
+    azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
+    azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
+    bedrockAccessKeyId: config.generatorConfig.bedrockAccessKeyId,
+    bedrockSecretAccessKey: config.generatorConfig.bedrockSecretAccessKey,
+    bedrockSessionToken: config.generatorConfig.bedrockSessionToken,
+    bedrockRegion: config.generatorConfig.bedrockRegion,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+  } as const;
+}
+
+function buildPlannerAssessmentUserMessage(input: PlannerInput): string {
+  const contextNotes = [
+    `Reasoning mode preference: ${input.reasoningMode ?? 'fast'}`,
+    `Output mode preference: ${input.outputMode ?? 'auto'}`,
+    `Attachment provided: ${Boolean(input.attachmentText?.trim())}`,
+    `Work-instruction context available: ${Boolean(input.wiContextText?.trim())}`,
+    `Reference examples available: ${Boolean(input.goldExamplesText?.trim())}`,
+    `Similar stories available: ${Boolean(input.similarStoriesText?.trim())}`,
+    `Existing clarification answers: ${input.clarifyAnswers?.length ?? 0}`,
+  ];
+
+  const sections = [
+    `REQUEST:\n${(input.requirement ?? '').trim()}`,
+    `CONTEXT SNAPSHOT:\n${contextNotes.join('\n')}`,
+  ];
+
+  if (input.clarifyAnswers?.length) {
+    sections.push(
+      `EXISTING ANSWERS:\n${input.clarifyAnswers
+        .slice(0, 6)
+        .map((answer) => `Q: ${answer.question}\nA: ${answer.answer}`)
+        .join('\n\n')}`,
+    );
+  }
+
+  return sections.join('\n\n---\n\n');
+}
+
+function toAmbiguityScore(clarity: ClarifyQuestionPlan['clarity']): number {
+  if (clarity === 'clear') return 1;
+  if (clarity === 'medium') return 3;
+  return 5;
+}
+
+function clampConfidence(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, 0.25), 0.99);
+}
+
+function normaliseAssessment(
+  raw: unknown,
+  fallback: PlannerDecision,
+): PlannerAssessmentResult {
+  const data = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
+  const clarity = data.clarity === 'clear' || data.clarity === 'medium' || data.clarity === 'vague'
+    ? data.clarity
+    : fallback.questionPlan.clarity;
+  const complexity = data.complexity === 'low' || data.complexity === 'medium' || data.complexity === 'high'
+    ? data.complexity
+    : fallback.featurePlan.complexity;
+  const scopeMode = data.scopeMode === 'atomic' || data.scopeMode === 'focused' || data.scopeMode === 'standard' || data.scopeMode === 'initiative'
+    ? data.scopeMode
+    : fallback.scopeMode;
+  const clarificationMode = data.clarificationMode === 'none' || data.clarificationMode === 'light' || data.clarificationMode === 'standard' || data.clarificationMode === 'deep'
+    ? data.clarificationMode
+    : fallback.clarificationMode;
+  const reasons = Array.isArray(data.reasons)
+    ? data.reasons.map((reason) => String(reason ?? '').trim()).filter(Boolean).slice(0, 5)
+    : fallback.rationale.slice(0, 5);
+
+  return {
+    clarity,
+    complexity,
+    scopeMode,
+    clarificationMode,
+    confidence: clampConfidence(data.confidence, fallback.confidence),
+    reasons,
+  };
+}
+
+export async function buildPlannerDecision(input: PlannerInput): Promise<PlannerDecision> {
+  const heuristicDecision = buildHeuristicPlannerDecision(input);
+  const config = input.config;
+  if (!config || !input.requirement?.trim()) {
+    return heuristicDecision;
+  }
+
+  try {
+    const assessment = normaliseAssessment(
+      (
+        await callLlmJsonWithUsage<PlannerAssessmentResult>({
+          model: getTierModel(config.generatorConfig.evaluateModel, config.tier),
+          systemPrompt: buildPlannerAssessmentPrompt(),
+          userMessage: buildPlannerAssessmentUserMessage(input),
+          maxTokens: 1200,
+          ...getPlannerProviderOpts(config),
+        })
+      ).data,
+      heuristicDecision,
+    );
+    const resolvedScopeMode =
+      (input.outputMode ?? heuristicDecision.outputMode) === 'single'
+        ? 'atomic'
+        : (input.outputMode ?? heuristicDecision.outputMode) === 'full_breakdown' && assessment.scopeMode === 'atomic'
+          ? 'focused'
+          : assessment.scopeMode;
+
+    const featurePlan = buildFeaturePlan(
+      resolvedScopeMode,
+      assessment.complexity,
+      input.outputMode ?? heuristicDecision.outputMode,
+      input.reasoningMode ?? heuristicDecision.reasoningMode,
+    );
+    const questionPlan = buildQuestionPlan(
+      assessment.clarificationMode,
+      assessment.clarity,
+      input.policy,
+    );
+    const rationale = assessment.reasons.length ? [...assessment.reasons] : [...heuristicDecision.rationale];
+    if (resolvedScopeMode !== assessment.scopeMode) {
+      rationale.push(
+        (input.outputMode ?? heuristicDecision.outputMode) === 'single'
+          ? 'Output override keeps the result to a single-feature scope.'
+          : 'Output override broadens the result beyond an atomic scope.',
+      );
+    }
+
+    return {
+      reasoningMode: input.reasoningMode ?? heuristicDecision.reasoningMode,
+      outputMode: input.outputMode ?? heuristicDecision.outputMode,
+      scopeMode: resolvedScopeMode,
+      clarificationMode: assessment.clarificationMode,
+      questionPlan,
+      featurePlan,
+      arPlan: buildArPlan(resolvedScopeMode, assessment.complexity),
+      useHierarchy: resolvedScopeMode === 'initiative',
+      confidence: assessment.confidence,
+      ambiguityScore: toAmbiguityScore(assessment.clarity),
+      ambiguityReasons: assessment.reasons.length ? assessment.reasons : heuristicDecision.ambiguityReasons,
+      rationale: rationale.slice(0, 5),
+    };
+  } catch (error) {
+    console.warn('[planner] Falling back to heuristic planner decision:', error);
+    return heuristicDecision;
+  }
+}
+
+function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecision {
   const requirement = input.requirement?.trim() ?? '';
   const attachment = input.attachmentText?.trim() ?? '';
   const wi = input.wiContextText?.trim() ?? '';

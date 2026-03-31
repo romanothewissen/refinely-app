@@ -343,7 +343,11 @@ resolver.define('startClarify', async ({ payload, context }) => {
       outputMode: payload.outputMode,
     };
     // Overwrite any stale result with a 'pending' marker so the polling hook waits
-    await entitySet(KEYS.clarifyProgress(payload.sessionId), { type: 'pending', updatedAt: Date.now() });
+    await entitySet(KEYS.clarifyProgress(payload.sessionId), {
+      type: 'pending',
+      message: 'Preparing discovery workflow…',
+      updatedAt: Date.now(),
+    });
     await clarifyQueue.push({ body: event });
     return { success: true };
   } catch (err) {

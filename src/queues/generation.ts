@@ -111,13 +111,14 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
-    const plannerDecision = buildPlannerDecision({
+    const plannerDecision = await buildPlannerDecision({
       requirement: maskedRequirement.text,
       clarifyAnswers: maskedAnswers.answers,
       attachmentText: maskedAttachment.text,
       goldExamplesText,
       similarStoriesText,
       wiContextText: wiContext.text,
+      config,
       reasoningMode: event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
       outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
       policy: config.aiExecutionPolicy,

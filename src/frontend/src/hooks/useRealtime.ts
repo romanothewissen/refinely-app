@@ -21,6 +21,7 @@ export function useClarifyRealtime(
   onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
   onFallthrough: () => void,
 ) {
+  const [progress, setProgress] = useState('');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
   // Keep callbacks in refs so the polling interval always calls the latest version
@@ -37,15 +38,17 @@ export function useClarifyRealtime(
       try {
         const res = await invoke('getClarifyResult', { sessionId }) as {
           success: boolean;
-          result?: { type: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number };
+          result?: { type: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number; message?: string };
         };
         const result = res.result;
 
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
         if (!result || result.type === 'pending') {
+          setProgress(result?.message ?? 'Preparing discovery workflow…');
           if (Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS) {
             clearInterval(timerRef.current!);
             timerRef.current = null;
+            setProgress('');
             onFallthroughRef.current();
           }
           return;
@@ -55,16 +58,19 @@ export function useClarifyRealtime(
           console.log('[useClarifyRealtime] session complete with', result.questions.length, 'questions');
           clearInterval(timerRef.current!);
           timerRef.current = null;
+          setProgress('');
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
           console.warn('[useClarifyRealtime] complete but no questions found — falling through to generate');
           clearInterval(timerRef.current!);
           timerRef.current = null;
+          setProgress('');
           onFallthroughRef.current();
         } else if (result.type === 'error') {
           console.error('[useClarifyRealtime] error result from backend');
           clearInterval(timerRef.current!);
           timerRef.current = null;
+          setProgress('');
           onFallthroughRef.current();
         }
       } catch {
@@ -77,8 +83,11 @@ export function useClarifyRealtime(
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
+      setProgress('');
     };
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { progress };
 }
 
 export function useGenerationRealtime(

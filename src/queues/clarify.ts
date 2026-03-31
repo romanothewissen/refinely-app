@@ -19,6 +19,14 @@ import { upsertAiSessionInsight } from '../services/ai-insights';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
 
+async function sendClarifyProgress(sessionId: string, message: string) {
+  await entitySet(KEYS.clarifyProgress(sessionId), {
+    type: 'pending',
+    message,
+    updatedAt: Date.now(),
+  });
+}
+
 function resolveRelevantGoldSources(
   sources: ClarifyEvent['config']['goldSources'],
   projectKey: string,
@@ -48,6 +56,7 @@ export async function handler(event: { body: ClarifyEvent }) {
   };
 
   try {
+    await sendClarifyProgress(sessionId, 'Gathering reference context and work instructions…');
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
@@ -63,17 +72,20 @@ export async function handler(event: { body: ClarifyEvent }) {
         : Promise.resolve([]),
     ]);
 
-    const plannerDecision = buildPlannerDecision({
+    await sendClarifyProgress(sessionId, 'Assessing request clarity and complexity…');
+    const plannerDecision = await buildPlannerDecision({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
       goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+      config,
       reasoningMode: event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
       outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
       policy: config.aiExecutionPolicy,
     });
 
+    await sendClarifyProgress(sessionId, 'Drafting the highest-value clarifying questions…');
     const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
