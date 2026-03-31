@@ -50,12 +50,15 @@ function buildPlannerAssessmentPrompt(): string {
 Assess structural complexity only. Ignore domain-specific nouns and industry labels.
 
 Focus on whether the request implies:
+- a narrow capability with hidden decision logic
 - hidden business rules or tie-breakers
 - multi-factor prioritization or optimization
 - allocation, scheduling, sequencing, routing, or approvals
 - dependencies, handoffs, or external context
 - meaningful exception handling
 - one bounded capability versus a broader workflow
+
+Prefer at least a small clarification pass by default. Use "none" only when the request is already highly specific or the user is clearly optimizing for minimal discovery.
 
 Return strict JSON only:
 {
@@ -504,19 +507,26 @@ function pickClarificationMode(
   complexityScore: number,
 ): ClarificationMode {
   if (scopeMode === 'atomic') {
+    if (clarity === 'vague' || complexityScore >= 4) {
+      return reasoningMode === 'deep' ? 'deep' : 'standard';
+    }
+    if (reasoningMode === 'deep' || clarity === 'medium' || complexityScore >= 2) {
+      return 'standard';
+    }
     return 'light';
   }
 
   if (scopeMode === 'focused') {
-    if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 2) return 'standard';
+    if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 3) return 'deep';
+    if (clarity === 'medium' || complexityScore >= 1) return 'standard';
     return 'light';
   }
 
   if (scopeMode === 'initiative') {
-    return reasoningMode === 'deep' || clarity !== 'clear' ? 'deep' : 'standard';
+    return reasoningMode === 'deep' || clarity !== 'clear' || complexityScore >= 2 ? 'deep' : 'standard';
   }
 
-  if (reasoningMode === 'deep' || clarity === 'vague' || complexityScore >= 2) return 'deep';
+  if (reasoningMode === 'deep' || clarity !== 'clear' || complexityScore >= 3) return 'deep';
   return 'standard';
 }
 
@@ -528,28 +538,31 @@ function buildQuestionPlan(
     'simpleAskMaxQuestions' | 'deepModeRoundTarget' | 'enterpriseMaxQuestionsPerRound'
   >,
 ): ClarifyQuestionPlan {
-  // Keep a meaningful discovery floor whenever we decide clarification is needed.
-  // The previous 1-2 question light path felt too shallow and often produced
-  // brittle follow-up coverage.
-  const lightMax = clamp(Math.max(policy?.simpleAskMaxQuestions ?? 2, 3), 3, 5);
+  // Keep one strong discovery round by default:
+  // light: 2-4, standard: 4-8, deep: 8-14.
+  const lightMax = clamp(Math.max(policy?.simpleAskMaxQuestions ?? 4, 2), 2, 4);
+  const deepTargetBase = clamp(Math.max(policy?.deepModeRoundTarget ?? 6, 4), 4, 10);
   const standardMax = clamp(
-    Math.max(lightMax + 2, policy?.deepModeRoundTarget ?? 5, 5),
-    5,
+    Math.max(lightMax + 2, deepTargetBase - 1),
+    4,
     8,
   );
-  const deepMax = clamp(
-    Math.max(standardMax + 1, policy?.enterpriseMaxQuestionsPerRound ?? 7, 6),
-    6,
+  const deepBaseline = clamp(
+    Math.max(policy?.enterpriseMaxQuestionsPerRound ?? 10, deepTargetBase),
+    8,
     12,
   );
+  const deepMax = clamp(
+    Math.max(standardMax + 2, policy?.enterpriseMaxQuestionsPerRound ?? 10, deepBaseline),
+    8,
+    14,
+  );
 
-  // "No discovery" should only exist as an explicit future UX choice, not as an
-  // implicit planner outcome. Keep a small but meaningful question floor.
   if (clarificationMode === 'none') {
     return {
       min: 2,
       max: lightMax,
-      target: Math.min(2, lightMax),
+      target: Math.min(3, lightMax),
       clarity,
     };
   }
@@ -557,24 +570,35 @@ function buildQuestionPlan(
     return {
       min: 2,
       max: lightMax,
-      target: clarity === 'clear' ? Math.min(2, lightMax) : Math.min(3, lightMax),
+      target:
+        clarity === 'clear'
+          ? Math.min(2, lightMax)
+          : Math.min(clarity === 'medium' ? 3 : 4, lightMax),
       clarity,
     };
   }
   if (clarificationMode === 'standard') {
     return {
-      min: Math.min(3, standardMax),
+      min: Math.min(4, standardMax),
       max: standardMax,
-      target: clarity === 'clear' ? Math.min(4, standardMax) : Math.min(5, standardMax),
+      target:
+        clarity === 'clear'
+          ? Math.min(4, standardMax)
+          : clarity === 'medium'
+            ? Math.min(Math.max(5, deepTargetBase - 1), standardMax)
+            : Math.min(Math.max(6, deepTargetBase), standardMax),
       clarity,
     };
   }
   return {
-    min: Math.min(5, deepMax),
+    min: Math.min(8, deepMax),
     max: deepMax,
-    target: clarity === 'vague'
-      ? deepMax
-      : Math.min(Math.max(6, policy?.deepModeRoundTarget ?? 6), deepMax),
+    target:
+      clarity === 'clear'
+        ? Math.min(Math.max(8, deepTargetBase), deepMax)
+        : clarity === 'medium'
+          ? Math.min(Math.max(10, deepTargetBase + 1), deepMax)
+          : Math.min(Math.max(12, deepTargetBase + 2), deepMax),
     clarity,
   };
 }

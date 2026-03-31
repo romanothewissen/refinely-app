@@ -157,7 +157,7 @@ function buildRetrievalStrategy(
     decision.scopeMode === 'initiative';
   const isLightPass =
     !isDeepPass &&
-    (decision.clarificationMode === 'light' || (decision.scopeMode === 'atomic' && decision.questionPlan.max <= 2));
+    (decision.clarificationMode === 'light' || (decision.scopeMode === 'atomic' && decision.questionPlan.max <= 4));
 
   if (isDeepPass) {
     return {
@@ -177,10 +177,10 @@ function buildRetrievalStrategy(
       wiTopK: Math.min(wiConfig.topKChunks, 2),
       wiMaxChars: Math.min(wiConfig.maxChars, 6000),
       goldLimit: 2,
-      includeSimilarStories: false,
+      includeSimilarStories,
       contextTimeoutMs: 9000,
       plannerDeadlineMs: 7000,
-      questionDeadlineMs: 18000,
+      questionDeadlineMs: 22000,
       contextMessage: 'Loading a light context pass to refine the most important questions…',
     };
   }

@@ -117,9 +117,9 @@ const AI_POLICY_PRESETS: Record<
       defaultOutputMode: 'auto',
       allowReasoningModeOverride: true,
       allowOutputModeOverride: true,
-      simpleAskMaxQuestions: 2,
-      deepModeRoundTarget: 5,
-      enterpriseMaxQuestionsPerRound: 7,
+      simpleAskMaxQuestions: 4,
+      deepModeRoundTarget: 6,
+      enterpriseMaxQuestionsPerRound: 10,
       maxDeepDiscoveryRounds: 3,
     },
   },
@@ -131,9 +131,9 @@ const AI_POLICY_PRESETS: Record<
       defaultOutputMode: 'single',
       allowReasoningModeOverride: true,
       allowOutputModeOverride: true,
-      simpleAskMaxQuestions: 1,
+      simpleAskMaxQuestions: 2,
       deepModeRoundTarget: 4,
-      enterpriseMaxQuestionsPerRound: 6,
+      enterpriseMaxQuestionsPerRound: 8,
       maxDeepDiscoveryRounds: 2,
     },
   },
@@ -145,9 +145,9 @@ const AI_POLICY_PRESETS: Record<
       defaultOutputMode: 'auto',
       allowReasoningModeOverride: true,
       allowOutputModeOverride: true,
-      simpleAskMaxQuestions: 2,
-      deepModeRoundTarget: 6,
-      enterpriseMaxQuestionsPerRound: 8,
+      simpleAskMaxQuestions: 4,
+      deepModeRoundTarget: 8,
+      enterpriseMaxQuestionsPerRound: 12,
       maxDeepDiscoveryRounds: 4,
     },
   },
@@ -159,9 +159,9 @@ const AI_POLICY_PRESETS: Record<
       defaultOutputMode: 'full_breakdown',
       allowReasoningModeOverride: true,
       allowOutputModeOverride: true,
-      simpleAskMaxQuestions: 3,
-      deepModeRoundTarget: 7,
-      enterpriseMaxQuestionsPerRound: 9,
+      simpleAskMaxQuestions: 4,
+      deepModeRoundTarget: 9,
+      enterpriseMaxQuestionsPerRound: 14,
       maxDeepDiscoveryRounds: 5,
     },
   },
@@ -274,9 +274,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [defaultOutputMode, setDefaultOutputMode] = useState<OutputMode>('auto');
   const [allowReasoningModeOverride, setAllowReasoningModeOverride] = useState(true);
   const [allowOutputModeOverride, setAllowOutputModeOverride] = useState(true);
-  const [simpleAskMaxQuestions, setSimpleAskMaxQuestions] = useState(2);
-  const [deepModeRoundTarget, setDeepModeRoundTarget] = useState(5);
-  const [enterpriseMaxQuestionsPerRound, setEnterpriseMaxQuestionsPerRound] = useState(7);
+  const [simpleAskMaxQuestions, setSimpleAskMaxQuestions] = useState(4);
+  const [deepModeRoundTarget, setDeepModeRoundTarget] = useState(6);
+  const [enterpriseMaxQuestionsPerRound, setEnterpriseMaxQuestionsPerRound] = useState(10);
   const [maxDeepDiscoveryRounds, setMaxDeepDiscoveryRounds] = useState(3);
   const [projectAiPolicies, setProjectAiPolicies] = useState<ProjectAiPolicy[]>([]);
   const [aiInsights, setAiInsights] = useState<AiInsightsReport | null>(null);
@@ -729,9 +729,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     try {
       const normalizedProjectAiPolicies = projectAiPolicies.map((policy) => ({
         ...policy,
-        simpleAskMaxQuestions: policy.simpleAskMaxQuestions === undefined ? undefined : normalizePolicyNumber(policy.simpleAskMaxQuestions, 0, 6),
-        deepModeRoundTarget: policy.deepModeRoundTarget === undefined ? undefined : normalizePolicyNumber(policy.deepModeRoundTarget, 1, 10),
-        enterpriseMaxQuestionsPerRound: policy.enterpriseMaxQuestionsPerRound === undefined ? undefined : normalizePolicyNumber(policy.enterpriseMaxQuestionsPerRound, 2, 12),
+        simpleAskMaxQuestions: policy.simpleAskMaxQuestions === undefined ? undefined : normalizePolicyNumber(policy.simpleAskMaxQuestions, 2, 4),
+        deepModeRoundTarget: policy.deepModeRoundTarget === undefined ? undefined : normalizePolicyNumber(policy.deepModeRoundTarget, 4, 10),
+        enterpriseMaxQuestionsPerRound: policy.enterpriseMaxQuestionsPerRound === undefined ? undefined : normalizePolicyNumber(policy.enterpriseMaxQuestionsPerRound, 8, 14),
         maxDeepDiscoveryRounds: policy.maxDeepDiscoveryRounds === undefined ? undefined : normalizePolicyNumber(policy.maxDeepDiscoveryRounds, 1, 6),
       }));
       const routedModels = profileMode === 'advanced'
@@ -778,9 +778,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           defaultOutputMode,
           allowReasoningModeOverride,
           allowOutputModeOverride,
-          simpleAskMaxQuestions: normalizePolicyNumber(simpleAskMaxQuestions, 0, 6),
-          deepModeRoundTarget: normalizePolicyNumber(deepModeRoundTarget, 1, 10),
-          enterpriseMaxQuestionsPerRound: normalizePolicyNumber(enterpriseMaxQuestionsPerRound, 2, 12),
+          simpleAskMaxQuestions: normalizePolicyNumber(simpleAskMaxQuestions, 2, 4),
+          deepModeRoundTarget: normalizePolicyNumber(deepModeRoundTarget, 4, 10),
+          enterpriseMaxQuestionsPerRound: normalizePolicyNumber(enterpriseMaxQuestionsPerRound, 8, 14),
           maxDeepDiscoveryRounds: normalizePolicyNumber(maxDeepDiscoveryRounds, 1, 6),
           hideModelSelectionFromEndUsers: true,
         },
@@ -1423,15 +1423,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Simple Ask Max Questions</label>
-                          <input type="number" min={0} max={6} value={simpleAskMaxQuestions} onChange={e => setSimpleAskMaxQuestions(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                          <input type="number" min={2} max={4} value={simpleAskMaxQuestions} onChange={e => setSimpleAskMaxQuestions(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Round Target Questions</label>
-                          <input type="number" min={1} max={10} value={deepModeRoundTarget} onChange={e => setDeepModeRoundTarget(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                          <input type="number" min={4} max={10} value={deepModeRoundTarget} onChange={e => setDeepModeRoundTarget(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Enterprise Max Questions / Round</label>
-                          <input type="number" min={2} max={12} value={enterpriseMaxQuestionsPerRound} onChange={e => setEnterpriseMaxQuestionsPerRound(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                          <input type="number" min={8} max={14} value={enterpriseMaxQuestionsPerRound} onChange={e => setEnterpriseMaxQuestionsPerRound(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Max Deep Discovery Rounds</label>
@@ -1604,15 +1604,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                               <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
                                   <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Simple Ask Max Questions</label>
-                                  <input type="number" min={0} max={6} value={currentProjectAiPolicy.simpleAskMaxQuestions ?? 2} onChange={e => updateProjectAiPolicy({ simpleAskMaxQuestions: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                  <input type="number" min={2} max={4} value={currentProjectAiPolicy.simpleAskMaxQuestions ?? 4} onChange={e => updateProjectAiPolicy({ simpleAskMaxQuestions: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                                 <div className="space-y-2">
                                   <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Round Target Questions</label>
-                                  <input type="number" min={1} max={10} value={currentProjectAiPolicy.deepModeRoundTarget ?? 5} onChange={e => updateProjectAiPolicy({ deepModeRoundTarget: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                  <input type="number" min={4} max={10} value={currentProjectAiPolicy.deepModeRoundTarget ?? 6} onChange={e => updateProjectAiPolicy({ deepModeRoundTarget: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                                 <div className="space-y-2">
                                   <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Enterprise Max Questions / Round</label>
-                                  <input type="number" min={2} max={12} value={currentProjectAiPolicy.enterpriseMaxQuestionsPerRound ?? 7} onChange={e => updateProjectAiPolicy({ enterpriseMaxQuestionsPerRound: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                                  <input type="number" min={8} max={14} value={currentProjectAiPolicy.enterpriseMaxQuestionsPerRound ?? 10} onChange={e => updateProjectAiPolicy({ enterpriseMaxQuestionsPerRound: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                                 <div className="space-y-2">
                                   <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Max Deep Discovery Rounds</label>

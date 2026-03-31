@@ -167,44 +167,128 @@ function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
 }
 
 function buildFallbackQuestions(requirement: string, needed: number): ClarifyQuestion[] {
-  const templates: ClarifyQuestion[] = [
+  const normalizedRequirement = requirement.toLowerCase();
+  const targetedTemplates: Array<{ matches: RegExp; question: ClarifyQuestion }> = [
     {
-      category: 'Roles & Personas',
-      question: 'Which role is responsible for accepting, reordering, or overriding the proposed schedule?',
-      suggestions: ['Dispatcher', 'Team lead', 'Fully automatic'],
+      matches: /\b(optimal|optimi[sz]e|optimization|priority|prioriti[sz]|criticality|due date|sla|weight|score|trade[- ]off|ranking|rank|urgency)\b/i,
+      question: {
+        category: 'Business Rules & Exceptions',
+        question: 'When multiple valid outcomes compete, how should the system rank them and how should ties be broken?',
+        suggestions: ['Single fixed priority order', 'Weighted scoring model', 'Configurable policy by business unit'],
+      },
     },
     {
-      category: 'Functional Flow',
-      question: 'How should criticality and due date be weighted when they conflict for two jobs?',
-      suggestions: ['Criticality wins', 'Due date wins', 'Configurable weighted score'],
+      matches: /\b(schedule|assign|allocation|allocate|dispatch|route|queue|sequence|sequencing|slot|calendar|timeline|reschedul)\w*\b/i,
+      question: {
+        category: 'Trigger & Context',
+        question: 'What events should create, recalculate, or adjust the outcome as conditions change?',
+        suggestions: ['On every relevant change', 'At scheduled checkpoints', 'Manual refresh plus key events'],
+      },
     },
     {
-      category: 'Business Rules & Exceptions',
-      question: 'What should happen when the optimal slot violates skill, parts, or availability constraints?',
-      suggestions: ['Pick next best slot', 'Escalate for manual assignment', 'Flag unschedulable'],
+      matches: /\b(approval|approve|review|override|manual|escalat)\w*\b/i,
+      question: {
+        category: 'Roles & Personas',
+        question: 'Who can review, override, or approve the proposed outcome, and under what conditions?',
+        suggestions: ['Operational owner only', 'Manager approval for exceptions', 'No manual override allowed'],
+      },
     },
     {
-      category: 'Trigger & Context',
-      question: 'When should schedules be generated or recalculated?',
-      suggestions: ['Nightly batch', 'On new request', 'On-demand by dispatcher'],
+      matches: /\b(integration|sync|import|export|api|feed|source|external|vendor|upstream|downstream)\b/i,
+      question: {
+        category: 'Trigger & Context',
+        question: 'What upstream data or dependent processes must be available, and what should happen when they are missing or stale?',
+        suggestions: ['Block until valid', 'Use last known good data', 'Proceed with warning and review'],
+      },
     },
     {
-      category: 'Success & Measurement',
-      question: 'What defines an optimal schedule outcome for this process?',
-      suggestions: ['Max SLA compliance', 'Critical jobs completed first', 'Balanced utilization'],
+      matches: /\b(notif|alert|visible|dashboard|report|audit|history|trace)\w*\b/i,
+      question: {
+        category: 'Success & Measurement',
+        question: 'Who needs visibility into the outcome and what level of traceability or explanation is required?',
+        suggestions: ['Basic status only', 'Full decision rationale', 'Audit trail for every change'],
+      },
     },
   ];
 
-  const seed = requirement.toLowerCase().includes('schedule')
-    ? templates
-    : templates.map((q, idx) => ({
-        ...q,
-        question: idx === 0
-          ? 'Which user role owns the final decision for this requirement?'
-          : q.question,
-      }));
+  const templates: ClarifyQuestion[] = [
+    {
+      category: 'Roles & Personas',
+      question: 'Which role owns the final business outcome and which roles are directly affected by it?',
+      suggestions: ['One primary owner', 'Shared across two roles', 'Different owner by process step'],
+    },
+    {
+      category: 'Trigger & Context',
+      question: 'What business event or condition should trigger this capability, and what context must already be known at that point?',
+      suggestions: ['Triggered by a new request', 'Triggered by a status change', 'Triggered on a planned cadence'],
+    },
+    {
+      category: 'Functional Flow',
+      question: 'What should the happy-path flow look like from the first trigger through the final business outcome?',
+      suggestions: ['Single straight-through flow', 'Flow with review checkpoint', 'Flow varies by scenario'],
+    },
+    {
+      category: 'Functional Flow',
+      question: 'What inputs or facts should the system consider before it determines the right outcome?',
+      suggestions: ['Only current request data', 'Request plus reference context', 'Request, history, and policy data'],
+    },
+    {
+      category: 'Business Rules & Exceptions',
+      question: 'What rules or constraints must always be respected, even when they conflict with the preferred outcome?',
+      suggestions: ['Regulatory or policy rules', 'Role-based permissions', 'Operational capacity limits'],
+    },
+    {
+      category: 'Business Rules & Exceptions',
+      question: 'What should happen when the ideal outcome cannot be completed as expected or when required information is missing?',
+      suggestions: ['Stop and request action', 'Proceed with warning', 'Use fallback policy'],
+    },
+    {
+      category: 'Business Rules & Exceptions',
+      question: 'Where are the key tradeoffs or policy decisions that could change the result for different scenarios?',
+      suggestions: ['Fixed enterprise-wide policy', 'Configurable by team', 'Depends on case attributes'],
+    },
+    {
+      category: 'Success & Measurement',
+      question: 'How should users know the result is correct, and what business outcome defines success?',
+      suggestions: ['Meets agreed policy', 'Improves turnaround time', 'Reduces manual rework'],
+    },
+    {
+      category: 'Roles & Personas',
+      question: 'Who needs to see, validate, act on, or be notified about the result after it is produced?',
+      suggestions: ['Only the request owner', 'Owner plus operational team', 'Multiple downstream stakeholders'],
+    },
+    {
+      category: 'Trigger & Context',
+      question: 'What related processes, systems, or teams does this depend on, and how should those dependencies affect behavior?',
+      suggestions: ['Independent capability', 'Depends on one upstream source', 'Depends on multiple handoffs'],
+    },
+    {
+      category: 'Business Rules & Exceptions',
+      question: 'Which exceptions need their own handling because the standard flow would be risky, invalid, or misleading?',
+      suggestions: ['Permission or policy exceptions', 'Data quality exceptions', 'Capacity or timing exceptions'],
+    },
+    {
+      category: 'Success & Measurement',
+      question: 'What level of explanation, auditability, or history should be retained so teams can trust and review the outcome later?',
+      suggestions: ['Minimal audit trail', 'Explain major decisions', 'Full traceability for all changes'],
+    },
+    {
+      category: 'Success & Measurement',
+      question: 'What should be configurable versus fixed so different business units or teams can use this consistently?',
+      suggestions: ['Globally fixed behavior', 'Configurable thresholds only', 'Configurable policies by context'],
+    },
+    {
+      category: 'Functional Flow',
+      question: 'What volume, timing, or responsiveness expectations would materially change how this capability should behave?',
+      suggestions: ['Low volume, manual review ok', 'Near real-time needed', 'High volume with strict SLAs'],
+    },
+  ];
 
-  return seed.slice(0, Math.max(0, needed));
+  const prioritized = targetedTemplates
+    .filter((template) => template.matches.test(normalizedRequirement))
+    .map((template) => template.question);
+
+  return dedupeQuestions([...prioritized, ...templates]).slice(0, Math.max(0, needed));
 }
 
 export function buildFallbackClarifyingQuestions(
@@ -875,20 +959,24 @@ export async function generateClarifyingQuestions(opts: {
   });
   const questionPlan = decision.questionPlan;
   const isLightClarifyPass =
+    decision.clarificationMode === 'light' &&
     decision.reasoningMode !== 'deep' &&
-    decision.scopeMode === 'atomic' &&
-    questionPlan.max <= 2;
+    questionPlan.max <= 4;
   const contextCharBudget = decision.reasoningMode === 'deep'
-    ? { attachment: 4000, wi: 4000, gold: 5000, similar: 5000 }
+    ? { attachment: 5000, wi: 6000, gold: 6500, similar: 6000 }
     : isLightClarifyPass
-      ? { attachment: 1400, wi: 1400, gold: 1800, similar: 1200 }
-      : { attachment: 2200, wi: 2200, gold: 3000, similar: 3000 };
+      ? { attachment: 1800, wi: 1800, gold: 2200, similar: 1800 }
+      : { attachment: 3200, wi: 3200, gold: 4200, similar: 4200 };
   const clarifyMaxTokens = decision.reasoningMode === 'deep'
-    ? 2600
+    ? 3600
     : isLightClarifyPass
-      ? 1000
-      : 1800;
-  const clarifyTopUpMaxTokens = decision.reasoningMode === 'deep' ? 1400 : 900;
+      ? 1400
+      : 2600;
+  const clarifyTopUpMaxTokens = decision.reasoningMode === 'deep'
+    ? 2200
+    : isLightClarifyPass
+      ? 900
+      : 1400;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
@@ -948,8 +1036,8 @@ export async function generateClarifyingQuestions(opts: {
 
   const shouldRunTopUpLlm =
     decision.reasoningMode === 'deep' ||
-    questionPlan.target >= 5 ||
-    questionPlan.max >= 6;
+    questionPlan.target >= 4 ||
+    questionPlan.max >= 5;
 
   if (filteredQuestions.length < desiredQuestionCount && shouldRunTopUpLlm) {
     const needed = desiredQuestionCount - filteredQuestions.length;

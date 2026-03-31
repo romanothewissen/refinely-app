@@ -205,12 +205,16 @@ CLARITY ASSESSMENT:
 - Never output fewer than ${opts.questionPlan.min} questions.
 - If the requirement is very clear and specific, stay near the lower bound.
 - If the requirement is vague or underspecified, stay near the upper bound.
+- If the request is narrow but hides prioritization, policy choices, decision logic, or meaningful exceptions, still ask enough questions to uncover those rules before feature generation.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
 - Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
 - Prefer fewer, higher-value questions over exhaustive questionnaires.
 - Each question should uncover a concrete business rule, decision, dependency, exception, or success measure.
 - Avoid superficial confirmation questions, yes/no questions, or generic prompts that would produce short answers.
 - Prefer scenario-based wording that helps the user answer with useful detail in one response.
+- Each question should be specific enough to invite a multi-sentence answer or a meaningful tradeoff decision.
+- Prefer "What should happen when...", "How should the system decide...", and "Who can override..." over vague prompts like "Any other requirements?".
+- Cover the most important missing decision dimensions before drilling deeper into one area.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected

@@ -503,91 +503,17 @@ export default function App() {
     const nextAnswers = [...discoveryAnswersRef.current, ...answers];
     setDiscoveryAnswers(nextAnswers);
     setClarifyQuestions([]);
+    setIsReviewingDiscovery(false);
+    setDiscoveryCoverage(null);
 
-    if (reasoningMode === 'deep' && discoveryRound < effectiveAiPolicy.maxDeepDiscoveryRounds) {
-      setIsWorking(true);
-      setIsReviewingDiscovery(true);
-      try {
-        const sufficiency = await api.evaluateSufficiency(
-          sessionIdRef.current,
-          requirementRef.current,
-          nextAnswers,
-          projectKey,
-          reasoningMode,
-        ) as any;
-        if (sufficiency?.tokenUsage) {
-          setWorkflowTokenUsage(prev => addTokenUsage(prev, sufficiency.tokenUsage));
-        }
-        if (sufficiency) {
-          setDiscoveryCoverage(sufficiency as DiscoveryCoverageSummary);
-          setClarifyContext(prev => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              discoveryCoverage: sufficiency as DiscoveryCoverageSummary,
-              tokenUsage: addTokenUsage(prev.tokenUsage ?? null, sufficiency.tokenUsage ?? null) ?? undefined,
-            };
-          });
-        }
-        await api.saveDiscoveryRound({
-          sessionId: sessionIdRef.current,
-          roundNumber: currentRoundNumber,
-          questions: currentRoundQuestions,
-          answers,
-          coverage: sufficiency,
-        }).catch(err => {
-          console.error('Failed to persist discovery round', err);
-        });
-        const allowAnotherDiscoveryRound =
-          currentRoundNumber < Math.min(effectiveAiPolicy.maxDeepDiscoveryRounds, 2);
-        const hasMeaningfulCoverageGap =
-          (sufficiency?.overallScore ?? 100) < 60 ||
-          (Array.isArray(sufficiency?.missingCritical) && sufficiency.missingCritical.length >= 2);
-        const hasMeaningfulFollowUp =
-          Array.isArray(sufficiency?.questions) && sufficiency.questions.length >= 2;
-
-        if (
-          sufficiency &&
-          allowAnotherDiscoveryRound &&
-          sufficiency.shouldContinueDiscovery &&
-          hasMeaningfulCoverageGap &&
-          hasMeaningfulFollowUp
-        ) {
-          console.log('[App] continuing discovery', {
-            round: currentRoundNumber,
-            score: sufficiency.overallScore,
-            questionCount: sufficiency.questions.length,
-            summary: sufficiency.summary,
-          });
-          setClarifyQuestions(sufficiency.questions);
-          setDiscoveryRound(prev => prev + 1);
-          setIsReviewingDiscovery(false);
-          setIsWorking(false);
-          return;
-        }
-      } catch (err) {
-        console.error('Discovery sufficiency check failed', err);
-        setDiscoveryCoverage(null);
-        await api.saveDiscoveryRound({
-          sessionId: sessionIdRef.current,
-          roundNumber: currentRoundNumber,
-          questions: currentRoundQuestions,
-          answers,
-        }).catch(saveErr => {
-          console.error('Failed to persist discovery round after coverage error', saveErr);
-        });
-      }
-      setIsReviewingDiscovery(false);
-    } else {
-      await api.saveDiscoveryRound({
-        sessionId: sessionIdRef.current,
-        roundNumber: currentRoundNumber,
-        questions: currentRoundQuestions,
-        answers,
-      }).catch(err => {
-        console.error('Failed to persist discovery round', err);
-      });
-    }
+    await api.saveDiscoveryRound({
+      sessionId: sessionIdRef.current,
+      roundNumber: currentRoundNumber,
+      questions: currentRoundQuestions,
+      answers,
+    }).catch(err => {
+      console.error('Failed to persist discovery round', err);
+    });
 
     console.log('[App] moving from discovery to generation', {
       round: currentRoundNumber,
