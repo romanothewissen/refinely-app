@@ -9,6 +9,7 @@
 const Resolver = require('@forge/resolver').default;
 import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
+import { randomUUID } from 'crypto';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { resolveAiExecutionPolicy, resolveGeneratorConfig } from '../services/ai-policy';
 import { getAiInsightsReport, upsertAiSessionInsight } from '../services/ai-insights';
@@ -331,7 +332,9 @@ resolver.define('startClarify', async ({ payload, context }) => {
     };
     const clarifyQueue = new Queue({ key: 'clarify-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const runId = randomUUID();
     const event: ClarifyEvent = {
+      runId,
       sessionId: payload.sessionId,
       accountId,
       requirement: payload.requirement,
@@ -346,10 +349,26 @@ resolver.define('startClarify', async ({ payload, context }) => {
     await entitySet(KEYS.clarifyProgress(payload.sessionId), {
       type: 'pending',
       message: 'Preparing discovery workflow…',
+      runId,
+      phase: 'queued',
       updatedAt: Date.now(),
     });
-    await clarifyQueue.push({ body: event });
-    return { success: true };
+    const pushResult = await clarifyQueue.push({
+      body: event,
+      concurrency: {
+        key: `clarify-${payload.sessionId}`,
+        limit: 1,
+      },
+    });
+    await entitySet(KEYS.clarifyProgress(payload.sessionId), {
+      type: 'pending',
+      message: 'Preparing discovery workflow…',
+      runId,
+      jobId: pushResult.jobId,
+      phase: 'queued',
+      updatedAt: Date.now(),
+    });
+    return { success: true, runId, jobId: pushResult.jobId };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, error: message };

@@ -30,6 +30,7 @@ export function useClarifyRealtime(
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAtRef = useRef<number>(0);
   const lastSuccessfulPollAtRef = useRef<number>(0);
+  const lastDebugSignatureRef = useRef('');
   const inFlightRef = useRef(false);
   // Keep callbacks in refs so the polling interval always calls the latest version
   const onCompleteRef = useRef(onComplete);
@@ -85,7 +86,20 @@ export function useClarifyRealtime(
       try {
         const res = await invoke('getClarifyResult', { sessionId }) as {
           success: boolean;
-          result?: { type: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number; message?: string };
+          result?: {
+            type: string;
+            questions?: unknown[];
+            contextMeta?: unknown;
+            updatedAt?: number;
+            message?: string;
+            phase?: string;
+            runId?: string;
+            jobId?: string;
+            eventId?: string;
+            retryCount?: number;
+            retryReason?: string;
+            error?: string;
+          };
         };
         lastSuccessfulPollAtRef.current = Date.now();
         const result = res.result;
@@ -93,6 +107,30 @@ export function useClarifyRealtime(
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
         if (!result || result.type === 'pending') {
           setProgress(result?.message ?? 'Preparing discovery workflow…');
+          const debugSignature = JSON.stringify({
+            type: result?.type ?? 'pending',
+            message: result?.message ?? '',
+            phase: result?.phase ?? '',
+            runId: result?.runId ?? '',
+            jobId: result?.jobId ?? '',
+            retryCount: result?.retryCount ?? 0,
+            retryReason: result?.retryReason ?? '',
+          });
+          if (debugSignature !== lastDebugSignatureRef.current) {
+            lastDebugSignatureRef.current = debugSignature;
+            console.debug('[useClarifyRealtime] progress', {
+              sessionId,
+              type: result?.type ?? 'pending',
+              message: result?.message ?? 'Preparing discovery workflow…',
+              phase: result?.phase,
+              runId: result?.runId,
+              jobId: result?.jobId,
+              eventId: result?.eventId,
+              retryCount: result?.retryCount,
+              retryReason: result?.retryReason,
+              updatedAt: result?.updatedAt,
+            });
+          }
           const updatedAt = result?.updatedAt ?? 0;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > CLARIFY_STALE_PROGRESS_MS) {
@@ -117,7 +155,15 @@ export function useClarifyRealtime(
           console.warn('[useClarifyRealtime] complete but no questions — planner decided none needed');
           finishWith('no_questions');
         } else if (result.type === 'error') {
-          console.error('[useClarifyRealtime] error result from backend');
+          console.error('[useClarifyRealtime] error result from backend', {
+            sessionId,
+            runId: result.runId,
+            jobId: result.jobId,
+            eventId: result.eventId,
+            retryCount: result.retryCount,
+            retryReason: result.retryReason,
+            error: result.error,
+          });
           finishWith('error');
         } else {
           // Unknown shape from storage; keep polling instead of getting stuck.

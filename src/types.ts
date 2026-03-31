@@ -558,6 +558,7 @@ export interface WiDoc {
 // ─── Clarify Queue Event ──────────────────────────────────────────────────────
 
 export interface ClarifyEvent {
+  runId: string;
   sessionId: string;
   accountId: string;
   requirement: string;

@@ -8,6 +8,7 @@
  * Result is stored in Forge Storage; the frontend polls getClarifyResult.
  */
 
+import { AsyncEvent } from '@forge/events';
 import { ClarifyContextMeta, ClarifyEvent, PlannerDecision, TokenUsageSummary } from '../types';
 import { buildHeuristicPlannerDecision, buildPlannerDecision } from '../core/planner';
 import { buildFallbackClarifyingQuestions, generateClarifyingQuestions } from '../core/story-generator';
@@ -19,11 +20,40 @@ import { upsertAiSessionInsight } from '../services/ai-insights';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
 
-async function sendClarifyProgress(sessionId: string, message: string) {
+async function writeClarifyProgress(
+  sessionId: string,
+  runId: string,
+  patch: Record<string, unknown>,
+) {
+  const current = await entityGet<Record<string, any>>(KEYS.clarifyProgress(sessionId));
+  if (current?.runId && current.runId !== runId) {
+    console.warn('[clarify-queue] Skipping stale progress write for superseded run', {
+      sessionId,
+      activeRunId: current.runId,
+      staleRunId: runId,
+    });
+    return false;
+  }
+
   await entitySet(KEYS.clarifyProgress(sessionId), {
+    ...(current ?? {}),
+    ...patch,
+    runId,
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
+async function sendClarifyProgress(
+  sessionId: string,
+  runId: string,
+  message: string,
+  extra?: Record<string, unknown>,
+) {
+  await writeClarifyProgress(sessionId, runId, {
     type: 'pending',
     message,
-    updatedAt: Date.now(),
+    ...(extra ?? {}),
   });
 }
 
@@ -167,8 +197,10 @@ function buildRetrievalStrategy(
   };
 }
 
-export async function handler(event: { body: ClarifyEvent }) {
-  const { sessionId, accountId, requirement, attachmentText, license, config: eventConfig, projectKey } = event.body;
+export async function handler(event: AsyncEvent<Record<string, unknown>> & { body: ClarifyEvent }) {
+  const { sessionId, accountId, requirement, attachmentText, license, config: eventConfig, projectKey, runId } = event.body;
+  const retryCount = event.retryContext?.retryCount ?? 0;
+  const retryReason = event.retryContext?.retryReason ?? null;
   
   // Resolve project-specific context
   const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
@@ -198,7 +230,41 @@ export async function handler(event: { body: ClarifyEvent }) {
     } as const;
     const heuristicPlannerDecision = buildHeuristicPlannerDecision(quickPlannerInput);
 
-    await sendClarifyProgress(sessionId, 'Quickly assessing request clarity and ambiguity…');
+    if (retryCount > 1) {
+      await writeClarifyProgress(sessionId, runId, {
+        type: 'error',
+        error: 'Discovery restarted multiple times and was stopped to avoid looping. Please try again.',
+        phase: 'retry_aborted',
+        retryCount,
+        retryReason,
+        jobId: event.jobId,
+        eventId: event.eventId,
+      });
+      return;
+    }
+
+    if (retryCount > 0) {
+      await sendClarifyProgress(
+        sessionId,
+        runId,
+        `Retrying discovery after an interrupted attempt (retry ${retryCount})…`,
+        {
+          phase: 'retrying',
+          retryCount,
+          retryReason,
+          jobId: event.jobId,
+          eventId: event.eventId,
+        },
+      );
+    }
+
+    await sendClarifyProgress(sessionId, runId, 'Quickly assessing request clarity and ambiguity…', {
+      phase: 'preflight_assessment',
+      retryCount,
+      retryReason,
+      jobId: event.jobId,
+      eventId: event.eventId,
+    });
     let plannerDecision: PlannerDecision;
     try {
       plannerDecision = await Promise.race([
@@ -210,7 +276,13 @@ export async function handler(event: { body: ClarifyEvent }) {
       plannerDecision = heuristicPlannerDecision;
     }
 
-    await sendClarifyProgress(sessionId, formatAssessmentMessage(plannerDecision));
+    await sendClarifyProgress(sessionId, runId, formatAssessmentMessage(plannerDecision), {
+      phase: 'preflight_complete',
+      retryCount,
+      retryReason,
+      jobId: event.jobId,
+      eventId: event.eventId,
+    });
 
     let wiContext = { text: '', docs: [] as Array<{ docId: string; filename: string; chunkCount: number }> };
     let goldItems: Awaited<ReturnType<typeof fetchGoldExamples>> = [];
@@ -228,7 +300,13 @@ export async function handler(event: { body: ClarifyEvent }) {
         config.tier !== 'free',
       );
 
-      await sendClarifyProgress(sessionId, retrievalStrategy.contextMessage);
+      await sendClarifyProgress(sessionId, runId, retrievalStrategy.contextMessage, {
+        phase: 'context_retrieval',
+        retryCount,
+        retryReason,
+        jobId: event.jobId,
+        eventId: event.eventId,
+      });
       [wiContext, goldItems, similarStories] = await Promise.all([
         config.wiConfig.enabled
           ? withTimeoutFallback(
@@ -296,7 +374,15 @@ export async function handler(event: { body: ClarifyEvent }) {
       );
       await sendClarifyProgress(
         sessionId,
+        runId,
         `Drafting ${targetQuestionCount} high-value clarifying question${targetQuestionCount === 1 ? '' : 's'}…`,
+        {
+          phase: 'question_generation',
+          retryCount,
+          retryReason,
+          jobId: event.jobId,
+          eventId: event.eventId,
+        },
       );
 
       try {
@@ -317,7 +403,13 @@ export async function handler(event: { body: ClarifyEvent }) {
         ambiguityAssessment = clarifyResult.ambiguityAssessment;
       } catch (clarifyErr) {
         console.warn('[clarify-queue] Clarify generation timed out, using fallback questions:', clarifyErr);
-        await sendClarifyProgress(sessionId, 'Model response was slow, so using a fast fallback question set…');
+        await sendClarifyProgress(sessionId, runId, 'Model response was slow, so using a fast fallback question set…', {
+          phase: 'fallback_questions',
+          retryCount,
+          retryReason,
+          jobId: event.jobId,
+          eventId: event.eventId,
+        });
         questions = buildFallbackClarifyingQuestions(maskedRequirement.text, plannerDecision.questionPlan);
         ambiguityAssessment = buildAmbiguityAssessment(plannerDecision, questions.length);
       }
@@ -355,11 +447,15 @@ export async function handler(event: { body: ClarifyEvent }) {
       })),
     };
 
-    await entitySet(KEYS.clarifyProgress(sessionId), {
+    await writeClarifyProgress(sessionId, runId, {
       type: 'complete',
       questions,
       contextMeta: clarifyContext,
-      updatedAt: Date.now(),
+      phase: 'complete',
+      retryCount,
+      retryReason,
+      jobId: event.jobId,
+      eventId: event.eventId,
     });
 
     try {
@@ -427,10 +523,14 @@ export async function handler(event: { body: ClarifyEvent }) {
     }
   } catch (err) {
     console.error('[clarify-queue] Error:', err);
-    await entitySet(KEYS.clarifyProgress(sessionId), {
+    await writeClarifyProgress(sessionId, runId, {
       type: 'error',
       error: err instanceof Error ? err.message : 'Clarify failed',
-      updatedAt: Date.now(),
+      phase: 'error',
+      retryCount,
+      retryReason,
+      jobId: event.jobId,
+      eventId: event.eventId,
     });
   }
 }
