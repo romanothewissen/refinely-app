@@ -120,7 +120,10 @@ export function resolveGeneratorConfig(
     arModel: selectedModel,
     clarifyModel: selectedModel,
     refineModel: selectedModel,
-    evaluateModel: selectedModel,
-    themeModel: selectedModel,
+    // evaluateModel and themeModel are used for classification/lightweight tasks
+    // (planner, rerank, theme extraction) — always keep them on the fast profile
+    // so they don't inherit a heavy thinking model in deep mode.
+    evaluateModel: fastProfileModel,
+    themeModel: fastProfileModel,
   };
 }

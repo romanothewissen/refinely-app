@@ -47,6 +47,15 @@ async function withTimeoutFallback<T>(
   }
 }
 
+function throwAfterTimeout(timeoutMs: number, label: string): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    setTimeout(
+      () => reject(new Error(`[clarify-queue] ${label} exceeded ${timeoutMs}ms — aborting to surface error`)),
+      timeoutMs,
+    );
+  });
+}
+
 function resolveRelevantGoldSources(
   sources: ClarifyEvent['config']['goldSources'],
   projectKey: string,
@@ -80,9 +89,8 @@ export async function handler(event: { body: ClarifyEvent }) {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
-    const contextTimeoutMs = (event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode) === 'deep'
-      ? 30000
-      : 18000;
+    const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
+    const contextTimeoutMs = reasoningMode === 'deep' ? 30000 : 18000;
     const [wiContext, goldItems, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? withTimeoutFallback(
@@ -110,29 +118,39 @@ export async function handler(event: { body: ClarifyEvent }) {
         : Promise.resolve([]),
     ]);
 
+    // LLM calls have no built-in timeout; race against a deadline so the queue job
+    // self-aborts and stores type:'error' instead of hanging until Forge kills it.
+    const llmDeadlineMs = reasoningMode === 'deep' ? 150000 : 80000;
+
     await sendClarifyProgress(sessionId, 'Assessing request clarity and complexity…');
-    const plannerDecision = await buildPlannerDecision({
-      requirement: maskedRequirement.text,
-      attachmentText: maskedAttachment.text,
-      wiContextText: wiContext.text,
-      goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
-      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
-      config,
-      reasoningMode: event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
-      outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
-      policy: config.aiExecutionPolicy,
-    });
+    const plannerDecision = await Promise.race([
+      buildPlannerDecision({
+        requirement: maskedRequirement.text,
+        attachmentText: maskedAttachment.text,
+        wiContextText: wiContext.text,
+        goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
+        similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+        config,
+        reasoningMode,
+        outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
+        policy: config.aiExecutionPolicy,
+      }),
+      throwAfterTimeout(llmDeadlineMs, 'planner LLM'),
+    ]);
 
     await sendClarifyProgress(sessionId, 'Drafting the highest-value clarifying questions…');
-    const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
-      requirement: maskedRequirement.text,
-      attachmentText: maskedAttachment.text,
-      wiContextText: wiContext.text,
-      goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
-      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
-      config,
-      plannerDecision,
-    });
+    const { questions, tokenUsage, ambiguityAssessment } = await Promise.race([
+      generateClarifyingQuestions({
+        requirement: maskedRequirement.text,
+        attachmentText: maskedAttachment.text,
+        wiContextText: wiContext.text,
+        goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
+        similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+        config,
+        plannerDecision,
+      }),
+      throwAfterTimeout(llmDeadlineMs, 'clarify question generation'),
+    ]);
 
     const clarifyContext: ClarifyContextMeta = {
       projectKey,

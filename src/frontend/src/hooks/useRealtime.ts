@@ -17,10 +17,12 @@ const CLARIFY_TIMEOUT_MS = 180000; // 3 min — generous for Pro thinking mode
 const CLARIFY_POLL_INTERVAL_MS = 3500;
 const GENERATION_POLL_INTERVAL_MS = 4000;
 
+export type ClarifyFallthroughReason = 'no_questions' | 'error' | 'timeout';
+
 export function useClarifyRealtime(
   sessionId: string | null,
   onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
-  onFallthrough: () => void,
+  onFallthrough: (reason: ClarifyFallthroughReason) => void,
 ) {
   const [progress, setProgress] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,7 +70,7 @@ export function useClarifyRealtime(
           if (Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS) {
             clearTimer();
             setProgress('');
-            onFallthroughRef.current();
+            onFallthroughRef.current('timeout');
             return;
           }
           scheduleNext();
@@ -81,15 +83,15 @@ export function useClarifyRealtime(
           setProgress('');
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
-          console.warn('[useClarifyRealtime] complete but no questions found — falling through to generate');
+          console.warn('[useClarifyRealtime] complete but no questions — planner decided none needed');
           clearTimer();
           setProgress('');
-          onFallthroughRef.current();
+          onFallthroughRef.current('no_questions');
         } else if (result.type === 'error') {
           console.error('[useClarifyRealtime] error result from backend');
           clearTimer();
           setProgress('');
-          onFallthroughRef.current();
+          onFallthroughRef.current('error');
         } else {
           // Unknown shape from storage; keep polling instead of getting stuck.
           scheduleNext();

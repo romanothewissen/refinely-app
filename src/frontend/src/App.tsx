@@ -6,7 +6,7 @@ import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
 import { SettingsView } from './SettingsView';
 import { api } from './hooks/useForge';
-import { useGenerationRealtime, useClarifyRealtime } from './hooks/useRealtime';
+import { useGenerationRealtime, useClarifyRealtime, type ClarifyFallthroughReason } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
 import { AiExecutionPolicy, DEFAULT_CONFIG, OutputMode, ReasoningMode } from './types';
@@ -384,12 +384,22 @@ export default function App() {
         startGeneration(requirement, []);
       }
     },
-    () => {
-      // Error or timeout — skip clarify and go straight to generation
+    (reason: ClarifyFallthroughReason) => {
       setPendingClarifySessionId(null);
       setIsReviewingDiscovery(false);
       setDiscoveryCoverage(null);
-      startGeneration(requirement, []);
+      if (reason === 'no_questions') {
+        // Planner determined no clarification is needed — proceed directly.
+        startGeneration(requirement, []);
+      } else {
+        // Error or timeout — surface to the user rather than silently generating.
+        setIsWorking(false);
+        setGenerationError(
+          reason === 'timeout'
+            ? 'Discovery timed out. Please try again, or use Fast mode for quicker results.'
+            : 'Discovery could not complete. Please try again.',
+        );
+      }
     },
   );
 
