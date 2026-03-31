@@ -10,7 +10,7 @@
 
 import { AsyncEvent } from '@forge/events';
 import { ClarifyContextMeta, ClarifyEvent, PlannerDecision, TokenUsageSummary } from '../types';
-import { buildHeuristicPlannerDecision, buildPlannerDecision } from '../core/planner';
+import { buildHeuristicPlannerDecision } from '../core/planner';
 import { generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
@@ -220,15 +220,13 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
     const outputMode = event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode;
-    const quickPlannerInput = {
+    const plannerDecision = buildHeuristicPlannerDecision({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
-      config,
       reasoningMode,
       outputMode,
       policy: config.aiExecutionPolicy,
-    } as const;
-    const heuristicPlannerDecision = buildHeuristicPlannerDecision(quickPlannerInput);
+    });
 
     if (retryCount > 1) {
       await writeClarifyProgress(sessionId, runId, {
@@ -258,140 +256,86 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       );
     }
 
-    await sendClarifyProgress(sessionId, runId, 'Quickly assessing request clarity and ambiguity…', {
-      phase: 'preflight_assessment',
+    await sendClarifyProgress(sessionId, runId, 'Assessing context and drafting discovery questions…', {
+      phase: 'preflight',
       retryCount,
       retryReason,
       jobId: event.jobId,
       eventId: event.eventId,
     });
-    let plannerDecision: PlannerDecision;
-    try {
-      plannerDecision = await Promise.race([
-        buildPlannerDecision(quickPlannerInput),
-        throwAfterTimeout(reasoningMode === 'deep' ? 10000 : 7000, 'quick planner assessment'),
-      ]);
-    } catch (assessmentErr) {
-      console.warn('[clarify-queue] Quick assessment timed out, using heuristic decision:', assessmentErr);
-      plannerDecision = heuristicPlannerDecision;
-    }
-
-    await sendClarifyProgress(sessionId, runId, formatAssessmentMessage(plannerDecision), {
-      phase: 'preflight_complete',
+    await sendClarifyProgress(sessionId, runId, 'Loading contextual signals from backlog and work instructions…', {
+      phase: 'context_retrieval',
       retryCount,
       retryReason,
       jobId: event.jobId,
       eventId: event.eventId,
     });
-
-    let wiContext = { text: '', docs: [] as Array<{ docId: string; filename: string; chunkCount: number }> };
-    let goldItems: Awaited<ReturnType<typeof fetchGoldExamples>> = [];
-    let similarStories: Awaited<ReturnType<typeof findSimilarStories>> = [];
-
-    {
-      const retrievalStrategy = buildRetrievalStrategy(
-        plannerDecision,
-        config.wiConfig,
-        reasoningMode,
-        config.tier !== 'free',
-      );
-
-      await sendClarifyProgress(sessionId, runId, retrievalStrategy.contextMessage, {
-        phase: 'context_retrieval',
-        retryCount,
-        retryReason,
-        jobId: event.jobId,
-        eventId: event.eventId,
-      });
-      [wiContext, goldItems, similarStories] = await Promise.all([
-        config.wiConfig.enabled
-          ? withTimeoutFallback(
-              retrieveWiContext(maskedRequirement.text, retrievalStrategy.wiTopK, retrievalStrategy.wiMaxChars, projectKey),
-              retrievalStrategy.contextTimeoutMs,
-              { text: '', docs: [] },
-              'work-instruction context',
-            )
-          : Promise.resolve({ text: '', docs: [] }),
-        config.goldSources.length
-          ? withTimeoutFallback(
-              fetchGoldExamples(config.goldSources, retrievalStrategy.goldLimit),
-              retrievalStrategy.contextTimeoutMs,
-              [],
-              'gold examples',
-            )
-          : Promise.resolve([]),
-        retrievalStrategy.includeSimilarStories
-          ? withTimeoutFallback(
-              findSimilarStories(maskedRequirement.text, config, projectKey),
-              retrievalStrategy.contextTimeoutMs,
-              [],
-              'similar stories',
-            )
-          : Promise.resolve([]),
-      ]);
-
-      // Keep the fast preflight decision as the single planner step on the
-      // critical path. The question generator already receives the retrieved
-      // context, so a second planner LLM call adds latency and another point
-      // of failure without materially improving the downstream output.
-    }
+    const [wiContext, goldItems, similarStories] = await Promise.all([
+      config.wiConfig.enabled
+        ? withTimeoutFallback(
+            retrieveWiContext(
+              maskedRequirement.text,
+              Math.min(config.wiConfig.topKChunks, reasoningMode === 'deep' ? 5 : 4),
+              Math.min(config.wiConfig.maxChars, reasoningMode === 'deep' ? 20000 : 14000),
+              projectKey,
+            ),
+            reasoningMode === 'deep' ? 18000 : 12000,
+            { text: '', docs: [] },
+            'work-instruction context',
+          )
+        : Promise.resolve({ text: '', docs: [] }),
+      config.goldSources.length
+        ? withTimeoutFallback(
+            fetchGoldExamples(config.goldSources, reasoningMode === 'deep' ? 6 : 5),
+            reasoningMode === 'deep' ? 18000 : 12000,
+            [],
+            'gold examples',
+          )
+        : Promise.resolve([]),
+      config.tier !== 'free'
+        ? withTimeoutFallback(
+            findSimilarStories(maskedRequirement.text, config, projectKey),
+            reasoningMode === 'deep' ? 18000 : 12000,
+            [],
+            'similar stories',
+          )
+        : Promise.resolve([]),
+    ]);
 
     let questions: Awaited<ReturnType<typeof generateClarifyingQuestions>>['questions'] = [];
     let tokenUsage: TokenUsageSummary = zeroClarifyTokenUsage();
     let ambiguityAssessment = buildAmbiguityAssessment(plannerDecision, 0);
 
-    if (plannerDecision.questionPlan.max > 0) {
-      const retrievalStrategy = buildRetrievalStrategy(
-        plannerDecision,
-        config.wiConfig,
-        reasoningMode,
-        config.tier !== 'free',
-      );
-      const targetQuestionCount = Math.max(
-        plannerDecision.questionPlan.min,
-        plannerDecision.questionPlan.target,
-      );
-      await sendClarifyProgress(
-        sessionId,
-        runId,
-        `Drafting ${targetQuestionCount} high-value clarifying question${targetQuestionCount === 1 ? '' : 's'}…`,
-        {
-          phase: 'question_generation',
-          retryCount,
-          retryReason,
-          jobId: event.jobId,
-          eventId: event.eventId,
-        },
-      );
-
-      try {
-        const clarifyResult = await Promise.race([
-          generateClarifyingQuestions({
-            requirement: maskedRequirement.text,
-            attachmentText: maskedAttachment.text,
-            wiContextText: wiContext.text,
-            goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
-            similarStoriesText: formatSimilarStoriesText(similarStories, 8),
-            config,
-            plannerDecision,
-          }),
-          throwAfterTimeout(retrievalStrategy.questionDeadlineMs, 'clarify question generation'),
-        ]);
-        questions = clarifyResult.questions;
-        tokenUsage = clarifyResult.tokenUsage;
-        ambiguityAssessment = clarifyResult.ambiguityAssessment;
-      } catch (clarifyErr) {
-        console.error('[clarify-queue] Clarify generation failed:', clarifyErr);
-        await sendClarifyProgress(sessionId, runId, 'Question generation failed before a strong question set was produced.', {
-          phase: 'question_generation_failed',
-          retryCount,
-          retryReason,
-          jobId: event.jobId,
-          eventId: event.eventId,
-        });
-        throw clarifyErr;
-      }
-    }
+    const targetQuestionCount = Math.max(
+      plannerDecision.questionPlan.min,
+      plannerDecision.questionPlan.target,
+    );
+    await sendClarifyProgress(
+      sessionId,
+      runId,
+      `Drafting ${targetQuestionCount} domain-specific clarifying question${targetQuestionCount === 1 ? '' : 's'}…`,
+      {
+        phase: 'question_generation',
+        retryCount,
+        retryReason,
+        jobId: event.jobId,
+        eventId: event.eventId,
+      },
+    );
+    const clarifyResult = await generateClarifyingQuestions({
+      requirement: maskedRequirement.text,
+      attachmentText: maskedAttachment.text,
+      wiContextText: wiContext.text,
+      goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
+      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+      config,
+      reasoningMode,
+      outputMode,
+      plannerDecision,
+    });
+    questions = clarifyResult.questions;
+    tokenUsage = clarifyResult.tokenUsage;
+    ambiguityAssessment = clarifyResult.ambiguityAssessment;
 
     const clarifyContext: ClarifyContextMeta = {
       projectKey,
@@ -460,7 +404,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
           projectKey,
           requirementExcerpt: maskedRequirement.text.slice(0, 240),
           decisionSummary: [
-            `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.clarificationMode} discovery.`,
+            `Discovery was calibrated to ${plannerDecision.clarificationMode} depth for a ${plannerDecision.scopeMode} request.`,
             `Generated ${questions.length} clarifying questions for ${ambiguityAssessment.level} ambiguity input.`,
             `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
           ],

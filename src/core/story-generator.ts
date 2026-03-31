@@ -24,7 +24,7 @@ import {
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
-import { buildPlannerDecision } from './planner';
+import { buildHeuristicPlannerDecision, buildPlannerDecision } from './planner';
 import {
   buildDecompositionSystemPrompt,
   buildArSystemPrompt,
@@ -145,7 +145,7 @@ function compactSuggestion(raw: unknown): string {
   const text = String(raw ?? '').trim().replace(/\s+/g, ' ');
   if (!text) return '';
   const words = text.split(' ');
-  return words.slice(0, 28).join(' ');
+  return words.slice(0, 48).join(' ');
 }
 
 function canonicalizeClarifyCategory(category: string): (typeof CLARIFY_CATEGORY_ORDER)[number] {
@@ -257,7 +257,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
       category: canonicalizeClarifyCategory(String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow'),
       question: String((x as any).question ?? '').trim(),
       suggestions: Array.isArray((x as any).suggestions)
-        ? (x as any).suggestions.map((s: unknown) => compactSuggestion(s)).filter(Boolean).slice(0, 3)
+        ? (x as any).suggestions.map((s: unknown) => compactSuggestion(s)).filter(Boolean).slice(0, 5)
         : [],
     }))
     .filter(q => q.question.length > 0);
@@ -976,6 +976,8 @@ export async function generateFeatures(opts: {
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
+  reasoningMode?: 'fast' | 'deep';
+  outputMode?: 'single' | 'auto' | 'full_breakdown';
   plannerDecision?: PlannerDecision;
   onPass1Complete?: (payload: {
     featureCount: number;
@@ -983,24 +985,32 @@ export async function generateFeatures(opts: {
     arBatchCount: number;
   }) => Promise<void>;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, plannerDecision, onPass1Complete } = opts;
+  const {
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    goldExamplesText,
+    similarStoriesText,
+    wiContextText,
+    config,
+    reasoningMode,
+    outputMode,
+    plannerDecision,
+    onPass1Complete,
+  } = opts;
   const { generatorConfig } = config;
-  const decision = plannerDecision ?? await buildPlannerDecision({
+  const decision = plannerDecision ?? buildHeuristicPlannerDecision({
     requirement,
     clarifyAnswers,
     attachmentText,
     wiContextText,
     goldExamplesText,
     similarStoriesText,
-    config,
-    reasoningMode: config.aiExecutionPolicy.defaultReasoningMode,
-    outputMode: config.aiExecutionPolicy.defaultOutputMode,
+    reasoningMode: reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
+    outputMode: outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
     policy: config.aiExecutionPolicy,
   });
-  const providerOpts = {
-    ...getProviderOpts(config),
-  } as const;
-  const stageTimeouts = resolveGenerationStageTimeouts(decision.reasoningMode);
+  const providerOpts = getProviderOpts(config);
 
   const userMessage = buildGenerationContextSections({
     requirement,
@@ -1022,26 +1032,28 @@ export async function generateFeatures(opts: {
     featurePlan: decision.featurePlan,
   });
 
-  let pass1Usage = { input: 0, output: 0 };
-  let pass1Features = buildFallbackFeatureCandidates(requirement, config, decision);
-  try {
-    const pass1Result = await Promise.race([
-      callLlmJsonWithUsage<{ features: RawFeature[] }>({
-        model: getTierModel(generatorConfig.decompositionModel, config.tier),
-        systemPrompt: pass1System,
-        userMessage,
-        maxTokens: generatorConfig.maxTokens,
-        ...providerOpts,
-      }),
-      throwAfterTimeout(stageTimeouts.pass1Ms, 'Feature decomposition'),
-    ]);
-    pass1Usage = pass1Result.usage;
-    const candidates = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
-    pass1Features = candidates.length
-      ? candidates
-      : buildFallbackFeatureCandidates(requirement, config, decision);
-  } catch (error) {
-    console.warn('[story-generator] Decomposition failed; using fallback feature seed:', error);
+  const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(generatorConfig.decompositionModel, config.tier),
+    systemPrompt: pass1System,
+    userMessage,
+    maxTokens: generatorConfig.maxTokens,
+    ...providerOpts,
+  });
+  const pass1Usage = pass1Result.usage;
+  const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
+
+  if (!pass1Features.length) {
+    throw new Error('Feature decomposition returned no valid features.');
+  }
+
+  const draftFeatures = pass1Features.map(normaliseFeature);
+
+  if (onPass1Complete) {
+    await onPass1Complete({
+      featureCount: pass1Features.length,
+      draftFeatures,
+      arBatchCount: 1,
+    });
   }
 
   // ── Pass 2: Acceptance Requirements ──
@@ -1049,7 +1061,6 @@ export async function generateFeatures(opts: {
     domainContext: config.domainContext,
     arPlan: decision.arPlan,
   });
-
   const pass2Context = buildGenerationContextSections({
     requirement,
     clarifyAnswers,
@@ -1060,115 +1071,37 @@ export async function generateFeatures(opts: {
     mode: 'pass2',
     reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
-  const pass2BatchSize = pass1Features.length >= 8
-    ? 4
-    : pass1Features.length >= 5
-      ? 3
-      : pass1Features.length;
-  const pass2Batches = chunkArray(pass1Features, pass2BatchSize);
-  const draftFeatures = pass1Features.map(normaliseFeature);
+  const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+  const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(generatorConfig.arModel, config.tier),
+    systemPrompt: pass2System,
+    userMessage: pass2UserMessage,
+    maxTokens: estimatePass2MaxTokens(
+      pass1Features.length,
+      decision.arPlan.target,
+      generatorConfig.maxTokens,
+      16384,
+    ),
+    ...providerOpts,
+  });
+  const pass2Usage = pass2Result.usage;
+  const rawFeatures = pass2Result.data.features?.length
+    ? mergeFeatures(pass1Features, pass2Result.data.features)
+    : pass1Features;
 
-  // Notify caller so it can emit a useful progress event before the slower pass 2 work starts.
-  if (onPass1Complete) {
-    await onPass1Complete({
-      featureCount: pass1Features.length,
-      draftFeatures,
-      arBatchCount: pass2Batches.length,
-    });
-  }
-
-  let pass2Usage = { input: 0, output: 0 };
-  let rawFeatures = pass1Features;
-  const pass2HardCap = pass2Batches.length > 1 ? 7000 : 12000;
-  const pass2Results = await Promise.all(pass2Batches.map(async (featureBatch, index) => {
-    const batchLabel = pass2Batches.length > 1
-      ? `Acceptance requirement generation batch ${index + 1}/${pass2Batches.length}`
-      : 'Acceptance requirement generation';
-    const batchUserMessage = [
-      pass2Context,
-      pass2Batches.length > 1
-        ? `FEATURES FROM PASS 1 - BATCH ${index + 1} OF ${pass2Batches.length} (fill in acceptance_requirements only for this batch):\n${JSON.stringify(featureBatch, null, 2)}`
-        : `FEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(featureBatch, null, 2)}`,
-    ].join('\n\n---\n\n');
-
-    try {
-      const batchResult = await Promise.race([
-        callLlmJsonWithUsage<{ features: RawFeature[] }>({
-          model: getTierModel(generatorConfig.arModel, config.tier),
-          systemPrompt: pass2System,
-          userMessage: batchUserMessage,
-          maxTokens: estimatePass2MaxTokens(
-            featureBatch.length,
-            decision.arPlan.target,
-            generatorConfig.maxTokens,
-            pass2HardCap,
-          ),
-          ...providerOpts,
-        }),
-        throwAfterTimeout(stageTimeouts.pass2Ms, batchLabel),
-      ]);
-
-      return {
-        rawFeatures: batchResult.data.features?.length
-          ? mergeFeatures(featureBatch, batchResult.data.features)
-          : featureBatch,
-        usage: batchResult.usage,
-      };
-    } catch (error) {
-      console.warn(`[story-generator] ${batchLabel} failed; using fallback acceptance requirements:`, error);
-      return {
-        rawFeatures: featureBatch,
-        usage: { input: 0, output: 0 },
-      };
-    }
-  }));
-
-  pass2Usage = sumUsage(pass2Results.map(result => result.usage));
-  rawFeatures = pass2Results.flatMap(result => result.rawFeatures);
-
-  rawFeatures = ensureAcceptanceRequirements(rawFeatures, decision.arPlan);
-  let features = rawFeatures.map(normaliseFeature);
+  const features = rawFeatures.map(normaliseFeature);
   if (!features.length) {
-    features = ensureAcceptanceRequirements(
-      buildFallbackFeatureCandidates(requirement, config, decision),
-      decision.arPlan,
-    ).map(normaliseFeature);
+    throw new Error('Acceptance requirement generation returned no valid features.');
   }
   const violations = validateFeatures(features, config);
-  let initiativeGroups: InitiativeGroup[] | undefined;
-  let initiativeGroupingUsage: TokenUsageSummary | undefined;
-
-  if (decision.useHierarchy && features.length > 0) {
-    try {
-      const groupingResult = await Promise.race([
-        buildInitiativeGroups({
-          requirement,
-          features,
-          config,
-        }),
-        throwAfterTimeout(stageTimeouts.groupingMs, 'Initiative grouping'),
-      ]);
-      initiativeGroups = groupingResult.initiativeGroups;
-      initiativeGroupingUsage = groupingResult.tokenUsage;
-    } catch (error) {
-      console.warn('[story-generator] Initiative grouping timed out; using fallback grouping:', error);
-      initiativeGroups = buildFallbackInitiativeGroups(features);
-    }
-  }
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Usage.input + pass2Usage.input + (initiativeGroupingUsage?.input ?? 0),
-    output: pass1Usage.output + pass2Usage.output + (initiativeGroupingUsage?.output ?? 0),
-    total:
-      pass1Usage.input +
-      pass1Usage.output +
-      pass2Usage.input +
-      pass2Usage.output +
-      (initiativeGroupingUsage?.total ?? 0),
+    input: pass1Usage.input + pass2Usage.input,
+    output: pass1Usage.output + pass2Usage.output,
+    total: pass1Usage.input + pass1Usage.output + pass2Usage.input + pass2Usage.output,
     byStage: {
       decomposition: toStageUsage(pass1Usage),
       acceptanceRequirements: toStageUsage(pass2Usage),
-      ...(initiativeGroupingUsage?.byStage ?? {}),
     },
   };
 
@@ -1178,7 +1111,6 @@ export async function generateFeatures(opts: {
     similarStories: [],   // filled in by the caller after this returns
     sessionId: uuidv4(),
     plannerDecision: decision,
-    initiativeGroups,
     tokenUsage,
   };
 }
@@ -1192,18 +1124,29 @@ export async function generateClarifyingQuestions(opts: {
   goldExamplesText: string;
   similarStoriesText: string;
   config: TenantConfig;
+  reasoningMode?: 'fast' | 'deep';
+  outputMode?: 'single' | 'auto' | 'full_breakdown';
   plannerDecision?: PlannerDecision;
 }): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
-  const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config, plannerDecision } = opts;
-  const decision = plannerDecision ?? await buildPlannerDecision({
+  const {
     requirement,
     attachmentText,
     wiContextText,
     goldExamplesText,
     similarStoriesText,
     config,
-    reasoningMode: config.aiExecutionPolicy.defaultReasoningMode,
-    outputMode: config.aiExecutionPolicy.defaultOutputMode,
+    reasoningMode,
+    outputMode,
+    plannerDecision,
+  } = opts;
+  const decision = plannerDecision ?? buildHeuristicPlannerDecision({
+    requirement,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+    reasoningMode: reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
+    outputMode: outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
     policy: config.aiExecutionPolicy,
   });
   const questionPlan = decision.questionPlan;
@@ -1259,25 +1202,15 @@ export async function generateClarifyingQuestions(opts: {
     questionPlan.max,
     Math.max(questionPlan.min, questionPlan.target),
   );
-  const preferredClarifyModel =
-    decision.reasoningMode === 'deep' || desiredQuestionCount >= 8
-      ? getTierModel(config.generatorConfig.deepProfileModel, config.tier)
-      : getTierModel(config.generatorConfig.clarifyModel, config.tier);
+  const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
+    model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+    systemPrompt: system,
+    userMessage: contextParts.join('\n\n'),
+    maxTokens: clarifyMaxTokens,
+    ...getProviderOpts(config),
+  });
 
-  const raw = await Promise.race([
-    callLlmJsonWithUsage<ClarifyQuestion[]>({
-      model: preferredClarifyModel,
-      systemPrompt: system,
-      userMessage: contextParts.join('\n\n'),
-      maxTokens: clarifyMaxTokens,
-      ...getProviderOpts(config),
-    }),
-    throwAfterTimeout(decision.reasoningMode === 'deep' ? 25000 : 16000, 'Clarify question generation'),
-  ]);
-
-  const filteredQuestions = sortClarifyingQuestions(
-    dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
-  );
+  const filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
 
   if (filteredQuestions.length < questionPlan.min) {
     throw new Error(`Clarify generation produced only ${filteredQuestions.length} valid questions; minimum expected ${questionPlan.min}.`);

@@ -383,7 +383,13 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     !hasAmbiguousTokens
   ) {
     scopeMode = 'atomic';
-  } else if (hasEnterpriseSignals || breadthScore >= 5) {
+  } else if (
+    hasEnterpriseSignals ||
+    (
+      breadthScore >= 6 &&
+      (reqWords >= 45 || reqSentences >= 3 || actorMentions >= 2 || integrationMentions >= 1 || hasMultiScenarioSignal)
+    )
+  ) {
     scopeMode = 'initiative';
   } else if (hasAllocationPlanningSignal || (hasOptimizationSignal && hasMultiFactorDecisionSignal) || breadthScore >= 3) {
     scopeMode = 'standard';

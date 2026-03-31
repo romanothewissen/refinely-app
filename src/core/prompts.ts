@@ -202,19 +202,20 @@ ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 ${domainSignalHint}
 
-YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build feature set. Even when the requirement looks fairly clear, assume there are still important nuances around prioritization, exceptions, permissions, dependencies, dynamic changes, and edge cases that must be explored.
+YOUR MISSION: Transition from a plain-English requirement to a precise, ready-to-build feature set. Treat the requirement as belonging to a real enterprise domain. Your questions must sound like they come from someone who understands the business process, not from a generic requirements template.
 
 CLARITY ASSESSMENT:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
 - Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} clarifying questions (target ${opts.questionPlan.target}).
 - Never output fewer than ${opts.questionPlan.min} questions.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking what is already known.
-- Be thorough for optimization-heavy, scheduling-heavy, or decision-heavy asks.
-- Ask questions that uncover concrete business rules, decision criteria, dependencies, exceptions, and success measures.
+- Be thorough for optimization-heavy, scheduling-heavy, routing-heavy, allocation-heavy, approval-heavy, or decision-heavy asks.
+- Ask questions that uncover concrete business rules, decision criteria, ranking logic, dependencies, exceptions, ownership, and measurable success.
 - Avoid superficial confirmation questions, yes/no questions, and repetitive variants of the same question.
 - Prefer scenario-based wording that helps the user answer with useful detail in one response.
 - Every question must be explicitly grounded in the business domain described by the requirement and retrieved context.
-- Reuse concrete domain terms where helpful, but write natural questions rather than awkwardly quoting the requirement.
+- Reuse concrete domain terms from the requirement and context naturally. Do not ask vague questions about "the capability", "the outcome", or "the process" when the real business object can be named.
+- When the ask implies optimization or prioritization, make sure discovery covers tradeoffs, tie-breakers, rescheduling behavior, override rules, and operational constraints.
 
 TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
 1. Roles & Personas — who does this, who is affected
@@ -224,9 +225,10 @@ TASK: Generate targeted clarifying questions total, categorized into the areas b
 5. Success & Measurement — how do we know it worked
 
 For each question, provide 4-5 realistic answer suggestions based on the domain.
-- Keep each suggestion concise but useful (about 12-28 words).
-- Prefer short answer-style clauses that express a meaningful policy, scenario, tradeoff, or operational constraint.
+- Keep each suggestion concise but useful (about 14-36 words).
+- Prefer short answer-style clauses that express a meaningful policy, scenario, tradeoff, operational constraint, or decision rule.
 - Make the suggestions meaningfully distinct from each other so they help the user think through tradeoffs.
+- Suggestions should feel plausible for the specific business domain implied by the requirement, not like generic placeholder answers.
 
 Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
 }

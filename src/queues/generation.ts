@@ -8,14 +8,13 @@
  */
 
 import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
-import { buildPlannerDecision } from '../core/planner';
+import { buildHeuristicPlannerDecision } from '../core/planner';
 import { generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { upsertAiSessionInsight } from '../services/ai-insights';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
-import { getConfig } from '../services/tenant-config';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
 
@@ -170,15 +169,14 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
-    const plannerDecision = await buildPlannerDecision({
+    const plannerDecision = buildHeuristicPlannerDecision({
       requirement: maskedRequirement.text,
       clarifyAnswers: maskedAnswers.answers,
       attachmentText: maskedAttachment.text,
       goldExamplesText,
       similarStoriesText,
       wiContextText: wiContext.text,
-      config,
-      reasoningMode: event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
+      reasoningMode,
       outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
       policy: config.aiExecutionPolicy,
     });
@@ -194,14 +192,13 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
+      reasoningMode,
+      outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
       plannerDecision,
       onPass1Complete: async ({ featureCount, draftFeatures, arBatchCount }) => {
-        const batchLabel = arBatchCount > 1
-          ? `in ${arBatchCount} parallel batches`
-          : 'for the drafted backlog';
         await sendProgress(
           sessionId,
-          `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Expanding acceptance requirements ${batchLabel}…`,
+          `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Writing acceptance requirements…`,
           2,
           { features: draftFeatures, draft: true },
         );
