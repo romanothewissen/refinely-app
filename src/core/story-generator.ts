@@ -1439,16 +1439,14 @@ export async function refineSingleFeature(opts: {
 
   const refined = result.data.features?.[0];
   const feedbackLower = feedback.toLowerCase();
-  const touchesSummary = /(summary|title|name|rename)/i.test(feedbackLower);
-  const touchesDescription = /(description|as a|so that|reword|rewrite)/i.test(feedbackLower);
   const touchesStoryPoints = /(story point|story points|estimate|estimation|sizing|size)/i.test(feedbackLower);
   const touchesProcessCode = /(process code|process_code|taxonomy|code)/i.test(feedbackLower);
   const candidate = refined ? normaliseFeature(refined) : feature;
   const stableResult: Feature = {
     ...feature,
     id: feature.id,
-    summary: touchesSummary ? candidate.summary : feature.summary,
-    description: touchesDescription ? candidate.description : feature.description,
+    summary: candidate.summary || feature.summary,
+    description: candidate.description || feature.description,
     acceptanceRequirements: candidate.acceptanceRequirements?.length
       ? candidate.acceptanceRequirements
       : feature.acceptanceRequirements,
@@ -1537,12 +1535,33 @@ export async function askQuestion(opts: {
 function normaliseFeature(raw: RawFeature): Feature {
   return {
     id: uuidv4(),
-    summary: raw.summary ?? 'Untitled feature',
-    description: raw.description ?? '',
+    summary: cleanModelText(raw.summary ?? 'Untitled feature'),
+    description: cleanModelText(raw.description ?? ''),
     acceptanceRequirements: normaliseArs(getRawAcceptanceArray(raw)),
     storyPoints: raw.suggested_story_points,
-    processCode: raw.process_code,
+    processCode: cleanOptionalModelText(raw.process_code),
   };
+}
+
+function cleanOptionalModelText(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const cleaned = cleanModelText(value);
+  return cleaned || undefined;
+}
+
+function cleanModelText(value: unknown): string {
+  const text = String(value ?? '');
+  return decodeEscapedUnicode(text)
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+
+function decodeEscapedUnicode(text: string): string {
+  return text
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t');
 }
 
 /** Read AR arrays whether the model used snake_case or camelCase. */
@@ -1559,13 +1578,13 @@ function getRawAcceptanceArray(raw: RawFeature): unknown[] {
 function normaliseArs(ars: unknown[]): Array<{ given: string; when: string; then: string }> {
   return ars
     .map(ar => {
-      if (typeof ar === 'string') return parseArString(ar);
+      if (typeof ar === 'string') return parseArString(cleanModelText(ar));
       if (typeof ar === 'object' && ar !== null) {
         const obj = ar as Record<string, unknown>;
         return {
-          given: String(obj.given ?? obj.Given ?? ''),
-          when: String(obj.when ?? obj.When ?? ''),
-          then: String(obj.then ?? obj.Then ?? ''),
+          given: cleanModelText(obj.given ?? obj.Given ?? ''),
+          when: cleanModelText(obj.when ?? obj.When ?? ''),
+          then: cleanModelText(obj.then ?? obj.Then ?? ''),
         };
       }
       return null;
@@ -1575,7 +1594,7 @@ function normaliseArs(ars: unknown[]): Array<{ given: string; when: string; then
 
 /** Parse GIVEN/WHEN/THEN; supports multiline clauses (models often wrap lines). */
 function parseArString(s: string): { given: string; when: string; then: string } {
-  const t = s.trim();
+  const t = cleanModelText(s);
   const givenMatch = t.match(/GIVEN\s+([\s\S]+?)(?=\s+(?:WHEN|THEN)\b|$)/i);
   const whenMatch = t.match(/WHEN\s+([\s\S]+?)(?=\s+THEN\b|$)/i);
   const thenMatch = t.match(/THEN\s+([\s\S]+)$/i);
