@@ -6,7 +6,6 @@
  */
 
 import { chat } from '@forge/llm';
-import { createHash, createHmac } from 'crypto';
 import { PiiMaskingStats } from '../types';
 import { maskPiiText } from '../services/compliance';
 
@@ -22,7 +21,7 @@ export interface LlmCallOptions {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
-  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
+  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -31,10 +30,6 @@ export interface LlmCallOptions {
   azureOpenaiEndpoint?: string;
   azureOpenaiDeployment?: string;
   azureOpenaiApiVersion?: string;
-  bedrockAccessKeyId?: string;
-  bedrockSecretAccessKey?: string;
-  bedrockSessionToken?: string;
-  bedrockRegion?: string;
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
@@ -70,10 +65,6 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     const result = await callAzureOpenAI(effectiveOpts);
     return { ...result, piiMasking };
   }
-  if (opts.provider === 'bedrock') {
-    const result = await callBedrock(effectiveOpts);
-    return { ...result, piiMasking };
-  }
 
   try {
     const response = await chat({
@@ -105,10 +96,6 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     }
     if (opts.azureOpenaiApiKey || process.env.AZURE_OPENAI_API_KEY) {
       const result = await callAzureOpenAI(effectiveOpts);
-      return { ...result, piiMasking };
-    }
-    if (opts.bedrockAccessKeyId || process.env.BEDROCK_ACCESS_KEY_ID) {
-      const result = await callBedrock(effectiveOpts);
       return { ...result, piiMasking };
     }
     const result = await callGemini(effectiveOpts);
@@ -342,152 +329,6 @@ async function callAzureOpenAI(opts: {
   };
 }
 
-function hashHex(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
-function hmacSha256(key: Buffer | string, value: string): Buffer {
-  return createHmac('sha256', key).update(value, 'utf8').digest();
-}
-
-function formatAmzDate(date: Date): { amzDate: string; dateStamp: string } {
-  const iso = date.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  return {
-    amzDate: iso,
-    dateStamp: iso.slice(0, 8),
-  };
-}
-
-function buildBedrockAuthHeaders(input: {
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  sessionToken?: string;
-  host: string;
-  canonicalUri: string;
-  payload: string;
-  now?: Date;
-}): Record<string, string> {
-  const { region, accessKeyId, secretAccessKey, sessionToken, host, canonicalUri, payload } = input;
-  const { amzDate, dateStamp } = formatAmzDate(input.now ?? new Date());
-  const payloadHash = hashHex(payload);
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    'content-type': 'application/json',
-    host,
-    'x-amz-content-sha256': payloadHash,
-    'x-amz-date': amzDate,
-  };
-
-  if (sessionToken) {
-    headers['x-amz-security-token'] = sessionToken;
-  }
-
-  const sortedHeaderKeys = Object.keys(headers).sort();
-  const canonicalHeaders = sortedHeaderKeys.map((key) => `${key}:${headers[key].trim()}\n`).join('');
-  const signedHeaders = sortedHeaderKeys.join(';');
-  const canonicalRequest = ['POST', canonicalUri, '', canonicalHeaders, signedHeaders, payloadHash].join('\n');
-  const credentialScope = `${dateStamp}/${region}/bedrock/aws4_request`;
-  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, hashHex(canonicalRequest)].join('\n');
-  const signingKey = hmacSha256(
-    hmacSha256(hmacSha256(hmacSha256(`AWS4${secretAccessKey}`, dateStamp), region), 'bedrock'),
-    'aws4_request',
-  );
-  const signature = createHmac('sha256', signingKey).update(stringToSign, 'utf8').digest('hex');
-
-  return {
-    Accept: headers.accept,
-    'Content-Type': headers['content-type'],
-    'X-Amz-Content-Sha256': payloadHash,
-    'X-Amz-Date': amzDate,
-    ...(sessionToken ? { 'X-Amz-Security-Token': sessionToken } : {}),
-    Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
-  };
-}
-
-function mapModelForBedrock(model: string): string {
-  if (model.includes('.')) return model;
-  if (process.env.BEDROCK_MODEL_ID) return process.env.BEDROCK_MODEL_ID;
-  return 'anthropic.claude-3-5-sonnet-20241022-v2:0';
-}
-
-async function callBedrock(opts: {
-  model: string;
-  systemPrompt: string;
-  userMessage: string;
-  maxTokens?: number;
-  bedrockAccessKeyId?: string;
-  bedrockSecretAccessKey?: string;
-  bedrockSessionToken?: string;
-  bedrockRegion?: string;
-}): Promise<LlmResponse> {
-  const accessKeyId = (opts.bedrockAccessKeyId ?? process.env.BEDROCK_ACCESS_KEY_ID ?? '').trim();
-  const secretAccessKey = (opts.bedrockSecretAccessKey ?? process.env.BEDROCK_SECRET_ACCESS_KEY ?? '').trim();
-  const sessionToken = (opts.bedrockSessionToken ?? process.env.BEDROCK_SESSION_TOKEN ?? '').trim();
-  const region = (opts.bedrockRegion ?? process.env.BEDROCK_REGION ?? 'us-east-1').trim();
-  if (!accessKeyId || !secretAccessKey) {
-    throw new Error('AWS Bedrock credentials are not set.');
-  }
-
-  const modelId = mapModelForBedrock(opts.model);
-  if (!modelId.startsWith('anthropic.')) {
-    throw new Error('Bedrock support currently expects an Anthropic Claude model ID.');
-  }
-
-  const host = `bedrock-runtime.${region}.amazonaws.com`;
-  const canonicalUri = `/model/${encodeURIComponent(modelId)}/invoke`;
-  const url = `https://${host}${canonicalUri}`;
-  const payload = JSON.stringify({
-    anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: opts.maxTokens ?? 8192,
-    system: opts.systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: [{ type: 'text', text: opts.userMessage }],
-      },
-    ],
-  });
-  const headers = buildBedrockAuthHeaders({
-    region,
-    accessKeyId,
-    secretAccessKey,
-    sessionToken: sessionToken || undefined,
-    host,
-    canonicalUri,
-    payload,
-  });
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: payload,
-  });
-
-  const rawBody = await res.text();
-  if (!res.ok) {
-    throw new Error(`AWS Bedrock API error: ${rawBody}`);
-  }
-
-  const responsePayload = JSON.parse(rawBody);
-  const text = Array.isArray(responsePayload.content)
-    ? responsePayload.content
-        .map((item: { type?: string; text?: string }) => (item?.type === 'text' ? item.text ?? '' : ''))
-        .join('')
-        .trim()
-    : String(responsePayload.completion ?? '').trim();
-
-  if (!text) {
-    throw new Error('AWS Bedrock returned an empty response.');
-  }
-
-  return {
-    text,
-    inputTokens: responsePayload.usage?.input_tokens,
-    outputTokens: responsePayload.usage?.output_tokens,
-  };
-}
-
 /**
  * Parse JSON from LLM output, tolerating leading/trailing prose.
  * Tries: direct parse → extract first {...} or [...] block.
@@ -524,7 +365,7 @@ export async function callLlmJson<T>(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
-  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
+  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -533,10 +374,6 @@ export async function callLlmJson<T>(opts: {
   azureOpenaiEndpoint?: string;
   azureOpenaiDeployment?: string;
   azureOpenaiApiVersion?: string;
-  bedrockAccessKeyId?: string;
-  bedrockSecretAccessKey?: string;
-  bedrockSessionToken?: string;
-  bedrockRegion?: string;
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
 }): Promise<T> {
@@ -549,7 +386,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
-  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
+  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -558,10 +395,6 @@ export async function callLlmJsonWithUsage<T>(opts: {
   azureOpenaiEndpoint?: string;
   azureOpenaiDeployment?: string;
   azureOpenaiApiVersion?: string;
-  bedrockAccessKeyId?: string;
-  bedrockSecretAccessKey?: string;
-  bedrockSessionToken?: string;
-  bedrockRegion?: string;
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
 }): Promise<{ data: T; usage: { input: number; output: number }; piiMasking?: PiiMaskingStats }> {

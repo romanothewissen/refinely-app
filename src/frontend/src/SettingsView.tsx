@@ -78,17 +78,10 @@ const OPENAI_MODELS = [
   { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
   { id: 'o1-preview', label: 'o1 Preview' },
 ];
-const BEDROCK_MODELS = [
-  { id: 'anthropic.claude-3-5-haiku-20241022-v1:0', label: 'Claude 3.5 Haiku on Bedrock' },
-  { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', label: 'Claude 3.5 Sonnet on Bedrock' },
-  { id: 'anthropic.claude-3-7-sonnet-20250219-v1:0', label: 'Claude 3.7 Sonnet on Bedrock' },
-];
-
 const PROVIDER_OPTIONS: Array<{ id: LlmProvider; label: string; blurb: string }> = [
   { id: 'forge_llms', label: 'Forge', blurb: 'Atlassian-managed routing' },
   { id: 'openai', label: 'OpenAI', blurb: 'Direct OpenAI API access' },
   { id: 'azure_openai', label: 'Azure OpenAI', blurb: 'Enterprise-managed OpenAI through Azure' },
-  { id: 'bedrock', label: 'AWS Bedrock', blurb: 'AWS-managed foundation models through Bedrock runtime' },
   { id: 'gemini', label: 'Gemini', blurb: 'Google Gemini API access' },
 ];
 
@@ -173,21 +166,18 @@ function modelMatchesProvider(model: string, provider: LlmProvider): boolean {
   if (provider === 'openai' || provider === 'azure_openai') {
     return model.startsWith('gpt-') || model.startsWith('o1-');
   }
-  if (provider === 'bedrock') return model.startsWith('anthropic.');
   return !model.startsWith('gemini-') && !model.startsWith('gpt-') && !model.startsWith('o1-');
 }
 
 function getProviderDefaults(provider: LlmProvider): { fastModel: string; deepModel: string } {
   if (provider === 'gemini') return { fastModel: 'gemini-2.5-flash', deepModel: 'gemini-2.5-pro' };
   if (provider === 'openai' || provider === 'azure_openai') return { fastModel: 'gpt-4o-mini', deepModel: 'gpt-4.5-preview' };
-  if (provider === 'bedrock') return { fastModel: 'anthropic.claude-3-5-haiku-20241022-v1:0', deepModel: 'anthropic.claude-3-7-sonnet-20250219-v1:0' };
   return { fastModel: 'claude-haiku-4-5-20251001', deepModel: 'claude-opus-4-6' };
 }
 
 function getAvailableModels(provider: LlmProvider) {
   if (provider === 'gemini') return GEMINI_MODELS;
   if (provider === 'openai' || provider === 'azure_openai') return OPENAI_MODELS;
-  if (provider === 'bedrock') return BEDROCK_MODELS;
   return CLAUDE_MODELS;
 }
 
@@ -205,7 +195,7 @@ function getProfileModels(provider: LlmProvider, profile: 'fast' | 'deep') {
 }
 
 function getModelLabel(model: string): string {
-  return [...CLAUDE_MODELS, ...GEMINI_MODELS, ...OPENAI_MODELS, ...BEDROCK_MODELS].find((option) => option.id === model)?.label ?? model;
+  return [...CLAUDE_MODELS, ...GEMINI_MODELS, ...OPENAI_MODELS].find((option) => option.id === model)?.label ?? model;
 }
 
 function applySimplifiedRouting(fastModel: string, deepModel: string) {
@@ -265,13 +255,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [azureOpenaiDeployment, setAzureOpenaiDeployment] = useState('');
   const [azureOpenaiApiVersion, setAzureOpenaiApiVersion] = useState('2024-10-21');
   const [existingAzureOpenaiApiKey, setExistingAzureOpenaiApiKey] = useState('');
-  const [bedrockAccessKeyId, setBedrockAccessKeyId] = useState('');
-  const [bedrockSecretAccessKey, setBedrockSecretAccessKey] = useState('');
-  const [bedrockSessionToken, setBedrockSessionToken] = useState('');
-  const [bedrockRegion, setBedrockRegion] = useState('us-east-1');
-  const [existingBedrockAccessKeyId, setExistingBedrockAccessKeyId] = useState('');
-  const [existingBedrockSecretAccessKey, setExistingBedrockSecretAccessKey] = useState('');
-  const [existingBedrockSessionToken, setExistingBedrockSessionToken] = useState('');
   
   // Dynamic model lists (fetched from provider APIs)
   const [dynamicModels, setDynamicModels] = useState<Record<string, { id: string; label: string }[]>>({});
@@ -407,11 +390,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.azureOpenaiEndpoint) setAzureOpenaiEndpoint(gc.azureOpenaiEndpoint);
         if (gc.azureOpenaiDeployment) setAzureOpenaiDeployment(gc.azureOpenaiDeployment);
         if (gc.azureOpenaiApiVersion) setAzureOpenaiApiVersion(gc.azureOpenaiApiVersion);
-        if (gc.bedrockAccessKeyId) setExistingBedrockAccessKeyId(gc.bedrockAccessKeyId);
-        if (gc.bedrockSecretAccessKey) setExistingBedrockSecretAccessKey(gc.bedrockSecretAccessKey);
-        if (gc.bedrockSessionToken) setExistingBedrockSessionToken(gc.bedrockSessionToken);
-        if (gc.bedrockRegion) setBedrockRegion(gc.bedrockRegion);
-
         const aiPolicy = existingConfig.aiExecutionPolicy || {};
         if (aiPolicy.workspacePreset) setWorkspacePreset(aiPolicy.workspacePreset);
         if (aiPolicy.defaultReasoningMode) setDefaultReasoningMode(aiPolicy.defaultReasoningMode);
@@ -759,10 +737,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           azureOpenaiEndpoint: azureOpenaiEndpoint.trim() || undefined,
           azureOpenaiDeployment: azureOpenaiDeployment.trim() || undefined,
           azureOpenaiApiVersion: azureOpenaiApiVersion.trim() || undefined,
-          bedrockAccessKeyId: bedrockAccessKeyId.trim() || existingBedrockAccessKeyId || "",
-          bedrockSecretAccessKey: bedrockSecretAccessKey.trim() || existingBedrockSecretAccessKey || "",
-          bedrockSessionToken: bedrockSessionToken.trim() || existingBedrockSessionToken || "",
-          bedrockRegion: bedrockRegion.trim() || undefined,
         },
         domainContext: domainContext.trim(),
         domainContexts,
@@ -795,15 +769,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
       if (azureOpenaiApiKey.trim()) setExistingAzureOpenaiApiKey(REDACTED);
-      if (bedrockAccessKeyId.trim()) setExistingBedrockAccessKeyId(REDACTED);
-      if (bedrockSecretAccessKey.trim()) setExistingBedrockSecretAccessKey(REDACTED);
-      if (bedrockSessionToken.trim()) setExistingBedrockSessionToken(REDACTED);
       setGeminiApiKey('');
       setOpenaiApiKey('');
       setAzureOpenaiApiKey('');
-      setBedrockAccessKeyId('');
-      setBedrockSecretAccessKey('');
-      setBedrockSessionToken('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
@@ -847,10 +815,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         azureOpenaiEndpoint: selectedProvider === 'azure_openai' ? (azureOpenaiEndpoint.trim() || undefined) : undefined,
         azureOpenaiDeployment: selectedProvider === 'azure_openai' ? (azureOpenaiDeployment.trim() || undefined) : undefined,
         azureOpenaiApiVersion: selectedProvider === 'azure_openai' ? (azureOpenaiApiVersion.trim() || undefined) : undefined,
-        bedrockAccessKeyId: selectedProvider === 'bedrock' ? (bedrockAccessKeyId.trim() || existingBedrockAccessKeyId || undefined) : undefined,
-        bedrockSecretAccessKey: selectedProvider === 'bedrock' ? (bedrockSecretAccessKey.trim() || existingBedrockSecretAccessKey || undefined) : undefined,
-        bedrockSessionToken: selectedProvider === 'bedrock' ? (bedrockSessionToken.trim() || existingBedrockSessionToken || undefined) : undefined,
-        bedrockRegion: selectedProvider === 'bedrock' ? (bedrockRegion.trim() || undefined) : undefined,
       }) as any;
       setLlmTestResult(res.success ? { ok: true, message: 'Connection successful.' } : { ok: false, message: res.error || 'Connection failed.' });
     } catch (err: any) { setLlmTestResult({ ok: false, message: err.message || 'Connection failed.' }); }
@@ -1074,23 +1038,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
-                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Admin Panel</div>
-                        <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getProviderLabel(provider)}</div>
-                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used to manage credentials and run provider connection checks.</div>
-                      </div>
+                    <div className="grid gap-4 md:grid-cols-2">
                       <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Fast Profile</div>
                         <div className="mt-2 text-[11px] font-bold text-[var(--rf-brand)]">{getProviderLabel(fastProfileProvider)}</div>
                         <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getModelLabel(fastProfileModel)}</div>
-                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used for lighter reasoning and shorter turnaround.</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Lighter reasoning — clarification, assessment, follow-up work.</div>
                       </div>
                       <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Deep Profile</div>
                         <div className="mt-2 text-[11px] font-bold text-[var(--rf-brand)]">{getProviderLabel(deepProfileProvider)}</div>
                         <div className="mt-2 text-sm font-bold text-[var(--rf-text)]">{getModelLabel(deepProfileModel)}</div>
-                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Used for backlog generation and more complex reasoning.</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">Heavier reasoning — feature generation and acceptance requirements.</div>
                       </div>
                     </div>
                   </div>
@@ -1231,8 +1190,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
 
                     <div className="space-y-3">
-                      <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Credential Provider</label>
-                      <p className="text-sm text-[var(--rf-text-tertiary)]">Choose which provider credentials you want to review or test. Routing itself is controlled only by the Fast and Deep profiles below.</p>
+                      <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Provider Credentials</label>
+                      <p className="text-sm text-[var(--rf-text-tertiary)]">Select a provider to enter or test its credentials. Actual routing is set independently by the Fast and Deep profiles below.</p>
                       <div className="grid gap-3 md:grid-cols-2">
                         {PROVIDER_OPTIONS.map((option) => (
                           <button
@@ -1309,39 +1268,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         <div className="space-y-2 md:col-span-2">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">API Version</label>
                           <input type="text" value={azureOpenaiApiVersion} onChange={e => setAzureOpenaiApiVersion(e.target.value)} placeholder="2024-10-21" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {provider === 'bedrock' && (
-                      <motion.div className="grid gap-4 md:grid-cols-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center px-1">
-                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Access Key ID</label>
-                            {existingBedrockAccessKeyId && <button onClick={() => { setExistingBedrockAccessKeyId(''); setBedrockAccessKeyId(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
-                          </div>
-                          <input type="password" value={bedrockAccessKeyId} onChange={e => setBedrockAccessKeyId(e.target.value)} placeholder={existingBedrockAccessKeyId ? '••••••••• (Stored)' : 'AKIA…'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center px-1">
-                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Secret Access Key</label>
-                            {existingBedrockSecretAccessKey && <button onClick={() => { setExistingBedrockSecretAccessKey(''); setBedrockSecretAccessKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
-                          </div>
-                          <input type="password" value={bedrockSecretAccessKey} onChange={e => setBedrockSecretAccessKey(e.target.value)} placeholder={existingBedrockSecretAccessKey ? '••••••••• (Stored)' : 'AWS secret'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center px-1">
-                            <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Session Token</label>
-                            {existingBedrockSessionToken && <button onClick={() => { setExistingBedrockSessionToken(''); setBedrockSessionToken(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
-                          </div>
-                          <input type="password" value={bedrockSessionToken} onChange={e => setBedrockSessionToken(e.target.value)} placeholder={existingBedrockSessionToken ? '••••••••• (Stored optional token)' : 'Optional STS token'} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Region</label>
-                          <input type="text" value={bedrockRegion} onChange={e => setBedrockRegion(e.target.value)} placeholder="us-east-1" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="md:col-span-2 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)]">
-                          Bedrock support currently targets Anthropic Claude model IDs on the Bedrock runtime. Use the Fast and Deep profile selectors below to choose which Bedrock Claude models each workflow path should use.
                         </div>
                       </motion.div>
                     )}
@@ -1434,19 +1360,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Simple Ask Max Questions</label>
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast mode — max clarifying questions</label>
                           <input type="number" min={2} max={4} value={simpleAskMaxQuestions} onChange={e => setSimpleAskMaxQuestions(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Round Target Questions</label>
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — target questions per round</label>
                           <input type="number" min={4} max={10} value={deepModeRoundTarget} onChange={e => setDeepModeRoundTarget(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Enterprise Max Questions / Round</label>
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max questions per round</label>
                           <input type="number" min={8} max={14} value={enterpriseMaxQuestionsPerRound} onChange={e => setEnterpriseMaxQuestionsPerRound(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Max Deep Discovery Rounds</label>
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max discovery rounds</label>
                           <input type="number" min={1} max={6} value={maxDeepDiscoveryRounds} onChange={e => setMaxDeepDiscoveryRounds(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                         </div>
                       </div>
@@ -1615,19 +1541,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                               <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Simple Ask Max Questions</label>
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast mode — max clarifying questions</label>
                                   <input type="number" min={2} max={4} value={currentProjectAiPolicy.simpleAskMaxQuestions ?? 4} onChange={e => updateProjectAiPolicy({ simpleAskMaxQuestions: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                                 <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep Round Target Questions</label>
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — target questions per round</label>
                                   <input type="number" min={4} max={10} value={currentProjectAiPolicy.deepModeRoundTarget ?? 6} onChange={e => updateProjectAiPolicy({ deepModeRoundTarget: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                                 <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Enterprise Max Questions / Round</label>
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max questions per round</label>
                                   <input type="number" min={8} max={14} value={currentProjectAiPolicy.enterpriseMaxQuestionsPerRound ?? 10} onChange={e => updateProjectAiPolicy({ enterpriseMaxQuestionsPerRound: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                                 <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Max Deep Discovery Rounds</label>
+                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max discovery rounds</label>
                                   <input type="number" min={1} max={6} value={currentProjectAiPolicy.maxDeepDiscoveryRounds ?? 3} onChange={e => updateProjectAiPolicy({ maxDeepDiscoveryRounds: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                                 </div>
                               </div>
@@ -1910,6 +1836,23 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-blue-100 shadow-sm"><Globe className="w-6 h-6" /></div>
+                      <div>
+                        <h4 className="text-base font-bold text-[var(--rf-text)]">Workspace context</h4>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Background about your business or product that shapes AI generation across all projects.</p>
+                      </div>
+                    </div>
+                    <textarea
+                      value={domainContext}
+                      onChange={e => setDomainContext(e.target.value)}
+                      rows={4}
+                      placeholder="e.g. We are a B2B SaaS company building logistics software. Our users are warehouse managers and operations teams..."
+                      className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-5 py-3.5 text-sm font-medium text-[var(--rf-text)] focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition resize-none"
+                    />
+                  </div>
+
+                  <div className="space-y-4 pt-6 border-t border-[var(--rf-border-subtle)]">
+                    <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-blue-100 shadow-sm"><Users className="w-6 h-6" /></div>
                       <div>
                         <h4 className="text-base font-bold text-[var(--rf-text)]">Core persona roles</h4>
@@ -2038,6 +1981,182 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     ))}
                   </div>
                 </div>
+
+                {transparencyEnabled && (
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                        <p className="text-[11px] uppercase tracking-widest text-indigo-600 font-bold">Compliance Pack</p>
+                      </div>
+                      <h4 className="text-xl font-bold text-[var(--rf-text)]">Transparency Reports</h4>
+                      <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">One record per generation turn. Shows the model used, token consumption, PII redactions, and the reasoning decisions the AI made.</p>
+                    </div>
+                    {transparencyReports.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-6 text-sm text-[var(--rf-text-tertiary)] text-center">
+                        No transparency reports recorded yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-[var(--rf-border)]">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)]">
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">When</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Turn</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Project</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Model</th>
+                              <th className="px-4 py-3 text-right font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">Tokens</th>
+                              <th className="px-4 py-3 text-right font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">PII redacted</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">AI decisions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--rf-border-subtle)]">
+                            {transparencyReports.map((report) => (
+                              <tr key={report.reportId} className="hover:bg-[var(--rf-surface-soft)]/50 transition-colors">
+                                <td className="px-4 py-3 text-[var(--rf-text-tertiary)] whitespace-nowrap">
+                                  {new Date(report.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{' '}
+                                  <span className="text-[10px]">{new Date(report.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest border ${
+                                    report.turnType === 'generate' ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-blue-100' :
+                                    report.turnType === 'clarify' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                                    report.turnType === 'refine' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                    'bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] border-[var(--rf-border)]'
+                                  }`}>
+                                    {report.turnType}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 font-bold text-[var(--rf-text)]">{report.projectKey ?? '—'}</td>
+                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] font-mono">{report.model ?? '—'}</td>
+                                <td className="px-4 py-3 text-right font-bold text-[var(--rf-text)]">
+                                  {report.tokenUsage?.total != null ? report.tokenUsage.total.toLocaleString() : '—'}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  {report.piiMasking.enabled ? (
+                                    <span className={`font-bold ${report.piiMasking.totalRedactions > 0 ? 'text-amber-600' : 'text-[var(--rf-text-tertiary)]'}`}>
+                                      {report.piiMasking.totalRedactions}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[var(--rf-text-tertiary)]">off</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] max-w-xs">
+                                  {report.decisionSummary.length > 0 ? (
+                                    <ul className="space-y-0.5">
+                                      {report.decisionSummary.map((d, i) => (
+                                        <li key={i} className="truncate" title={d}>· {d}</li>
+                                      ))}
+                                    </ul>
+                                  ) : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {auditTrailEnabled && (
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                        <p className="text-[11px] uppercase tracking-widest text-indigo-600 font-bold">Compliance Pack</p>
+                      </div>
+                      <h4 className="text-xl font-bold text-[var(--rf-text)]">Audit Trail</h4>
+                      <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">Immutable log of configuration changes, security events, and runtime actions. Hash-chained to detect tampering.</p>
+                    </div>
+                    {complianceEvents.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-6 text-sm text-[var(--rf-text-tertiary)] text-center">
+                        No audit events recorded yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-[var(--rf-border)]">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)]">
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">When</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Category</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Action</th>
+                              <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Details</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--rf-border-subtle)]">
+                            {complianceEvents.map((event) => (
+                              <tr key={event.eventId} className="hover:bg-[var(--rf-surface-soft)]/50 transition-colors">
+                                <td className="px-4 py-3 text-[var(--rf-text-tertiary)] whitespace-nowrap">
+                                  {new Date(event.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{' '}
+                                  <span className="text-[10px]">{new Date(event.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest border ${
+                                    event.category === 'security' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+                                    event.category === 'config' ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border-blue-100' :
+                                    event.category === 'prompt' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                    'bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] border-[var(--rf-border)]'
+                                  }`}>
+                                    {event.category}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 font-bold text-[var(--rf-text)]">{event.action.replace(/_/g, ' ')}</td>
+                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] font-mono text-[10px] max-w-xs truncate" title={JSON.stringify(event.details)}>
+                                  {JSON.stringify(event.details)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {auditTrailEnabled && jiraAuditRecords.length > 0 && (
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                        <p className="text-[11px] uppercase tracking-widest text-indigo-600 font-bold">Compliance Pack</p>
+                      </div>
+                      <h4 className="text-xl font-bold text-[var(--rf-text)]">Jira Audit Records</h4>
+                      <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">Recent Jira-side audit events for issues created or modified by Refinely.</p>
+                    </div>
+                    <div className="overflow-x-auto rounded-xl border border-[var(--rf-border)]">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)]">
+                            <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">When</th>
+                            <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Event</th>
+                            <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Author</th>
+                            <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Details</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--rf-border-subtle)]">
+                          {jiraAuditRecords.map((record, i) => (
+                            <tr key={i} className="hover:bg-[var(--rf-surface-soft)]/50 transition-colors">
+                              <td className="px-4 py-3 text-[var(--rf-text-tertiary)] whitespace-nowrap">
+                                {record.created ? (
+                                  <>
+                                    {new Date(record.created as string).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{' '}
+                                    <span className="text-[10px]">{new Date(record.created as string).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+                                  </>
+                                ) : '—'}
+                              </td>
+                              <td className="px-4 py-3 font-bold text-[var(--rf-text)]">{String(record.summary ?? record.eventName ?? '—')}</td>
+                              <td className="px-4 py-3 text-[var(--rf-text-secondary)]">{String((record.authorAccountId as any)?.displayName ?? record.authorAccountId ?? '—')}</td>
+                              <td className="px-4 py-3 text-[var(--rf-text-secondary)] font-mono text-[10px] max-w-xs truncate" title={JSON.stringify(record)}>
+                                {JSON.stringify(record.objectItem ?? record.changedValues ?? {})}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
           </div>

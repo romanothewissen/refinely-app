@@ -125,7 +125,7 @@ export const api = {
   fetchAvailableModels: (provider: 'openai' | 'gemini') =>
     invoke('fetchAvailableModels', { provider }),
   testLlmConnection: (payload: {
-    provider: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
+    provider: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
     model: string;
     geminiApiKey?: string;
     geminiBaseUrl?: string;
@@ -135,10 +135,6 @@ export const api = {
     azureOpenaiEndpoint?: string;
     azureOpenaiDeployment?: string;
     azureOpenaiApiVersion?: string;
-    bedrockAccessKeyId?: string;
-    bedrockSecretAccessKey?: string;
-    bedrockSessionToken?: string;
-    bedrockRegion?: string;
   }) => invoke('testLlmConnection', payload),
 };
 

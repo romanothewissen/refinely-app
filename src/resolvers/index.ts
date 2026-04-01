@@ -123,9 +123,6 @@ resolver.define('getConfig', async ({ context, payload }) => {
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
     if (gc.azureOpenaiApiKey) gc.azureOpenaiApiKey = REDACTED;
-    if (gc.bedrockAccessKeyId) gc.bedrockAccessKeyId = REDACTED;
-    if (gc.bedrockSecretAccessKey) gc.bedrockSecretAccessKey = REDACTED;
-    if (gc.bedrockSessionToken) gc.bedrockSessionToken = REDACTED;
   }
   
   return {
@@ -155,9 +152,6 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
   if (ngc.azureOpenaiApiKey === REDACTED) ngc.azureOpenaiApiKey = egc.azureOpenaiApiKey;
-  if (ngc.bedrockAccessKeyId === REDACTED) ngc.bedrockAccessKeyId = egc.bedrockAccessKeyId;
-  if (ngc.bedrockSecretAccessKey === REDACTED) ngc.bedrockSecretAccessKey = egc.bedrockSecretAccessKey;
-  if (ngc.bedrockSessionToken === REDACTED) ngc.bedrockSessionToken = egc.bedrockSessionToken;
   
   await saveConfig(payload);
 
@@ -169,10 +163,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   const apiKeyRotated = Boolean(
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
     (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
-    (ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED && ngc.azureOpenaiApiKey !== egc.azureOpenaiApiKey) ||
-    (ngc.bedrockAccessKeyId && ngc.bedrockAccessKeyId !== REDACTED && ngc.bedrockAccessKeyId !== egc.bedrockAccessKeyId) ||
-    (ngc.bedrockSecretAccessKey && ngc.bedrockSecretAccessKey !== REDACTED && ngc.bedrockSecretAccessKey !== egc.bedrockSecretAccessKey) ||
-    (ngc.bedrockSessionToken && ngc.bedrockSessionToken !== REDACTED && ngc.bedrockSessionToken !== egc.bedrockSessionToken),
+    (ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED && ngc.azureOpenaiApiKey !== egc.azureOpenaiApiKey),
   );
   const auditEnabled = Boolean(existingConfig.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled);
   if (changedModelFields.length > 0) {
@@ -194,7 +185,6 @@ resolver.define('saveConfig', async ({ payload, context }) => {
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
           ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED ? 'azure_openai' : null,
-          ngc.bedrockAccessKeyId && ngc.bedrockAccessKeyId !== REDACTED ? 'bedrock' : null,
         ].filter(Boolean),
       },
       enabled: auditEnabled,
@@ -234,8 +224,7 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
     const isAzureOpenAI = payload.provider === 'azure_openai';
-    const isBedrock = payload.provider === 'bedrock';
-    
+
     const res = await callLlm({
       provider: payload.provider,
       model: payload.model || 'test',
@@ -247,10 +236,6 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       azureOpenaiEndpoint: isAzureOpenAI ? (payload.azureOpenaiEndpoint?.trim() || gc.azureOpenaiEndpoint) : undefined,
       azureOpenaiDeployment: isAzureOpenAI ? (payload.azureOpenaiDeployment?.trim() || gc.azureOpenaiDeployment) : undefined,
       azureOpenaiApiVersion: isAzureOpenAI ? (payload.azureOpenaiApiVersion?.trim() || gc.azureOpenaiApiVersion) : undefined,
-      bedrockAccessKeyId: isBedrock ? (payload.bedrockAccessKeyId === REDACTED ? gc.bedrockAccessKeyId : (payload.bedrockAccessKeyId?.trim() || gc.bedrockAccessKeyId)) : undefined,
-      bedrockSecretAccessKey: isBedrock ? (payload.bedrockSecretAccessKey === REDACTED ? gc.bedrockSecretAccessKey : (payload.bedrockSecretAccessKey?.trim() || gc.bedrockSecretAccessKey)) : undefined,
-      bedrockSessionToken: isBedrock ? (payload.bedrockSessionToken === REDACTED ? gc.bedrockSessionToken : (payload.bedrockSessionToken?.trim() || gc.bedrockSessionToken)) : undefined,
-      bedrockRegion: isBedrock ? (payload.bedrockRegion?.trim() || gc.bedrockRegion) : undefined,
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
       noFallback: true,

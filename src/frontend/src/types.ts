@@ -40,13 +40,9 @@ export interface GeneratorConfig {
   azureOpenaiEndpoint?: string;
   azureOpenaiDeployment?: string;
   azureOpenaiApiVersion?: string;
-  bedrockAccessKeyId?: string;
-  bedrockSecretAccessKey?: string;
-  bedrockSessionToken?: string;
-  bedrockRegion?: string;
 }
 
-export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai' | 'bedrock';
+export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
 export type AiProfileMode = 'simplified';
 export type AiPolicyPreset = 'balanced' | 'delivery' | 'discovery' | 'enterprise';
 export type ReasoningMode = 'fast' | 'deep';
@@ -248,7 +244,6 @@ export const DEFAULT_CONFIG: TenantConfig = {
     themeModel: 'claude-haiku-4-5-20251001',
     maxTokens: 8192,
     azureOpenaiApiVersion: '2024-10-21',
-    bedrockRegion: 'us-east-1',
   },
   aiExecutionPolicy: {
     workspacePreset: 'balanced',

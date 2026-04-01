@@ -82,10 +82,6 @@ function getPlannerProviderOpts(config: TenantConfig) {
     azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
     azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
     azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
-    bedrockAccessKeyId: config.generatorConfig.bedrockAccessKeyId,
-    bedrockSecretAccessKey: config.generatorConfig.bedrockSecretAccessKey,
-    bedrockSessionToken: config.generatorConfig.bedrockSessionToken,
-    bedrockRegion: config.generatorConfig.bedrockRegion,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
 }
