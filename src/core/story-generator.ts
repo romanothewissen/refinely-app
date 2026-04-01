@@ -27,6 +27,7 @@ import { getTierModel } from '../services/billing';
 import { buildHeuristicPlannerDecision, buildPlannerDecision } from './planner';
 import {
   buildDecompositionSystemPrompt,
+  buildDecompositionRepairSystemPrompt,
   buildArSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
@@ -695,6 +696,52 @@ function clampFeatureCandidates(rawFeatures: RawFeature[], featurePlan: FeatureP
   return rawFeatures.slice(0, featurePlan.max);
 }
 
+function countRoleNarratives(text: string): number {
+  return (text.match(/\bAs a[n]?\b/gi) ?? []).length;
+}
+
+function hasCompoundFeatureSignals(feature: RawFeature): boolean {
+  const summary = cleanModelText(feature.summary ?? '').toLowerCase();
+  const description = cleanModelText(feature.description ?? '');
+  const roleNarratives = countRoleNarratives(description);
+  const compoundSummary =
+    /\b(and|plus|across|including)\b/i.test(summary) &&
+    /(access|permissions?|approval|audit|notification|report|view|edit|create|update|delete|sync|integration)/i.test(summary);
+
+  return roleNarratives > 1 || compoundSummary;
+}
+
+function shouldRepairDecomposition(rawFeatures: RawFeature[], featurePlan: FeaturePlan): boolean {
+  if (featurePlan.min <= 1) return rawFeatures.some(hasCompoundFeatureSignals);
+  if (rawFeatures.length < featurePlan.min) return true;
+  return rawFeatures.some(hasCompoundFeatureSignals);
+}
+
+async function runDecompositionPass(opts: {
+  systemPrompt: string;
+  userMessage: string;
+  config: TenantConfig;
+  timeoutMs: number;
+}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
+  const result = await Promise.race([
+    callLlmJsonWithUsage<{ features: RawFeature[] }>({
+      model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
+      systemPrompt: opts.systemPrompt,
+      userMessage: opts.userMessage,
+      maxTokens: Math.min(opts.config.generatorConfig.maxTokens, 3500),
+      timeoutMs: opts.timeoutMs,
+      geminiThinkingBudget: 16000,
+      ...getProviderOpts(opts.config),
+    }),
+    throwAfterTimeout(opts.timeoutMs, 'Pass 1 (decomposition)'),
+  ]);
+
+  return {
+    features: result.data.features ?? [],
+    usage: result.usage,
+  };
+}
+
 const DISCOVERY_DIMENSIONS: Array<{ key: DiscoveryCoverageDimension['key']; label: string }> = [
   { key: 'goal', label: 'Business goal' },
   { key: 'actors', label: 'Actors and roles' },
@@ -1038,20 +1085,51 @@ export async function generateFeatures(opts: {
   const stageTimeouts = resolveGenerationStageTimeouts(decision.reasoningMode);
 
   // Pass 1 produces features with empty AR arrays — 3 500 tokens is generous for up to ~15 features.
-  const pass1Result = await Promise.race([
-    callLlmJsonWithUsage<{ features: RawFeature[] }>({
-      model: getTierModel(generatorConfig.decompositionModel, config.tier),
-      systemPrompt: pass1System,
+  const pass1Result = await runDecompositionPass({
+    systemPrompt: pass1System,
+    userMessage,
+    config,
+    timeoutMs: stageTimeouts.pass1Ms,
+  });
+  let pass1Usage = pass1Result.usage;
+  let pass1Features = clampFeatureCandidates(pass1Result.features, decision.featurePlan);
+
+  if (shouldRepairDecomposition(pass1Features, decision.featurePlan)) {
+    const repairSystemPrompt = buildDecompositionRepairSystemPrompt({
+      domainContext: config.domainContext,
+      domainRoles: config.domainRoles,
+      processTaxonomy: config.processTaxonomy,
+      processTaxonomyEnabled: config.processTaxonomyEnabled,
+      featurePlan: decision.featurePlan,
+    });
+    const repairUserMessage = [
       userMessage,
-      maxTokens: Math.min(generatorConfig.maxTokens, 3500),
-      timeoutMs: stageTimeouts.pass1Ms,
-      geminiThinkingBudget: 16000,
-      ...providerOpts,
-    }),
-    throwAfterTimeout(stageTimeouts.pass1Ms, 'Pass 1 (decomposition)'),
-  ]);
-  const pass1Usage = pass1Result.usage;
-  const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
+      `PREVIOUS DECOMPOSITION (UNDER-SPLIT OR COMPOUND):\n${JSON.stringify(pass1Features, null, 2)}`,
+      `REPAIR INSTRUCTIONS:
+- The planner expected at least ${decision.featurePlan.min} and ideally ${decision.featurePlan.target} features.
+- Split any feature that combines multiple roles, permission levels, workflows, or independently testable outcomes.
+- Return only the repaired feature list in strict JSON.`,
+    ].join('\n\n---\n\n');
+
+    try {
+      const repairResult = await runDecompositionPass({
+        systemPrompt: repairSystemPrompt,
+        userMessage: repairUserMessage,
+        config,
+        timeoutMs: Math.min(stageTimeouts.pass1Ms, decision.reasoningMode === 'deep' ? 75000 : 45000),
+      });
+      const repairedFeatures = clampFeatureCandidates(repairResult.features, decision.featurePlan);
+      pass1Usage = sumUsage([pass1Usage, repairResult.usage]);
+      if (
+        repairedFeatures.length > pass1Features.length ||
+        !shouldRepairDecomposition(repairedFeatures, decision.featurePlan)
+      ) {
+        pass1Features = repairedFeatures;
+      }
+    } catch (repairError) {
+      console.warn('[story-generator] Decomposition repair pass failed; keeping initial pass 1 result:', repairError);
+    }
+  }
 
   if (!pass1Features.length) {
     throw new Error('Feature decomposition returned no valid features.');

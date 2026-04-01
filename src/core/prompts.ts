@@ -114,11 +114,15 @@ Each dimension that represents a distinct, deliverable capability should become 
 
 RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- One feature = one primary business capability for one primary role or role family
+- If materially different roles need different permissions, outcomes, or flows, split them into separate features
+- If the ask combines edit access, read-only access, approvals, auditability, notifications, or exception handling, split those into separate features when they are independently deliverable
 - Use business roles appropriate to the domain (from the list above if provided)
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
+- Never include more than one "As a ..." role narrative in a single description
 ${processRule}
 ${planningGuidance ? `\n${planningGuidance}` : ''}
 
@@ -126,6 +130,29 @@ ${taxonomySection}
 
 Think step by step about the full scope of this requirement, then output JSON:
 {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+}
+
+export function buildDecompositionRepairSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles: string[];
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+  featurePlan: {
+    min: number;
+    max: number;
+    target: number;
+    shape: 'narrow' | 'balanced' | 'broad';
+    complexity: 'low' | 'medium' | 'high';
+  };
+}): string {
+  return `${buildDecompositionSystemPrompt(opts)}
+
+DECOMPOSITION REPAIR MODE:
+- A previous attempt merged distinct capabilities into too few features
+- Repair the decomposition so it matches the expected scope more closely
+- If one draft feature combines multiple roles, multiple permission levels, multiple business outcomes, or multiple independently testable behaviors, split it
+- Preserve business meaning, but separate distinct deliverables into separate backlog-ready features
+- Return at least ${opts.featurePlan.min} features unless the request is truly atomic beyond reasonable doubt`;
 }
 
 // ─── Pass 2: Acceptance Requirements ─────────────────────────────────────────
