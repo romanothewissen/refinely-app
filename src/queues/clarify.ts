@@ -227,6 +227,14 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       outputMode,
       policy: config.aiExecutionPolicy,
     });
+    const retrievalStrategy = buildRetrievalStrategy(
+      plannerDecision,
+      config.wiConfig,
+      reasoningMode,
+      config.tier !== 'free',
+    );
+    const includeBacklogContext =
+      reasoningMode !== 'deep' && plannerDecision.clarificationMode !== 'deep';
 
     if (retryCount > 1) {
       await writeClarifyProgress(sessionId, runId, {
@@ -263,7 +271,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       jobId: event.jobId,
       eventId: event.eventId,
     });
-    await sendClarifyProgress(sessionId, runId, 'Loading contextual signals from backlog and work instructions…', {
+    await sendClarifyProgress(sessionId, runId, retrievalStrategy.contextMessage, {
       phase: 'context_retrieval',
       retryCount,
       retryReason,
@@ -275,27 +283,27 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
         ? withTimeoutFallback(
             retrieveWiContext(
               maskedRequirement.text,
-              Math.min(config.wiConfig.topKChunks, reasoningMode === 'deep' ? 5 : 4),
-              Math.min(config.wiConfig.maxChars, reasoningMode === 'deep' ? 20000 : 14000),
+              retrievalStrategy.wiTopK,
+              retrievalStrategy.wiMaxChars,
               projectKey,
             ),
-            reasoningMode === 'deep' ? 18000 : 12000,
+            retrievalStrategy.contextTimeoutMs,
             { text: '', docs: [] },
             'work-instruction context',
           )
         : Promise.resolve({ text: '', docs: [] }),
-      config.goldSources.length
+      includeBacklogContext && config.goldSources.length
         ? withTimeoutFallback(
-            fetchGoldExamples(config.goldSources, reasoningMode === 'deep' ? 6 : 5),
-            reasoningMode === 'deep' ? 18000 : 12000,
+            fetchGoldExamples(config.goldSources, retrievalStrategy.goldLimit),
+            retrievalStrategy.contextTimeoutMs,
             [],
             'gold examples',
           )
         : Promise.resolve([]),
-      config.tier !== 'free'
+      includeBacklogContext && retrievalStrategy.includeSimilarStories
         ? withTimeoutFallback(
             findSimilarStories(maskedRequirement.text, config, projectKey),
-            reasoningMode === 'deep' ? 18000 : 12000,
+            retrievalStrategy.contextTimeoutMs,
             [],
             'similar stories',
           )

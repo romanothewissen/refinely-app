@@ -1156,27 +1156,41 @@ export async function generateClarifyingQuestions(opts: {
     policy: config.aiExecutionPolicy,
   });
   const questionPlan = decision.questionPlan;
+  const desiredQuestionCount = Math.min(
+    questionPlan.max,
+    Math.max(questionPlan.min, questionPlan.target),
+  );
+  const includeBacklogContext = decision.reasoningMode !== 'deep' && decision.clarificationMode !== 'deep';
   // WI context is the dominant signal for question quality — give it the most room.
-  // Gold examples and similar stories help avoid asking about what's already known.
+  // Deep clarify is intentionally closer to jira-story-assistant: requirement + WI
+  // are the main discovery inputs; backlog references stay out of the deep question
+  // prompt so the model can focus on ambiguity rather than example mimicry.
   const contextCharBudget = decision.reasoningMode === 'deep'
-    ? { attachment: 4000, wi: 14000, gold: 5000, similar: 5000 }
+    ? { attachment: 3200, wi: 12000, gold: 0, similar: 0 }
     : { attachment: 2800, wi: 8000, gold: 3200, similar: 3200 };
-  // No explicit token cap — the response has a natural ceiling (a bounded JSON
-  // array of questions) and truncating it causes silent parse failures.
-  // callLlmJsonWithUsage defaults to 8192 when maxTokens is omitted.
-  const clarifyMaxTokens = undefined;
+  // jira-story-assistant capped clarify at 4096 output tokens. Keeping a real
+  // ceiling here prevents deep models from spending too much time on suggestion
+  // rendering and long JSON payloads.
+  const clarifyMaxTokens = decision.reasoningMode === 'deep' ? 4096 : 3072;
 
-  const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
+  const contextParts: string[] = [
+    `REQUIREMENT: ${requirement}`,
+    `DISCOVERY TARGET: produce about ${desiredQuestionCount} clarifying questions.`,
+  ];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, contextCharBudget.wi)}`);
-  if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, contextCharBudget.gold)}`);
-  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, contextCharBudget.similar)}`);
+  if (includeBacklogContext && goldExamplesText) {
+    contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, contextCharBudget.gold)}`);
+  }
+  if (includeBacklogContext && similarStoriesText) {
+    contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, contextCharBudget.similar)}`);
+  }
   const domainSignals = extractDomainSignals([
     requirement,
     attachmentText.slice(0, 1200),
     wiContextText.slice(0, 2200),
-    goldExamplesText.slice(0, 2200),
-    similarStoriesText.slice(0, 2200),
+    includeBacklogContext ? goldExamplesText.slice(0, 2200) : '',
+    includeBacklogContext ? similarStoriesText.slice(0, 2200) : '',
     ...(config.domainRoles ?? []),
   ]);
   if (domainSignals.length) {
@@ -1208,11 +1222,6 @@ export async function generateClarifyingQuestions(opts: {
     domainSignals,
     questionPlan,
   });
-
-  const desiredQuestionCount = Math.min(
-    questionPlan.max,
-    Math.max(questionPlan.min, questionPlan.target),
-  );
   const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,

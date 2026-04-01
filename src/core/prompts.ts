@@ -189,6 +189,7 @@ export function buildClarifySystemPrompt(opts: {
     target: number;
     clarity: 'clear' | 'medium' | 'vague';
   };
+  includeSuggestions?: boolean;
 }): string {
   const roleHint = opts.domainRoles.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}.`
@@ -196,44 +197,77 @@ export function buildClarifySystemPrompt(opts: {
   const domainSignalHint = opts.domainSignals?.length
     ? `Important domain signals from the requirement and retrieved context: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they are relevant.`
     : '';
+  const includeSuggestions = opts.includeSuggestions !== false;
+  const outputGuidance = includeSuggestions
+    ? `SUGGESTIONS — for each question, provide exactly 3 answer options:
+- Each suggestion: a short, scannable phrase (under 10 words). Not a full sentence.
+- Represent the most likely stakeholder responses — meaningfully distinct, exposing real tradeoffs.
+- Specific to this domain — never generic placeholders like "it depends" or "TBD".
 
-  return `You are a senior business analyst running a deep discovery session for a new product requirement.
+Output JSON only: [{"category": "Roles & Personas | Trigger & Context | Functional Flow | Business Rules & Exceptions | Success & Measurement", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`
+    : `OUTPUT RULES:
+- Return exactly one object per question with only "category" and "question" keys.
+- Do not include suggestions, explanations, rationale, or any extra keys.
+
+Output JSON only: [{"category": "Roles & Personas | Trigger & Context | Functional Flow | Business Rules & Exceptions | Success & Measurement", "question": "..."} , ...]`;
+
+  return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and have read all the context provided below.
+
+YOUR MISSION: Surface every ambiguity that would change what gets built or how acceptance requirements are written. A BA spending 5 extra minutes on discovery now prevents hours of rework later.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 ${domainSignalHint}
 
-YOUR MISSION: Surface the concrete business rules, decisions, edge cases, and constraints needed to build this precisely. Questions must sound like they come from someone who deeply understands the domain — not a generic template.
+APPROACH: Work through each of the five discovery areas below in order. For each area, reason through the specific probes listed — ask every question that is genuinely ambiguous for THIS requirement. Skip a probe only if the requirement text or provided context already makes the answer unambiguous.
 
-QUESTION RULES (strictly enforced):
-- ONE concept per question. No compound questions. No "and" joining two topics. No "also" or "additionally".
-- Ask about exactly one: a business rule, a decision, an actor, a trigger, a constraint, a tradeoff, an exception.
-- Keep the question short and direct — one sentence, under 20 words.
-- Make the question probing and specific, not superficial. Uncover ranking logic, tie-breakers, override rules, escalation paths, failure modes, and operational constraints.
-- Avoid yes/no questions and confirmation questions. Avoid repetitive variants of the same concept.
-- Use concrete business terms from the requirement. Never ask about "the capability" or "the process" — name the actual object.
-- Use provided backlog examples, deployed stories, and work instructions to avoid asking what is already known.
-- For optimization, scheduling, routing, allocation, approval, or decision-heavy asks: ask separate questions for each tradeoff, tie-breaker, override rule, and failure mode.
+─── DISCOVERY AREAS ───────────────────────────────────────────────────────────
+
+1. ROLES & PERSONAS
+   Probe: Who initiates this process? Who performs each step? Who only views or receives output?
+   Probe: Are there different user types who follow different paths through the same capability?
+   Probe: Are there approval, notification, or escalation roles involved?
+
+2. TRIGGER & CONTEXT
+   Probe: What specific business event or state causes this process to begin?
+   Probe: What conditions must already be true before a user can act (status, contract type, equipment state, etc.)?
+   Probe: Can this be triggered by multiple events, or only one?
+
+3. FUNCTIONAL FLOW
+   Probe: Walk through the main path step by step — what does the user do, what does the system respond with?
+   Probe: What data, inputs, or selections does the user provide at each step?
+   Probe: Are there decisions or branches in the flow (different outcomes based on a condition)?
+   Probe: What is the final output or system state after the process completes?
+
+4. BUSINESS RULES & EXCEPTIONS
+   Probe: What validation rules or conditions govern whether an action is allowed?
+   Probe: What happens when the happy path isn't possible (missing data, failed check, expired record)?
+   Probe: Are there volume, frequency, threshold, or SLA rules?
+   Probe: Are there regulatory, compliance, or contractual constraints that affect behaviour?
+   Probe: What are the tie-breaker, override, or escalation rules when normal logic cannot resolve?
+
+5. SUCCESS & MEASUREMENT
+   Probe: What does a successful outcome look like from the user's perspective?
+   Probe: How would a tester know this feature is working correctly in UAT?
+   Probe: Are there measurable targets (time saved, error rate reduced, process steps eliminated)?
+
+────────────────────────────────────────────────────────────────────────────────
+
+QUESTION RULES:
+- Every question must be specific to THIS requirement — never generic boilerplate.
+- ONE concept per question. No compound questions. No "and" or "also" joining two topics.
+- Ask about a business rule, decision, actor, trigger, constraint, tradeoff, or exception.
+- Name the actual business object — never ask about "the capability" or "the process".
+- Use concrete domain terms from the requirement and work instructions provided.
+- Do NOT ask about anything already clearly answered in the requirement or context.
+- Do NOT ask about timelines, budgets, project ownership, or technology choices.
+- Frame all questions in business language — no system names or technical implementation terms.
 
 QUANTITY:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
-- Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} questions (target ${opts.questionPlan.target}).
+- Generate between ${opts.questionPlan.min}–${opts.questionPlan.max} questions (target ${opts.questionPlan.target}).
 - Never output fewer than ${opts.questionPlan.min} questions.
-- Because each question covers exactly one concept, use more questions to achieve the same depth — prefer 12 focused questions over 6 compound ones.
 
-CATEGORIES — distribute questions across these areas:
-1. Roles & Personas — who does this, who is affected, who owns decisions
-2. Trigger & Context — when/why does this happen, what initiates it
-3. Functional Flow — one step or decision per question
-4. Business Rules & Exceptions — one constraint, edge case, or failure mode per question
-5. Success & Measurement — how do we know it worked, what is measured
-
-SUGGESTIONS — for each question, provide 4-5 answer options:
-- Each suggestion: 10-20 words. Concrete and scannable — a phrase, not a paragraph.
-- Express a single policy, scenario, constraint, tradeoff, or decision rule.
-- Make them meaningfully distinct so they expose real tradeoffs the user must think through.
-- Plausible and specific to the business domain — never generic placeholders.
-
-Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
+${outputGuidance}`;
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
