@@ -1343,15 +1343,40 @@ export async function generateClarifyingQuestions(opts: {
     domainSignals,
     questionPlan,
   });
-  const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
-    model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-    systemPrompt: system,
-    userMessage: contextParts.join('\n\n'),
-    maxTokens: clarifyMaxTokens,
-    timeoutMs,
-    geminiThinkingBudget: decision.reasoningMode === 'deep' ? 16000 : 8000,
-    ...getProviderOpts(config),
-  });
+  let raw: Awaited<ReturnType<typeof callLlmJsonWithUsage<ClarifyQuestion[]>>>;
+  try {
+    raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
+      model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+      systemPrompt: system,
+      userMessage: contextParts.join('\n\n'),
+      maxTokens: clarifyMaxTokens,
+      timeoutMs,
+      geminiThinkingBudget: decision.reasoningMode === 'deep' ? 16000 : 8000,
+      ...getProviderOpts(config),
+    });
+  } catch (error) {
+    console.warn('[generateClarifyingQuestions] Clarify JSON parsing failed; using fallback questions instead:', error);
+    const fallback = buildFallbackClarifyingQuestions(requirement, questionPlan);
+    return {
+      questions: fallback,
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        total: 0,
+        byStage: { clarify: { input: 0, output: 0, total: 0 } },
+      },
+      ambiguityAssessment: {
+        level: questionPlan.clarity,
+        score: decision.ambiguityScore,
+        reasons: [
+          ...decision.ambiguityReasons.slice(0, 3),
+          'Used fallback discovery questions after the model returned invalid clarify JSON.',
+        ].slice(0, 4),
+        questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
+        generatedQuestions: fallback.length,
+      },
+    };
+  }
 
   const filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
 

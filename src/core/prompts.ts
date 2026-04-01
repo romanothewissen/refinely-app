@@ -288,6 +288,8 @@ QUESTION RULES:
 - Do NOT ask about anything already clearly answered in the requirement or context.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Frame all questions in business language — no system names or technical implementation terms.
+- Never return features, user stories, acceptance requirements, or a {"features": [...]} object.
+- The output must be discovery questions only.
 
 QUANTITY:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
