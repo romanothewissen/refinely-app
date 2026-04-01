@@ -43,7 +43,7 @@ export function getTierModel(
       return 'gemini-2.5-flash';
     }
 
-    if (requestedModel.startsWith('gpt-') || requestedModel.startsWith('o1-') || requestedModel.startsWith('o3-')) {
+    if (requestedModel.startsWith('gpt-') || requestedModel.startsWith('o1') || requestedModel.startsWith('o3')) {
       return 'gpt-4o-mini';
     }
 

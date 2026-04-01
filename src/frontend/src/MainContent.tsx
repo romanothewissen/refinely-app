@@ -321,6 +321,8 @@ interface MainContentProps {
   } | null;
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
+  fastProfileModel?: string;
+  deepProfileModel?: string;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
   loadingTitle?: string;
 }
@@ -332,7 +334,7 @@ interface FeatureSection {
   items: Array<{ feature: Feature; index: number }>;
 }
 
-function GeneratingSkeleton({ loadingTitle, progress }: { loadingTitle?: string; progress?: string }) {
+function GeneratingSkeleton() {
   return (
     <motion.div
       className="w-full max-w-4xl mx-auto px-6 py-10 space-y-6 flex-1 flex flex-col items-center justify-center min-h-[400px]"
@@ -350,11 +352,6 @@ function GeneratingSkeleton({ loadingTitle, progress }: { loadingTitle?: string;
           <Sparkles className="w-6 h-6 text-[var(--rf-brand)] relative z-10" />
           <div className="absolute inset-0 bg-[var(--rf-brand-muted)]/50 animate-pulse" />
         </div>
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">{loadingTitle || 'Crafting features'}</h2>
-          <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1 max-w-xl">{progress || 'Processing your request…'}</p>
-        </div>
-        <div className="dot-bounce text-[var(--rf-brand)] mt-2"><span /><span /><span /></div>
       </motion.div>
 
       <div className="w-full space-y-4">
@@ -384,11 +381,46 @@ function GeneratingSkeleton({ loadingTitle, progress }: { loadingTitle?: string;
   );
 }
 
+// ─── Pricing table (USD per 1M tokens) ───────────────────────────────────────
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-haiku-4-5-20251001': { input: 0.80, output: 4.00 },
+  'claude-haiku-4-5': { input: 0.80, output: 4.00 },
+  'claude-sonnet-4-5': { input: 3.00, output: 15.00 },
+  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
+  'claude-opus-4-6': { input: 15.00, output: 75.00 },
+  'claude-3-5-haiku-20241022': { input: 0.80, output: 4.00 },
+  'claude-3-5-sonnet-20241022': { input: 3.00, output: 15.00 },
+  'claude-3-7-sonnet-20250219': { input: 3.00, output: 15.00 },
+  'gpt-4o': { input: 2.50, output: 10.00 },
+  'gpt-4o-mini': { input: 0.15, output: 0.60 },
+  'gpt-4-turbo': { input: 10.00, output: 30.00 },
+  'o1': { input: 15.00, output: 60.00 },
+  'o1-mini': { input: 1.10, output: 4.40 },
+  'gemini-1.5-pro': { input: 1.25, output: 5.00 },
+  'gemini-1.5-flash': { input: 0.075, output: 0.30 },
+  'gemini-2.0-flash': { input: 0.10, output: 0.40 },
+  'gemini-2.5-pro': { input: 1.25, output: 10.00 },
+};
+
+function calculateEstimatedCost(
+  input: number,
+  output: number,
+  fastModel: string,
+  deepModel: string,
+): number {
+  const fastPrice = MODEL_PRICING[fastModel] ?? { input: 0.80, output: 4.00 };
+  const deepPrice = MODEL_PRICING[deepModel] ?? { input: 15.00, output: 75.00 };
+  // Input tokens come mostly from fast profile (clarify/preflight); output from deep profile (generation)
+  return (input / 1_000_000) * fastPrice.input + (output / 1_000_000) * deepPrice.output;
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage
+  generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
+  fastProfileModel = 'claude-haiku-4-5-20251001',
+  deepProfileModel = 'claude-opus-4-6',
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1095,30 +1127,48 @@ export function MainContent({
               whileTap={{ scale: 0.97 }}
             >
               <Coins className="w-4 h-4 text-[var(--rf-text-tertiary)]" />
-              Tokens
+              {workflowTokenUsage?.total
+                ? `~$${calculateEstimatedCost(workflowTokenUsage.input, workflowTokenUsage.output, fastProfileModel, deepProfileModel).toFixed(3)}`
+                : 'Tokens'}
             </motion.button>
             <AnimatePresence>
               {showTokenDetails && (
                 <motion.div
-                  className="absolute right-0 top-full mt-3 w-[260px] rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-xl z-50"
+                  className="absolute right-0 top-full mt-3 w-[280px] rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-xl z-50"
                   initial={{ opacity: 0, y: -8, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.96 }}
                   transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
                 >
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workflow tokens</div>
-                  <div className="mt-1.5 text-2xl font-black text-[var(--rf-text)] tracking-tight">
-                    {(workflowTokenUsage?.total ?? 0).toLocaleString()}
-                  </div>
-                  <div className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
-                    {(workflowTokenUsage?.input ?? 0).toLocaleString()} in / {(workflowTokenUsage?.output ?? 0).toLocaleString()} out
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Workflow token usage</div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-[var(--rf-text-tertiary)]">Input tokens</span>
+                      <span className="text-sm font-bold text-[var(--rf-text)]">{(workflowTokenUsage?.input ?? 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-[var(--rf-text-tertiary)]">Output tokens</span>
+                      <span className="text-sm font-bold text-[var(--rf-text)]">{(workflowTokenUsage?.output ?? 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1.5 border-t border-[var(--rf-border-subtle)]">
+                      <span className="text-xs font-semibold text-[var(--rf-text-secondary)]">Total tokens</span>
+                      <span className="text-sm font-black text-[var(--rf-text)]">{(workflowTokenUsage?.total ?? 0).toLocaleString()}</span>
+                    </div>
+                    {workflowTokenUsage?.total ? (
+                      <div className="flex items-center justify-between pt-1.5 border-t border-[var(--rf-border-subtle)]">
+                        <span className="text-xs font-semibold text-[var(--rf-brand)]">Est. cost</span>
+                        <span className="text-sm font-black text-[var(--rf-brand)]">
+                          ~${calculateEstimatedCost(workflowTokenUsage.input, workflowTokenUsage.output, fastProfileModel, deepProfileModel).toFixed(4)}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-[11px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                    Includes clarify, generation, and all iterative refinements.
+                    Includes clarify, generation, and all refinements. Cost is an estimate based on your configured model profiles.
                   </div>
                   {lastAiTokenUsage && (
                     <div className="mt-2 text-[11px] font-medium text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] rounded-lg p-2 border border-[var(--rf-border-subtle)]">
-                      Last: {lastAiTokenUsage.label} ({lastAiTokenUsage.total.toLocaleString()})
+                      Last: {lastAiTokenUsage.label} — {lastAiTokenUsage.total.toLocaleString()} tokens ({lastAiTokenUsage.input.toLocaleString()} in / {lastAiTokenUsage.output.toLocaleString()} out)
                     </div>
                   )}
                 </motion.div>
@@ -1249,7 +1299,7 @@ export function MainContent({
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         {isGenerating && !hasFeatures ? (
-          <GeneratingSkeleton loadingTitle={loadingTitle} progress={progress} />
+          <GeneratingSkeleton />
         ) : !hasFeatures ? (
           <motion.div
             className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"

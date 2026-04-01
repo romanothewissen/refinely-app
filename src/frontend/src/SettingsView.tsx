@@ -62,21 +62,20 @@ interface TransparencyReportRow {
 
 const CLAUDE_MODELS = [
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fastest)' },
-  { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet (Balanced)' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus (Best logic)' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet (Fast — default)' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus (Deep — default)' },
 ];
 const GEMINI_MODELS = [
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast — default)' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep — default)' },
   { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
   { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
 ];
 const OPENAI_MODELS = [
-  { id: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast)' },
-  { id: 'gpt-4o', label: 'GPT-4o (Strong)' },
-  { id: 'gpt-4.5-preview', label: 'GPT-4.5 (Top logic)' },
-  { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
-  { id: 'o1-preview', label: 'o1 Preview' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini (Fastest)' },
+  { id: 'gpt-4o', label: 'GPT-4o (Fast — default)' },
+  { id: 'o1', label: 'o1 (Deep — default)' },
+  { id: 'o3-mini', label: 'o3 Mini (Fast reasoning)' },
 ];
 const PROVIDER_OPTIONS: Array<{ id: LlmProvider; label: string; blurb: string }> = [
   { id: 'forge_llms', label: 'Forge', blurb: 'Atlassian-managed routing' },
@@ -164,15 +163,15 @@ function modelMatchesProvider(model: string, provider: LlmProvider): boolean {
   if (!model) return false;
   if (provider === 'gemini') return model.startsWith('gemini-');
   if (provider === 'openai' || provider === 'azure_openai') {
-    return model.startsWith('gpt-') || model.startsWith('o1-');
+    return model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3');
   }
-  return !model.startsWith('gemini-') && !model.startsWith('gpt-') && !model.startsWith('o1-');
+  return !model.startsWith('gemini-') && !model.startsWith('gpt-') && !model.startsWith('o1') && !model.startsWith('o3');
 }
 
 function getProviderDefaults(provider: LlmProvider): { fastModel: string; deepModel: string } {
   if (provider === 'gemini') return { fastModel: 'gemini-2.5-flash', deepModel: 'gemini-2.5-pro' };
-  if (provider === 'openai' || provider === 'azure_openai') return { fastModel: 'gpt-4o-mini', deepModel: 'gpt-4.5-preview' };
-  return { fastModel: 'claude-haiku-4-5-20251001', deepModel: 'claude-opus-4-6' };
+  if (provider === 'openai' || provider === 'azure_openai') return { fastModel: 'gpt-4o', deepModel: 'o1' };
+  return { fastModel: 'claude-sonnet-4-6', deepModel: 'claude-opus-4-6' };
 }
 
 function getAvailableModels(provider: LlmProvider) {

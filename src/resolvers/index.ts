@@ -467,7 +467,12 @@ resolver.define('saveDiscoveryRound', async ({ payload, context }) => {
 
 resolver.define('refineFeatures', async ({ payload, context }) => {
   try {
-    const config = await getConfig();
+    const eventConfig = await getConfig();
+    const config = {
+      ...eventConfig,
+      generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', 'fast'),
+      tier: getEffectiveTier(eventConfig, context),
+    };
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(payload.requirement ?? '', piiEnabled);
     const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
@@ -518,7 +523,11 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
 
 resolver.define('refineSingleFeature', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const config = {
+    ...eventConfig,
+    generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', 'fast'),
+    tier: getEffectiveTier(eventConfig, context),
+  };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
   const result = await refineSingleFeature({
@@ -576,7 +585,11 @@ resolver.define('checkRefineFeedback', async ({ payload, context }) => {
 
 resolver.define('ask', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const config = {
+    ...eventConfig,
+    generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', 'fast'),
+    tier: getEffectiveTier(eventConfig, context),
+  };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedPrompt = maskPiiText(payload.message ?? '', piiEnabled);
   const maskedHistory = maskPiiInAnswers(

@@ -512,18 +512,21 @@ function sumUsage(usages: Array<{ input: number; output: number }>) {
 
 
 function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasoningMode']) {
+  // These are safety-net timeouts to catch genuine hangs (network issues, unresponsive model),
+  // NOT performance targets. Real calls can legitimately take 60-120s on deep mode.
+  // The queue has 900s total, so there is plenty of headroom.
   if (reasoningMode === 'deep') {
     return {
-      pass1Ms: 55000,
-      pass2Ms: 85000,
-      groupingMs: 30000,
+      pass1Ms: 120000,   // 2 min — Opus decomposition with large context
+      pass2Ms: 240000,   // 4 min — Opus AR writing for a broad initiative
+      groupingMs: 45000,
     };
   }
 
   return {
-    pass1Ms: 35000,
-    pass2Ms: 55000,
-    groupingMs: 20000,
+    pass1Ms: 90000,    // 90s — Sonnet decomposition
+    pass2Ms: 150000,   // 2.5 min — Sonnet AR writing
+    groupingMs: 30000,
   };
 }
 
@@ -542,6 +545,9 @@ function buildGenerationContextSections(opts: {
   mode: 'pass1' | 'pass2';
   reasoningMode: PlannerDecision['reasoningMode'];
 }): string[] {
+  // Pass 1 (decomposition): full context — gold examples and similar stories inform the feature shape.
+  // Pass 2 (AR writing): lean context — the features from pass 1 already carry the decomposition
+  //   reasoning; pass 2 only needs the requirement, Q&A, and a small WI excerpt for domain accuracy.
   const budgets = opts.mode === 'pass1'
     ? (
       opts.reasoningMode === 'deep'
@@ -549,9 +555,11 @@ function buildGenerationContextSections(opts: {
         : { attachment: 1800, wi: 4500, gold: 2400, similar: 1800 }
     )
     : (
+      // Pass 2 only needs WI context — it grounds ARs in real process steps and conditions.
+      // Gold examples and similar stories were already used in pass 1.
       opts.reasoningMode === 'deep'
-        ? { attachment: 2500, wi: 5000, gold: 2200, similar: 2000 }
-        : { attachment: 900, wi: 1600, gold: 900, similar: 800 }
+        ? { attachment: 600, wi: 4000, gold: 0, similar: 0 }
+        : { attachment: 400, wi: 2500, gold: 0, similar: 0 }
     );
 
   const sections: string[] = [`REQUIREMENT: ${opts.requirement}`];
@@ -578,10 +586,7 @@ function buildGenerationContextSections(opts: {
   if (opts.mode === 'pass1' && opts.similarStoriesText) {
     sections.push(`SIMILAR STORIES FROM BACKLOG (for business context and writing style cues):\n${truncateContext(opts.similarStoriesText, budgets.similar)}`);
   }
-
-  if (opts.mode === 'pass2' && opts.similarStoriesText) {
-    sections.push(`BACKLOG REFERENCE SNAPSHOT:\n${truncateContext(opts.similarStoriesText, budgets.similar)}`);
-  }
+  // Pass 2 does not need similar stories — features from pass 1 already reflect that context.
 
   return sections;
 }
@@ -1018,13 +1023,19 @@ export async function generateFeatures(opts: {
     featurePlan: decision.featurePlan,
   });
 
-  const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(generatorConfig.decompositionModel, config.tier),
-    systemPrompt: pass1System,
-    userMessage,
-    maxTokens: generatorConfig.maxTokens,
-    ...providerOpts,
-  });
+  const stageTimeouts = resolveGenerationStageTimeouts(decision.reasoningMode);
+
+  // Pass 1 produces features with empty AR arrays — 3 500 tokens is generous for up to ~15 features.
+  const pass1Result = await Promise.race([
+    callLlmJsonWithUsage<{ features: RawFeature[] }>({
+      model: getTierModel(generatorConfig.decompositionModel, config.tier),
+      systemPrompt: pass1System,
+      userMessage,
+      maxTokens: Math.min(generatorConfig.maxTokens, 3500),
+      ...providerOpts,
+    }),
+    throwAfterTimeout(stageTimeouts.pass1Ms, 'Pass 1 (decomposition)'),
+  ]);
   const pass1Usage = pass1Result.usage;
   const pass1Features = clampFeatureCandidates(pass1Result.data.features ?? [], decision.featurePlan);
 
@@ -1058,17 +1069,31 @@ export async function generateFeatures(opts: {
     reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
   const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
-  const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(generatorConfig.arModel, config.tier),
-    systemPrompt: pass2System,
-    userMessage: pass2UserMessage,
-    maxTokens: generatorConfig.maxTokens,
-    ...providerOpts,
-  });
-  const pass2Usage = pass2Result.usage;
-  const rawFeatures = pass2Result.data.features?.length
-    ? mergeFeatures(pass1Features, pass2Result.data.features)
-    : pass1Features;
+
+  // Pass 2 writes ARs only — 5 000 tokens covers ~10 features × 5 thorough ARs with room to spare.
+  // On timeout fall back to pass 1 features with generic ARs so the user gets a partial result
+  // they can refine rather than a hard failure.
+  let pass2Usage = { input: 0, output: 0 };
+  let rawFeatures: RawFeature[];
+  try {
+    const pass2Result = await Promise.race([
+      callLlmJsonWithUsage<{ features: RawFeature[] }>({
+        model: getTierModel(generatorConfig.arModel, config.tier),
+        systemPrompt: pass2System,
+        userMessage: pass2UserMessage,
+        maxTokens: Math.min(generatorConfig.maxTokens, 5000),
+        ...providerOpts,
+      }),
+      throwAfterTimeout(stageTimeouts.pass2Ms, 'Pass 2 (acceptance requirements)'),
+    ]);
+    pass2Usage = pass2Result.usage;
+    rawFeatures = pass2Result.data.features?.length
+      ? mergeFeatures(pass1Features, pass2Result.data.features)
+      : ensureAcceptanceRequirements(pass1Features, decision.arPlan);
+  } catch (pass2Err) {
+    console.warn('[story-generator] Pass 2 timed out — returning pass 1 features with fallback ARs:', pass2Err);
+    rawFeatures = ensureAcceptanceRequirements(pass1Features, decision.arPlan);
+  }
 
   const features = rawFeatures.map(normaliseFeature);
   if (!features.length) {
@@ -1131,9 +1156,11 @@ export async function generateClarifyingQuestions(opts: {
     policy: config.aiExecutionPolicy,
   });
   const questionPlan = decision.questionPlan;
+  // WI context is the dominant signal for question quality — give it the most room.
+  // Gold examples and similar stories help avoid asking about what's already known.
   const contextCharBudget = decision.reasoningMode === 'deep'
-    ? { attachment: 4000, wi: 4000, gold: 5000, similar: 5000 }
-    : { attachment: 2800, wi: 2800, gold: 3200, similar: 3200 };
+    ? { attachment: 4000, wi: 14000, gold: 5000, similar: 5000 }
+    : { attachment: 2800, wi: 8000, gold: 3200, similar: 3200 };
   // No explicit token cap — the response has a natural ceiling (a bounded JSON
   // array of questions) and truncating it causes silent parse failures.
   // callLlmJsonWithUsage defaults to 8192 when maxTokens is omitted.

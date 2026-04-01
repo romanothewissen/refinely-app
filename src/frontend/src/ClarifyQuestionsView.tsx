@@ -499,12 +499,25 @@ function ContextDetailsModal({
             </div>
 
             <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40 p-4">
-              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Token usage</div>
-              <div className="mt-3 text-sm text-[var(--rf-text-secondary)]">
-                {contextMeta.tokenUsage
-                  ? `${contextMeta.tokenUsage.total.toLocaleString()} total (${contextMeta.tokenUsage.input.toLocaleString()} in / ${contextMeta.tokenUsage.output.toLocaleString()} out)`
-                  : 'Not available'}
-              </div>
+              <div className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)] mb-3">Token usage</div>
+              {contextMeta.tokenUsage ? (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-[var(--rf-text-tertiary)]">Input</span>
+                    <span className="font-semibold text-[var(--rf-text)]">{contextMeta.tokenUsage.input.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-[var(--rf-text-tertiary)]">Output</span>
+                    <span className="font-semibold text-[var(--rf-text)]">{contextMeta.tokenUsage.output.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs pt-1 border-t border-[var(--rf-border-subtle)]">
+                    <span className="font-semibold text-[var(--rf-text-secondary)]">Total</span>
+                    <span className="font-bold text-[var(--rf-text)]">{contextMeta.tokenUsage.total.toLocaleString()}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-[var(--rf-text-tertiary)]">Not available</div>
+              )}
             </div>
           </div>
 
