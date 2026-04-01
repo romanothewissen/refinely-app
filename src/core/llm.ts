@@ -214,7 +214,7 @@ async function callGemini(opts: {
   };
 
   if (typeof opts.geminiThinkingBudget === 'number') {
-    requestBody.thinkingConfig = {
+    (requestBody.generationConfig as Record<string, unknown>).thinkingConfig = {
       thinkingBudget: Math.max(0, Math.min(24576, Math.round(opts.geminiThinkingBudget))),
     };
   }
