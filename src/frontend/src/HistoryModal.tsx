@@ -274,7 +274,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
       </div>
 
       {typeof conv.lastDiscoveryScore === 'number' && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold tracking-widest text-amber-900 border border-amber-200">
               Discovery {conv.lastDiscoveryScore}%
@@ -283,43 +283,6 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
               {conv.lastMissingCriticalCount ? `${conv.lastMissingCriticalCount} critical gap${conv.lastMissingCriticalCount !== 1 ? 's' : ''}` : 'Coverage looked complete'}
             </span>
           </div>
-          {conv.lastDiscoverySummary && (
-            <div className="mt-1.5 text-[11px] text-amber-900/90 leading-relaxed line-clamp-3">
-              {conv.lastDiscoverySummary}
-            </div>
-          )}
-        </div>
-      )}
-
-      {Array.isArray(conv.discoveryTranscriptPreview) && conv.discoveryTranscriptPreview.length > 0 && (
-        <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/45 p-2.5 space-y-2.5">
-          {conv.discoveryTranscriptPreview.map((round: any) => (
-            <div key={round.roundNumber} className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold tracking-widest text-[var(--rf-text)] border border-[var(--rf-border-subtle)]">
-                  Round {round.roundNumber}
-                </span>
-                <span className="rounded-md bg-white px-2 py-1 text-[10px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
-                  {round.answerCount} answer{round.answerCount !== 1 ? 's' : ''}
-                </span>
-              </div>
-              {round.summary && (
-                <div className="text-[11px] text-[var(--rf-text-secondary)] leading-relaxed line-clamp-2">
-                  {round.summary}
-                </div>
-              )}
-              {Array.isArray(round.highlights) && round.highlights.length > 0 && (
-                <div className="space-y-1.5">
-                  {round.highlights.map((item: any, index: number) => (
-                    <div key={`${round.roundNumber}-${index}`} className="rounded-lg bg-white px-2.5 py-2 border border-[var(--rf-border-subtle)]">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{item.question}</div>
-                      <div className="mt-1 text-[11px] text-[var(--rf-text-secondary)] line-clamp-2">{item.answer}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
         </div>
       )}
 

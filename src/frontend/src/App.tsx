@@ -389,10 +389,13 @@ export default function App() {
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
     if (!accountId) return;
+    const requestedSessionId = sessionId;
+    let cancelled = false;
     // Persist session pointer cross-device
     api.setLastSession(sessionId).catch(() => {});
     // Restore features from last conversation turn
     api.getConversation(sessionId).then((res: any) => {
+      if (cancelled || sessionIdRef.current !== requestedSessionId) return;
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
@@ -404,17 +407,22 @@ export default function App() {
           setSidebarOpen(false);
         } else {
           void restoreInFlightSession(sessionId).then((restored) => {
+            if (cancelled || sessionIdRef.current !== requestedSessionId) return;
             if (restored) setSidebarOpen(false);
           });
         }
       } else {
         setWorkflowTokenUsage(null);
         void restoreInFlightSession(sessionId).then((restored) => {
+          if (cancelled || sessionIdRef.current !== requestedSessionId) return;
           if (restored) setSidebarOpen(false);
         });
       }
     }).catch(() => {});
     loadHistory();
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, accountId]); // eslint-disable-line
 
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
@@ -570,6 +578,7 @@ export default function App() {
   sidebarWidthRef.current = sidebarWidth;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const restoreRequestRef = useRef(0);
   const discoveryAnswersRef = useRef<any[]>([]);
   discoveryAnswersRef.current = discoveryAnswers;
   const [isGenerationStarted, setIsGenerationStarted] = useState(false);
@@ -719,10 +728,15 @@ export default function App() {
   };
 
   const restoreSession = async (sid: string) => {
+    const requestId = restoreRequestRef.current + 1;
+    restoreRequestRef.current = requestId;
     try {
+      setSessionId(sid);
       const res = await api.getConversation(sid) as any;
+      if (restoreRequestRef.current !== requestId || sessionIdRef.current !== sid) {
+        return;
+      }
       if (res.success && res.conversation) {
-        setSessionId(res.conversation.sessionId);
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
@@ -737,7 +751,7 @@ export default function App() {
         setIsReviewingDiscovery(false);
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
         if (!lastTurn?.features?.length) {
-          await restoreInFlightSession(res.conversation.sessionId);
+          await restoreInFlightSession(sid);
         }
         setViewMode('generate');
       }
