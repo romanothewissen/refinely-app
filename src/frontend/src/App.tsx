@@ -632,23 +632,64 @@ export default function App() {
     const currentRoundNumber = discoveryRound || 1;
     const nextAnswers = [...discoveryAnswersRef.current, ...answers];
     setDiscoveryAnswers(nextAnswers);
-    setClarifyQuestions([]);
-    setIsReviewingDiscovery(false);
+    setIsReviewingDiscovery(true);
     setDiscoveryCoverage(null);
+
+    let coverageResult: DiscoveryCoverageSummary | null = null;
+    const canRunAnotherDiscoveryRound =
+      reasoningMode === 'deep' &&
+      currentRoundNumber < effectiveAiPolicy.maxDeepDiscoveryRounds;
+
+    if (canRunAnotherDiscoveryRound) {
+      try {
+        const evaluation = await api.evaluateSufficiency(
+          sessionIdRef.current,
+          requirementRef.current,
+          nextAnswers,
+          projectKey,
+          reasoningMode,
+        ) as DiscoveryCoverageSummary;
+        coverageResult = evaluation;
+        setDiscoveryCoverage(evaluation);
+        if (evaluation?.tokenUsage) {
+          setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation.tokenUsage ?? null));
+        }
+      } catch (err) {
+        console.error('Failed to evaluate discovery sufficiency', err);
+      }
+    }
 
     await api.saveDiscoveryRound({
       sessionId: sessionIdRef.current,
       roundNumber: currentRoundNumber,
       questions: currentRoundQuestions,
       answers,
+      coverage: coverageResult ?? undefined,
     }).catch(err => {
       console.error('Failed to persist discovery round', err);
     });
+
+    const shouldContinueDiscovery =
+      Boolean(coverageResult?.shouldContinueDiscovery) &&
+      Array.isArray(coverageResult?.questions) &&
+      coverageResult.questions.length > 0;
+
+    if (shouldContinueDiscovery) {
+      setClarifyQuestions(coverageResult!.questions ?? []);
+      setDiscoveryRound(currentRoundNumber + 1);
+      setClarifyContext(prev => prev ? { ...prev, discoveryCoverage: coverageResult ?? prev.discoveryCoverage } : prev);
+      setIsReviewingDiscovery(false);
+      return;
+    }
+
+    setClarifyQuestions([]);
+    setIsReviewingDiscovery(false);
 
     console.log('[App] moving from discovery to generation', {
       round: currentRoundNumber,
       accumulatedAnswers: nextAnswers.length,
       reasoningMode,
+      continuedDiscovery: false,
     });
     await startGeneration(requirementRef.current, nextAnswers);
   };
