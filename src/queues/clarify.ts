@@ -356,6 +356,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       reasoningMode,
       outputMode,
       plannerDecision,
+      timeoutMs: retrievalStrategy.questionDeadlineMs,
     });
     questions = clarifyResult.questions;
     tokenUsage = mergeTokenUsage(clarifyResult.tokenUsage, similarStoriesResult.tokenUsage);

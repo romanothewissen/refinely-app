@@ -508,6 +508,8 @@ async function rerankWithClaude(
       systemPrompt: 'Rank the Jira backlog items by relevance to the requirement. Output a JSON array of 1-based indices.',
       userMessage: prompt,
       maxTokens: 256,
+      timeoutMs: 10000,
+      geminiThinkingBudget: 0,
       provider: config.generatorConfig.provider,
       geminiApiKey: config.generatorConfig.geminiApiKey,
       geminiBaseUrl: config.generatorConfig.geminiBaseUrl,

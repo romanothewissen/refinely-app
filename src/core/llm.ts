@@ -21,6 +21,8 @@ export interface LlmCallOptions {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  timeoutMs?: number;
+  geminiThinkingBudget?: number;
   provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
   geminiApiKey?: string;
   geminiBaseUrl?: string;
@@ -33,6 +35,10 @@ export interface LlmCallOptions {
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
+}
+
+interface JsonLlmCallOptions extends LlmCallOptions {
+  retryOnParseFailure?: boolean;
 }
 
 export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
@@ -67,14 +73,18 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
   }
 
   try {
-    const response = await chat({
-      model: opts.model,
-      messages: [
-        { role: 'system', content: effectiveOpts.systemPrompt },
-        { role: 'user', content: effectiveOpts.userMessage },
-      ],
-      max_completion_tokens: opts.maxTokens ?? 8192,
-    });
+    const response = await withLocalTimeout(
+      chat({
+        model: opts.model,
+        messages: [
+          { role: 'system', content: effectiveOpts.systemPrompt },
+          { role: 'user', content: effectiveOpts.userMessage },
+        ],
+        max_completion_tokens: opts.maxTokens ?? 8192,
+      }),
+      opts.timeoutMs,
+      `Forge LLM call (${opts.model})`,
+    );
 
     const content = response.choices[0]?.message?.content ?? '';
     const text = typeof content === 'string' ? content : JSON.stringify(content);
@@ -103,6 +113,50 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
   }
 }
 
+async function withLocalTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number | undefined,
+  label: string,
+): Promise<T> {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return promise;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} exceeded ${timeoutMs}ms`)), timeoutMs);
+    });
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number | undefined,
+  label: string,
+): Promise<Response> {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return fetch(url, init);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') {
+      throw new Error(`${label} exceeded ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function shouldFallbackToGemini(err: unknown): boolean {
   const msg = String((err as { message?: unknown })?.message ?? err ?? '').toLowerCase();
   return msg.includes('llm endpoint not enabled') || msg.includes("'llm' module is not defined");
@@ -127,6 +181,8 @@ async function callGemini(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  timeoutMs?: number;
+  geminiThinkingBudget?: number;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
 }): Promise<LlmResponse> {
@@ -141,25 +197,38 @@ async function callGemini(opts: {
   const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: opts.systemPrompt }],
+  const requestBody: Record<string, unknown> = {
+    systemInstruction: {
+      parts: [{ text: opts.systemPrompt }],
+    },
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: opts.userMessage }],
       },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: opts.userMessage }],
-        },
-      ],
-      generationConfig: {
-        maxOutputTokens: opts.maxTokens ?? 8192,
-        responseMimeType: 'application/json', // Native JSON mode for better reliability
-      },
-    }),
-  });
+    ],
+    generationConfig: {
+      maxOutputTokens: opts.maxTokens ?? 8192,
+      responseMimeType: 'application/json', // Native JSON mode for better reliability
+    },
+  };
+
+  if (typeof opts.geminiThinkingBudget === 'number') {
+    requestBody.thinkingConfig = {
+      thinkingBudget: Math.max(0, Math.min(24576, Math.round(opts.geminiThinkingBudget))),
+    };
+  }
+
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    },
+    opts.timeoutMs,
+    `Gemini API call (${model})`,
+  );
 
   const rawBody = await res.text();
   let payload: {
@@ -214,6 +283,7 @@ async function callOpenAI(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  timeoutMs?: number;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
 }): Promise<LlmResponse> {
@@ -225,22 +295,27 @@ async function callOpenAI(opts: {
   const baseUrl = opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
   const url = `${baseUrl}/chat/completions`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: opts.model,
+        messages: [
+          { role: 'system', content: opts.systemPrompt },
+          { role: 'user', content: opts.userMessage }
+        ],
+        max_tokens: opts.maxTokens ?? 8192,
+        response_format: { type: 'json_schema' } // Native OpenAI JSON mode for bulletproof parsing
+      })
     },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [
-        { role: 'system', content: opts.systemPrompt },
-        { role: 'user', content: opts.userMessage }
-      ],
-      max_tokens: opts.maxTokens ?? 8192,
-      response_format: { type: 'json_schema' } // Native OpenAI JSON mode for bulletproof parsing
-    })
-  });
+    opts.timeoutMs,
+    `OpenAI API call (${opts.model})`,
+  );
 
   const rawBody = await res.text();
   if (!res.ok) {
@@ -271,6 +346,7 @@ async function callAzureOpenAI(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  timeoutMs?: number;
   azureOpenaiApiKey?: string;
   azureOpenaiEndpoint?: string;
   azureOpenaiDeployment?: string;
@@ -315,14 +391,19 @@ async function callAzureOpenAI(opts: {
     body.response_format = { type: 'json_object' };
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': apiKey,
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    opts.timeoutMs,
+    `Azure OpenAI API call (${deployment})`,
+  );
 
   const rawBody = await res.text();
   if (!res.ok) {
@@ -368,52 +449,21 @@ export function extractJson<T = unknown>(text: string): T {
 }
 
 /**
- * Call LLM and extract JSON, with one retry on JSON parse failure.
+ * Call LLM and extract JSON. Retries only when retryOnParseFailure is enabled.
  */
-export async function callLlmJson<T>(opts: {
-  model: string;
-  systemPrompt: string;
-  userMessage: string;
-  maxTokens?: number;
-  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
-  geminiApiKey?: string;
-  geminiBaseUrl?: string;
-  openaiApiKey?: string;
-  openaiBaseUrl?: string;
-  azureOpenaiApiKey?: string;
-  azureOpenaiEndpoint?: string;
-  azureOpenaiDeployment?: string;
-  azureOpenaiApiVersion?: string;
-  noFallback?: boolean;
-  piiMaskingEnabled?: boolean;
-}): Promise<T> {
+export async function callLlmJson<T>(opts: JsonLlmCallOptions): Promise<T> {
   const result = await callLlmJsonWithUsage<T>(opts);
   return result.data;
 }
 
-export async function callLlmJsonWithUsage<T>(opts: {
-  model: string;
-  systemPrompt: string;
-  userMessage: string;
-  maxTokens?: number;
-  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
-  geminiApiKey?: string;
-  geminiBaseUrl?: string;
-  openaiApiKey?: string;
-  openaiBaseUrl?: string;
-  azureOpenaiApiKey?: string;
-  azureOpenaiEndpoint?: string;
-  azureOpenaiDeployment?: string;
-  azureOpenaiApiVersion?: string;
-  noFallback?: boolean;
-  piiMaskingEnabled?: boolean;
-}): Promise<{ data: T; usage: { input: number; output: number }; piiMasking?: PiiMaskingStats }> {
+export async function callLlmJsonWithUsage<T>(opts: JsonLlmCallOptions): Promise<{ data: T; usage: { input: number; output: number }; piiMasking?: PiiMaskingStats }> {
   let lastError: Error | null = null;
   let totalInput = 0;
   let totalOutput = 0;
   const piiMaskingTotals: PiiMaskingStats = { enabled: !!opts.piiMaskingEnabled, totalRedactions: 0, byType: {} };
+  const maxAttempts = opts.retryOnParseFailure ? 2 : 1;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await callLlm(opts);
     totalInput += res.inputTokens ?? 0;
     totalOutput += res.outputTokens ?? 0;
@@ -432,7 +482,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
       };
     } catch (err) {
       lastError = err as Error;
-      if (attempt === 0) {
+      if (attempt === 0 && opts.retryOnParseFailure) {
         opts = {
           ...opts,
           userMessage: opts.userMessage + '\n\nIMPORTANT: Respond with valid JSON only. No prose before or after.',

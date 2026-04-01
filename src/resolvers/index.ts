@@ -238,6 +238,9 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       azureOpenaiApiVersion: isAzureOpenAI ? (payload.azureOpenaiApiVersion?.trim() || gc.azureOpenaiApiVersion) : undefined,
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
+      maxTokens: 16,
+      timeoutMs: 10000,
+      geminiThinkingBudget: 0,
       noFallback: true,
     });
     return { success: true, reply: res.text };

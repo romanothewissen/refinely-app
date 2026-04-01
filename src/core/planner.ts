@@ -169,6 +169,8 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
           systemPrompt: buildPlannerAssessmentPrompt(),
           userMessage: buildPlannerAssessmentUserMessage(input),
           maxTokens: 240,
+          timeoutMs: assessmentTimeoutMs,
+          geminiThinkingBudget: 4000,
           ...getPlannerProviderOpts(config),
         }),
         new Promise<never>((_, reject) => {

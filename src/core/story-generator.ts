@@ -944,6 +944,9 @@ async function buildInitiativeGroups(opts: {
       model: getTierModel(config.generatorConfig.themeModel, config.tier),
       systemPrompt,
       userMessage,
+      maxTokens: 1024,
+      timeoutMs: 15000,
+      geminiThinkingBudget: 0,
       ...getProviderOpts(config),
     });
 
@@ -1041,6 +1044,8 @@ export async function generateFeatures(opts: {
       systemPrompt: pass1System,
       userMessage,
       maxTokens: Math.min(generatorConfig.maxTokens, 3500),
+      timeoutMs: stageTimeouts.pass1Ms,
+      geminiThinkingBudget: 16000,
       ...providerOpts,
     }),
     throwAfterTimeout(stageTimeouts.pass1Ms, 'Pass 1 (decomposition)'),
@@ -1098,6 +1103,8 @@ export async function generateFeatures(opts: {
                 ? Math.max(2400, featureBatch.length * 1200)
                 : Math.max(1800, featureBatch.length * 900),
             ),
+            timeoutMs: Math.min(stageTimeouts.pass2Ms, arBatchPlan.batchTimeoutMs),
+            geminiThinkingBudget: 16000,
             ...providerOpts,
           }),
           throwAfterTimeout(
@@ -1167,6 +1174,7 @@ export async function generateClarifyingQuestions(opts: {
   reasoningMode?: 'fast' | 'deep';
   outputMode?: 'single' | 'auto' | 'full_breakdown';
   plannerDecision?: PlannerDecision;
+  timeoutMs?: number;
 }): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
   const {
     requirement,
@@ -1178,6 +1186,7 @@ export async function generateClarifyingQuestions(opts: {
     reasoningMode,
     outputMode,
     plannerDecision,
+    timeoutMs,
   } = opts;
   const decision = plannerDecision ?? buildHeuristicPlannerDecision({
     requirement,
@@ -1261,6 +1270,8 @@ export async function generateClarifyingQuestions(opts: {
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
     maxTokens: clarifyMaxTokens,
+    timeoutMs,
+    geminiThinkingBudget: decision.reasoningMode === 'deep' ? 16000 : 8000,
     ...getProviderOpts(config),
   });
 
@@ -1352,6 +1363,9 @@ export async function evaluateSufficiency(opts: {
       scopeMode: decision.scopeMode,
     }),
     userMessage,
+    maxTokens: 2048,
+    timeoutMs: opts.reasoningMode === 'deep' ? 20000 : 12000,
+    geminiThinkingBudget: 8000,
     ...getProviderOpts(opts.config),
   });
 
@@ -1398,7 +1412,9 @@ export async function refineFeatures(opts: {
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
     systemPrompt: system,
     userMessage,
-    maxTokens: config.generatorConfig.maxTokens,
+    maxTokens: Math.min(config.generatorConfig.maxTokens, 8192),
+    timeoutMs: 45000,
+    geminiThinkingBudget: 16000,
     ...getProviderOpts(config),
   });
 
@@ -1434,6 +1450,9 @@ export async function refineSingleFeature(opts: {
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
     systemPrompt: system,
     userMessage,
+    maxTokens: Math.min(config.generatorConfig.maxTokens, 4096),
+    timeoutMs: 30000,
+    geminiThinkingBudget: 8000,
     ...getProviderOpts(config),
   });
 
@@ -1478,6 +1497,9 @@ export async function checkRefineFeedbackSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildRefineSufficiencyPrompt(),
     userMessage,
+    maxTokens: 512,
+    timeoutMs: 10000,
+    geminiThinkingBudget: 4000,
     ...getProviderOpts(opts.config),
   });
 
@@ -1497,7 +1519,9 @@ Rules:
 - No quotes, no punctuation at the end, no filler like "feature", "request", or "session"
 - Prefer titles that would look good in a conversation history list`,
     userMessage: requirement,
-    maxTokens: 32,
+    maxTokens: 80,
+    timeoutMs: 7000,
+    geminiThinkingBudget: 0,
     ...getProviderOpts(config),
   });
   return normalizeConversationTitle(res.text, requirement);
@@ -1524,6 +1548,9 @@ export async function askQuestion(opts: {
     model: opts.config.generatorConfig.arModel,
     systemPrompt: opts.systemPrompt,
     userMessage,
+    maxTokens: 1024,
+    timeoutMs: 20000,
+    geminiThinkingBudget: 0,
     ...getProviderOpts(opts.config),
   });
 
