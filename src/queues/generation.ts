@@ -204,9 +204,10 @@ export async function handler(event: { body: GenerationEvent }) {
       outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
       plannerDecision,
       onPass1Complete: async ({ featureCount, draftFeatures, arBatchCount }) => {
+        const batchHint = arBatchCount > 1 ? ` across ${arBatchCount} batches` : '';
         await sendProgress(
           sessionId,
-          `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Writing acceptance requirements…`,
+          `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Writing acceptance requirements${batchHint}…`,
           2,
           { features: draftFeatures, draft: true },
         );

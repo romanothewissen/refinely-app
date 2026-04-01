@@ -510,6 +510,15 @@ function sumUsage(usages: Array<{ input: number; output: number }>) {
   );
 }
 
+function resolveArBatchPlan(reasoningMode: PlannerDecision['reasoningMode'], featureCount: number) {
+  const batchSize = reasoningMode === 'deep'
+    ? (featureCount >= 7 ? 3 : 4)
+    : (featureCount >= 4 ? 2 : 3);
+  const batches = chunkArray(Array.from({ length: featureCount }), batchSize).length;
+  const batchTimeoutMs = reasoningMode === 'deep' ? 90000 : 45000;
+  return { batchSize, batches, batchTimeoutMs };
+}
+
 
 function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasoningMode']) {
   // These are safety-net timeouts to catch genuine hangs (network issues, unresponsive model),
@@ -1044,12 +1053,13 @@ export async function generateFeatures(opts: {
   }
 
   const draftFeatures = pass1Features.map(normaliseFeature);
+  const arBatchPlan = resolveArBatchPlan(decision.reasoningMode, pass1Features.length);
 
   if (onPass1Complete) {
     await onPass1Complete({
       featureCount: pass1Features.length,
       draftFeatures,
-      arBatchCount: 1,
+      arBatchCount: arBatchPlan.batches,
     });
   }
 
@@ -1068,32 +1078,56 @@ export async function generateFeatures(opts: {
     mode: 'pass2',
     reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
-  const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+  const pass2FeatureBatches = chunkArray(pass1Features, arBatchPlan.batchSize);
 
-  // Pass 2 writes ARs only — 5 000 tokens covers ~10 features × 5 thorough ARs with room to spare.
-  // On timeout fall back to pass 1 features with generic ARs so the user gets a partial result
-  // they can refine rather than a hard failure.
-  let pass2Usage = { input: 0, output: 0 };
-  let rawFeatures: RawFeature[];
-  try {
-    const pass2Result = await Promise.race([
-      callLlmJsonWithUsage<{ features: RawFeature[] }>({
-        model: getTierModel(generatorConfig.arModel, config.tier),
-        systemPrompt: pass2System,
-        userMessage: pass2UserMessage,
-        maxTokens: Math.min(generatorConfig.maxTokens, 5000),
-        ...providerOpts,
-      }),
-      throwAfterTimeout(stageTimeouts.pass2Ms, 'Pass 2 (acceptance requirements)'),
-    ]);
-    pass2Usage = pass2Result.usage;
-    rawFeatures = pass2Result.data.features?.length
-      ? mergeFeatures(pass1Features, pass2Result.data.features)
-      : ensureAcceptanceRequirements(pass1Features, decision.arPlan);
-  } catch (pass2Err) {
-    console.warn('[story-generator] Pass 2 timed out — returning pass 1 features with fallback ARs:', pass2Err);
-    rawFeatures = ensureAcceptanceRequirements(pass1Features, decision.arPlan);
-  }
+  // Pass 2 writes ARs in smaller batches so fast mode stays responsive and one
+  // slow feature does not block the entire result set.
+  const pass2BatchResults = await Promise.all(
+    pass2FeatureBatches.map(async (featureBatch, batchIndex) => {
+      const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 BATCH ${batchIndex + 1}/${pass2FeatureBatches.length} (fill in acceptance_requirements for each and keep order unchanged):\n${JSON.stringify(featureBatch, null, 2)}`;
+
+      try {
+        const pass2Result = await Promise.race([
+          callLlmJsonWithUsage<{ features: RawFeature[] }>({
+            model: getTierModel(generatorConfig.arModel, config.tier),
+            systemPrompt: pass2System,
+            userMessage: pass2UserMessage,
+            maxTokens: Math.min(
+              generatorConfig.maxTokens,
+              decision.reasoningMode === 'deep'
+                ? Math.max(2400, featureBatch.length * 1200)
+                : Math.max(1800, featureBatch.length * 900),
+            ),
+            ...providerOpts,
+          }),
+          throwAfterTimeout(
+            Math.min(stageTimeouts.pass2Ms, arBatchPlan.batchTimeoutMs),
+            `Pass 2 batch ${batchIndex + 1} (acceptance requirements)`,
+          ),
+        ]);
+
+        const mergedBatch = pass2Result.data.features?.length
+          ? mergeFeatures(featureBatch, pass2Result.data.features)
+          : featureBatch;
+        return {
+          features: ensureAcceptanceRequirements(mergedBatch, decision.arPlan),
+          usage: pass2Result.usage,
+        };
+      } catch (pass2Err) {
+        console.warn(`[story-generator] Pass 2 batch ${batchIndex + 1} failed — using fallback ARs for that batch:`, pass2Err);
+        return {
+          features: ensureAcceptanceRequirements(featureBatch, decision.arPlan),
+          usage: { input: 0, output: 0 },
+        };
+      }
+    }),
+  );
+
+  const pass2Usage = sumUsage(pass2BatchResults.map(result => result.usage));
+  const rawFeatures = ensureAcceptanceRequirements(
+    pass2BatchResults.flatMap(result => result.features),
+    decision.arPlan,
+  );
 
   const features = rawFeatures.map(normaliseFeature);
   if (!features.length) {
