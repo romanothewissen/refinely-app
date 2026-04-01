@@ -217,7 +217,7 @@ export default function App() {
   
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
-  const [projectKey, setProjectKey] = useState<string>('*');
+  const [projectKey, setProjectKey] = useState<string>('');
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [goldSources, setGoldSources] = useState<any[]>([]);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
@@ -355,14 +355,15 @@ export default function App() {
       .then((res: any) => {
         const projects = Array.isArray(res?.projects) ? res.projects : [];
         setAvailableProjects(projects);
-        if (projectKey === '*' && projects.length === 1) {
-          setProjectKey(projects[0].key);
-        }
       })
       .catch(() => {});
   }, []); // eslint-disable-line
 
   useEffect(() => {
+    if (!projectKey) {
+      setWiDocs([]);
+      return;
+    }
     api.listWiDocs(projectKey)
       .then((res: any) => {
         setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
@@ -438,7 +439,7 @@ export default function App() {
 
   const loadWorkspaceConfig = async (selectedProjectKey = projectKey) => {
     try {
-      const res = await api.getConfig({ projectKey: selectedProjectKey }) as any;
+      const res = await api.getConfig({ projectKey: selectedProjectKey || '*' }) as any;
       if (!res) return;
       setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
       if (res.tier) setTier(res.tier);
@@ -534,6 +535,10 @@ export default function App() {
 
   const handleStartBrainstorm = async () => {
     if (!requirement.trim()) return;
+    if (!projectKey) {
+      setGenerationError('Choose a project or select Standalone workspace before starting generation.');
+      return;
+    }
     setIsWorking(true);
     setGenerationError(null);
     setFeatures([]);
@@ -586,6 +591,10 @@ export default function App() {
   const startGeneration = async (reqText: string, clarifyAnswers: any[]) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
+    if (!projectKey) {
+      setGenerationError('Choose a project or select Standalone workspace before generating.');
+      return;
+    }
     
     console.log('[App] startGeneration', {
       sessionId: sid,
@@ -792,7 +801,10 @@ export default function App() {
               }}
               requirement={requirement}
               setRequirement={setRequirement}
-              onStartBrainstorm={() => { handleStartBrainstorm(); closeSidebar(); }}
+              onStartBrainstorm={() => {
+                void handleStartBrainstorm();
+                if (projectKey && requirement.trim()) closeSidebar();
+              }}
               onNewSession={() => {
                 let newSid: string;
                 try { newSid = crypto.randomUUID(); }

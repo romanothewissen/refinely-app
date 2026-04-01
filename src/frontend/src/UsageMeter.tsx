@@ -53,8 +53,8 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
             {(tier === 'premium' || tier === 'enterprise') ? <ShieldCheck className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
           </div>
           <div>
-            <h4 className="text-[13px] font-bold text-white tracking-tight">{tierName} Plan</h4>
-            <p className="text-[10px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest mt-0.5">Current Usage</p>
+            <h4 className="text-[14px] font-bold text-white tracking-tight">{tierName} Plan</h4>
+            <p className="text-[11px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest mt-0.5">Current Usage</p>
           </div>
         </div>
         {isAtLimit && <AlertCircle className="w-4 h-4 text-rose-500" />}
@@ -62,9 +62,9 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
 
       <div className="space-y-2">
         <div className="flex justify-between items-end">
-          <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
+          <span className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
           <span className="text-sm font-bold text-white tracking-tight">
-            {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '\u221e' : max}</span>
+            {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[12px] ml-1">/ {isUnlimited ? '\u221e' : max}</span>
           </span>
         </div>
         {!isUnlimited && (

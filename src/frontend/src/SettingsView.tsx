@@ -60,6 +60,8 @@ interface TransparencyReportRow {
   tokenUsage?: { total: number };
 }
 
+type DiscoveryRangeId = 'lean' | 'balanced' | 'thorough' | 'enterprise';
+
 const CLAUDE_MODELS = [
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fastest)' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet (Fast — default)' },
@@ -159,6 +161,43 @@ const AI_POLICY_PRESETS: Record<
   },
 };
 
+const DISCOVERY_RANGE_OPTIONS: Array<{
+  id: DiscoveryRangeId;
+  label: string;
+  hint: string;
+  values: {
+    simpleAskMaxQuestions: number;
+    deepModeRoundTarget: number;
+    enterpriseMaxQuestionsPerRound: number;
+    maxDeepDiscoveryRounds: number;
+  };
+}> = [
+  {
+    id: 'lean',
+    label: 'Lean',
+    hint: 'Short clarify pass with minimal follow-up.',
+    values: { simpleAskMaxQuestions: 2, deepModeRoundTarget: 4, enterpriseMaxQuestionsPerRound: 8, maxDeepDiscoveryRounds: 2 },
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    hint: 'Good default for most teams and day-to-day work.',
+    values: { simpleAskMaxQuestions: 4, deepModeRoundTarget: 6, enterpriseMaxQuestionsPerRound: 10, maxDeepDiscoveryRounds: 3 },
+  },
+  {
+    id: 'thorough',
+    label: 'Thorough',
+    hint: 'Broader discovery before generation.',
+    values: { simpleAskMaxQuestions: 4, deepModeRoundTarget: 8, enterpriseMaxQuestionsPerRound: 12, maxDeepDiscoveryRounds: 4 },
+  },
+  {
+    id: 'enterprise',
+    label: 'Exhaustive',
+    hint: 'Maximum clarify breadth for complex or regulated work.',
+    values: { simpleAskMaxQuestions: 4, deepModeRoundTarget: 9, enterpriseMaxQuestionsPerRound: 14, maxDeepDiscoveryRounds: 5 },
+  },
+];
+
 function modelMatchesProvider(model: string, provider: LlmProvider): boolean {
   if (!model) return false;
   if (provider === 'gemini') return model.startsWith('gemini-');
@@ -215,6 +254,56 @@ function getProviderLabel(provider: LlmProvider): string {
 function normalizePolicyNumber(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(Math.max(Math.round(value), min), max);
+}
+
+function getDiscoveryRangeFromPolicy(values: {
+  simpleAskMaxQuestions?: number;
+  deepModeRoundTarget?: number;
+  enterpriseMaxQuestionsPerRound?: number;
+  maxDeepDiscoveryRounds?: number;
+}): DiscoveryRangeId {
+  const score =
+    (values.simpleAskMaxQuestions ?? 0) +
+    (values.deepModeRoundTarget ?? 0) +
+    (values.enterpriseMaxQuestionsPerRound ?? 0) +
+    (values.maxDeepDiscoveryRounds ?? 0);
+
+  const ranked = DISCOVERY_RANGE_OPTIONS.map((option) => ({
+    id: option.id,
+    delta: Math.abs(
+      score -
+      (
+        option.values.simpleAskMaxQuestions +
+        option.values.deepModeRoundTarget +
+        option.values.enterpriseMaxQuestionsPerRound +
+        option.values.maxDeepDiscoveryRounds
+      ),
+    ),
+  })).sort((left, right) => left.delta - right.delta);
+
+  return ranked[0]?.id ?? 'balanced';
+}
+
+function applyDiscoveryRange(
+  rangeId: DiscoveryRangeId,
+  apply: (values: {
+    simpleAskMaxQuestions: number;
+    deepModeRoundTarget: number;
+    enterpriseMaxQuestionsPerRound: number;
+    maxDeepDiscoveryRounds: number;
+  }) => void,
+) {
+  const match = DISCOVERY_RANGE_OPTIONS.find((option) => option.id === rangeId) ?? DISCOVERY_RANGE_OPTIONS[1];
+  apply(match.values);
+}
+
+function formatAuditDetails(details: unknown): string {
+  if (!details || typeof details !== 'object') return '—';
+  const entries = Object.entries(details as Record<string, unknown>)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${String(value)}`);
+  return entries.length ? entries.join(' • ') : '—';
 }
 
 function getDefaultModelForProvider(provider: LlmProvider, depth: 'fast' | 'deep') {
@@ -623,6 +712,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }
 
   const currentProjectAiPolicy = projectAiPolicies.find((policy) => policy.projectKey === activeArProj) || null;
+  const workspaceDiscoveryRange = getDiscoveryRangeFromPolicy({
+    simpleAskMaxQuestions,
+    deepModeRoundTarget,
+    enterpriseMaxQuestionsPerRound,
+    maxDeepDiscoveryRounds,
+  });
+  const projectDiscoveryRange = getDiscoveryRangeFromPolicy({
+    simpleAskMaxQuestions: currentProjectAiPolicy?.simpleAskMaxQuestions ?? simpleAskMaxQuestions,
+    deepModeRoundTarget: currentProjectAiPolicy?.deepModeRoundTarget ?? deepModeRoundTarget,
+    enterpriseMaxQuestionsPerRound: currentProjectAiPolicy?.enterpriseMaxQuestionsPerRound ?? enterpriseMaxQuestionsPerRound,
+    maxDeepDiscoveryRounds: currentProjectAiPolicy?.maxDeepDiscoveryRounds ?? maxDeepDiscoveryRounds,
+  });
 
   function updateProjectAiPolicy(nextPatch: Partial<ProjectAiPolicy> | null) {
     if (!activeArProj || activeArProj === '*') return;
@@ -1357,23 +1458,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         </label>
                       </div>
 
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast mode — max clarifying questions</label>
-                          <input type="number" min={2} max={4} value={simpleAskMaxQuestions} onChange={e => setSimpleAskMaxQuestions(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — target questions per round</label>
-                          <input type="number" min={4} max={10} value={deepModeRoundTarget} onChange={e => setDeepModeRoundTarget(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max questions per round</label>
-                          <input type="number" min={8} max={14} value={enterpriseMaxQuestionsPerRound} onChange={e => setEnterpriseMaxQuestionsPerRound(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max discovery rounds</label>
-                          <input type="number" min={1} max={6} value={maxDeepDiscoveryRounds} onChange={e => setMaxDeepDiscoveryRounds(Number(e.target.value))} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                        </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Clarifying question coverage</label>
+                        <select
+                          value={workspaceDiscoveryRange}
+                          onChange={(e) => applyDiscoveryRange(e.target.value as DiscoveryRangeId, (values) => {
+                            setSimpleAskMaxQuestions(values.simpleAskMaxQuestions);
+                            setDeepModeRoundTarget(values.deepModeRoundTarget);
+                            setEnterpriseMaxQuestionsPerRound(values.enterpriseMaxQuestionsPerRound);
+                            setMaxDeepDiscoveryRounds(values.maxDeepDiscoveryRounds);
+                          })}
+                          className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none"
+                        >
+                          {DISCOVERY_RANGE_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>{option.label} — {option.hint}</option>
+                          ))}
+                        </select>
+                        <p className="px-1 text-sm text-[var(--rf-text-tertiary)]">
+                          Fast mode asks fewer questions; deep mode uses the same coverage setting to decide round size and how many follow-up rounds it may run.
+                        </p>
                       </div>
                     </div>
 
@@ -1388,16 +1491,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           onChange={e => setActiveArProj(e.target.value)}
                           className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none md:w-72 transition"
                         >
-                          <option value="*">Select a project...</option>
+                          <option value="">Choose project...</option>
+                          <option value="*">Workspace default</option>
                           {projects.map(project => (
                             <option key={project.key} value={project.key}>{project.key}: {project.name}</option>
                           ))}
                         </select>
                       </div>
 
-                      {activeArProj === '*' ? (
+                      {!activeArProj || activeArProj === '*' ? (
                         <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-sm text-[var(--rf-text-tertiary)] text-center">
-                          Select a project to define project-specific AI behavior.
+                          Choose a project to define project-specific AI behavior.
                         </div>
                       ) : (
                         <>
@@ -1538,23 +1642,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                 </label>
                               </div>
 
-                              <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Fast mode — max clarifying questions</label>
-                                  <input type="number" min={2} max={4} value={currentProjectAiPolicy.simpleAskMaxQuestions ?? 4} onChange={e => updateProjectAiPolicy({ simpleAskMaxQuestions: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                                </div>
-                                <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — target questions per round</label>
-                                  <input type="number" min={4} max={10} value={currentProjectAiPolicy.deepModeRoundTarget ?? 6} onChange={e => updateProjectAiPolicy({ deepModeRoundTarget: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                                </div>
-                                <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max questions per round</label>
-                                  <input type="number" min={8} max={14} value={currentProjectAiPolicy.enterpriseMaxQuestionsPerRound ?? 10} onChange={e => updateProjectAiPolicy({ enterpriseMaxQuestionsPerRound: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                                </div>
-                                <div className="space-y-2">
-                                  <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Deep mode — max discovery rounds</label>
-                                  <input type="number" min={1} max={6} value={currentProjectAiPolicy.maxDeepDiscoveryRounds ?? 3} onChange={e => updateProjectAiPolicy({ maxDeepDiscoveryRounds: Number(e.target.value) })} className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
-                                </div>
+                              <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest px-1">Clarifying question coverage</label>
+                                <select
+                                  value={projectDiscoveryRange}
+                                  onChange={(e) => applyDiscoveryRange(e.target.value as DiscoveryRangeId, (values) => updateProjectAiPolicy(values))}
+                                  className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none"
+                                >
+                                  {DISCOVERY_RANGE_OPTIONS.map((option) => (
+                                    <option key={option.id} value={option.id}>{option.label} — {option.hint}</option>
+                                  ))}
+                                </select>
+                                <p className="px-1 text-sm text-[var(--rf-text-tertiary)]">
+                                  This project can ask fewer or more clarifying questions than the workspace default without exposing raw tuning levers.
+                                </p>
                               </div>
                             </div>
                           )}
@@ -1706,7 +1807,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       onChange={e => setActiveArProj(e.target.value)} 
                       className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none sm:w-64 transition"
                     >
-                      <option value="*">Select a project...</option>
+                      <option value="">Choose project...</option>
+                      <option value="*">Workspace default</option>
                       {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
                     </select>
                   </div>
@@ -1982,7 +2084,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 </div>
 
                 {transparencyEnabled && (
-                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-4">
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-5">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <ShieldCheck className="w-4 h-4 text-indigo-600" />
@@ -1991,13 +2093,27 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <h4 className="text-xl font-bold text-[var(--rf-text)]">Transparency Reports</h4>
                       <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">One record per generation turn. Shows the model used, token consumption, PII redactions, and the reasoning decisions the AI made.</p>
                     </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Reports</div>
+                        <div className="mt-1 text-2xl font-bold text-[var(--rf-text)]">{transparencyReports.length}</div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Redactions</div>
+                        <div className="mt-1 text-2xl font-bold text-[var(--rf-text)]">{transparencyReports.reduce((sum, report) => sum + (report.piiMasking?.totalRedactions ?? 0), 0)}</div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Tokens tracked</div>
+                        <div className="mt-1 text-2xl font-bold text-[var(--rf-text)]">{transparencyReports.reduce((sum, report) => sum + (report.tokenUsage?.total ?? 0), 0).toLocaleString()}</div>
+                      </div>
+                    </div>
                     {transparencyReports.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-6 text-sm text-[var(--rf-text-tertiary)] text-center">
                         No transparency reports recorded yet.
                       </div>
                     ) : (
                       <div className="overflow-x-auto rounded-xl border border-[var(--rf-border)]">
-                        <table className="w-full text-xs">
+                        <table className="w-full text-sm">
                           <thead>
                             <tr className="border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)]">
                               <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">When</th>
@@ -2040,11 +2156,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                     <span className="text-[var(--rf-text-tertiary)]">off</span>
                                   )}
                                 </td>
-                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] max-w-xs">
+                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] max-w-sm align-top">
                                   {report.decisionSummary.length > 0 ? (
-                                    <ul className="space-y-0.5">
+                                    <ul className="space-y-1">
                                       {report.decisionSummary.map((d, i) => (
-                                        <li key={i} className="truncate" title={d}>· {d}</li>
+                                        <li key={i} className="leading-relaxed" title={d}>· {d}</li>
                                       ))}
                                     </ul>
                                   ) : '—'}
@@ -2059,7 +2175,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 )}
 
                 {auditTrailEnabled && (
-                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-4">
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-5">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <ShieldCheck className="w-4 h-4 text-indigo-600" />
@@ -2074,7 +2190,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </div>
                     ) : (
                       <div className="overflow-x-auto rounded-xl border border-[var(--rf-border)]">
-                        <table className="w-full text-xs">
+                        <table className="w-full text-sm">
                           <thead>
                             <tr className="border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)]">
                               <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">When</th>
@@ -2101,8 +2217,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                   </span>
                                 </td>
                                 <td className="px-4 py-3 font-bold text-[var(--rf-text)]">{event.action.replace(/_/g, ' ')}</td>
-                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] font-mono text-[10px] max-w-xs truncate" title={JSON.stringify(event.details)}>
-                                  {JSON.stringify(event.details)}
+                                <td className="px-4 py-3 text-[var(--rf-text-secondary)] max-w-md leading-relaxed" title={JSON.stringify(event.details)}>
+                                  {formatAuditDetails(event.details)}
                                 </td>
                               </tr>
                             ))}
@@ -2114,7 +2230,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 )}
 
                 {auditTrailEnabled && jiraAuditRecords.length > 0 && (
-                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-4">
+                  <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-5">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <ShieldCheck className="w-4 h-4 text-indigo-600" />
@@ -2124,7 +2240,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">Recent Jira-side audit events for issues created or modified by Refinely.</p>
                     </div>
                     <div className="overflow-x-auto rounded-xl border border-[var(--rf-border)]">
-                      <table className="w-full text-xs">
+                      <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)]">
                             <th className="px-4 py-3 text-left font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest whitespace-nowrap">When</th>
@@ -2146,8 +2262,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                               </td>
                               <td className="px-4 py-3 font-bold text-[var(--rf-text)]">{String(record.summary ?? record.eventName ?? '—')}</td>
                               <td className="px-4 py-3 text-[var(--rf-text-secondary)]">{String((record.authorAccountId as any)?.displayName ?? record.authorAccountId ?? '—')}</td>
-                              <td className="px-4 py-3 text-[var(--rf-text-secondary)] font-mono text-[10px] max-w-xs truncate" title={JSON.stringify(record)}>
-                                {JSON.stringify(record.objectItem ?? record.changedValues ?? {})}
+                              <td className="px-4 py-3 text-[var(--rf-text-secondary)] max-w-md leading-relaxed" title={JSON.stringify(record)}>
+                                {formatAuditDetails((record.objectItem as Record<string, unknown> | undefined) ?? (record.changedValues as Record<string, unknown> | undefined) ?? record)}
                               </td>
                             </tr>
                           ))}

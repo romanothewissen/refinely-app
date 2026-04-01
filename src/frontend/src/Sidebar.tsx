@@ -79,20 +79,30 @@ export function Sidebar({
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
-  const brainstormDisabled = !requirement.trim() || isWorking || isAtLimit;
+  const hasSelectedScope = Boolean(projectKey);
+  const brainstormDisabled = !hasSelectedScope || !requirement.trim() || isWorking || isAtLimit;
   const [showUsage, setShowUsage] = React.useState(true);
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
   const activeGoldSources = goldSources.filter(source => (source.targetProjects ?? []).includes(projectKey));
-  const matchedConnectorLabel = projectKey === '*'
-    ? 'Select a project for context'
-    : activeGoldSources.length > 0
-      ? `${activeGoldSources.length} active connector${activeGoldSources.length !== 1 ? 's' : ''}`
-      : 'No connectors active';
+  const matchedConnectorLabel = !projectKey
+    ? 'Choose a scope first'
+    : projectKey === '*'
+      ? 'Standalone workspace mode'
+      : activeGoldSources.length > 0
+        ? `${activeGoldSources.length} active connector${activeGoldSources.length !== 1 ? 's' : ''}`
+        : 'No connectors active';
   const activeWiDocs = wiDocs.filter(doc => (doc.targetProjects ?? ['*']).includes('*') || (doc.targetProjects ?? []).includes(projectKey));
   const availableProject = availableProjects.find(p => p.key === projectKey);
-  const projectTitle = projectKey === '*'
-    ? 'Global Workspace'
-    : `${projectKey}${availableProject?.name ? ` \u00b7 ${availableProject.name}` : ''}`;
+  const projectTitle = !projectKey
+    ? 'Choose project or standalone'
+    : projectKey === '*'
+      ? 'Standalone Workspace'
+      : `${projectKey} · ${availableProject?.name || 'Project context'}`;
+  const projectHint = !projectKey
+    ? 'Select a Jira project for context, or deliberately choose Standalone workspace.'
+    : activeGoldSources.length > 0
+      ? 'Backlog context will use the selected project settings.'
+      : 'Project selected. Connectors and docs can now be configured for this scope.';
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
 
   return (
@@ -120,7 +130,7 @@ export function Sidebar({
               {tierName}
             </span>
           </div>
-          <p className="text-[10px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">
+          <p className="text-[11px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">
             Requirement to Backlog
           </p>
         </div>
@@ -151,7 +161,7 @@ export function Sidebar({
       <div className="flex-1 min-h-0 flex flex-col w-full px-4 py-3 gap-3 overflow-hidden">
         {/* Project context card */}
         <motion.div
-          className="rf-sidebar-card px-3 py-2"
+          className="rf-sidebar-card px-3.5 py-3"
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
@@ -159,22 +169,26 @@ export function Sidebar({
         >
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Workspace</div>
-              <div className="text-xs font-semibold text-[var(--rf-text)] truncate">{projectTitle}</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Scope</div>
+              <div className="text-sm font-semibold text-[var(--rf-text)] truncate">{projectTitle}</div>
             </div>
             <select
               value={projectKey}
               onChange={(e) => setProjectKey(e.target.value)}
-              className="shrink-0 min-w-[120px] rounded-lg border border-[var(--rf-sidebar-border)] bg-transparent px-2 py-1 text-[10px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] transition-all hover:bg-[var(--rf-sidebar-card-hover)]"
+              className="shrink-0 min-w-[170px] rounded-lg border border-[var(--rf-sidebar-border)] bg-transparent px-3 py-2 text-[12px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] transition-all hover:bg-[var(--rf-sidebar-card-hover)]"
             >
-              <option value="*" className="text-[var(--rf-text)]">No project</option>
+              <option value="" className="text-[var(--rf-text)]">Choose scope...</option>
+              <option value="*" className="text-[var(--rf-text)]">Standalone workspace</option>
               {availableProjects.map(project => (
                 <option key={project.key} value={project.key} className="text-[var(--rf-text)]">
-                  {project.key}
+                  {project.key}: {project.name}
                 </option>
               ))}
             </select>
           </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-[var(--rf-sidebar-text-muted)]">
+            {projectHint}
+          </p>
         </motion.div>
 
         <motion.div
@@ -187,29 +201,31 @@ export function Sidebar({
           <motion.button
             type="button"
             onClick={() => onOpenProjectSettings('jira', projectKey)}
-            className="rf-sidebar-card px-3 py-2 text-left"
+            className="rf-sidebar-card px-3.5 py-3 text-left disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!hasSelectedScope}
             whileTap={{ scale: 0.98 }}
           >
-            <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Connectors</div>
-            <div className="text-[10px] font-medium text-[var(--rf-text)] truncate">{matchedConnectorLabel}</div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Connectors</div>
+            <div className="text-[12px] font-medium text-[var(--rf-text)] truncate">{matchedConnectorLabel}</div>
           </motion.button>
 
           <motion.button
             type="button"
             onClick={() => onOpenProjectSettings('jira', projectKey)}
-            className="rf-sidebar-card px-3 py-2 text-left"
+            className="rf-sidebar-card px-3.5 py-3 text-left disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!hasSelectedScope}
             whileTap={{ scale: 0.98 }}
           >
-            <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Docs</div>
-            <div className="text-[10px] font-medium text-[var(--rf-text)] truncate">
-              {activeWiDocs.length > 0 ? `${activeWiDocs.length} Ingested` : 'None'}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Docs</div>
+            <div className="text-[12px] font-medium text-[var(--rf-text)] truncate">
+              {!hasSelectedScope ? 'Choose a scope first' : activeWiDocs.length > 0 ? `${activeWiDocs.length} ingested` : 'None linked'}
             </div>
           </motion.button>
         </motion.div>
 
         {/* Policy controls */}
         <motion.div
-          className="rf-sidebar-card px-3 py-2 space-y-2"
+          className="rf-sidebar-card px-3.5 py-3 space-y-2.5"
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
@@ -217,7 +233,7 @@ export function Sidebar({
         >
           <div className="grid gap-2 grid-cols-2">
             <div>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Reasoning</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Reasoning</div>
               <div className="flex rounded-lg bg-[var(--rf-bg-sidebar)] border border-[var(--rf-sidebar-border)] p-0.5">
                 {(['fast', 'deep'] as const).map(mode => (
                   <button
@@ -225,7 +241,7 @@ export function Sidebar({
                     type="button"
                     onClick={() => setReasoningMode(mode)}
                     disabled={!allowReasoningModeOverride}
-                    className={`flex-1 rounded-md px-1.5 py-1 text-[10px] font-bold transition ${
+                    className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-bold transition ${
                       reasoningMode === mode
                         ? 'bg-white text-[var(--rf-brand)] shadow-sm'
                         : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
@@ -237,7 +253,7 @@ export function Sidebar({
               </div>
             </div>
             <div>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Output</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Output</div>
               <div className="flex rounded-lg bg-[var(--rf-bg-sidebar)] border border-[var(--rf-sidebar-border)] p-0.5">
                 {([
                   { value: 'single', label: '1' },
@@ -249,7 +265,7 @@ export function Sidebar({
                     type="button"
                     onClick={() => setOutputMode(option.value)}
                     disabled={!allowOutputModeOverride}
-                    className={`flex-1 rounded-md px-1 py-1 text-[10px] font-bold transition ${
+                    className={`flex-1 rounded-md px-1.5 py-1.5 text-[11px] font-bold transition ${
                       outputMode === option.value
                         ? 'bg-white text-[var(--rf-brand)] shadow-sm'
                         : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
@@ -272,9 +288,9 @@ export function Sidebar({
             animate="visible"
             custom={5}
           >
-            <label className="text-[9px] font-bold text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">Requirement</label>
+            <label className="text-[10px] font-bold text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">Requirement</label>
             {originIssueKey && (
-              <span className="text-[9px] font-bold text-[var(--rf-brand)]">
+              <span className="text-[10px] font-bold text-[var(--rf-brand)]">
                 {originIssueKey}
               </span>
             )}
@@ -290,20 +306,20 @@ export function Sidebar({
             <textarea
               value={requirement}
               onChange={(e) => setRequirement(e.target.value)}
-              placeholder="Describe your feature..."
-              disabled={isWorking}
-              className="block w-full flex-1 bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-xs leading-relaxed resize-none disabled:opacity-50 px-3 py-2 custom-scrollbar"
+              placeholder={hasSelectedScope ? 'Describe your feature...' : 'Choose a project or standalone workspace first'}
+              disabled={isWorking || !hasSelectedScope}
+              className="block w-full flex-1 bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-3.5 py-3 custom-scrollbar"
             />
             <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-sidebar-border)] px-3 py-1.5 bg-[var(--rf-bg-sidebar)]">
               <motion.button
                 title="Attach doc"
-                className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]"
                 whileTap={{ scale: 0.97 }}
               >
                 <Paperclip className="w-3 h-3" />
                 <span>Attach</span>
               </motion.button>
-              <div className="text-[9px] font-medium text-[var(--rf-text-tertiary)] tabular-nums">{wordCount} words</div>
+              <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)] tabular-nums">{wordCount} words</div>
             </div>
           </motion.div>
         </div>
@@ -319,7 +335,7 @@ export function Sidebar({
           <motion.button
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
-            className="brainstorm-shimmer w-full bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 text-white text-xs font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md border border-[var(--rf-brand)]/50"
+            className="brainstorm-shimmer w-full bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 text-white text-sm font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md border border-[var(--rf-brand)]/50"
             whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
@@ -331,14 +347,19 @@ export function Sidebar({
             ) : (
               <>
                 <Zap className={`w-3.5 h-3.5 ${requirement.trim() ? 'fill-white' : ''}`} />
-                <span>{isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
+                <span>{!hasSelectedScope ? 'Choose Scope First' : isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
               </>
             )}
           </motion.button>
+          {!hasSelectedScope && (
+            <p className="px-1 text-[12px] leading-relaxed text-[var(--rf-sidebar-text-muted)]">
+              Generation is locked until you deliberately choose a Jira project or the standalone workspace mode.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <motion.button
               onClick={onNewSession}
-              className="rf-sidebar-card py-2 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[10px] font-bold flex items-center justify-center gap-1"
+              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[11px] font-bold flex items-center justify-center gap-1"
               whileTap={{ scale: 0.97 }}
             >
               <Plus className="w-3 h-3" />
@@ -346,7 +367,7 @@ export function Sidebar({
             </motion.button>
             <motion.button
               onClick={onOpenHistory}
-              className="rf-sidebar-card py-2 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[10px] font-bold flex items-center justify-center gap-1"
+              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[11px] font-bold flex items-center justify-center gap-1"
               whileTap={{ scale: 0.97 }}
             >
               <Clock className="w-3 h-3" />
