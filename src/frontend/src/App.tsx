@@ -6,7 +6,7 @@ import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
 import { SettingsView } from './SettingsView';
 import { api } from './hooks/useForge';
-import { useGenerationRealtime, useClarifyRealtime, type ClarifyFallthroughReason } from './hooks/useRealtime';
+import { useGenerationRealtime, useClarifyRealtime, type ClarifyFallthroughDetails } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
 import { AiExecutionPolicy, DEFAULT_CONFIG, OutputMode, ReasoningMode } from './types';
@@ -518,17 +518,19 @@ export default function App() {
         setGenerationError('Discovery completed without returning questions. Please try again.');
       }
     },
-    (reason: ClarifyFallthroughReason) => {
+    ({ reason, message }: ClarifyFallthroughDetails) => {
       setPendingClarifySessionId(null);
       setIsReviewingDiscovery(false);
       setDiscoveryCoverage(null);
       setIsWorking(false);
-      setGenerationError(
+      const fallbackMessage =
         reason === 'timeout'
           ? 'Discovery timed out. Please try again, or use Fast mode for quicker results.'
           : reason === 'no_questions'
             ? 'Discovery returned no questions. Please try again.'
-            : 'Discovery could not complete. Please try again.',
+            : 'Discovery could not complete. Please try again.';
+      setGenerationError(
+        message || fallbackMessage,
       );
     },
   );

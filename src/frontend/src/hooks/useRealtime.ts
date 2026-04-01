@@ -20,11 +20,39 @@ const CLARIFY_POLL_INTERVAL_MS = 3500;
 const GENERATION_POLL_INTERVAL_MS = 4000;
 
 export type ClarifyFallthroughReason = 'no_questions' | 'error' | 'timeout';
+export interface ClarifyFallthroughDetails {
+  reason: ClarifyFallthroughReason;
+  message?: string;
+}
+
+function toUserFacingClarifyError(message?: string): ClarifyFallthroughDetails {
+  const raw = (message ?? '').trim();
+  if (!raw) {
+    return { reason: 'error' };
+  }
+
+  const lower = raw.toLowerCase();
+  const isTimeoutLike =
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('exceeded') ||
+    lower.includes('abort');
+
+  if (isTimeoutLike) {
+    return {
+      reason: 'timeout',
+      message: 'Discovery timed out while generating questions. Please try again, or use Fast mode for quicker results.',
+    };
+  }
+
+  const cleaned = raw.replace(/^\[clarify-queue\]\s*/i, '').slice(0, 240);
+  return { reason: 'error', message: cleaned };
+}
 
 export function useClarifyRealtime(
   sessionId: string | null,
   onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
-  onFallthrough: (reason: ClarifyFallthroughReason) => void,
+  onFallthrough: (details: ClarifyFallthroughDetails) => void,
 ) {
   const [progress, setProgress] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,14 +88,14 @@ export function useClarifyRealtime(
       }
     };
 
-    const finishWith = (reason: ClarifyFallthroughReason) => {
+    const finishWith = (reason: ClarifyFallthroughReason, message?: string) => {
       if (cancelled) return;
       cancelled = true;
       clearTimer();
       clearWatchdog();
       inFlightRef.current = false;
       setProgress('');
-      onFallthroughRef.current(reason);
+      onFallthroughRef.current({ reason, message });
     };
 
     watchdogRef.current = setTimeout(() => {
@@ -167,7 +195,8 @@ export function useClarifyRealtime(
             retryReason: result.retryReason,
             error: result.error,
           });
-          finishWith('error');
+          const details = toUserFacingClarifyError(result.error);
+          finishWith(details.reason, details.message);
         } else {
           // Unknown shape from storage; keep polling instead of getting stuck.
           scheduleNext();
