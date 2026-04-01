@@ -156,6 +156,7 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
   const heuristicDecision = buildHeuristicPlannerDecision(input);
   const config = input.config;
   const reasoningMode = input.reasoningMode ?? heuristicDecision.reasoningMode;
+  const planningPressure = computePlanningPressure(input);
   if (!config || !input.requirement?.trim()) {
     return heuristicDecision;
   }
@@ -216,6 +217,7 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
       conservativeComplexity,
       input.outputMode ?? heuristicDecision.outputMode,
       reasoningMode,
+      planningPressure.featurePressure,
     );
     const questionPlan = buildQuestionPlan(
       conservativeClarificationMode,
@@ -241,7 +243,7 @@ export async function buildPlannerDecision(input: PlannerInput): Promise<Planner
       clarificationMode: conservativeClarificationMode,
       questionPlan,
       featurePlan,
-      arPlan: buildArPlan(resolvedScopeMode, conservativeComplexity),
+      arPlan: buildArPlan(resolvedScopeMode, conservativeComplexity, planningPressure.arPressure),
       useHierarchy: resolvedScopeMode === 'initiative',
       confidence: Math.min(assessment.confidence, heuristicDecision.confidence),
       ambiguityScore: Math.max(heuristicDecision.ambiguityScore, toAmbiguityScore(conservativeClarity)),
@@ -405,7 +407,8 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
   const complexity: FeaturePlan['complexity'] =
     complexityScore >= 4 ? 'high' : complexityScore >= 2 ? 'medium' : 'low';
 
-  const featurePlan = buildFeaturePlan(scopeMode, complexity, outputMode, reasoningMode);
+  const planningPressure = computePlanningPressure(input);
+  const featurePlan = buildFeaturePlan(scopeMode, complexity, outputMode, reasoningMode, planningPressure.featurePressure);
   let clarificationMode = pickClarificationMode(scopeMode, clarity, reasoningMode, complexityScore);
   const requiresExpandedDiscovery =
     hasAllocationPlanningSignal ||
@@ -415,7 +418,7 @@ export function buildHeuristicPlannerDecision(input: PlannerInput): PlannerDecis
     clarificationMode = 'deep';
   }
   const questionPlan = buildQuestionPlan(clarificationMode, clarity, policy);
-  const arPlan = buildArPlan(scopeMode, complexity);
+  const arPlan = buildArPlan(scopeMode, complexity, planningPressure.arPressure);
 
   const rationale: string[] = [];
   if (scopeMode === 'atomic') rationale.push('Request appears narrow enough for a single well-scoped feature.');
@@ -477,35 +480,62 @@ function buildFeaturePlan(
   complexity: FeaturePlan['complexity'],
   outputMode: OutputMode,
   reasoningMode: ReasoningMode,
+  featurePressure: number,
 ): FeaturePlan {
   if (scopeMode === 'atomic') {
     return { min: 1, max: 1, target: 1, shape: 'narrow', complexity };
   }
 
   if (scopeMode === 'focused') {
+    const target = clamp(
+      2 +
+        (featurePressure >= 2 ? 1 : 0) +
+        (featurePressure >= 5 ? 1 : 0) +
+        (outputMode === 'full_breakdown' || reasoningMode === 'deep' ? 1 : 0),
+      2,
+      4,
+    );
     return {
       min: 2,
       max: 4,
-      target: outputMode === 'full_breakdown' || reasoningMode === 'deep' ? 4 : 3,
+      target,
       shape: 'narrow',
       complexity,
     };
   }
 
   if (scopeMode === 'initiative') {
+    const target = clamp(
+      6 +
+        (featurePressure >= 2 ? 1 : 0) +
+        (featurePressure >= 4 ? 1 : 0) +
+        (featurePressure >= 6 ? 1 : 0) +
+        (reasoningMode === 'deep' ? 1 : 0),
+      6,
+      10,
+    );
     return {
-      min: 7,
+      min: 6,
       max: 10,
-      target: reasoningMode === 'deep' ? 9 : 8,
+      target,
       shape: 'broad',
       complexity: 'high',
     };
   }
 
+  const target = clamp(
+    3 +
+      (featurePressure >= 1 ? 1 : 0) +
+      (featurePressure >= 3 ? 1 : 0) +
+      (featurePressure >= 5 ? 1 : 0) +
+      (reasoningMode === 'deep' || outputMode === 'full_breakdown' ? 1 : 0),
+    3,
+    7,
+  );
   return {
-    min: 4,
+    min: 3,
     max: 7,
-    target: reasoningMode === 'deep' || outputMode === 'full_breakdown' ? 6 : 5,
+    target,
     shape: 'balanced',
     complexity,
   };
@@ -618,19 +648,93 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function computePlanningPressure(input: PlannerInput): { featurePressure: number; arPressure: number } {
+  const requirement = input.requirement?.trim() ?? '';
+  const answers = input.clarifyAnswers ?? [];
+  const reqWords = requirement ? requirement.split(/\s+/).length : 0;
+  const reqSentences = requirement
+    ? requirement.split(/[.!?]\s+/).map((s) => s.trim()).filter(Boolean).length
+    : 0;
+  const actorMentions =
+    (requirement.match(/\bas\s+a[n]?\s+[a-z0-9][a-z0-9\s/-]{0,40}/ig) ?? []).length +
+    (requirement.match(/\b(?:used by|visible to|assigned to|owned by)\s+[a-z0-9][a-z0-9\s/-]{0,40}/ig) ?? []).length;
+  const exceptionMentions = (requirement.match(/\b(error|fail|exception|edge|invalid|conflict|fallback|retry|permission|duplicate|rollback|escalat|audit|log|history)\w*\b/ig) ?? []).length;
+  const integrationMentions = (requirement.match(/\b(integration|sync|import|export|api|feed|data source|vendor|webhook|endpoint|queue|channel)\b/ig) ?? []).length;
+  const listSeparatorCount = (requirement.match(/,/g) ?? []).length;
+  const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|various|different|complex|including|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception|rollout|migration|program|portfolio|operating model)/i
+    .test(requirement);
+  const hasEnterpriseSignals = /(enterprise|compliance|audit|governance|permission matrix|cross[- ]functional|cross[- ]team|multiple teams|multiple departments|multiple business units|regional|global rollout)/i
+    .test(requirement);
+  const hasDecisionSignal = /\b(if|whether|based on|determine|identify|distinguish|decide|unless)\b/i.test(requirement);
+  const hasAlternativeOutcomeSignal = /\bor\b/i.test(requirement);
+  const hasEnumerationSignal = /\b(including|such as|for example|e\.g\.)\b/i.test(requirement);
+  const hasComplianceSignal = /\b(compliance|audit|security|permission|approval|policy|governance|history)\b/i.test(requirement);
+  const hasMultiScenarioSignal =
+    hasEnumerationSignal ||
+    listSeparatorCount >= 2 ||
+    /\betc\b/i.test(requirement);
+
+  const featurePressure = clamp(
+    (reqWords >= 35 ? 1 : 0) +
+    (reqSentences >= 2 ? 1 : 0) +
+    (actorMentions >= 2 ? 1 : 0) +
+    (hasBroadScopeSignals ? 1 : 0) +
+    (hasDecisionSignal && hasAlternativeOutcomeSignal ? 1 : 0) +
+    (hasMultiScenarioSignal ? 1 : 0) +
+    (answers.length >= 3 ? 1 : 0) +
+    (hasEnterpriseSignals ? 1 : 0),
+    0,
+    6,
+  );
+
+  const arPressure = clamp(
+    (reqSentences >= 2 ? 1 : 0) +
+    (exceptionMentions >= 1 ? 1 : 0) +
+    (exceptionMentions >= 3 ? 1 : 0) +
+    (integrationMentions >= 1 ? 1 : 0) +
+    (hasDecisionSignal ? 1 : 0) +
+    (hasComplianceSignal ? 1 : 0) +
+    (answers.length >= 2 ? 1 : 0),
+    0,
+    6,
+  );
+
+  return { featurePressure, arPressure };
+}
+
 function buildArPlan(
   scopeMode: ScopeMode,
   complexity: FeaturePlan['complexity'],
+  arPressure: number,
 ): ArPlan {
-  if (scopeMode === 'atomic' && complexity === 'low') {
+  if (scopeMode === 'atomic' && complexity === 'low' && arPressure <= 1) {
     return { min: 2, max: 3, target: 2, depth: 'lean' };
   }
 
-  if (scopeMode === 'initiative' || complexity === 'high') {
-    return { min: 4, max: 6, target: 5, depth: 'thorough' };
+  if (scopeMode === 'initiative' || complexity === 'high' || arPressure >= 5) {
+    return {
+      min: 4,
+      max: 6,
+      target: arPressure >= 6 ? 6 : 5,
+      depth: 'thorough',
+    };
   }
 
-  return { min: 3, max: 5, target: 4, depth: 'standard' };
+  if (complexity === 'low' && arPressure <= 2) {
+    return {
+      min: 2,
+      max: 4,
+      target: arPressure <= 1 ? 2 : 3,
+      depth: 'lean',
+    };
+  }
+
+  return {
+    min: 3,
+    max: 5,
+    target: arPressure >= 4 ? 5 : arPressure <= 1 ? 3 : 4,
+    depth: 'standard',
+  };
 }
 
 function buildAmbiguityReasons(input: {
