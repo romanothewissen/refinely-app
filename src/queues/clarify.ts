@@ -14,7 +14,7 @@ import { buildHeuristicPlannerDecision } from '../core/planner';
 import { generateClarifyingQuestions, normalizeConversationTitle } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
-import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
+import { findSimilarStoriesWithUsage, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { upsertAiSessionInsight } from '../services/ai-insights';
 import { entityGet, entitySet, KEYS } from '../services/cache';
@@ -117,6 +117,21 @@ function zeroClarifyTokenUsage(): TokenUsageSummary {
     total: 0,
     byStage: {
       clarify: { input: 0, output: 0, total: 0 },
+    },
+  };
+}
+
+function mergeTokenUsage(
+  existing?: TokenUsageSummary,
+  next?: TokenUsageSummary,
+): TokenUsageSummary {
+  return {
+    input: (existing?.input ?? 0) + (next?.input ?? 0),
+    output: (existing?.output ?? 0) + (next?.output ?? 0),
+    total: (existing?.total ?? 0) + (next?.total ?? 0),
+    byStage: {
+      ...(existing?.byStage ?? {}),
+      ...(next?.byStage ?? {}),
     },
   };
 }
@@ -278,7 +293,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       jobId: event.jobId,
       eventId: event.eventId,
     });
-    const [wiContext, goldItems, similarStories] = await Promise.all([
+    const [wiContext, goldItems, similarStoriesResult] = await Promise.all([
       config.wiConfig.enabled
         ? withTimeoutFallback(
             retrieveWiContext(
@@ -302,13 +317,14 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
         : Promise.resolve([]),
       includeBacklogContext && retrievalStrategy.includeSimilarStories
         ? withTimeoutFallback(
-            findSimilarStories(maskedRequirement.text, config, projectKey),
+            findSimilarStoriesWithUsage(maskedRequirement.text, config, projectKey),
             retrievalStrategy.contextTimeoutMs,
-            [],
+            { stories: [], tokenUsage: zeroClarifyTokenUsage() },
             'similar stories',
           )
-        : Promise.resolve([]),
+        : Promise.resolve({ stories: [], tokenUsage: zeroClarifyTokenUsage() }),
     ]);
+    const similarStories = similarStoriesResult.stories;
 
     let questions: Awaited<ReturnType<typeof generateClarifyingQuestions>>['questions'] = [];
     let tokenUsage: TokenUsageSummary = zeroClarifyTokenUsage();
@@ -342,7 +358,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       plannerDecision,
     });
     questions = clarifyResult.questions;
-    tokenUsage = clarifyResult.tokenUsage;
+    tokenUsage = mergeTokenUsage(clarifyResult.tokenUsage, similarStoriesResult.tokenUsage);
     ambiguityAssessment = clarifyResult.ambiguityAssessment;
 
     const clarifyContext: ClarifyContextMeta = {

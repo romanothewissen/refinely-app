@@ -10,7 +10,7 @@
 import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
 import { buildHeuristicPlannerDecision } from '../core/planner';
 import { generateFeatures, generateSessionTitle, normalizeConversationTitle } from '../core/story-generator';
-import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
+import { findSimilarStoriesWithUsage, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { upsertAiSessionInsight } from '../services/ai-insights';
@@ -55,6 +55,22 @@ async function withTimeoutFallback<T>(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function mergeTokenUsage(
+  existing?: TokenUsageSummary,
+  next?: TokenUsageSummary,
+): TokenUsageSummary | undefined {
+  if (!existing && !next) return undefined;
+  return {
+    input: (existing?.input ?? 0) + (next?.input ?? 0),
+    output: (existing?.output ?? 0) + (next?.output ?? 0),
+    total: (existing?.total ?? 0) + (next?.total ?? 0),
+    byStage: {
+      ...(existing?.byStage ?? {}),
+      ...(next?.byStage ?? {}),
+    },
+  };
 }
 
 function buildGenerationRetrievalBudget(reasoningMode: 'fast' | 'deep') {
@@ -137,7 +153,7 @@ export async function handler(event: { body: GenerationEvent }) {
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'workspace';
     await sendProgress(sessionId, `Loading context for ${projectLabel}…`);
 
-    const [goldItems, wiContext, similarStories] = await Promise.all([
+    const [goldItems, wiContext, similarStoriesResult] = await Promise.all([
       goldCount
         ? withTimeoutFallback(
             fetchGoldExamples(config.goldSources, retrievalBudget.goldLimit),
@@ -160,13 +176,14 @@ export async function handler(event: { body: GenerationEvent }) {
           )
         : Promise.resolve({ text: '', docs: [] }),
       withTimeoutFallback(
-        findSimilarStories(maskedRequirement.text, config, projectKey),
+        findSimilarStoriesWithUsage(maskedRequirement.text, config, projectKey),
         retrievalBudget.contextTimeoutMs,
-        [],
+        { stories: [], tokenUsage: { input: 0, output: 0, total: 0, byStage: {} } },
         'similar stories',
       ),
     ]);
 
+    const similarStories = similarStoriesResult.stories;
     const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
 
@@ -216,6 +233,7 @@ export async function handler(event: { body: GenerationEvent }) {
 
     result.similarStories = similarStories;
     result.sessionId = sessionId;
+    result.tokenUsage = mergeTokenUsage(result.tokenUsage, similarStoriesResult.tokenUsage) ?? result.tokenUsage;
     const latestDiscoveryCoverage = await getLatestDiscoveryCoverage(sessionId, accountId);
     const latestDiscoveryTranscript = await getLatestDiscoveryTranscript(sessionId, accountId);
     const generationContext: GenerationContextMeta = {

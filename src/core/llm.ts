@@ -165,14 +165,22 @@ async function callGemini(opts: {
   let payload: {
     error?: { message?: string };
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      thoughtsTokenCount?: number;
+    };
   } = {};
 
   try {
     payload = JSON.parse(rawBody) as {
       error?: { message?: string };
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        thoughtsTokenCount?: number;
+      };
     };
   } catch {
     // Some Forge/network errors come back as plain text, not JSON.
@@ -195,7 +203,9 @@ async function callGemini(opts: {
   return {
     text,
     inputTokens: payload.usageMetadata?.promptTokenCount,
-    outputTokens: payload.usageMetadata?.candidatesTokenCount,
+    outputTokens:
+      (payload.usageMetadata?.candidatesTokenCount ?? 0) +
+      (payload.usageMetadata?.thoughtsTokenCount ?? 0),
   };
 }
 

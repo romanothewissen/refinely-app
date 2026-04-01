@@ -7,9 +7,9 @@
  */
 
 import { asApp, assumeTrustedRoute } from '@forge/api';
-import { callLlmJson } from './llm';
+import { callLlmJsonWithUsage } from './llm';
 import { buildRerankPrompt } from './prompts';
-import { SimilarStory, TenantConfig } from '../types';
+import { SimilarStory, TenantConfig, TokenUsageSummary } from '../types';
 import { objectRead, objectWrite, KEYS } from '../services/cache';
 
 interface BacklogDoc {
@@ -55,25 +55,51 @@ const MAX_SIMILAR_STORIES = 12;
 const MIN_STORY_RELEVANCE = 0.26;
 const MIN_BASELINE_STORIES = 4;
 
+function zeroTokenUsage(): TokenUsageSummary {
+  return {
+    input: 0,
+    output: 0,
+    total: 0,
+    byStage: {},
+  };
+}
+
+export interface SimilarStoriesResult {
+  stories: SimilarStory[];
+  tokenUsage: TokenUsageSummary;
+}
+
 export async function findSimilarStories(
   requirement: string,
   config: TenantConfig,
   projectKey = '*',
 ): Promise<SimilarStory[]> {
+  const result = await findSimilarStoriesWithUsage(requirement, config, projectKey);
+  return result.stories;
+}
+
+export async function findSimilarStoriesWithUsage(
+  requirement: string,
+  config: TenantConfig,
+  projectKey = '*',
+): Promise<SimilarStoriesResult> {
   if (!projectKey || projectKey === '*') {
-    return [];
+    return { stories: [], tokenUsage: zeroTokenUsage() };
   }
 
   try {
     const index = await ensureBacklogIndex(projectKey, config);
-    if (!index.docs.length) return [];
+    if (!index.docs.length) return { stories: [], tokenUsage: zeroTokenUsage() };
 
     const candidates = lexicalRetrieve(requirement, index.docs).slice(0, 24);
-    if (!candidates.length) return [];
+    if (!candidates.length) return { stories: [], tokenUsage: zeroTokenUsage() };
 
     let ranked = candidates;
+    let rerankUsage = zeroTokenUsage();
     if (config.similarityConfig.useLlmRerank && config.tier !== 'free' && candidates.length > 5) {
-      ranked = await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
+      const reranked = await rerankWithClaude(requirement, candidates, config);
+      ranked = reranked.items;
+      rerankUsage = reranked.tokenUsage;
     }
 
     const normalized = normalizeSimilarityScores(ranked);
@@ -82,17 +108,20 @@ export async function findSimilarStories(
       .slice(0, MAX_SIMILAR_STORIES);
 
     const baseUrl = await getJiraBaseUrl();
-    return selected.map(item => ({
-      key: item.key,
-      summary: item.summary,
-      description: item.description,
-      acceptanceCriteria: item.acceptanceCriteria,
-      relevanceScore: item.relevanceScore,
-      url: `${baseUrl}/browse/${item.key}`,
-    }));
+    return {
+      stories: selected.map(item => ({
+        key: item.key,
+        summary: item.summary,
+        description: item.description,
+        acceptanceCriteria: item.acceptanceCriteria,
+        relevanceScore: item.relevanceScore,
+        url: `${baseUrl}/browse/${item.key}`,
+      })),
+      tokenUsage: rerankUsage,
+    };
   } catch (err) {
     console.warn('[similar-stories] Backlog retrieval failed:', err);
-    return [];
+    return { stories: [], tokenUsage: zeroTokenUsage() };
   }
 }
 
@@ -468,25 +497,50 @@ function buildTermFreq(terms: string[]): Record<string, number> {
 async function rerankWithClaude(
   requirement: string,
   candidates: Array<BacklogDoc & { relevanceScore: number }>,
-  model: string,
-): Promise<Array<BacklogDoc & { relevanceScore: number }>> {
+  config: TenantConfig,
+): Promise<{ items: Array<BacklogDoc & { relevanceScore: number }>; tokenUsage: TokenUsageSummary }> {
   try {
     const summaries = candidates.map(c => `${c.key}: ${c.summary}`);
     const prompt = buildRerankPrompt(requirement, summaries);
 
-    const ranked = await callLlmJson<number[]>({
-      model,
+    const ranked = await callLlmJsonWithUsage<number[]>({
+      model: config.generatorConfig.themeModel,
       systemPrompt: 'Rank the Jira backlog items by relevance to the requirement. Output a JSON array of 1-based indices.',
       userMessage: prompt,
       maxTokens: 256,
+      provider: config.generatorConfig.provider,
+      geminiApiKey: config.generatorConfig.geminiApiKey,
+      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+      openaiApiKey: config.generatorConfig.openaiApiKey,
+      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+      azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
+      azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
+      azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
+      azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
     });
 
-    if (!Array.isArray(ranked)) return candidates;
-    return ranked
-      .map(index => candidates[index - 1])
-      .filter((candidate): candidate is BacklogDoc & { relevanceScore: number } => !!candidate);
+    const tokenUsage: TokenUsageSummary = {
+      input: ranked.usage.input,
+      output: ranked.usage.output,
+      total: ranked.usage.input + ranked.usage.output,
+      byStage: {
+        similarStoriesRerank: {
+          input: ranked.usage.input,
+          output: ranked.usage.output,
+          total: ranked.usage.input + ranked.usage.output,
+        },
+      },
+    };
+
+    if (!Array.isArray(ranked.data)) return { items: candidates, tokenUsage };
+    return {
+      items: ranked.data
+        .map(index => candidates[index - 1])
+        .filter((candidate): candidate is BacklogDoc & { relevanceScore: number } => !!candidate),
+      tokenUsage,
+    };
   } catch {
-    return candidates;
+    return { items: candidates, tokenUsage: zeroTokenUsage() };
   }
 }
 
