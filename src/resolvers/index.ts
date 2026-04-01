@@ -328,8 +328,10 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   }
 
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const runId = randomUUID();
 
   const event: GenerationEvent = {
+    runId,
     sessionId: payload.sessionId,
     accountId,
     requirement: payload.requirement,
@@ -347,14 +349,29 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
   await entitySet(KEYS.generationProgress(payload.sessionId), {
     type: 'progress',
+    runId,
     sessionId: payload.sessionId,
     message: 'Queuing generation…',
     updatedAt: Date.now(),
   });
 
   const generationQueue = new Queue({ key: 'generation-queue' });
-  await generationQueue.push({ body: event });
-  return { success: true, sessionId: payload.sessionId };
+  const pushResult = await generationQueue.push({
+    body: event,
+    concurrency: {
+      key: `generation-${payload.sessionId}`,
+      limit: 1,
+    },
+  });
+  await entitySet(KEYS.generationProgress(payload.sessionId), {
+    type: 'progress',
+    runId,
+    jobId: pushResult.jobId,
+    sessionId: payload.sessionId,
+    message: 'Queuing generation…',
+    updatedAt: Date.now(),
+  });
+  return { success: true, sessionId: payload.sessionId, runId, jobId: pushResult.jobId };
 });
 
 // ─── Generation progress (polling) ───────────────────────────────────────────

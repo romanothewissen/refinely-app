@@ -21,20 +21,53 @@ import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendCompliance
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error';
   sessionId: string;
+  runId?: string;
+  jobId?: string;
   message?: string;
   pass?: 1 | 2;
   payload?: unknown;
 }
 
-async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: unknown) {
+async function writeGenerationProgress(
+  sessionId: string,
+  runId: string,
+  patch: Record<string, unknown>,
+) {
+  const current = await entityGet<Record<string, any>>(KEYS.generationProgress(sessionId));
+  if (current?.runId && current.runId !== runId) {
+    console.warn('[generation-queue] Skipping stale progress write for superseded run', {
+      sessionId,
+      activeRunId: current.runId,
+      staleRunId: runId,
+    });
+    return false;
+  }
+
   await entitySet(KEYS.generationProgress(sessionId), {
+    ...(current ?? {}),
+    ...patch,
+    runId,
+    updatedAt: Date.now(),
+  });
+  return true;
+}
+
+async function sendProgress(
+  sessionId: string,
+  runId: string,
+  message: string,
+  pass?: 1 | 2,
+  payload?: unknown,
+  extra?: Record<string, unknown>,
+) {
+  await writeGenerationProgress(sessionId, runId, {
     type: 'progress',
     sessionId,
     message,
     pass,
     payload,
-    updatedAt: Date.now(),
-  } as RealtimeEvent);
+    ...(extra ?? {}),
+  });
 }
 
 async function withTimeoutFallback<T>(
@@ -125,7 +158,7 @@ async function getLatestDiscoveryTranscript(sessionId: string, accountId: string
 }
 
 export async function handler(event: { body: GenerationEvent }) {
-  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
+  const { runId, sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
   // Resolve project-specific context and filter gold sources
   const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
@@ -151,7 +184,7 @@ export async function handler(event: { body: GenerationEvent }) {
     const retrievalBudget = buildGenerationRetrievalBudget(reasoningMode);
     const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'workspace';
-    await sendProgress(sessionId, `Loading context for ${projectLabel}…`);
+    await sendProgress(sessionId, runId, `Loading context for ${projectLabel}…`);
 
     const [goldItems, wiContext, similarStoriesResult] = await Promise.all([
       goldCount
@@ -192,7 +225,7 @@ export async function handler(event: { body: GenerationEvent }) {
     if (similarStories.length > 0) contextParts.push(`${similarStories.length} related stor${similarStories.length !== 1 ? 'ies' : 'y'}`);
     if (wiContext.docs.length > 0) contextParts.push(`${wiContext.docs.length} work instruction${wiContext.docs.length !== 1 ? 's' : ''}`);
     const contextSummary = contextParts.length > 0 ? contextParts.join(', ') : 'no prior context';
-    await sendProgress(sessionId, `Context loaded (${contextSummary}). Planning features…`);
+    await sendProgress(sessionId, runId, `Context loaded (${contextSummary}). Planning features…`);
 
     const plannerDecision = buildHeuristicPlannerDecision({
       requirement: maskedRequirement.text,
@@ -207,7 +240,7 @@ export async function handler(event: { body: GenerationEvent }) {
     });
 
     // Progress: pass 1
-    await sendProgress(sessionId, 'Decomposing requirement into features…', 1);
+    await sendProgress(sessionId, runId, 'Decomposing requirement into features…', 1);
 
     const result = await generateFeatures({
       requirement,
@@ -224,6 +257,7 @@ export async function handler(event: { body: GenerationEvent }) {
         const batchHint = arBatchCount > 1 ? ` across ${arBatchCount} batches` : '';
         await sendProgress(
           sessionId,
+          runId,
           `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Writing acceptance requirements${batchHint}…`,
           2,
           { features: draftFeatures, draft: true },
@@ -268,12 +302,11 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     result.generationContext = generationContext;
 
-    await entitySet(KEYS.generationProgress(sessionId), {
+    await writeGenerationProgress(sessionId, runId, {
       type: 'complete',
       sessionId,
       payload: result,
-      updatedAt: Date.now(),
-    } as RealtimeEvent);
+    });
 
     try {
       await upsertAiSessionInsight({
@@ -378,12 +411,11 @@ export async function handler(event: { body: GenerationEvent }) {
 
   } catch (err) {
     console.error('[generation-queue] Error:', err);
-    await entitySet(KEYS.generationProgress(sessionId), {
+    await writeGenerationProgress(sessionId, runId, {
       type: 'error',
       sessionId,
       message: err instanceof Error ? err.message : 'Generation failed. Please try again.',
-      updatedAt: Date.now(),
-    } as RealtimeEvent);
+    });
   }
 }
 

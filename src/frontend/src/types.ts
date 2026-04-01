@@ -502,6 +502,7 @@ export interface ClarifyEvent {
 // ─── Generation Queue Event ───────────────────────────────────────────────────
 
 export interface GenerationEvent {
+  runId: string;
   sessionId: string;
   accountId: string;          // Atlassian account ID of the initiating user
   requirement: string;

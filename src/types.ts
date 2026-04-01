@@ -568,6 +568,7 @@ export interface ClarifyEvent {
 // ─── Generation Queue Event ───────────────────────────────────────────────────
 
 export interface GenerationEvent {
+  runId: string;
   sessionId: string;
   accountId: string;
   requirement: string;

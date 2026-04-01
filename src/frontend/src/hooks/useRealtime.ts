@@ -4,6 +4,7 @@ import { invoke } from '@forge/bridge';
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error';
   sessionId: string;
+  runId?: string;
   message?: string;
   pass?: 1 | 2;
   payload?: unknown;
