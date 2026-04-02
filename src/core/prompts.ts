@@ -71,8 +71,8 @@ export function buildDecompositionSystemPrompt(opts: {
     min: number;
     max: number;
     target: number;
-    shape: 'narrow' | 'balanced' | 'broad';
-    complexity: 'low' | 'medium' | 'high';
+    shape: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
+    complexity: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
   };
 }): string {
   const roleList = opts.domainRoles.length
@@ -87,14 +87,46 @@ export function buildDecompositionSystemPrompt(opts: {
     ? '- Each feature MUST include a process_code from the taxonomy above (never invent a code)'
     : '- Omit process_code from output';
 
-  const planningGuidance = opts.featurePlan
-    ? `OUTPUT CALIBRATION:
-- The requirement shape appears: ${opts.featurePlan.shape.toUpperCase()}
-- The requirement complexity appears: ${opts.featurePlan.complexity.toUpperCase()}
-- Aim for ${opts.featurePlan.min}-${opts.featurePlan.max} features (target ${opts.featurePlan.target})
-- If the requirement is narrow, do NOT split into trivial or UI-level features
-- If the requirement is broad, include supporting capabilities only when they are independently deliverable`
-    : '';
+  const planningGuidance = (() => {
+    if (!opts.featurePlan) return '';
+    const { shape, complexity, min, max, target } = opts.featurePlan;
+    const base = `OUTPUT CALIBRATION:
+- The requirement shape appears: ${shape.toUpperCase()}
+- The requirement complexity appears: ${complexity.toUpperCase()}
+- Aim for ${min}-${max} features (target ${target})`;
+
+    if (shape === 'minimal')
+      return `${base}
+- This is a FOCUSED, small requirement. Output exactly ${target} feature(s).
+- Do NOT decompose further unless there are genuinely independent capabilities.
+- One well-scoped feature is better than three micro-features.
+- If the ask is a single capability, return exactly 1 feature.`;
+
+    if (shape === 'narrow')
+      return `${base}
+- This is a tightly scoped requirement. Keep features to ${min}-${max}.
+- Do NOT split into trivial or UI-level features.
+- Combine related concerns into a single feature rather than over-splitting.`;
+
+    if (shape === 'epic')
+      return `${base}
+- This is a COMPLEX, multi-workflow requirement. It MUST produce ${min}-${max} features.
+- Each distinct workflow, role-specific capability, or independently testable behavior MUST be its own feature.
+- DO NOT collapse multiple workflows into a single feature.
+- If the requirement describes ${min}+ things, output ${min}+ features.
+- Under-decomposition is worse than over-decomposition for requirements of this scale.`;
+
+    if (shape === 'broad')
+      return `${base}
+- This is a broad requirement covering multiple capabilities. Target ${target} features.
+- Include supporting capabilities only when they are independently deliverable.
+- Each distinct workflow or role-specific behavior should be its own feature.`;
+
+    // balanced (default)
+    return `${base}
+- If the requirement is narrow, do NOT split into trivial or UI-level features.
+- If the requirement is broad, include supporting capabilities only when they are independently deliverable.`;
+  })();
 
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
@@ -119,6 +151,7 @@ RULES:
 - No system-specific terms: no product names, module names, or object names
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
+- Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
 ${processRule}
 ${planningGuidance ? `\n${planningGuidance}` : ''}
 
@@ -136,16 +169,38 @@ export function buildArSystemPrompt(opts: {
     min: number;
     max: number;
     target: number;
-    depth: 'lean' | 'standard' | 'thorough';
+    depth: 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
   };
 }): string {
-  const arGuidance = opts.arPlan
-    ? `AR CALIBRATION:
-- Target ${opts.arPlan.min}-${opts.arPlan.max} acceptance requirements per feature (target ${opts.arPlan.target})
-- Depth should be ${opts.arPlan.depth.toUpperCase()}
-- Do not under-specify broad or risky features
-- Do not over-specify very small, straightforward features`
-    : '';
+  const arGuidance = (() => {
+    if (!opts.arPlan) return '';
+    const { min, max, target, depth } = opts.arPlan;
+    const base = `AR CALIBRATION:
+- Target ${min}-${max} acceptance requirements per feature (target ${target})
+- Depth should be ${depth.toUpperCase()}`;
+
+    if (depth === 'minimal')
+      return `${base}
+- Write only ${min}-${max} ARs per feature covering the happy path.
+- Skip edge cases unless they are critical to business correctness.
+- Keep ARs concise and focused on the core behavior.`;
+
+    if (depth === 'comprehensive')
+      return `${base}
+- Be exhaustive. Cover the happy path, key business rules, edge cases, failure modes, and boundary conditions.
+- Each distinct scenario or rule deserves its own AR.
+- Do not under-specify broad or risky features — thoroughness is expected at this depth.`;
+
+    if (depth === 'lean')
+      return `${base}
+- Focus on the happy path and one or two key business rules.
+- Do not over-specify very small, straightforward features.`;
+
+    // standard / thorough
+    return `${base}
+- Do not under-specify broad or risky features.
+- Do not over-specify very small, straightforward features.`;
+  })();
 
   return `You are a principal QA lead and business analyst writing acceptance requirements for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
@@ -177,6 +232,32 @@ OUTPUT FORMAT (strict):
 - Fill at least 2–4 acceptance_requirements per feature unless the feature is truly trivial (then at least 1).
 
 Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
+}
+
+// ─── Per-Feature AR User Message (for parallel AR generation) ────────────────
+
+export function buildArPerFeatureUserMessage(opts: {
+  requirement: string;
+  clarifyAnswers?: { question: string; answer: string }[];
+  feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string };
+}): string {
+  const reqText = (opts.requirement || '').trim().slice(0, 2000);
+  const parts = [`REQUIREMENT:\n${reqText}`];
+
+  const answers = opts.clarifyAnswers ?? [];
+  if (answers.length > 0) {
+    const qaText = answers
+      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
+      .join('\n\n')
+      .slice(0, 1500);
+    parts.push(`CLARIFYING Q&A:\n${qaText}`);
+  }
+
+  parts.push(
+    `---\n\nFEATURE TO WRITE ACCEPTANCE REQUIREMENTS FOR:\n${JSON.stringify(opts.feature, null, 2)}`,
+  );
+
+  return parts.join('\n\n');
 }
 
 // ─── Clarifying Questions ─────────────────────────────────────────────────────

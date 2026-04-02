@@ -25,6 +25,8 @@ interface RealtimeEvent {
   payload?: unknown;
 }
 
+const PROGRESS_HEARTBEAT_MS = 15000;
+
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2) {
   await entitySet(KEYS.generationProgress(sessionId), {
     type: 'progress',
@@ -33,6 +35,27 @@ async function sendProgress(sessionId: string, message: string, pass?: 1 | 2) {
     pass,
     updatedAt: Date.now(),
   } as RealtimeEvent);
+}
+
+function startProgressHeartbeat(
+  sessionId: string,
+  getCurrentProgress: () => { message?: string; pass?: 1 | 2 },
+) {
+  let stopped = false;
+  let inFlight = false;
+  const timer = setInterval(() => {
+    const current = getCurrentProgress();
+    if (stopped || inFlight || !current.message) return;
+    inFlight = true;
+    void sendProgress(sessionId, current.message, current.pass).finally(() => {
+      inFlight = false;
+    });
+  }, PROGRESS_HEARTBEAT_MS);
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 function resolveRelevantGoldSources(
@@ -71,15 +94,22 @@ export async function handler(event: { body: GenerationEvent }) {
     goldSources: relevantGoldSources,
     tier: getEffectiveTier(eventConfig, { license }) 
   };
+  let stopHeartbeat: (() => void) | null = null;
 
   try {
+    let currentProgress: { message?: string; pass?: 1 | 2 } = {};
+    const updateProgress = async (message: string, pass?: 1 | 2) => {
+      currentProgress = { message, pass };
+      await sendProgress(sessionId, message, pass);
+    };
+    stopHeartbeat = startProgressHeartbeat(sessionId, () => currentProgress);
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
     const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
-    await sendProgress(sessionId, `Reading reference examples, work instructions, and related stories for ${projectLabel}…`);
+    await updateProgress(`Reading reference examples, work instructions, and related stories for ${projectLabel}…`);
 
     const [goldItems, wiContext, similarStories] = await Promise.all([
       goldCount
@@ -102,7 +132,7 @@ export async function handler(event: { body: GenerationEvent }) {
     const similarStoriesText = formatSimilarStoriesText(similarStories);
 
     // Progress: pass 1
-    await sendProgress(sessionId, 'Planning feature structure from gathered context…', 1);
+    await updateProgress('Planning feature structure from gathered context…', 1);
 
     const result = await generateFeatures({
       requirement,
@@ -115,7 +145,11 @@ export async function handler(event: { body: GenerationEvent }) {
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onPass1Complete: async (featureCount) => {
         if (await isWorkflowCancelled(sessionId)) return;
-        await sendProgress(sessionId, `Writing acceptance requirements for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
+        await updateProgress(`Writing acceptance requirements for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
+      },
+      onArProgress: async (completed, total) => {
+        if (await isWorkflowCancelled(sessionId)) return;
+        await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2);
       },
     });
 
@@ -284,6 +318,8 @@ export async function handler(event: { body: GenerationEvent }) {
       message: err instanceof Error ? err.message : 'Generation failed. Please try again.',
       updatedAt: Date.now(),
     } as RealtimeEvent);
+  } finally {
+    stopHeartbeat?.();
   }
 }
 

@@ -22,6 +22,7 @@ import { getTierModel } from '../services/billing';
 import {
   buildDecompositionSystemPrompt,
   buildArSystemPrompt,
+  buildArPerFeatureUserMessage,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
   buildRefineSystemPrompt,
@@ -55,15 +56,15 @@ interface FeaturePlan {
   min: number;
   max: number;
   target: number;
-  shape: 'narrow' | 'balanced' | 'broad';
-  complexity: 'low' | 'medium' | 'high';
+  shape: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
+  complexity: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
 }
 
 interface ArPlan {
   min: number;
   max: number;
   target: number;
-  depth: 'lean' | 'standard' | 'thorough';
+  depth: 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
 }
 
 interface RequirementAssessment {
@@ -107,6 +108,229 @@ const GENERIC_ROLE_WORDS = new Set([
   'engineer',
 ]);
 
+const PASS1_CONTEXT_LIMITS = {
+  requirement: 5000,
+  clarify: 6000,
+  attachment: 5000,
+  wi: 12000,
+  gold: 12000,
+  similar: 8000,
+} as const;
+
+const PASS1_CONTEXT_LIMITS_COMPACT = {
+  requirement: 4000,
+  clarify: 4000,
+  attachment: 3000,
+  wi: 6000,
+  gold: 6000,
+  similar: 4000,
+} as const;
+
+const PASS2_CONTEXT_LIMITS = {
+  requirement: 4000,
+  clarify: 5000,
+  attachment: 3000,
+  wi: 6000,
+  gold: 6000,
+  similar: 4000,
+} as const;
+
+function trimPromptText(text: string, maxChars: number): string {
+  const normalized = (text || '').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars).trimEnd()}\n...[truncated for speed]`;
+}
+
+function pushPromptSection(parts: string[], heading: string, text: string, maxChars: number) {
+  const trimmed = trimPromptText(text, maxChars);
+  if (!trimmed) return;
+  parts.push(`${heading}:\n${trimmed}`);
+}
+
+function buildGenerationUserMessage(input: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  wiContextText: string;
+  goldExamplesText: string;
+  similarStoriesText: string;
+  limits: typeof PASS1_CONTEXT_LIMITS | typeof PASS1_CONTEXT_LIMITS_COMPACT | typeof PASS2_CONTEXT_LIMITS;
+}): string {
+  const parts = [`REQUIREMENT: ${trimPromptText(input.requirement, input.limits.requirement)}`];
+
+  if (input.clarifyAnswers.length) {
+    const qaText = input.clarifyAnswers
+      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
+      .join('\n\n');
+    pushPromptSection(parts, 'CLARIFICATION Q&A', qaText, input.limits.clarify);
+  }
+
+  pushPromptSection(parts, 'ATTACHMENT CONTEXT', input.attachmentText, input.limits.attachment);
+  pushPromptSection(parts, 'WORK INSTRUCTIONS', input.wiContextText, input.limits.wi);
+  pushPromptSection(parts, 'GOLD STANDARD EXAMPLES (for high-level format reference)', input.goldExamplesText, input.limits.gold);
+  pushPromptSection(parts, 'SIMILAR STORIES FROM BACKLOG (use these for business context and phrasing patterns only)', input.similarStoriesText, input.limits.similar);
+
+  return parts.join('\n\n---\n\n');
+}
+
+async function runDecompositionPass(input: {
+  userMessage: string;
+  systemPrompt: string;
+  generatorConfig: TenantConfig['generatorConfig'];
+  tier: TenantConfig['tier'];
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
+  const firstAttempt = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(input.generatorConfig.decompositionModel, input.tier),
+    systemPrompt: input.systemPrompt,
+    userMessage: input.userMessage,
+    maxTokens: input.generatorConfig.maxTokens,
+    ...input.providerOpts,
+  });
+
+  const initialFeatures = firstAttempt.data.features ?? [];
+  if (initialFeatures.length > 0) {
+    return { features: initialFeatures, usage: firstAttempt.usage };
+  }
+
+  const retryAttempt = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(input.generatorConfig.decompositionModel, input.tier),
+    systemPrompt: `${input.systemPrompt}\n\nFINAL REMINDER: Return at least 1 feature. Never return an empty features array.`,
+    userMessage: `${input.userMessage}\n\nIMPORTANT: The previous result contained zero features. Return at least one well-scoped feature in valid JSON.`,
+    maxTokens: input.generatorConfig.maxTokens,
+    ...input.providerOpts,
+  });
+
+  const retryFeatures = retryAttempt.data.features ?? [];
+  if (!retryFeatures.length) {
+    throw new Error('Feature breakdown returned no features. Please tighten the requirement or switch to a faster, more reliable model for feature breakdown.');
+  }
+
+  return {
+    features: retryFeatures,
+    usage: {
+      input: firstAttempt.usage.input + retryAttempt.usage.input,
+      output: firstAttempt.usage.output + retryAttempt.usage.output,
+    },
+  };
+}
+
+// ─── Parallel AR Generation (one LLM call per feature) ──────────────────────
+
+const PARALLEL_AR_CONCURRENCY = 5;
+
+async function runParallelArPass(input: {
+  features: RawFeature[];
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  domainContext: string;
+  arPlan: ArPlan;
+  generatorConfig: TenantConfig['generatorConfig'];
+  tier: TenantConfig['tier'];
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+  onArProgress?: (completed: number, total: number) => Promise<void>;
+}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
+  const systemPrompt = buildArSystemPrompt({
+    domainContext: input.domainContext,
+    arPlan: input.arPlan,
+  });
+
+  const model = getTierModel(input.generatorConfig.arModel, input.tier);
+  const maxTokens = 2048;
+
+  // Build per-feature tasks
+  const tasks = input.features.map((feature) => ({
+    feature,
+    userMessage: buildArPerFeatureUserMessage({
+      requirement: input.requirement,
+      clarifyAnswers: input.clarifyAnswers?.map(a => ({
+        question: a.question,
+        answer: a.answer,
+      })),
+      feature: {
+        summary: feature.summary ?? '',
+        description: feature.description ?? '',
+        suggested_story_points: feature.suggested_story_points,
+        process_code: feature.process_code,
+      },
+    }),
+  }));
+
+  // Execute in batches of PARALLEL_AR_CONCURRENCY
+  const results: { feature: RawFeature; usage: { input: number; output: number } }[] = [];
+  let completed = 0;
+
+  for (let i = 0; i < tasks.length; i += PARALLEL_AR_CONCURRENCY) {
+    const batch = tasks.slice(i, i + PARALLEL_AR_CONCURRENCY);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (task) => {
+        const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+          model,
+          systemPrompt,
+          userMessage: task.userMessage,
+          maxTokens,
+          ...input.providerOpts,
+        });
+        return { feature: task.feature, result };
+      }),
+    );
+
+    for (let j = 0; j < batchResults.length; j++) {
+      const settled = batchResults[j];
+      const originalFeature = batch[j].feature;
+      if (settled.status === 'fulfilled') {
+        const arFeatures = settled.value.result.data.features ?? [];
+        // Take the first feature's ARs (we only sent one feature)
+        const arFeature = arFeatures[0];
+        results.push({
+          feature: arFeature
+            ? { ...originalFeature, acceptance_requirements: arFeature.acceptance_requirements ?? arFeature.acceptanceRequirements ?? [] }
+            : originalFeature,
+          usage: settled.value.result.usage,
+        });
+      } else {
+        // Failed — keep original feature without ARs
+        results.push({
+          feature: originalFeature,
+          usage: { input: 0, output: 0 },
+        });
+      }
+      completed++;
+      if (input.onArProgress) await input.onArProgress(completed, tasks.length);
+    }
+  }
+
+  const totalUsage = results.reduce(
+    (acc, r) => ({ input: acc.input + r.usage.input, output: acc.output + r.usage.output }),
+    { input: 0, output: 0 },
+  );
+
+  return { features: results.map(r => r.feature), usage: totalUsage };
+}
+
 function assessRequirement(input: {
   requirement: string;
   attachmentText: string;
@@ -131,17 +355,54 @@ function assessRequirement(input: {
     .test(requirement);
   const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|optimal|better|faster|enhance|fix this|update this|handle this|do it)/i
     .test(requirement);
-  const hasBroadScopeSignals = /(and|also|plus|across|multiple|several|workflow|end[- ]to[- ]end|dashboard|reporting|notification|approval|integration|sync|assignment|prioritization|exception)/i
-    .test(requirement);
-  const roleMentions = (requirement.match(/\b(admin|manager|planner|dispatcher|technician|fse|field service engineer|agent|user|customer|analyst|qa|developer|operator)\b/ig) ?? []).length;
+
+  // ── Richer signals for scope detection ──
+
+  // Count enumerated items (bullets, numbered lists)
+  const bulletCount = (requirement.match(/^[\s]*[-*•]\s/gm) ?? []).length;
+  const numberedCount = (requirement.match(/^[\s]*\d+[.)]\s/gm) ?? []).length;
+  const enumeratedItems = bulletCount + numberedCount;
+
+  // Count distinct workflow/action verbs (deduplicated)
+  const workflowMatches = (requirement.match(
+    /\b(when|after|before|upon|during|if|unless|trigger|initiate|approve|reject|escalate|assign|notify|schedule|route|validate|submit|complete|cancel|archive|review|monitor|dispatch|prioriti[sz]e|allocate|transfer|reassign|override)\b/gi,
+  ) ?? []);
+  const distinctWorkflows = new Set(workflowMatches.map(w => w.toLowerCase())).size;
+
+  // Count genuinely distinct roles (exclude generic terms)
+  const roleMatches = (requirement.match(
+    /\b(admin|administrator|manager|planner|dispatcher|technician|fse|field service engineer|customer|analyst|qa|developer|operator|supervisor|coordinator|lead|director|reviewer|approver|scheduler|engineer)\b/gi,
+  ) ?? []);
+  const distinctRoles = new Set(
+    roleMatches.map(r => r.toLowerCase()).filter(r => !GENERIC_ROLE_WORDS.has(r)),
+  ).size;
+  const totalRoleMentions = roleMatches.length;
+
   const exceptionMentions = (requirement.match(/\b(error|fail|exception|edge|invalid|conflict|fallback|retry|permission|duplicate)\b/ig) ?? []).length;
 
+  // ── Continuous shape score (0–10 scale) ──
+  const shapeScore =
+    (distinctWorkflows >= 8 ? 3 : distinctWorkflows >= 5 ? 2 : distinctWorkflows >= 2 ? 1 : 0) +
+    (distinctRoles >= 3 ? 2 : distinctRoles >= 2 ? 1 : 0) +
+    (enumeratedItems >= 6 ? 2 : enumeratedItems >= 3 ? 1 : 0) +
+    (reqWords >= 200 ? 2 : reqWords >= 80 ? 1 : 0) +
+    (reqSentences >= 8 ? 1 : 0);
+
+  // ── Continuous complexity score (0–10 scale) ──
+  const complexityScore =
+    (hasConstraints ? 1 : 0) +
+    (exceptionMentions >= 3 ? 2 : exceptionMentions >= 1 ? 1 : 0) +
+    (answers.length >= 8 ? 2 : answers.length >= 5 ? 1 : 0) +
+    (distinctRoles >= 3 ? 2 : distinctRoles >= 2 ? 1 : 0) +
+    (distinctWorkflows >= 5 ? 2 : distinctWorkflows >= 2 ? 1 : 0);
+
+  // ── Ambiguity / clarity ──
   const ambiguityPenalty =
     (reqWords <= 25 ? 1 : 0) +
     (reqSentences <= 1 ? 1 : 0) +
     (hasAmbiguousTokens ? 1 : 0) +
-    (hasBroadScopeSignals ? 1 : 0) +
-    (roleMentions === 0 ? 1 : 0) +
+    (shapeScore >= 3 ? 1 : 0) +   // broad scope adds ambiguity
+    (totalRoleMentions === 0 ? 1 : 0) +
     (exceptionMentions === 0 ? 1 : 0);
 
   const clarityScore =
@@ -151,19 +412,7 @@ function assessRequirement(input: {
     (hasConstraints ? 1 : 0) -
     (ambiguityPenalty >= 3 ? 1 : 0);
 
-  const complexityScore =
-    (hasConstraints ? 1 : 0) +
-    (exceptionMentions >= 2 ? 1 : 0) +
-    (answers.length >= 5 ? 1 : 0) +
-    (roleMentions >= 2 ? 1 : 0) +
-    (hasBroadScopeSignals ? 1 : 0);
-
-  const shapeScore =
-    (hasBroadScopeSignals ? 1 : 0) +
-    (reqWords >= 60 ? 1 : 0) +
-    (reqSentences >= 4 ? 1 : 0) +
-    (answers.length >= 5 ? 1 : 0);
-
+  // ── Question plan (unchanged thresholds) ──
   const questionPlan: ClarifyQuestionPlan =
     clarityScore >= 4
       ? { min: 4, max: 6, target: 5, clarity: 'clear' }
@@ -171,44 +420,68 @@ function assessRequirement(input: {
         ? { min: 10, max: 14, target: 12, clarity: 'vague' }
         : { min: 6, max: 9, target: 7, clarity: 'medium' };
 
-  const featurePlan: FeaturePlan =
-    shapeScore >= 3
-      ? {
-          min: complexityScore >= 4 ? 5 : 4,
-          max: complexityScore >= 4 ? 8 : 6,
-          target: complexityScore >= 4 ? 6 : 5,
-          shape: 'broad',
-          complexity: complexityScore >= 4 ? 'high' : 'medium',
-        }
-      : shapeScore <= 1
-        ? {
-            min: 1,
-            max: complexityScore >= 3 ? 4 : 3,
-            target: complexityScore >= 3 ? 3 : 2,
-            shape: 'narrow',
-            complexity: complexityScore >= 3 ? 'medium' : 'low',
-          }
-        : {
-            min: 2,
-            max: complexityScore >= 4 ? 6 : 5,
-            target: complexityScore >= 4 ? 5 : 4,
-            shape: 'balanced',
-            complexity: complexityScore >= 4 ? 'high' : 'medium',
-          };
+  // ── Shape tier (5 buckets) ──
+  const shape: FeaturePlan['shape'] =
+    shapeScore >= 7 ? 'epic'
+      : shapeScore >= 5 ? 'broad'
+        : shapeScore >= 3 ? 'balanced'
+          : shapeScore >= 1 ? 'narrow'
+            : 'minimal';
 
+  // ── Complexity tier (5 buckets) ──
+  const complexity: FeaturePlan['complexity'] =
+    complexityScore >= 7 ? 'very_high'
+      : complexityScore >= 5 ? 'high'
+        : complexityScore >= 3 ? 'medium'
+          : complexityScore >= 1 ? 'low'
+            : 'trivial';
+
+  // ── Feature plan matrix ──
+  const featurePlanMatrix: Record<FeaturePlan['shape'], Record<string, Omit<FeaturePlan, 'shape' | 'complexity'>>> = {
+    minimal: {
+      low:    { min: 1, max: 1, target: 1 },
+      high:   { min: 1, max: 2, target: 1 },
+    },
+    narrow: {
+      low:    { min: 1, max: 3, target: 2 },
+      high:   { min: 2, max: 4, target: 3 },
+    },
+    balanced: {
+      low:    { min: 3, max: 5, target: 4 },
+      high:   { min: 4, max: 7, target: 5 },
+    },
+    broad: {
+      low:    { min: 5, max: 9, target: 7 },
+      high:   { min: 6, max: 12, target: 8 },
+    },
+    epic: {
+      low:    { min: 8, max: 12, target: 10 },
+      high:   { min: 10, max: 15, target: 12 },
+    },
+  };
+  const complexityBand = (complexity === 'high' || complexity === 'very_high') ? 'high' : 'low';
+  const planEntry = featurePlanMatrix[shape]?.[complexityBand] ?? featurePlanMatrix.balanced.low;
+  const featurePlan: FeaturePlan = { ...planEntry, shape, complexity };
+
+  // ── AR plan ──
   const arPlan: ArPlan =
-    featurePlan.complexity === 'high'
-      ? { min: 4, max: 6, target: 5, depth: 'thorough' }
-      : featurePlan.complexity === 'low'
-        ? { min: 2, max: 3, target: 2, depth: 'lean' }
-      : { min: 3, max: 5, target: 4, depth: 'standard' };
+    complexity === 'very_high'
+      ? { min: 5, max: 8, target: 6, depth: 'comprehensive' }
+      : complexity === 'high'
+        ? { min: 4, max: 6, target: 5, depth: 'thorough' }
+        : complexity === 'medium'
+          ? { min: 3, max: 5, target: 4, depth: 'standard' }
+          : complexity === 'low'
+            ? { min: 2, max: 3, target: 2, depth: 'lean' }
+            : { min: 1, max: 2, target: 1, depth: 'minimal' };
 
+  // ── Ambiguity reasons ──
   const ambiguityReasons: string[] = [];
   if (reqWords <= 25) ambiguityReasons.push('Requirement is short and likely underspecified.');
   if (reqSentences <= 1) ambiguityReasons.push('Requirement is expressed as a single sentence without decomposition clues.');
   if (!hasRichContext) ambiguityReasons.push('No attachment, work-instruction context, or prior Q&A was available.');
-  if (hasBroadScopeSignals) ambiguityReasons.push('Request implies multiple dimensions (priority, due dates, skills, or dependencies).');
-  if (roleMentions === 0) ambiguityReasons.push('Primary role is not explicit.');
+  if (shapeScore >= 3) ambiguityReasons.push('Request implies multiple dimensions (priority, due dates, skills, or dependencies).');
+  if (totalRoleMentions === 0) ambiguityReasons.push('Primary role is not explicit.');
   if (exceptionMentions === 0) ambiguityReasons.push('Edge cases and failure handling are not defined.');
   if (!hasConstraints) ambiguityReasons.push('Business constraints are still implicit.');
 
@@ -331,9 +604,10 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   onPass1Complete?: (featureCount: number) => Promise<void>;
+  onArProgress?: (completed: number, total: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete, shouldCancel } = opts;
+  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete, onArProgress, shouldCancel } = opts;
   const { generatorConfig } = config;
   const assessment = assessRequirement({
     requirement,
@@ -357,33 +631,17 @@ export async function generateFeatures(opts: {
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
 
-  // Build user message — include all context
-  const contextSections: string[] = [`REQUIREMENT: ${requirement}`];
-
-  if (clarifyAnswers.length) {
-    const qaText = clarifyAnswers
-      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
-      .join('\n\n');
-    contextSections.push(`CLARIFICATION Q&A:\n${qaText}`);
-  }
-
-  if (attachmentText) {
-    contextSections.push(`ATTACHMENT CONTEXT:\n${attachmentText.slice(0, 8000)}`);
-  }
-
-  if (wiContextText) {
-    contextSections.push(`WORK INSTRUCTIONS:\n${wiContextText}`);
-  }
-
-  if (goldExamplesText) {
-    contextSections.push(`GOLD STANDARD EXAMPLES (for high-level format reference):\n${goldExamplesText}`);
-  }
-
-  if (similarStoriesText) {
-    contextSections.push(`SIMILAR STORIES FROM BACKLOG (most relevant matching stories for business context — use these to understand how this organization typically writes stories and ARs for this specific domain):\n${similarStoriesText}`);
-  }
-
-  const userMessage = contextSections.join('\n\n---\n\n');
+  const pass1UserMessage = buildGenerationUserMessage({
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+    limits: (assessment.featurePlan.shape === 'minimal' || assessment.featurePlan.shape === 'narrow')
+      ? PASS1_CONTEXT_LIMITS_COMPACT
+      : PASS1_CONTEXT_LIMITS,
+  });
 
   // ── Pass 1: Decomposition ──
   const pass1System = buildDecompositionSystemPrompt({
@@ -394,55 +652,89 @@ export async function generateFeatures(opts: {
     featurePlan: assessment.featurePlan,
   });
 
-  const pass1Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(generatorConfig.decompositionModel, config.tier),
+  const pass1Result = await runDecompositionPass({
+    userMessage: pass1UserMessage,
     systemPrompt: pass1System,
-    userMessage,
-    maxTokens: generatorConfig.maxTokens,
-    ...providerOpts,
+    generatorConfig,
+    tier: config.tier,
+    providerOpts,
   });
 
-  const pass1Features = pass1Result.data.features ?? [];
+  const pass1Features = pass1Result.features;
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
   // ── Pass 2: Acceptance Requirements ──
-  const pass2System = buildArSystemPrompt({
-    domainContext: config.domainContext,
-    arPlan: assessment.arPlan,
-  });
+  // Use parallel per-feature AR generation for 2+ features (faster);
+  // fall back to monolithic single-call for 1 feature (no parallelism benefit).
 
-  const pass2UserMessage = `${userMessage}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+  let pass2Usage: { input: number; output: number };
+  let rawFeatures: RawFeature[];
 
-  // Pass 2 often needs more output tokens than pass 1 (many GWT strings per feature).
-  const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 16384);
+  if (pass1Features.length >= 2) {
+    // Parallel path: one small LLM call per feature
+    const parallelResult = await runParallelArPass({
+      features: pass1Features,
+      requirement,
+      clarifyAnswers,
+      domainContext: config.domainContext,
+      arPlan: assessment.arPlan,
+      generatorConfig,
+      tier: config.tier,
+      providerOpts,
+      onArProgress,
+    });
+    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    rawFeatures = parallelResult.features;
+    pass2Usage = parallelResult.usage;
+  } else {
+    // Monolithic path: single LLM call for all features (used for 1-feature results)
+    const pass2System = buildArSystemPrompt({
+      domainContext: config.domainContext,
+      arPlan: assessment.arPlan,
+    });
 
-  const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(generatorConfig.arModel, config.tier),
-    systemPrompt: pass2System,
-    userMessage: pass2UserMessage,
-    maxTokens: pass2MaxTokens,
-    ...providerOpts,
-  });
-  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    const pass2ContextMessage = buildGenerationUserMessage({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      goldExamplesText,
+      similarStoriesText,
+      limits: PASS2_CONTEXT_LIMITS,
+    });
 
-  // Merge: use pass2 ARs; fall back to pass1 if pass2 missing or empty
-  const rawFeatures = pass2Result.data.features?.length
-    ? mergeFeatures(pass1Features, pass2Result.data.features)
-    : pass1Features;
+    const pass2UserMessage = `${pass2ContextMessage}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+
+    const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 4096);
+
+    const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+      model: getTierModel(generatorConfig.arModel, config.tier),
+      systemPrompt: pass2System,
+      userMessage: pass2UserMessage,
+      maxTokens: pass2MaxTokens,
+      ...providerOpts,
+    });
+    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+
+    rawFeatures = pass2Result.data.features?.length
+      ? mergeFeatures(pass1Features, pass2Result.data.features)
+      : pass1Features;
+    pass2Usage = pass2Result.usage;
+  }
 
   const features = rawFeatures.map(normaliseFeature);
   const violations = validateFeatures(features, config);
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Result.usage.input + pass2Result.usage.input,
-    output: pass1Result.usage.output + pass2Result.usage.output,
-    total: pass1Result.usage.input + pass1Result.usage.output + pass2Result.usage.input + pass2Result.usage.output,
+    input: pass1Result.usage.input + pass2Usage.input,
+    output: pass1Result.usage.output + pass2Usage.output,
+    total: pass1Result.usage.input + pass1Result.usage.output + pass2Usage.input + pass2Usage.output,
     byStage: {
       decomposition: toStageUsage(pass1Result.usage),
-      acceptanceRequirements: toStageUsage(pass2Result.usage),
+      acceptanceRequirements: toStageUsage(pass2Usage),
     },
   };
 
