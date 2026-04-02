@@ -2,13 +2,11 @@ import { invoke } from '@forge/bridge';
 
 type Payload = Record<string, unknown>;
 const p = (v: unknown) => v as Payload;
-type ReasoningMode = 'fast' | 'deep';
-type OutputMode = 'single' | 'auto' | 'full_breakdown';
 
 // Typed invoke wrapper for all resolver calls
 export const api = {
   // Config
-  getConfig: (payload?: { projectKey?: string }) => invoke('getConfig', payload || {}),
+  getConfig: () => invoke('getConfig'),
   saveConfig: (config: unknown) => invoke('saveConfig', p(config)),
   saveProjectConfig: (payload: any) => invoke('saveProjectConfig', payload),
   patchConfig: (patch: unknown) => invoke('patchConfig', p(patch)),
@@ -23,38 +21,15 @@ export const api = {
     clarifyAnswers?: unknown[];
     attachmentText?: string;
     projectKey?: string;
-    reasoningMode?: ReasoningMode;
-    outputMode?: OutputMode;
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)
-  startClarify: (
-    sessionId: string,
-    requirement: string,
-    attachmentText?: string,
-    projectKey?: string,
-    reasoningMode?: ReasoningMode,
-    outputMode?: OutputMode,
-  ) =>
-    invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, reasoningMode, outputMode }),
+  startClarify: (sessionId: string, requirement: string, attachmentText?: string, projectKey?: string) =>
+    invoke('startClarify', { sessionId, requirement, attachmentText, projectKey }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
-  evaluateSufficiency: (
-    sessionId: string,
-    requirement: string,
-    answers: unknown[],
-    projectKey?: string,
-    reasoningMode?: ReasoningMode,
-    outputMode?: OutputMode,
-  ) =>
-    invoke('evaluateSufficiency', { sessionId, requirement, answers, projectKey, reasoningMode, outputMode }),
-  saveDiscoveryRound: (payload: {
-    sessionId: string;
-    roundNumber: number;
-    questions: unknown[];
-    answers: unknown[];
-    coverage?: unknown;
-  }) => invoke('saveDiscoveryRound', payload),
+  evaluateSufficiency: (requirement: string, answers: unknown[]) =>
+    invoke('evaluateSufficiency', { requirement, answers }),
 
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>
@@ -115,12 +90,9 @@ export const api = {
   setLastSession: (sessionId: string) => invoke('setLastSession', { sessionId }),
   getIssueSession: (issueKey: string) => invoke('getIssueSession', { issueKey }),
   setIssueSession: (issueKey: string, sessionId: string) => invoke('setIssueSession', { issueKey, sessionId }),
-  getSidebarWidth: () => invoke('getSidebarWidth'),
-  setSidebarWidth: (width: number) => invoke('setSidebarWidth', { width }),
 
   // Usage
   getUsage: () => invoke('getUsage'),
-  getAiInsights: () => invoke('getAiInsights'),
   resetUsage: () => invoke('resetUsage'),
   listComplianceAuditEvents: (limit?: number) => invoke('listComplianceAuditEvents', { limit }),
   listTransparencyReports: (payload?: { sessionId?: string; turnType?: 'generate' | 'clarify' | 'refine' | 'ask'; limit?: number }) =>
@@ -129,19 +101,13 @@ export const api = {
 
   // LLM config
   checkIsAdmin: (payload?: any) => invoke('checkIsAdmin', payload),
-  fetchAvailableModels: (provider: 'openai' | 'gemini') =>
-    invoke('fetchAvailableModels', { provider }),
   testLlmConnection: (payload: {
-    provider: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
+    provider: 'forge_llms' | 'gemini' | 'openai';
     model: string;
     geminiApiKey?: string;
     geminiBaseUrl?: string;
     openaiApiKey?: string;
     openaiBaseUrl?: string;
-    azureOpenaiApiKey?: string;
-    azureOpenaiEndpoint?: string;
-    azureOpenaiDeployment?: string;
-    azureOpenaiApiVersion?: string;
   }) => invoke('testLlmConnection', payload),
 };
 

@@ -6,10 +6,9 @@ import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
 import { SettingsView } from './SettingsView';
 import { api } from './hooks/useForge';
-import { useGenerationRealtime, useClarifyRealtime, type ClarifyFallthroughDetails } from './hooks/useRealtime';
+import { useGenerationRealtime, useClarifyRealtime } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
-import { AiExecutionPolicy, DEFAULT_CONFIG, OutputMode, ReasoningMode } from './types';
 
 export interface Feature {
   id: string;
@@ -30,19 +29,20 @@ export interface Feature {
 export interface AppConfig {
   branding?: { appTitle?: string; primaryColor?: string; secondaryColor?: string; logoUrl?: string | null };
   tier?: string;
+  goldSources?: unknown[];
 }
 
 interface GenerationContextMeta {
   domainRolesUsed: string[];
+  goldExamplesCount: number;
+  referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
   projectKey: string;
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
-  discoveryCoverage?: DiscoveryCoverageSummary;
-  discoveryTranscript?: DiscoveryRoundSummary[];
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
@@ -51,40 +51,13 @@ interface ClarifyContextMeta {
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
+  goldExamplesCount?: number;
+  referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
   similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-  discoveryCoverage?: DiscoveryCoverageSummary;
-  discoveryTranscript?: DiscoveryRoundSummary[];
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
-}
-
-interface DiscoveryCoverageSummary {
-  sufficient: boolean;
-  canGenerate: boolean;
-  shouldContinueDiscovery: boolean;
-  overallScore: number;
-  summary: string;
-  missingCritical: string[];
-  dimensions: Array<{
-    key: string;
-    label: string;
-    required: boolean;
-    score: number;
-    status: 'missing' | 'partial' | 'covered';
-    evidence: string;
-  }>;
-  questions?: Array<{ category: string; question: string; suggestions: string[] }>;
-  tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
-}
-
-interface DiscoveryRoundSummary {
-  roundNumber: number;
-  questions: Array<{ category: string; question: string; suggestions: string[] }>;
-  answers: Array<{ question: string; answer: string }>;
-  coverage?: DiscoveryCoverageSummary;
-  submittedAt: string;
 }
 
 interface WorkflowTokenUsage {
@@ -134,17 +107,6 @@ function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
   return total;
 }
 
-function getDefaultSidebarWidth(viewportWidth?: number): number {
-  const width = typeof viewportWidth === 'number'
-    ? viewportWidth
-    : (typeof window !== 'undefined' ? window.innerWidth : 0);
-
-  if (!width || width <= 0) return 420;
-  if (width <= 720) return Math.max(300, width - 48);
-  // Default to 50% of window as requested, but clamp it to reasonable max/min
-  return Math.min(Math.max(Math.round(width * 0.5), 360), width * 0.7);
-}
-
 export default function App() {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>('generate');
   const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
@@ -152,14 +114,9 @@ export default function App() {
   const [requirement, setRequirement] = useState('');
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
-  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>('fast');
-  const [outputMode, setOutputMode] = useState<OutputMode>('auto');
-  const [effectiveAiPolicy, setEffectiveAiPolicy] = useState<AiExecutionPolicy>(DEFAULT_CONFIG.aiExecutionPolicy);
   const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
-  const [discoveryCoverage, setDiscoveryCoverage] = useState<DiscoveryCoverageSummary | null>(null);
   const [workflowTokenUsage, setWorkflowTokenUsage] = useState<WorkflowTokenUsage | null>(null);
-  const [fastProfileModel, setFastProfileModel] = useState<string>('claude-sonnet-4-6');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
     try { return crypto.randomUUID(); } 
@@ -168,9 +125,6 @@ export default function App() {
   
   // Realtime Integration
   const [clarifyQuestions, setClarifyQuestions] = useState<any[]>([]);
-  const [discoveryAnswers, setDiscoveryAnswers] = useState<any[]>([]);
-  const [discoveryRound, setDiscoveryRound] = useState(0);
-  const [isReviewingDiscovery, setIsReviewingDiscovery] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingClarifySessionId, setPendingClarifySessionId] = useState<string | null>(null);
   const [isWorking, setIsWorking] = useState(false);
@@ -180,7 +134,7 @@ export default function App() {
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tier, setTier] = useState('free');
-  const [sidebarWidth, setSidebarWidth] = useState(() => getDefaultSidebarWidth());
+  const [sidebarWidth, setSidebarWidth] = useState(window.innerWidth / 2);
   const isResizing = useRef(false);
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -194,12 +148,6 @@ export default function App() {
     isResizing.current = false;
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', endResizing);
-    
-    // Persist the new width to Forge Storage
-    const latestWidth = sidebarWidthRef.current;
-    if (latestWidth) {
-      api.setSidebarWidth(latestWidth).catch(err => console.error('Failed to save sidebar width', err));
-    }
   };
 
   const startResizing = (e: React.MouseEvent) => {
@@ -210,74 +158,13 @@ export default function App() {
   
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
-  const [projectKey, setProjectKey] = useState<string>('');
+  const [projectKey, setProjectKey] = useState<string>('*');
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
+  const [goldSources, setGoldSources] = useState<any[]>([]);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
 
   // History
   const [conversations, setConversations] = useState<any[]>([]);
-
-  const restoreInFlightSession = async (sid: string) => {
-    try {
-      const [generationRes, clarifyRes] = await Promise.all([
-        api.getProgress(sid),
-        api.getClarifyResult(sid),
-      ]) as any[];
-
-      const generation = generationRes?.progress;
-      const clarify = clarifyRes?.result;
-
-      // A completed generation with features is always safe to restore.
-      if (generation?.type === 'complete' && generation?.payload?.features?.length) {
-        setFeatures(generation.payload.features);
-        setGenerationContext(generation.payload.generationContext ?? null);
-        setPendingSessionId(null);
-        setPendingClarifySessionId(null);
-        setIsWorking(false);
-        setIsGenerationStarted(false);
-        return true;
-      }
-
-      // An active or newly-queued clarify session must take priority over any
-      // stale generation progress still sitting in storage from a previous run.
-      // Without this check, accountId loading after the user clicks Generate
-      // would re-trigger this effect, find old gen_progress, and clobber the
-      // live clarify session before questions ever reach the frontend.
-      if (clarify?.type === 'complete' && Array.isArray(clarify.questions) && clarify.questions.length > 0) {
-        setClarifyQuestions(clarify.questions);
-        setClarifyContext((clarify.contextMeta as ClarifyContextMeta | undefined) ?? null);
-        setDiscoveryRound(1);
-        setPendingSessionId(null);
-        setPendingClarifySessionId(null);
-        setIsWorking(false);
-        setIsGenerationStarted(false);
-        return true;
-      }
-
-      if (clarify && (clarify.type === 'pending' || clarify.type === 'progress')) {
-        setPendingSessionId(null);
-        setPendingClarifySessionId(sid);
-        setIsWorking(true);
-        setIsGenerationStarted(false);
-        return true;
-      }
-
-      if (generation?.type === 'progress') {
-        if (generation?.payload?.features?.length) {
-          setFeatures(generation.payload.features);
-        }
-        setPendingClarifySessionId(null);
-        setPendingSessionId(sid);
-        setIsWorking(true);
-        setIsGenerationStarted(true);
-        return true;
-      }
-    } catch (error) {
-      console.warn('Failed to restore in-flight session state', error);
-    }
-
-    return false;
-  };
 
   // Animated sidebar close helper
   const closeSidebar = () => {
@@ -329,16 +216,6 @@ export default function App() {
           if (lastRes?.sessionId) setSessionId(lastRes.sessionId);
         } catch {}
       }
-
-      // Load saved sidebar width
-      try {
-        const widthRes = await api.getSidebarWidth() as any;
-        if (widthRes?.success && typeof widthRes.width === 'number') {
-          setSidebarWidth(widthRes.width);
-        }
-      } catch (e) {
-        console.warn('Failed to load sidebar width', e);
-      }
     }).catch(err => console.error('Context error', err));
   }, []); // eslint-disable-line
 
@@ -347,15 +224,22 @@ export default function App() {
       .then((res: any) => {
         const projects = Array.isArray(res?.projects) ? res.projects : [];
         setAvailableProjects(projects);
+        if (projectKey === '*' && projects.length === 1) {
+          setProjectKey(projects[0].key);
+        }
       })
       .catch(() => {});
   }, []); // eslint-disable-line
 
   useEffect(() => {
-    if (!projectKey) {
-      setWiDocs([]);
-      return;
-    }
+    api.getConfig()
+      .then((res: any) => {
+        setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line
+
+  useEffect(() => {
     api.listWiDocs(projectKey)
       .then((res: any) => {
         setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
@@ -363,59 +247,26 @@ export default function App() {
       .catch(() => {});
   }, [projectKey]);
 
-  useEffect(() => {
-    const syncSidebarWidth = () => {
-      setSidebarWidth((current) => {
-        const maxAllowed = window.innerWidth * 0.7;
-        if (!current || current < 300) {
-          return getDefaultSidebarWidth(window.innerWidth);
-        }
-        return Math.min(current, maxAllowed);
-      });
-    };
-
-    syncSidebarWidth();
-    window.addEventListener('resize', syncSidebarWidth);
-    return () => window.removeEventListener('resize', syncSidebarWidth);
-  }, []);
-
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
     if (!accountId) return;
-    const requestedSessionId = sessionId;
-    let cancelled = false;
     // Persist session pointer cross-device
     api.setLastSession(sessionId).catch(() => {});
     // Restore features from last conversation turn
     api.getConversation(sessionId).then((res: any) => {
-      if (cancelled || sessionIdRef.current !== requestedSessionId) return;
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
-        setRequirement(lastTurn?.requirement ?? '');
-        setClarifyContext(lastTurn?.clarifyContext ?? null);
         if (lastTurn?.features?.length > 0) {
           setFeatures(lastTurn.features);
           setGenerationContext(lastTurn.generationContext ?? null);
           setSidebarOpen(false);
-        } else {
-          void restoreInFlightSession(sessionId).then((restored) => {
-            if (cancelled || sessionIdRef.current !== requestedSessionId) return;
-            if (restored) setSidebarOpen(false);
-          });
         }
       } else {
         setWorkflowTokenUsage(null);
-        void restoreInFlightSession(sessionId).then((restored) => {
-          if (cancelled || sessionIdRef.current !== requestedSessionId) return;
-          if (restored) setSidebarOpen(false);
-        });
       }
     }).catch(() => {});
     loadHistory();
-    return () => {
-      cancelled = true;
-    };
   }, [sessionId, accountId]); // eslint-disable-line
 
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
@@ -429,27 +280,15 @@ export default function App() {
     } catch {}
   };
 
-  const loadWorkspaceConfig = async (selectedProjectKey = projectKey) => {
-    try {
-      const res = await api.getConfig({ projectKey: selectedProjectKey || '*' }) as any;
+  // Initial fetch of config and usage
+  useEffect(() => {
+    api.getConfig().then((res: any) => {
       if (!res) return;
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
-      if (res.effectiveGeneratorConfig?.fastProfileModel) setFastProfileModel(res.effectiveGeneratorConfig.fastProfileModel);
-      const nextPolicy = (res.effectiveAiPolicy as AiExecutionPolicy | undefined) ?? DEFAULT_CONFIG.aiExecutionPolicy;
-      setEffectiveAiPolicy(nextPolicy);
-      setReasoningMode(nextPolicy.defaultReasoningMode);
-      setOutputMode(nextPolicy.defaultOutputMode);
-    } catch (e) {
-      console.error('Config fetch failed', e);
-    }
-  };
-
-  // Initial fetch of config and usage
-  useEffect(() => {
-    loadWorkspaceConfig(projectKey);
+    }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
-  }, [projectKey]); // eslint-disable-line
+  }, []);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
 
@@ -482,69 +321,37 @@ export default function App() {
       setIsWorking(false);
       setIsGenerationStarted(false);
     }
-    ,
-    (payload: any) => {
-      if (payload?.features && Array.isArray(payload.features) && payload.features.length > 0) {
-        setFeatures(payload.features);
-      }
-    }
   );
 
-  const { progress: clarifyProgress } = useClarifyRealtime(
+  useClarifyRealtime(
     pendingClarifySessionId,
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
-      setIsReviewingDiscovery(false);
       setClarifyContext(nextClarifyContext);
-      setDiscoveryCoverage(null);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
         setClarifyQuestions(questions);
-        setDiscoveryRound(1);
         setIsWorking(false);
       } else {
-        setIsWorking(false);
-        setGenerationError('Discovery completed without returning questions. Please try again.');
+        startGeneration(requirement, []);
       }
     },
-    ({ reason, message }: ClarifyFallthroughDetails) => {
+    () => {
+      // Error or timeout — skip clarify and go straight to generation
       setPendingClarifySessionId(null);
-      setIsReviewingDiscovery(false);
-      setDiscoveryCoverage(null);
-      setIsWorking(false);
-      const fallbackMessage =
-        reason === 'timeout'
-          ? 'Discovery timed out. Please try again, or use Fast mode for quicker results.'
-          : reason === 'no_questions'
-            ? 'Discovery returned no questions. Please try again.'
-            : 'Discovery could not complete. Please try again.';
-      setGenerationError(
-        message || fallbackMessage,
-      );
+      startGeneration(requirement, []);
     },
   );
 
   const handleStartBrainstorm = async () => {
     if (!requirement.trim()) return;
-    if (!projectKey) {
-      setGenerationError('Choose a project or select Standalone workspace before starting generation.');
-      return;
-    }
     setIsWorking(true);
     setGenerationError(null);
     setFeatures([]);
     setGenerationContext(null);
     setClarifyContext(null);
-    setClarifyQuestions([]);
-    setDiscoveryCoverage(null);
     setWorkflowTokenUsage(null);
-    setDiscoveryAnswers([]);
-    setDiscoveryRound(0);
-    setIsReviewingDiscovery(false);
-    setPendingSessionId(null);
-    setPendingClarifySessionId(null);
-    setIsGenerationStarted(false);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -552,56 +359,32 @@ export default function App() {
     }
 
     try {
-      console.log('[App] startClarify', { sessionId, projectKey, reasoningMode, outputMode });
-      const res = await api.startClarify(sessionId, requirement, undefined, projectKey, reasoningMode, outputMode) as any;
-      console.log('[App] startClarify result', res);
+      const res = await api.startClarify(sessionId, requirement, undefined, projectKey) as any;
       if (res.success) {
-        setPendingSessionId(null);
         setPendingClarifySessionId(sessionId);
       } else {
-        setIsWorking(false);
-        setGenerationError(`Discovery could not start: ${res?.error || 'Unknown error'}`);
+        await startGeneration(requirement, []);
       }
-    } catch (err: any) {
-      setIsWorking(false);
-      setGenerationError(`Discovery could not start: ${err?.message || 'Unknown error'}`);
+    } catch {
+      await startGeneration(requirement, []);
     }
   };
 
   // Helpers to avoid stale closures in effects
   const requirementRef = useRef(requirement);
   requirementRef.current = requirement;
-  const sidebarWidthRef = useRef(sidebarWidth);
-  sidebarWidthRef.current = sidebarWidth;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
-  const restoreRequestRef = useRef(0);
-  const discoveryAnswersRef = useRef<any[]>([]);
-  discoveryAnswersRef.current = discoveryAnswers;
   const [isGenerationStarted, setIsGenerationStarted] = useState(false);
 
   const startGeneration = async (reqText: string, clarifyAnswers: any[]) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
-    if (!projectKey) {
-      setGenerationError('Choose a project or select Standalone workspace before generating.');
-      return;
-    }
     
-    console.log('[App] startGeneration', {
-      sessionId: sid,
-      requirementLength: req.length,
-      clarifyAnswerCount: clarifyAnswers.length,
-      projectKey,
-      reasoningMode,
-      outputMode,
-    });
     setIsWorking(true);
     setIsGenerationStarted(true);
-    setIsReviewingDiscovery(false);
     setGenerationError(null);
     setClarifyQuestions([]);
-    setDiscoveryCoverage(null);
     // CRITICAL: Stop clarify polling if it was active
     setPendingClarifySessionId(null);
 
@@ -615,11 +398,7 @@ export default function App() {
         requirement: req,
         clarifyAnswers,
         projectKey,
-        reasoningMode,
-        outputMode,
       }) as any;
-
-      console.log('[App] startGeneration result', res);
 
       if (res?.success) {
         // resolver confirmed OK — polling is already running
@@ -635,79 +414,6 @@ export default function App() {
       setIsGenerationStarted(false);
       setPendingSessionId(null);
     }
-  };
-
-  const handleClarifyComplete = async (answers: any[]) => {
-    const currentRoundQuestions = [...clarifyQuestions];
-    const currentRoundNumber = discoveryRound || 1;
-    const nextAnswers = [...discoveryAnswersRef.current, ...answers];
-    setDiscoveryAnswers(nextAnswers);
-    setIsReviewingDiscovery(true);
-    setDiscoveryCoverage(null);
-
-    let coverageResult: DiscoveryCoverageSummary | null = null;
-    const canRunAnotherDiscoveryRound =
-      reasoningMode === 'deep' &&
-      currentRoundNumber < effectiveAiPolicy.maxDeepDiscoveryRounds;
-
-    if (canRunAnotherDiscoveryRound) {
-      try {
-        const evaluation = await api.evaluateSufficiency(
-          sessionIdRef.current,
-          requirementRef.current,
-          nextAnswers,
-          projectKey,
-          reasoningMode,
-          outputMode,
-        ) as DiscoveryCoverageSummary;
-        coverageResult = evaluation;
-        setDiscoveryCoverage(evaluation);
-        if (evaluation?.tokenUsage) {
-          setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation.tokenUsage ?? null));
-        }
-      } catch (err) {
-        console.error('Failed to evaluate discovery sufficiency', err);
-      }
-    }
-
-    await api.saveDiscoveryRound({
-      sessionId: sessionIdRef.current,
-      roundNumber: currentRoundNumber,
-      questions: currentRoundQuestions,
-      answers,
-      coverage: coverageResult ?? undefined,
-    }).catch(err => {
-      console.error('Failed to persist discovery round', err);
-    });
-
-    const shouldContinueDiscovery =
-      Boolean(coverageResult?.shouldContinueDiscovery) &&
-      Array.isArray(coverageResult?.questions) &&
-      coverageResult.questions.length > 0;
-
-    if (shouldContinueDiscovery) {
-      setClarifyQuestions(coverageResult!.questions ?? []);
-      setDiscoveryRound(currentRoundNumber + 1);
-      setClarifyContext(prev => prev ? { ...prev, discoveryCoverage: coverageResult ?? prev.discoveryCoverage } : prev);
-      setIsReviewingDiscovery(false);
-      return;
-    }
-
-    setClarifyQuestions([]);
-    setIsReviewingDiscovery(false);
-
-    console.log('[App] moving from discovery to generation', {
-      round: currentRoundNumber,
-      accumulatedAnswers: nextAnswers.length,
-      reasoningMode,
-      continuedDiscovery: false,
-    });
-    await startGeneration(requirementRef.current, nextAnswers);
-  };
-
-  const handleClarifySkip = async () => {
-    const currentAnswers = discoveryAnswersRef.current;
-    await startGeneration(requirementRef.current, currentAnswers);
   };
 
   const handleCreateJiraFeature = async (formData: any) => {
@@ -730,15 +436,10 @@ export default function App() {
   };
 
   const restoreSession = async (sid: string) => {
-    const requestId = restoreRequestRef.current + 1;
-    restoreRequestRef.current = requestId;
     try {
-      setSessionId(sid);
       const res = await api.getConversation(sid) as any;
-      if (restoreRequestRef.current !== requestId || sessionIdRef.current !== sid) {
-        return;
-      }
       if (res.success && res.conversation) {
+        setSessionId(res.conversation.sessionId);
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
@@ -746,15 +447,7 @@ export default function App() {
           setGenerationContext(lastTurn.generationContext ?? null);
           setClarifyContext(lastTurn.clarifyContext ?? null);
         }
-        setClarifyQuestions([]);
-        setDiscoveryAnswers([]);
-        setDiscoveryRound(0);
-        setDiscoveryCoverage(null);
-        setIsReviewingDiscovery(false);
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
-        if (!lastTurn?.features?.length) {
-          await restoreInFlightSession(sid);
-        }
         setViewMode('generate');
       }
     } catch {}
@@ -794,10 +487,7 @@ export default function App() {
               }}
               requirement={requirement}
               setRequirement={setRequirement}
-              onStartBrainstorm={() => {
-                void handleStartBrainstorm();
-                if (projectKey && requirement.trim()) closeSidebar();
-              }}
+              onStartBrainstorm={() => { handleStartBrainstorm(); closeSidebar(); }}
               onNewSession={() => {
                 let newSid: string;
                 try { newSid = crypto.randomUUID(); }
@@ -809,9 +499,6 @@ export default function App() {
                 setClarifyContext(null);
                 setWorkflowTokenUsage(null);
                 setClarifyQuestions([]);
-                setDiscoveryAnswers([]);
-                setDiscoveryRound(0);
-                setIsReviewingDiscovery(false);
                 setSidebarOpen(true);
                 setSidebarExiting(false);
                 setSessionId(newSid);
@@ -831,23 +518,18 @@ export default function App() {
               projectKey={projectKey}
               setProjectKey={setProjectKey}
               availableProjects={availableProjects}
+              goldSources={goldSources}
               wiDocs={wiDocs}
               onOpenProjectSettings={openProjectSettings}
-              reasoningMode={reasoningMode}
-              setReasoningMode={setReasoningMode}
-              outputMode={outputMode}
-              setOutputMode={setOutputMode}
-              allowReasoningModeOverride={effectiveAiPolicy.allowReasoningModeOverride}
-              allowOutputModeOverride={effectiveAiPolicy.allowOutputModeOverride}
             />
               {/* Resize Handle */}
               {sidebarOpen && (
                 <div
                   onMouseDown={startResizing}
-                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-[var(--rf-brand)]/20 group z-50 transition-colors flex items-center justify-center"
+                  className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize hover:bg-[var(--rf-brand-muted)]0/20 group z-50 transition-colors flex items-center justify-center"
                   style={{ cursor: 'col-resize' }}
                 >
-                  <div className="w-1 h-8 bg-white/20 group-hover:bg-[var(--rf-brand)] rounded-full transition-colors" />
+                  <div className="w-1 h-8 bg-white/20 group-hover:bg-[var(--rf-brand-muted)]0 rounded-full transition-colors" />
                 </div>
               )}
             </div>
@@ -858,11 +540,7 @@ export default function App() {
       {/* Main Right Pane / Settings */}
       {viewMode === 'settings' && isAdmin ? (
         <SettingsView
-          onClose={() => {
-            setViewMode('generate');
-            setSidebarOpen(true);
-            loadWorkspaceConfig(projectKey);
-          }}
+          onClose={() => { setViewMode('generate'); setSidebarOpen(true); }}
           initialTab={settingsStartTab}
           initialProjectKey={settingsStartProjectKey}
         />
@@ -885,21 +563,15 @@ export default function App() {
           {clarifyQuestions.length > 0 ? (
             <ClarifyQuestionsView 
               questions={clarifyQuestions} 
-              onComplete={handleClarifyComplete}
-              onSkip={handleClarifySkip}
-              isReviewing={isReviewingDiscovery}
-              reviewMessage={
-                reasoningMode === 'deep'
-                  ? 'Reviewing this discovery round, checking coverage gaps, and deciding whether to generate features now or continue with another round.'
-                  : 'Reviewing your answers and preparing the next generation step.'
-              }
+              onComplete={(answers: any[]) => {
+                startGeneration(requirement, answers);
+              }}
+              onSkip={() => {
+                startGeneration(requirement, []);
+              }}
               contextMeta={clarifyContext}
-              coverageSummary={discoveryCoverage}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
-              roundNumber={discoveryRound}
-              reasoningMode={reasoningMode}
-              skipLabel={discoveryAnswers.length > 0 ? 'Generate now' : 'Skip questions'}
             />
           ) : (
             <MainContent
@@ -907,18 +579,9 @@ export default function App() {
               setFeatures={setFeatures}
               onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
               isGenerating={isGenerating || isWorking}
-              loadingTitle={
-                isWorking && !isGenerating && !isGenerationStarted
-                  ? 'Analyzing context & clarifying requirements'
-                  : 'Crafting features'
-              }
               progress={
                 isWorking && !isGenerating 
-                  ? (isGenerationStarted
-                      ? 'Preparing generation engine...'
-                        : isReviewingDiscovery
-                          ? 'Reviewing discovery coverage...'
-                        : clarifyProgress || 'Preparing discovery workflow...')
+                  ? (isGenerationStarted ? 'Preparing generation engine...' : 'Discovery phase: Deep-dive requirement analysis...') 
                   : progress
               }
               sidebarOpen={sidebarOpen}
@@ -928,7 +591,6 @@ export default function App() {
               generationContext={generationContext}
               projectKey={projectKey}
               workflowTokenUsage={workflowTokenUsage}
-              fastProfileModel={fastProfileModel}
               onWorkflowTokenUsage={(usageDelta) => {
                 setWorkflowTokenUsage(prev => addTokenUsage(prev, usageDelta));
               }}

@@ -41,6 +41,18 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
       }
     }
 
+    // Check process code if taxonomy is enabled
+    if (config.processTaxonomyEnabled && config.processTaxonomy.length) {
+      const validCodes = new Set(config.processTaxonomy.map(p => p.code));
+      if (!feature.processCode || !validCodes.has(feature.processCode)) {
+        violations.push({
+          featureId: feature.id,
+          field: 'processCode',
+          message: `Invalid or missing process code: "${feature.processCode}"`,
+        });
+      }
+    }
+
     // Check ARs
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {

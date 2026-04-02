@@ -7,9 +7,9 @@
  */
 
 import { asApp, assumeTrustedRoute } from '@forge/api';
-import { callLlmJsonWithUsage } from './llm';
+import { callLlmJson } from './llm';
 import { buildRerankPrompt } from './prompts';
-import { SimilarStory, TenantConfig, TokenUsageSummary } from '../types';
+import { SimilarStory, TenantConfig } from '../types';
 import { objectRead, objectWrite, KEYS } from '../services/cache';
 
 interface BacklogDoc {
@@ -50,78 +50,41 @@ interface SearchJqlResponse {
 }
 
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_INDEX_ITEMS = 2500;
-const MAX_SIMILAR_STORIES = 16;
-const MIN_STORY_RELEVANCE = 0.26;
-const MIN_BASELINE_STORIES = 5;
-
-function zeroTokenUsage(): TokenUsageSummary {
-  return {
-    input: 0,
-    output: 0,
-    total: 0,
-    byStage: {},
-  };
-}
-
-export interface SimilarStoriesResult {
-  stories: SimilarStory[];
-  tokenUsage: TokenUsageSummary;
-}
+const MAX_INDEX_ITEMS = 1000;
 
 export async function findSimilarStories(
   requirement: string,
   config: TenantConfig,
   projectKey = '*',
 ): Promise<SimilarStory[]> {
-  const result = await findSimilarStoriesWithUsage(requirement, config, projectKey);
-  return result.stories;
-}
-
-export async function findSimilarStoriesWithUsage(
-  requirement: string,
-  config: TenantConfig,
-  projectKey = '*',
-): Promise<SimilarStoriesResult> {
   if (!projectKey || projectKey === '*') {
-    return { stories: [], tokenUsage: zeroTokenUsage() };
+    return [];
   }
 
   try {
     const index = await ensureBacklogIndex(projectKey, config);
-    if (!index.docs.length) return { stories: [], tokenUsage: zeroTokenUsage() };
+    if (!index.docs.length) return [];
 
     const candidates = lexicalRetrieve(requirement, index.docs).slice(0, 24);
-    if (!candidates.length) return { stories: [], tokenUsage: zeroTokenUsage() };
+    if (!candidates.length) return [];
 
     let ranked = candidates;
-    let rerankUsage = zeroTokenUsage();
-    if (config.similarityConfig.useLlmRerank && config.tier !== 'free' && candidates.length > 5) {
-      const reranked = await rerankWithClaude(requirement, candidates, config);
-      ranked = reranked.items;
-      rerankUsage = reranked.tokenUsage;
+    if (config.similarityConfig.useLlmRerank && candidates.length > 5) {
+      ranked = await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
     }
 
-    const normalized = normalizeSimilarityScores(ranked);
-    const selected = normalized
-      .filter((item, index) => item.relevanceScore >= MIN_STORY_RELEVANCE || index < MIN_BASELINE_STORIES)
-      .slice(0, MAX_SIMILAR_STORIES);
-
     const baseUrl = await getJiraBaseUrl();
-    return {
-      stories: selected.map(item => ({
-        key: item.key,
-        summary: item.summary,
-        description: item.description,
-        acceptanceCriteria: item.acceptanceCriteria,
-        relevanceScore: item.relevanceScore,
-        url: `${baseUrl}/browse/${item.key}`,
-      })),
-      tokenUsage: rerankUsage,
-    };
+    return ranked.slice(0, 12).map(item => ({
+      key: item.key,
+      summary: item.summary,
+      description: item.description,
+      acceptanceCriteria: item.acceptanceCriteria,
+      relevanceScore: item.relevanceScore,
+      url: `${baseUrl}/browse/${item.key}`,
+    }));
   } catch (err) {
     console.warn('[similar-stories] Backlog retrieval failed:', err);
-    return { stories: [], tokenUsage: zeroTokenUsage() };
+    return [];
   }
 }
 
@@ -436,28 +399,6 @@ function lexicalRetrieve(requirement: string, docs: BacklogDoc[]): Array<Backlog
     .sort((a, b) => b.relevanceScore - a.relevanceScore);
 }
 
-function normalizeSimilarityScores(
-  items: Array<BacklogDoc & { relevanceScore: number }>,
-): Array<BacklogDoc & { relevanceScore: number }> {
-  if (!items.length) return [];
-
-  const rawScores = items.map(item => Number.isFinite(item.relevanceScore) ? item.relevanceScore : 0);
-  const maxRaw = Math.max(...rawScores, 0);
-  const minRaw = Math.min(...rawScores, 0);
-  const range = maxRaw - minRaw;
-
-  return items.map((item, index) => {
-    const raw = Number.isFinite(item.relevanceScore) ? item.relevanceScore : 0;
-    const scoreNorm = range > 0 ? (raw - minRaw) / range : 1;
-    const rankNorm = items.length > 1 ? 1 - index / (items.length - 1) : 1;
-    const blended = (scoreNorm * 0.65) + (rankNorm * 0.35);
-    return {
-      ...item,
-      relevanceScore: Math.max(0, Math.min(1, blended)),
-    };
-  });
-}
-
 function buildQueryTerms(requirement: string): string[] {
   const baseTerms = tokenize(requirement);
   const phrases = requirement
@@ -497,52 +438,25 @@ function buildTermFreq(terms: string[]): Record<string, number> {
 async function rerankWithClaude(
   requirement: string,
   candidates: Array<BacklogDoc & { relevanceScore: number }>,
-  config: TenantConfig,
-): Promise<{ items: Array<BacklogDoc & { relevanceScore: number }>; tokenUsage: TokenUsageSummary }> {
+  model: string,
+): Promise<Array<BacklogDoc & { relevanceScore: number }>> {
   try {
     const summaries = candidates.map(c => `${c.key}: ${c.summary}`);
     const prompt = buildRerankPrompt(requirement, summaries);
 
-    const ranked = await callLlmJsonWithUsage<number[]>({
-      model: config.generatorConfig.themeModel,
+    const ranked = await callLlmJson<number[]>({
+      model,
       systemPrompt: 'Rank the Jira backlog items by relevance to the requirement. Output a JSON array of 1-based indices.',
       userMessage: prompt,
       maxTokens: 256,
-      timeoutMs: 10000,
-      geminiThinkingBudget: 0,
-      provider: config.generatorConfig.provider,
-      geminiApiKey: config.generatorConfig.geminiApiKey,
-      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-      openaiApiKey: config.generatorConfig.openaiApiKey,
-      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-      azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
-      azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
-      azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
-      azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
     });
 
-    const tokenUsage: TokenUsageSummary = {
-      input: ranked.usage.input,
-      output: ranked.usage.output,
-      total: ranked.usage.input + ranked.usage.output,
-      byStage: {
-        similarStoriesRerank: {
-          input: ranked.usage.input,
-          output: ranked.usage.output,
-          total: ranked.usage.input + ranked.usage.output,
-        },
-      },
-    };
-
-    if (!Array.isArray(ranked.data)) return { items: candidates, tokenUsage };
-    return {
-      items: ranked.data
-        .map(index => candidates[index - 1])
-        .filter((candidate): candidate is BacklogDoc & { relevanceScore: number } => !!candidate),
-      tokenUsage,
-    };
+    if (!Array.isArray(ranked)) return candidates;
+    return ranked
+      .map(index => candidates[index - 1])
+      .filter((candidate): candidate is BacklogDoc & { relevanceScore: number } => !!candidate);
   } catch {
-    return { items: candidates, tokenUsage: zeroTokenUsage() };
+    return candidates;
   }
 }
 
@@ -558,93 +472,13 @@ async function getJiraBaseUrl(): Promise<string> {
 
 export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): string {
   if (!items.length) return '';
-
-  const selected = items.slice(0, maxItems);
-  const roles = extractCommonRoles(selected).slice(0, 12);
-  const topics = selected
-    .map(item => item.summary?.trim())
-    .filter(Boolean)
-    .slice(0, 10);
-  const arPatterns = extractArPatterns(selected).slice(0, 10);
-  const examples = selected.slice(0, Math.min(4, selected.length));
-
-  const sections: string[] = [
-    'REFERENCE BACKLOG CONTEXT FROM DEPLOYED ITEMS:',
-    'Use the roles, scope, and level of detail reflected below. Match the business depth and acceptance rigor, not any customer-specific system wording.',
-  ];
-
-  if (roles.length) {
-    sections.push(`Common roles in similar backlog items: ${roles.join(', ')}`);
-  }
-
-  if (topics.length) {
-    sections.push(
-      `Related backlog topics:\n${topics.map((topic, index) => `  ${index + 1}. ${topic}`).join('\n')}`,
-    );
-  }
-
-  if (arPatterns.length) {
-    sections.push(
-      `Sample acceptance requirement patterns:\n${arPatterns.map((pattern, index) => `  ${index + 1}. ${pattern}`).join('\n')}`,
-    );
-  }
-
-  sections.push(
-    examples
-      .map((item, index) => ([
-        `--- Reference Example ${index + 1} (${item.key}) ---`,
-        `Summary: ${item.summary}`,
-        item.description ? `Description: ${item.description.slice(0, 700)}` : '',
-        item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1200)}` : '',
-      ].filter(Boolean).join('\n')))
-      .join('\n\n'),
-  );
-
-  return sections.filter(Boolean).join('\n\n');
-}
-
-function extractCommonRoles(items: SimilarStory[]): string[] {
-  const seen = new Set<string>();
-  const roles: string[] = [];
-
-  for (const item of items) {
-    const description = String(item.description ?? '');
-    const matches = description.matchAll(/\bas\s+an?\s+([^,]+),/gi);
-    for (const match of matches) {
-      const role = String(match[1] ?? '').trim().replace(/\s+/g, ' ');
-      if (!role || role.length > 80) continue;
-      const key = role.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      roles.push(role);
-    }
-  }
-
-  return roles;
-}
-
-function extractArPatterns(items: SimilarStory[]): string[] {
-  const seen = new Set<string>();
-  const patterns: string[] = [];
-
-  for (const item of items) {
-    const raw = String(item.acceptanceCriteria ?? '');
-    if (!raw) continue;
-    const lines = raw
-      .split(/\n+/)
-      .map(line => line.trim().replace(/^[-*]\s*/, ''))
-      .filter(Boolean);
-
-    for (const line of lines) {
-      if (!/given|when|then/i.test(line)) continue;
-      const normalized = line.replace(/\s+/g, ' ');
-      const key = normalized.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      patterns.push(normalized.slice(0, 240));
-      if (patterns.length >= 14) return patterns;
-    }
-  }
-
-  return patterns;
+  return items
+    .slice(0, maxItems)
+    .map((item, index) => ([
+      `--- Backlog Reference ${index + 1} (${item.key}) ---`,
+      `Summary: ${item.summary}`,
+      item.description ? `Description: ${item.description.slice(0, 900)}` : '',
+      item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1400)}` : '',
+    ].filter(Boolean).join('\n')))
+    .join('\n\n');
 }

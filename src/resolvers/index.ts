@@ -9,10 +9,7 @@
 const Resolver = require('@forge/resolver').default;
 import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
-import { randomUUID } from 'crypto';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
-import { resolveAiExecutionPolicy, resolveGeneratorConfig } from '../services/ai-policy';
-import { getAiInsightsReport, upsertAiSessionInsight } from '../services/ai-insights';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
@@ -38,11 +35,12 @@ import {
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
+import { refreshGoldCache, getCacheInfo } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm } from '../core/llm';
-import { ClarifyAnswer, ClarifyQuestion, Feature, GenerationEvent, ClarifyEvent } from '../types';
+import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -111,7 +109,7 @@ resolver.define('checkIsAdmin', async ({ context, payload }) => {
   };
 });
 
-resolver.define('getConfig', async ({ context, payload }) => {
+resolver.define('getConfig', async ({ context }) => {
   const config = await getConfig();
   const isAdmin = await checkAdmin(context);
   await recordRuntimeVersionIfChanged((context as { accountId?: string })?.accountId, Boolean(config.compliance?.auditTrailEnabled));
@@ -121,23 +119,9 @@ resolver.define('getConfig', async ({ context, payload }) => {
     // Scrub keys for the frontend
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
-    if (gc.azureOpenaiApiKey) gc.azureOpenaiApiKey = REDACTED;
   }
   
-  return {
-    ...config,
-    isAdmin,
-    effectiveAiPolicy: resolveAiExecutionPolicy(config, payload?.projectKey),
-    effectiveGeneratorConfig: resolveGeneratorConfig(config, payload?.projectKey, payload?.reasoningMode),
-  };
-});
-
-resolver.define('getAiInsights', async ({ context }) => {
-  await ensureAdmin(context);
-  return {
-    success: true,
-    insights: await getAiInsightsReport(),
-  };
+  return { ...config, isAdmin };
 });
 
 resolver.define('saveConfig', async ({ payload, context }) => {
@@ -150,19 +134,17 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
-  if (ngc.azureOpenaiApiKey === REDACTED) ngc.azureOpenaiApiKey = egc.azureOpenaiApiKey;
   
   await saveConfig(payload);
 
   const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const modelFields = ['provider', 'profileMode', 'fastProfileProvider', 'fastProfileModel', 'deepProfileProvider', 'deepProfileModel', 'decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'themeModel'];
+  const modelFields = ['decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'themeModel'];
   const changedModelFields = modelFields.filter((field) => {
     return ngc[field] !== undefined && ngc[field] !== egc[field];
   });
   const apiKeyRotated = Boolean(
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
-    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
-    (ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED && ngc.azureOpenaiApiKey !== egc.azureOpenaiApiKey),
+    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey),
   );
   const auditEnabled = Boolean(existingConfig.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled);
   if (changedModelFields.length > 0) {
@@ -183,7 +165,6 @@ resolver.define('saveConfig', async ({ payload, context }) => {
         providerKeysUpdated: [
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
-          ngc.azureOpenaiApiKey && ngc.azureOpenaiApiKey !== REDACTED ? 'azure_openai' : null,
         ].filter(Boolean),
       },
       enabled: auditEnabled,
@@ -222,8 +203,7 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
-    const isAzureOpenAI = payload.provider === 'azure_openai';
-
+    
     const res = await callLlm({
       provider: payload.provider,
       model: payload.model || 'test',
@@ -231,77 +211,11 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       geminiBaseUrl: isGemini ? (payload.geminiBaseUrl?.trim() || gc.geminiBaseUrl) : undefined,
       openaiApiKey: isOpenAI ? (payload.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload.openaiApiKey?.trim() || gc.openaiApiKey)) : undefined,
       openaiBaseUrl: isOpenAI ? (payload.openaiBaseUrl?.trim() || gc.openaiBaseUrl) : undefined,
-      azureOpenaiApiKey: isAzureOpenAI ? (payload.azureOpenaiApiKey === REDACTED ? gc.azureOpenaiApiKey : (payload.azureOpenaiApiKey?.trim() || gc.azureOpenaiApiKey)) : undefined,
-      azureOpenaiEndpoint: isAzureOpenAI ? (payload.azureOpenaiEndpoint?.trim() || gc.azureOpenaiEndpoint) : undefined,
-      azureOpenaiDeployment: isAzureOpenAI ? (payload.azureOpenaiDeployment?.trim() || gc.azureOpenaiDeployment) : undefined,
-      azureOpenaiApiVersion: isAzureOpenAI ? (payload.azureOpenaiApiVersion?.trim() || gc.azureOpenaiApiVersion) : undefined,
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
-      maxTokens: 16,
-      timeoutMs: 10000,
-      geminiThinkingBudget: 0,
       noFallback: true,
     });
     return { success: true, reply: res.text };
-  } catch (err) {
-    const message = String((err as { message?: unknown })?.message ?? err ?? 'Unknown error');
-    return { success: false, error: message };
-  }
-});
-
-// ─── Dynamic model list ───────────────────────────────────────────────────────
-
-const MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-resolver.define('fetchAvailableModels', async ({ payload, context }) => {
-  await ensureAdmin(context);
-  const provider: string = payload.provider;
-
-  // Return cached result if fresh
-  const cacheKey = `model_list_${provider}`;
-  try {
-    const cached = await entityGet(cacheKey) as { models: { id: string; label: string }[]; fetchedAt: number } | null;
-    if (cached && Date.now() - cached.fetchedAt < MODEL_CACHE_TTL_MS) {
-      return { success: true, models: cached.models, fromCache: true };
-    }
-  } catch { /* cache miss — continue */ }
-
-  const cfg = await getConfig();
-  const gc = cfg.generatorConfig || {};
-
-  try {
-    let models: { id: string; label: string }[] = [];
-
-    if (provider === 'openai') {
-      const apiKey = gc.openaiApiKey?.trim();
-      if (!apiKey) return { success: false, error: 'OpenAI API key not configured yet.' };
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!res.ok) return { success: false, error: `OpenAI API returned ${res.status}` };
-      const data = await res.json() as { data: { id: string; object: string }[] };
-      models = (data.data || [])
-        .filter((m) => m.object === 'model' && /^(gpt-|o[0-9]|chatgpt-)/.test(m.id))
-        .sort((a, b) => a.id < b.id ? 1 : -1)
-        .map((m) => ({ id: m.id, label: m.id }));
-
-    } else if (provider === 'gemini') {
-      const apiKey = gc.geminiApiKey?.trim();
-      if (!apiKey) return { success: false, error: 'Gemini API key not configured yet.' };
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`);
-      if (!res.ok) return { success: false, error: `Gemini API returned ${res.status}` };
-      const data = await res.json() as { models: { name: string; displayName: string; supportedGenerationMethods?: string[] }[] };
-      models = (data.models || [])
-        .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && m.name.includes('gemini'))
-        .map((m) => ({ id: m.name.replace('models/', ''), label: m.displayName || m.name.replace('models/', '') }))
-        .sort((a, b) => a.id < b.id ? 1 : -1);
-
-    } else {
-      return { success: false, error: `Dynamic model list not available for provider: ${provider}` };
-    }
-
-    await entitySet(cacheKey, { models, fetchedAt: Date.now() });
-    return { success: true, models, fromCache: false };
   } catch (err) {
     const message = String((err as { message?: unknown })?.message ?? err ?? 'Unknown error');
     return { success: false, error: message };
@@ -312,66 +226,38 @@ resolver.define('fetchAvailableModels', async ({ payload, context }) => {
 
 resolver.define('startGeneration', async ({ payload, context }) => {
   const config = await getConfig();
-  const effectivePolicy = resolveAiExecutionPolicy(config, payload.projectKey || '*');
-  const effectiveGeneratorConfig = resolveGeneratorConfig(
-    config,
-    payload.projectKey || '*',
-    payload.reasoningMode,
-  );
-  const eventConfig = {
-    ...config,
-    aiExecutionPolicy: effectivePolicy,
-    generatorConfig: effectiveGeneratorConfig,
-  };
 
-  const check = await checkGenerationAllowed(eventConfig, context);
+  const check = await checkGenerationAllowed(config, context);
   if (!check.allowed) {
     return { success: false, error: check.reason };
   }
 
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const runId = randomUUID();
 
   const event: GenerationEvent = {
-    runId,
     sessionId: payload.sessionId,
     accountId,
     requirement: payload.requirement,
     clarifyAnswers: payload.clarifyAnswers ?? [],
     attachmentText: payload.attachmentText ?? '',
-    config: eventConfig,
+    config,
     license: context?.license,
+    goldExamples: '',   // fetched inside queue consumer
+    wiContext: '',      // fetched inside queue consumer
     projectKey: payload.projectKey || '*',
-    reasoningMode: payload.reasoningMode,
-    outputMode: payload.outputMode,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
   await entitySet(KEYS.generationProgress(payload.sessionId), {
     type: 'progress',
-    runId,
     sessionId: payload.sessionId,
     message: 'Queuing generation…',
     updatedAt: Date.now(),
   });
 
   const generationQueue = new Queue({ key: 'generation-queue' });
-  const pushResult = await generationQueue.push({
-    body: event,
-    concurrency: {
-      key: `generation-${payload.sessionId}`,
-      limit: 1,
-    },
-  });
-  await entitySet(KEYS.generationProgress(payload.sessionId), {
-    type: 'progress',
-    runId,
-    jobId: pushResult.jobId,
-    sessionId: payload.sessionId,
-    message: 'Queuing generation…',
-    updatedAt: Date.now(),
-  });
-  return { success: true, sessionId: payload.sessionId, runId, jobId: pushResult.jobId };
+  await generationQueue.push({ body: event });
+  return { success: true, sessionId: payload.sessionId };
 });
 
 // ─── Generation progress (polling) ───────────────────────────────────────────
@@ -386,50 +272,21 @@ resolver.define('getProgress', async ({ payload }: { payload: { sessionId: strin
 resolver.define('startClarify', async ({ payload, context }) => {
   try {
     const config = await getConfig();
-    const eventConfig = {
-      ...config,
-      aiExecutionPolicy: resolveAiExecutionPolicy(config, payload.projectKey || '*'),
-      generatorConfig: resolveGeneratorConfig(config, payload.projectKey || '*', payload.reasoningMode),
-    };
     const clarifyQueue = new Queue({ key: 'clarify-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-    const runId = randomUUID();
     const event: ClarifyEvent = {
-      runId,
       sessionId: payload.sessionId,
       accountId,
       requirement: payload.requirement,
       attachmentText: payload.attachmentText ?? '',
-      config: eventConfig,
+      config,
       license: context?.license,
       projectKey: payload.projectKey || '*',
-      reasoningMode: payload.reasoningMode,
-      outputMode: payload.outputMode,
     };
     // Overwrite any stale result with a 'pending' marker so the polling hook waits
-    await entitySet(KEYS.clarifyProgress(payload.sessionId), {
-      type: 'pending',
-      message: 'Preparing discovery workflow…',
-      runId,
-      phase: 'queued',
-      updatedAt: Date.now(),
-    });
-    const pushResult = await clarifyQueue.push({
-      body: event,
-      concurrency: {
-        key: `clarify-${payload.sessionId}`,
-        limit: 1,
-      },
-    });
-    await entitySet(KEYS.clarifyProgress(payload.sessionId), {
-      type: 'pending',
-      message: 'Preparing discovery workflow…',
-      runId,
-      jobId: pushResult.jobId,
-      phase: 'queued',
-      updatedAt: Date.now(),
-    });
-    return { success: true, runId, jobId: pushResult.jobId };
+    await entitySet(KEYS.clarifyProgress(payload.sessionId), { type: 'pending', updatedAt: Date.now() });
+    await clarifyQueue.push({ body: event });
+    return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, error: message };
@@ -443,54 +300,19 @@ resolver.define('getClarifyResult', async ({ payload }) => {
 
 resolver.define('evaluateSufficiency', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = {
-    ...eventConfig,
-    aiExecutionPolicy: resolveAiExecutionPolicy(eventConfig, payload.projectKey || '*'),
-    generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', payload.reasoningMode),
-    tier: getEffectiveTier(eventConfig, context),
-  };
-  const result = await evaluateSufficiency({
+  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  return evaluateSufficiency({
     requirement: payload.requirement,
     answers: payload.answers as ClarifyAnswer[],
     config,
-    reasoningMode: payload.reasoningMode,
-    outputMode: payload.outputMode,
   });
-  if (payload?.sessionId) {
-    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-    await persistDiscoveryCoverage(payload.sessionId, accountId, result);
-  }
-  return result;
-});
-
-resolver.define('saveDiscoveryRound', async ({ payload, context }) => {
-  try {
-    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-    await persistDiscoveryRound(
-      payload.sessionId,
-      accountId,
-      Number(payload.roundNumber) || 1,
-      normaliseQuestions(payload.questions),
-      normaliseAnswers(payload.answers),
-      payload.coverage,
-    );
-    return { success: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { success: false, error: message };
-  }
 });
 
 // ─── Refine ───────────────────────────────────────────────────────────────────
 
 resolver.define('refineFeatures', async ({ payload, context }) => {
   try {
-    const eventConfig = await getConfig();
-    const config = {
-      ...eventConfig,
-      generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', 'fast'),
-      tier: getEffectiveTier(eventConfig, context),
-    };
+    const config = await getConfig();
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(payload.requirement ?? '', piiEnabled);
     const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
@@ -541,11 +363,7 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
 
 resolver.define('refineSingleFeature', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = {
-    ...eventConfig,
-    generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', 'fast'),
-    tier: getEffectiveTier(eventConfig, context),
-  };
+  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
   const result = await refineSingleFeature({
@@ -603,11 +421,7 @@ resolver.define('checkRefineFeedback', async ({ payload, context }) => {
 
 resolver.define('ask', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = {
-    ...eventConfig,
-    generatorConfig: resolveGeneratorConfig(eventConfig, payload.projectKey || '*', 'fast'),
-    tier: getEffectiveTier(eventConfig, context),
-  };
+  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedPrompt = maskPiiText(payload.message ?? '', piiEnabled);
   const maskedHistory = maskPiiInAnswers(
@@ -619,21 +433,7 @@ resolver.define('ask', async ({ payload, context }) => {
   );
 
   const [wiContext, similarItems] = await Promise.all([
-    config.wiConfig.enabled ? retrieveWiContext(maskedPrompt.text, 8, 25000, '*', {
-      enabled: Boolean(config.similarityConfig.useLlmRerank),
-      model: config.generatorConfig.themeModel,
-      provider: config.generatorConfig.provider,
-      geminiApiKey: config.generatorConfig.geminiApiKey,
-      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-      openaiApiKey: config.generatorConfig.openaiApiKey,
-      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-      azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
-      azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
-      azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
-      azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
-      shortlistSize: 12,
-      timeoutMs: 10000,
-    }) : Promise.resolve({ text: '', docs: [] }),
+    config.wiConfig.enabled ? retrieveWiContext(maskedPrompt.text, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
     findSimilarStories(maskedPrompt.text, config, payload.projectKey || '*'),
   ]);
 
@@ -945,14 +745,11 @@ resolver.define('removeWiDoc', async ({ payload, context }) => {
   return { success: true };
 });
 
+// ─── Gold Standards Cache ─────────────────────────────────────────────────────
+
 resolver.define('getCacheInfo', async () => {
-  return {
-    success: true,
-    enabled: false,
-    itemCount: 0,
-    cachedAt: null,
-    message: 'Curated gold example caching has been removed from the redesigned pipeline.',
-  };
+  const info = await getCacheInfo();
+  return { success: true, ...info };
 });
 
 resolver.define('getBacklogCacheInfo', async ({ payload }) => {
@@ -975,10 +772,14 @@ resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
 
 resolver.define('refreshCache', async ({ context }) => {
   await ensureAdmin(context);
-  return {
-    success: false,
-    error: 'Curated gold example caching has been removed from the redesigned pipeline.',
-  };
+  const eventConfig = await getConfig();
+  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  
+  if (!config.goldSources.length) {
+    return { success: false, error: 'No gold standard sources configured.' };
+  }
+  const cache = await refreshGoldCache(config.goldSources);
+  return { success: true, itemCount: cache.itemCount, cachedAt: cache.cachedAt };
 });
 
 resolver.define('refreshBacklogCache', async ({ payload, context }) => {
@@ -1002,51 +803,7 @@ resolver.define('getHistory', async ({ payload, context }) => {
   const index = await entityGet<Array<{ sessionId: string; title: string; updatedAt: string; turnCount: number }>>(
     KEYS.userConversationIndex(accountId),
   ) ?? [];
-  const conversations = await Promise.all(
-    index.slice(0, limit).map(async (entry) => {
-      const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(
-        KEYS.userConversations(accountId, entry.sessionId),
-      );
-      const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
-      const lastTurn = turns[turns.length - 1];
-      const latestClarifyWithCoverage = [...turns]
-        .reverse()
-        .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryCoverage);
-      const latestTranscriptOwner = [...turns]
-        .reverse()
-        .find(turn => turn?.generationContext?.discoveryTranscript || turn?.clarifyContext?.discoveryTranscript);
-      const discoveryTranscript = latestTranscriptOwner?.generationContext?.discoveryTranscript
-        ?? latestTranscriptOwner?.clarifyContext?.discoveryTranscript
-        ?? [];
-
-      return {
-        ...entry,
-        lastTurnType: lastTurn?.turnType ?? null,
-        lastFeatureCount: Array.isArray(lastTurn?.features) ? lastTurn.features.length : 0,
-        lastScopeMode: null,
-        lastDiscoveryScore: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.overallScore ?? null,
-        lastDiscoverySummary: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.summary ?? null,
-        lastMissingCriticalCount: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.missingCritical?.length ?? 0,
-        lastDiscoveryRoundCount: Array.isArray(discoveryTranscript) ? discoveryTranscript.length : 0,
-        discoveryTranscriptPreview: Array.isArray(discoveryTranscript)
-          ? discoveryTranscript.slice(0, 4).map((round: Record<string, any>) => ({
-              roundNumber: round?.roundNumber ?? 0,
-              answerCount: Array.isArray(round?.answers) ? round.answers.length : 0,
-              summary: round?.coverage?.summary ?? null,
-              highlights: Array.isArray(round?.answers)
-                ? round.answers
-                    .slice(0, 2)
-                    .map((answer: Record<string, any>) => ({
-                      question: String(answer?.question ?? ''),
-                      answer: String(answer?.answer ?? ''),
-                    }))
-                : [],
-            }))
-          : [],
-      };
-    }),
-  );
-  return { success: true, conversations };
+  return { success: true, conversations: index.slice(0, limit) };
 });
 
 resolver.define('getConversation', async ({ payload, context }) => {
@@ -1142,18 +899,6 @@ resolver.define('setIssueSession', async ({ payload, context }) => {
   return { success: true };
 });
 
-resolver.define('getSidebarWidth', async ({ context }) => {
-  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const width = await entityGet<number>(KEYS.userSidebarWidth(accountId));
-  return { success: true, width: width ?? null };
-});
-
-resolver.define('setSidebarWidth', async ({ payload, context }) => {
-  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  await entitySet(KEYS.userSidebarWidth(accountId), Number(payload.width));
-  return { success: true };
-});
-
 // ─── Usage ────────────────────────────────────────────────────────────────────
 
 resolver.define('getUsage', async ({ context }) => {
@@ -1204,177 +949,6 @@ async function updateLatestTurnFeatures(
     }
   } catch {
     // ignore
-  }
-}
-
-function mergeTokenUsage(
-  existing?: { input?: number; output?: number; total?: number; byStage?: Record<string, { input: number; output: number; total: number }> },
-  next?: { input?: number; output?: number; total?: number; byStage?: Record<string, { input: number; output: number; total: number }> },
-) {
-  if (!existing && !next) return undefined;
-  return {
-    input: (existing?.input ?? 0) + (next?.input ?? 0),
-    output: (existing?.output ?? 0) + (next?.output ?? 0),
-    total: (existing?.total ?? 0) + (next?.total ?? 0),
-    byStage: {
-      ...(existing?.byStage ?? {}),
-      ...(next?.byStage ?? {}),
-    },
-  };
-}
-
-function normaliseQuestions(raw: unknown): ClarifyQuestion[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map(item => ({
-      category: String(item.category ?? 'Functional Flow').trim() || 'Functional Flow',
-      question: String(item.question ?? '').trim(),
-      suggestions: Array.isArray(item.suggestions)
-        ? item.suggestions.map(value => String(value ?? '').trim()).filter(Boolean).slice(0, 5)
-        : [],
-    }))
-    .filter(item => item.question.length > 0);
-}
-
-function normaliseAnswers(raw: unknown): ClarifyAnswer[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map(item => ({
-      question: String(item.question ?? '').trim(),
-      answer: String(item.answer ?? '').trim(),
-    }))
-    .filter(item => item.question.length > 0 || item.answer.length > 0);
-}
-
-async function persistDiscoveryRound(
-  sessionId: string,
-  accountId: string,
-  roundNumber: number,
-  questions: ClarifyQuestion[],
-  answers: ClarifyAnswer[],
-  coverage?: Record<string, any>,
-) {
-  const key = KEYS.userConversations(accountId, sessionId);
-  const existing = await entityGet<{ turns: Array<Record<string, any>> }>(key);
-  if (!existing?.turns?.length) return;
-
-  const clarifyTurn = [...existing.turns]
-    .reverse()
-    .find(turn => turn?.turnType === 'clarify');
-
-  if (!clarifyTurn) return;
-
-  const existingTranscript = Array.isArray(clarifyTurn?.clarifyContext?.discoveryTranscript)
-    ? [...clarifyTurn.clarifyContext.discoveryTranscript]
-    : [];
-
-  const nextRound = {
-    roundNumber,
-    questions,
-    answers,
-    coverage,
-    submittedAt: new Date().toISOString(),
-  };
-
-  const roundIndex = existingTranscript.findIndex((round: Record<string, any>) => Number(round?.roundNumber) === roundNumber);
-  if (roundIndex >= 0) {
-    existingTranscript[roundIndex] = {
-      ...existingTranscript[roundIndex],
-      ...nextRound,
-      questions: questions.length ? questions : existingTranscript[roundIndex].questions ?? [],
-      answers: answers.length ? answers : existingTranscript[roundIndex].answers ?? [],
-      coverage: coverage ?? existingTranscript[roundIndex].coverage,
-    };
-  } else {
-    existingTranscript.push(nextRound);
-    existingTranscript.sort((left: Record<string, any>, right: Record<string, any>) => Number(left.roundNumber) - Number(right.roundNumber));
-  }
-
-  const mergedTokenUsage = clarifyTurn?.clarifyContext?.tokenUsage;
-  const totalDiscoveryQuestions = existingTranscript.reduce(
-    (sum: number, round: Record<string, any>) => sum + (Array.isArray(round?.questions) ? round.questions.length : 0),
-    0,
-  );
-  const totalDiscoveryAnswers = existingTranscript.reduce(
-    (sum: number, round: Record<string, any>) => sum + (Array.isArray(round?.answers) ? round.answers.length : 0),
-    0,
-  );
-  const latestCoverage = coverage ?? clarifyTurn?.clarifyContext?.discoveryCoverage;
-  const initialQuestionCount = Array.isArray(existingTranscript[0]?.questions)
-    ? existingTranscript[0].questions.length
-    : undefined;
-
-  clarifyTurn.clarifyContext = {
-    ...(clarifyTurn.clarifyContext ?? {}),
-    discoveryTranscript: existingTranscript,
-    discoveryCoverage: latestCoverage,
-    tokenUsage: mergedTokenUsage,
-  };
-  clarifyTurn.tokenUsage = mergedTokenUsage;
-
-  await entitySet(key, existing);
-
-  await upsertAiSessionInsight({
-    sessionId,
-    projectKey: clarifyTurn?.clarifyContext?.projectKey ?? '*',
-    initialClarifyQuestionCount: initialQuestionCount,
-    discoveryRounds: existingTranscript.length,
-    totalDiscoveryQuestions,
-    totalDiscoveryAnswers,
-    latestCoverageScore: latestCoverage?.overallScore ?? null,
-    latestMissingCriticalCount: latestCoverage?.missingCritical?.length ?? 0,
-  });
-
-  const progress = await entityGet<Record<string, any>>(KEYS.clarifyProgress(sessionId));
-  if (progress?.contextMeta) {
-    progress.contextMeta = {
-      ...progress.contextMeta,
-      discoveryTranscript: existingTranscript,
-      discoveryCoverage: coverage ?? progress.contextMeta.discoveryCoverage,
-      tokenUsage: progress.contextMeta.tokenUsage,
-    };
-    await entitySet(KEYS.clarifyProgress(sessionId), progress);
-  }
-}
-
-async function persistDiscoveryCoverage(
-  sessionId: string,
-  accountId: string,
-  coverage: Record<string, any>,
-) {
-  try {
-    const key = KEYS.userConversations(accountId, sessionId);
-    const existing = await entityGet<{ turns: Array<Record<string, any>> }>(key);
-    if (existing?.turns?.length) {
-      const clarifyTurn = [...existing.turns]
-        .reverse()
-        .find(turn => turn?.turnType === 'clarify');
-
-      if (clarifyTurn) {
-        const mergedTokenUsage = mergeTokenUsage(clarifyTurn?.clarifyContext?.tokenUsage, coverage?.tokenUsage);
-        clarifyTurn.clarifyContext = {
-          ...(clarifyTurn.clarifyContext ?? {}),
-          discoveryCoverage: coverage,
-          tokenUsage: mergedTokenUsage,
-        };
-        clarifyTurn.tokenUsage = mergedTokenUsage;
-        await entitySet(key, existing);
-      }
-    }
-
-    const progress = await entityGet<Record<string, any>>(KEYS.clarifyProgress(sessionId));
-    if (progress?.contextMeta) {
-      progress.contextMeta = {
-        ...progress.contextMeta,
-        discoveryCoverage: coverage,
-        tokenUsage: mergeTokenUsage(progress.contextMeta.tokenUsage, coverage?.tokenUsage),
-      };
-      await entitySet(KEYS.clarifyProgress(sessionId), progress);
-    }
-  } catch (err) {
-    console.warn('[persistDiscoveryCoverage] Failed to persist discovery coverage:', err);
   }
 }
 

@@ -19,12 +19,7 @@ export interface GoldSource {
 }
 
 export interface GeneratorConfig {
-  provider: LlmProvider;
-  profileMode: AiProfileMode;
-  fastProfileProvider: LlmProvider;
-  deepProfileProvider: LlmProvider;
-  fastProfileModel: string;
-  deepProfileModel: string;
+  provider: 'forge_llms' | 'gemini' | 'openai';
   decompositionModel: string;   // e.g. claude-opus-4-6, gpt-4o
   arModel: string;              // e.g. claude-opus-4-6, gpt-4o
   clarifyModel: string;         // e.g. claude-sonnet-4-6, gpt-4o-mini
@@ -36,147 +31,6 @@ export interface GeneratorConfig {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  azureOpenaiApiKey?: string;
-  azureOpenaiEndpoint?: string;
-  azureOpenaiDeployment?: string;
-  azureOpenaiApiVersion?: string;
-}
-
-export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
-export type AiProfileMode = 'simplified';
-export type AiPolicyPreset = 'balanced' | 'delivery' | 'discovery' | 'enterprise';
-export type ReasoningMode = 'fast' | 'deep';
-export type OutputMode = 'single' | 'auto' | 'full_breakdown';
-export type ScopeMode = 'atomic' | 'focused' | 'standard' | 'initiative';
-export type ClarificationMode = 'none' | 'light' | 'standard' | 'deep';
-
-export interface ClarifyQuestionPlan {
-  min: number;
-  max: number;
-  target: number;
-  clarity: 'clear' | 'medium' | 'vague';
-}
-
-export interface FeaturePlan {
-  min: number;
-  max: number;
-  target: number;
-  shape: 'narrow' | 'balanced' | 'broad';
-  complexity: 'low' | 'medium' | 'high';
-}
-
-export interface ArPlan {
-  min: number;
-  max: number;
-  target: number;
-  depth: 'lean' | 'standard' | 'thorough';
-}
-
-export interface PlannerDecision {
-  reasoningMode: ReasoningMode;
-  outputMode: OutputMode;
-  scopeMode: ScopeMode;
-  clarificationMode: ClarificationMode;
-  questionPlan: ClarifyQuestionPlan;
-  featurePlan: FeaturePlan;
-  arPlan: ArPlan;
-  useHierarchy: boolean;
-  confidence: number;
-  ambiguityScore: number;
-  ambiguityReasons: string[];
-  rationale: string[];
-}
-
-export interface AiExecutionPolicy {
-  workspacePreset: AiPolicyPreset;
-  defaultReasoningMode: ReasoningMode;
-  defaultOutputMode: OutputMode;
-  allowReasoningModeOverride: boolean;
-  allowOutputModeOverride: boolean;
-  simpleAskMaxQuestions: number;
-  deepModeRoundTarget: number;
-  enterpriseMaxQuestionsPerRound: number;
-  maxDeepDiscoveryRounds: number;
-  hideModelSelectionFromEndUsers: boolean;
-}
-
-export interface AiSessionInsight {
-  sessionId: string;
-  createdAt: string;
-  updatedAt: string;
-  projectKey: string;
-  reasoningMode?: ReasoningMode;
-  outputMode?: OutputMode;
-  scopeMode?: ScopeMode;
-  clarificationMode?: ClarificationMode;
-  plannedFeatureTarget?: number;
-  plannedQuestionTarget?: number;
-  initialClarifyQuestionCount?: number;
-  discoveryRounds?: number;
-  totalDiscoveryQuestions?: number;
-  totalDiscoveryAnswers?: number;
-  latestCoverageScore?: number | null;
-  latestMissingCriticalCount?: number;
-  generatedFeatureCount?: number;
-  initiativeGroupCount?: number;
-}
-
-export interface AiInsightsBreakdownItem {
-  key: string;
-  count: number;
-  avgFeatures: number;
-  avgDiscoveryRounds: number;
-  avgCoverageScore: number | null;
-}
-
-export interface AiInsightRecentSession {
-  sessionId: string;
-  updatedAt: string;
-  projectKey: string;
-  scopeMode?: ScopeMode;
-  reasoningMode?: ReasoningMode;
-  outputMode?: OutputMode;
-  generatedFeatureCount?: number;
-  discoveryRounds?: number;
-  latestCoverageScore?: number | null;
-}
-
-export interface AiInsightsReport {
-  generatedAt: string;
-  totalSessions: number;
-  clarifySessions: number;
-  generatedSessions: number;
-  avgFeatureCount: number;
-  avgDiscoveryRounds: number;
-  avgQuestionsPerClarifySession: number;
-  avgCoverageScore: number | null;
-  overTargetFeatureSessions: number;
-  singleFeatureSessions: number;
-  multiRoundSessions: number;
-  initiativeSessions: number;
-  scopeBreakdown: AiInsightsBreakdownItem[];
-  reasoningBreakdown: AiInsightsBreakdownItem[];
-  outputBreakdown: AiInsightsBreakdownItem[];
-  projectBreakdown: Array<{ key: string; count: number }>;
-  recentSessions: AiInsightRecentSession[];
-}
-
-export interface ProjectAiPolicy {
-  projectKey: string;
-  preset: AiPolicyPreset | 'inherit';
-  defaultReasoningMode?: ReasoningMode;
-  defaultOutputMode?: OutputMode;
-  profileMode?: AiProfileMode;
-  fastProfileProvider?: LlmProvider;
-  fastProfileModel?: string;
-  deepProfileProvider?: LlmProvider;
-  deepProfileModel?: string;
-  allowReasoningModeOverride?: boolean;
-  allowOutputModeOverride?: boolean;
-  simpleAskMaxQuestions?: number;
-  deepModeRoundTarget?: number;
-  enterpriseMaxQuestionsPerRound?: number;
-  maxDeepDiscoveryRounds?: number;
 }
 
 export interface ProcessCode {
@@ -200,7 +54,6 @@ export interface ProjectBacklogStatusScope {
 export interface TenantConfig {
   goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
-  aiExecutionPolicy: AiExecutionPolicy;
   domainContext: string;
   domainRoles: string[];
   processTaxonomyEnabled: boolean;
@@ -224,38 +77,19 @@ export interface TenantConfig {
   };
   issueLinkType: string;  // default: 'Relates to'
   backlogStatusScopes: ProjectBacklogStatusScope[];
-  projectAiPolicies: ProjectAiPolicy[];
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
   goldSources: [],
   generatorConfig: {
     provider: 'forge_llms',
-    profileMode: 'simplified',
-    fastProfileProvider: 'forge_llms',
-    deepProfileProvider: 'forge_llms',
-    fastProfileModel: 'claude-sonnet-4-6',
-    deepProfileModel: 'claude-sonnet-4-6',
-    decompositionModel: 'claude-sonnet-4-6',
-    arModel: 'claude-sonnet-4-6',
-    clarifyModel: 'claude-sonnet-4-6',
-    refineModel: 'claude-sonnet-4-6',
-    evaluateModel: 'claude-sonnet-4-6',
-    themeModel: 'claude-sonnet-4-6',
+    decompositionModel: 'claude-opus-4-6',
+    arModel: 'claude-opus-4-6',
+    clarifyModel: 'claude-sonnet-4-5-20250929',
+    refineModel: 'claude-opus-4-6',
+    evaluateModel: 'claude-haiku-4-5-20251001',
+    themeModel: 'claude-haiku-4-5-20251001',
     maxTokens: 8192,
-    azureOpenaiApiVersion: '2024-10-21',
-  },
-  aiExecutionPolicy: {
-    workspacePreset: 'balanced',
-    defaultReasoningMode: 'fast',
-    defaultOutputMode: 'auto',
-    allowReasoningModeOverride: true,
-    allowOutputModeOverride: true,
-    simpleAskMaxQuestions: 4,
-    deepModeRoundTarget: 6,
-    enterpriseMaxQuestionsPerRound: 10,
-    maxDeepDiscoveryRounds: 3,
-    hideModelSelectionFromEndUsers: true,
   },
   domainContext: '',
   domainRoles: [],
@@ -273,7 +107,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
   },
   wiConfig: {
     enabled: true,
-    topKChunks: 30,
+    topKChunks: 8,
     maxChars: 100000,
   },
   tier: 'free',
@@ -285,7 +119,6 @@ export const DEFAULT_CONFIG: TenantConfig = {
   },
   issueLinkType: 'Relates to',
   backlogStatusScopes: [],
-  projectAiPolicies: [],
 };
 
 // ─── Feature / Story Types ────────────────────────────────────────────────────
@@ -323,43 +156,6 @@ export interface ReferencedSimilarStory {
   key: string;
   summary: string;
   relevanceScore?: number;
-  url?: string;
-}
-
-export interface InitiativeGroup {
-  id: string;
-  title: string;
-  summary: string;
-  featureIds: string[];
-}
-
-export interface DiscoveryCoverageDimension {
-  key: string;
-  label: string;
-  required: boolean;
-  score: number;
-  status: 'missing' | 'partial' | 'covered';
-  evidence: string;
-}
-
-export interface DiscoveryCoverageResult {
-  sufficient: boolean;
-  canGenerate: boolean;
-  shouldContinueDiscovery: boolean;
-  overallScore: number;
-  summary: string;
-  missingCritical: string[];
-  dimensions: DiscoveryCoverageDimension[];
-  questions?: ClarifyQuestion[];
-  tokenUsage?: TokenUsageSummary;
-}
-
-export interface DiscoveryRoundTranscript {
-  roundNumber: number;
-  questions: ClarifyQuestion[];
-  answers: ClarifyAnswer[];
-  coverage?: DiscoveryCoverageResult;
-  submittedAt: string;
 }
 
 export interface ContextSourceMeta {
@@ -372,18 +168,24 @@ export interface ContextSourceMeta {
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {
+  goldExamplesCount?: number;
+  referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
-  discoveryCoverage?: DiscoveryCoverageResult;
-  discoveryTranscript?: DiscoveryRoundTranscript[];
-  tokenUsage?: TokenUsageSummary;
+  ambiguityAssessment?: {
+    level: 'clear' | 'medium' | 'vague';
+    score: number;
+    reasons: string[];
+    questionPlan: { min: number; max: number; target: number };
+    generatedQuestions: number;
+  };
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
+  goldExamplesCount: number;
+  referencedGoldExamples: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
-  discoveryCoverage?: DiscoveryCoverageResult;
-  discoveryTranscript?: DiscoveryRoundTranscript[];
   tokenUsage?: TokenUsageSummary;
 }
 
@@ -474,28 +276,24 @@ export interface WiDoc {
 // ─── Clarify Queue Event ──────────────────────────────────────────────────────
 
 export interface ClarifyEvent {
-  runId: string;
   sessionId: string;
   accountId: string;
   requirement: string;
   attachmentText: string;
   config: TenantConfig;
-  reasoningMode?: ReasoningMode;
-  outputMode?: OutputMode;
 }
 
 // ─── Generation Queue Event ───────────────────────────────────────────────────
 
 export interface GenerationEvent {
-  runId: string;
   sessionId: string;
   accountId: string;          // Atlassian account ID of the initiating user
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   config: TenantConfig;
-  reasoningMode?: ReasoningMode;
-  outputMode?: OutputMode;
+  goldExamples: string;
+  wiContext: string;
 }
 
 // ─── Tier Limits ─────────────────────────────────────────────────────────────

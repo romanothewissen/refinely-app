@@ -10,6 +10,12 @@ function collectKnownProjectKeys(config: Awaited<ReturnType<typeof getConfig>>):
   for (const ctx of config.domainContexts ?? []) {
     if (ctx.projectKey && ctx.projectKey !== '*') keys.add(ctx.projectKey);
   }
+  for (const source of config.goldSources ?? []) {
+    if (source.project) keys.add(source.project);
+    for (const target of source.targetProjects ?? []) {
+      if (target && target !== '*') keys.add(target);
+    }
+  }
   for (const scope of config.backlogStatusScopes ?? []) {
     if (scope.projectKey && scope.projectKey !== '*') keys.add(scope.projectKey);
   }

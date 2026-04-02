@@ -179,7 +179,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                 <div className="w-16 h-16 rounded-2xl bg-[var(--rf-brand-muted)] border border-blue-100 flex items-center justify-center shadow-inner">
                   <div className="w-8 h-8 border-[3px] border-[var(--rf-brand-subtle)] border-t-blue-600 rounded-full spin-slow" />
                 </div>
-                <div className="absolute -inset-2 bg-[var(--rf-brand)]/10 rounded-3xl animate-pulse" />
+                <div className="absolute -inset-2 bg-[var(--rf-brand-muted)]0/10 rounded-3xl animate-pulse" />
               </div>
               <div className="text-center space-y-1">
                 <p className="font-bold text-[var(--rf-text)] text-lg tracking-tight">Creating in Jira…</p>

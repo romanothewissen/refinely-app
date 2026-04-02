@@ -32,7 +32,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
           <div className="flex items-center gap-2.5">
             <div className="w-16 h-1.5 bg-[var(--rf-text)] rounded-full overflow-hidden">
               <div
-                className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-danger)]' : isNearLimit ? 'bg-amber-500' : 'bg-[var(--rf-brand)]'}`}
+                className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-danger-subtle)]0' : isNearLimit ? 'bg-amber-500' : 'bg-[var(--rf-brand-muted)]0'}`}
                 style={{ width: `${percentage}%` }}
               />
             </div>
@@ -49,12 +49,12 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
     <div className={`space-y-4 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={`p-1.5 rounded-lg shadow-sm ${(tier === 'premium' || tier === 'enterprise') ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : tier === 'standard' ? 'bg-[var(--rf-brand)]/10 text-blue-400 border border-[var(--rf-brand)]/20' : 'bg-white/5 text-[var(--rf-text-tertiary)] border border-white/10'}`}>
+          <div className={`p-1.5 rounded-lg shadow-sm ${(tier === 'premium' || tier === 'enterprise') ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : tier === 'standard' ? 'bg-[var(--rf-brand-muted)]0/10 text-blue-400 border border-[var(--rf-brand)]/20' : 'bg-white/5 text-[var(--rf-text-tertiary)] border border-white/10'}`}>
             {(tier === 'premium' || tier === 'enterprise') ? <ShieldCheck className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
           </div>
           <div>
-            <h4 className="text-[14px] font-bold text-white tracking-tight">{tierName} Plan</h4>
-            <p className="text-[11px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest mt-0.5">Current Usage</p>
+            <h4 className="text-[13px] font-bold text-white tracking-tight">{tierName} Plan</h4>
+            <p className="text-[10px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest mt-0.5">Current Usage</p>
           </div>
         </div>
         {isAtLimit && <AlertCircle className="w-4 h-4 text-rose-500" />}
@@ -62,18 +62,18 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
 
       <div className="space-y-2">
         <div className="flex justify-between items-end">
-          <span className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
+          <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
           <span className="text-sm font-bold text-white tracking-tight">
-            {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[12px] ml-1">/ {isUnlimited ? '\u221e' : max}</span>
+            {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '\u221e' : max}</span>
           </span>
         </div>
         {!isUnlimited && (
           <div className="w-full h-2 bg-[var(--rf-text)] rounded-full overflow-hidden shadow-inner">
             <div
               className={`h-full transition-all duration-500 rounded-full ${
-                isAtLimit ? 'bg-[var(--rf-danger)] shadow-[0_0_10px_rgba(244,63,94,0.5)]' :
+                isAtLimit ? 'bg-[var(--rf-danger-subtle)]0 shadow-[0_0_10px_rgba(244,63,94,0.5)]' :
                 isNearLimit ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' :
-                'bg-[var(--rf-brand)] shadow-[0_0_10px_rgba(59,130,246,0.5)]'
+                'bg-[var(--rf-brand-muted)]0 shadow-[0_0_10px_rgba(59,130,246,0.5)]'
               }`}
               style={{ width: `${percentage}%` }}
             />

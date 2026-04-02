@@ -56,4 +56,3 @@ permissions:
       backend:
         - address: https://generativelanguage.googleapis.com
         - address: https://api.openai.com
-        - address: https://api.anthropic.com
