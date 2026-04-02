@@ -8,9 +8,22 @@ import { router } from '@forge/bridge';
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
 type AcceptanceRequirement = { given: string; when: string; then: string };
 
+function tokenizeDiffText(text: string): string[] {
+  return text.match(/\w+|\s+|[^\s\w]+/g) || [];
+}
+
+function appendDiffToken(tokens: DiffToken[], next: DiffToken) {
+  const previous = tokens[tokens.length - 1];
+  if (previous && previous.type === next.type) {
+    previous.text += next.text;
+    return;
+  }
+  tokens.push(next);
+}
+
 function wordDiff(oldText: string, newText: string): DiffToken[] {
-  const oldWords = (oldText || '').split(/\b/);
-  const newWords = (newText || '').split(/\b/);
+  const oldWords = tokenizeDiffText(oldText || '');
+  const newWords = tokenizeDiffText(newText || '');
   const m = oldWords.length, n = newWords.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = m - 1; i >= 0; i--)
@@ -19,12 +32,12 @@ function wordDiff(oldText: string, newText: string): DiffToken[] {
   const tokens: DiffToken[] = [];
   let i = 0, j = 0;
   while (i < m && j < n) {
-    if (oldWords[i] === newWords[j]) { tokens.push({ text: newWords[j], type: 'same' }); i++; j++; }
-    else if (dp[i+1][j] >= dp[i][j+1]) { tokens.push({ text: oldWords[i], type: 'removed' }); i++; }
-    else { tokens.push({ text: newWords[j], type: 'added' }); j++; }
+    if (oldWords[i] === newWords[j]) { appendDiffToken(tokens, { text: newWords[j], type: 'same' }); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { appendDiffToken(tokens, { text: oldWords[i], type: 'removed' }); i++; }
+    else { appendDiffToken(tokens, { text: newWords[j], type: 'added' }); j++; }
   }
-  while (i < m) tokens.push({ text: oldWords[i++], type: 'removed' });
-  while (j < n) tokens.push({ text: newWords[j++], type: 'added' });
+  while (i < m) appendDiffToken(tokens, { text: oldWords[i++], type: 'removed' });
+  while (j < n) appendDiffToken(tokens, { text: newWords[j++], type: 'added' });
   return tokens;
 }
 
@@ -65,41 +78,122 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union ? intersection / union : 0;
 }
 
+function clauseSimilarity(left: string, right: string): number {
+  const normalisedLeft = normaliseWhitespace(left);
+  const normalisedRight = normaliseWhitespace(right);
+  if (!normalisedLeft && !normalisedRight) return 1;
+  if (!normalisedLeft || !normalisedRight) return 0;
+  if (normalisedLeft === normalisedRight) return 1;
+  return jaccard(tokenSet(left), tokenSet(right));
+}
+
 function arSimilarity(left: AcceptanceRequirement, right: AcceptanceRequirement): number {
   const leftText = `${left.given} ${left.when} ${left.then}`.trim();
   const rightText = `${right.given} ${right.when} ${right.then}`.trim();
   const exact = normaliseWhitespace(leftText) === normaliseWhitespace(rightText);
   if (exact) return 1;
-  return jaccard(tokenSet(leftText), tokenSet(rightText));
+
+  const fullScore = jaccard(tokenSet(leftText), tokenSet(rightText));
+  const givenScore = clauseSimilarity(left.given, right.given);
+  const whenScore = clauseSimilarity(left.when, right.when);
+  const thenScore = clauseSimilarity(left.then, right.then);
+  const structureScore =
+    ((Boolean(normaliseWhitespace(left.given)) === Boolean(normaliseWhitespace(right.given)) ? 1 : 0) +
+    (Boolean(normaliseWhitespace(left.when)) === Boolean(normaliseWhitespace(right.when)) ? 1 : 0) +
+    (Boolean(normaliseWhitespace(left.then)) === Boolean(normaliseWhitespace(right.then)) ? 1 : 0)) / 3;
+
+  return (fullScore * 0.4) + (givenScore * 0.2) + (whenScore * 0.15) + (thenScore * 0.2) + (structureScore * 0.05);
+}
+
+function arMatchScore(
+  left: AcceptanceRequirement,
+  right: AcceptanceRequirement,
+  leftIndex: number,
+  rightIndex: number,
+  leftCount: number,
+  rightCount: number,
+): number {
+  const similarity = arSimilarity(left, right);
+  const leftPosition = leftCount <= 1 ? 0 : leftIndex / (leftCount - 1);
+  const rightPosition = rightCount <= 1 ? 0 : rightIndex / (rightCount - 1);
+  const positionPenalty = Math.min(Math.abs(leftPosition - rightPosition), 1) * 0.08;
+  return similarity - positionPenalty;
 }
 
 function alignAcceptanceRequirements(
   original: AcceptanceRequirement[],
   proposed: AcceptanceRequirement[],
 ): Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> {
-  const usedOriginalIndices = new Set<number>();
   const rows: Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> = [];
 
-  for (const nextAr of proposed) {
-    let bestIndex = -1;
-    let bestScore = 0;
+  if (proposed.length === 0) return rows;
+  if (original.length === 0) {
+    return proposed.map((nextAr) => ({ proposed: nextAr, isNew: true }));
+  }
 
-    for (let i = 0; i < original.length; i += 1) {
-      if (usedOriginalIndices.has(i)) continue;
-      const score = arSimilarity(original[i], nextAr);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
+  const matchThreshold = 0.26;
+  const newArPenalty = 0.38;
+  const m = original.length;
+  const n = proposed.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  const decision: Array<Array<'skip-original' | 'new-proposed' | 'match' | null>> = Array.from(
+    { length: m + 1 },
+    () => new Array(n + 1).fill(null),
+  );
+
+  for (let i = 1; i <= m; i += 1) {
+    dp[i][0] = dp[i - 1][0];
+    decision[i][0] = 'skip-original';
+  }
+
+  for (let j = 1; j <= n; j += 1) {
+    dp[0][j] = dp[0][j - 1] - newArPenalty;
+    decision[0][j] = 'new-proposed';
+  }
+
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      let bestScore = dp[i - 1][j];
+      let bestDecision: 'skip-original' | 'new-proposed' | 'match' = 'skip-original';
+
+      const markAsNewScore = dp[i][j - 1] - newArPenalty;
+      if (markAsNewScore > bestScore) {
+        bestScore = markAsNewScore;
+        bestDecision = 'new-proposed';
       }
+
+      const pairScore = arMatchScore(original[i - 1], proposed[j - 1], i - 1, j - 1, m, n);
+      if (pairScore >= matchThreshold) {
+        const matchScore = dp[i - 1][j - 1] + pairScore;
+        if (matchScore > bestScore) {
+          bestScore = matchScore;
+          bestDecision = 'match';
+        }
+      }
+
+      dp[i][j] = bestScore;
+      decision[i][j] = bestDecision;
+    }
+  }
+
+  let i = m;
+  let j = n;
+  while (j > 0) {
+    const step = decision[i][j];
+    if (step === 'match') {
+      rows.unshift({ proposed: proposed[j - 1], oldAr: original[i - 1], oldIndex: i - 1, isNew: false });
+      i -= 1;
+      j -= 1;
+      continue;
     }
 
-    const matched = bestIndex >= 0 && bestScore >= 0.45;
-    if (matched) {
-      usedOriginalIndices.add(bestIndex);
-      rows.push({ proposed: nextAr, oldAr: original[bestIndex], oldIndex: bestIndex, isNew: false });
-    } else {
-      rows.push({ proposed: nextAr, isNew: true });
+    if (step === 'new-proposed' || i === 0) {
+      rows.unshift({ proposed: proposed[j - 1], isNew: true });
+      j -= 1;
+      continue;
     }
+
+    i -= 1;
   }
 
   return rows;
