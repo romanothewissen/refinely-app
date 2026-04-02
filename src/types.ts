@@ -40,11 +40,19 @@ export interface ProcessCode {
   definition: string;
 }
 
+export interface ProjectFieldMapping {
+  summaryFieldId: string;
+  descriptionFieldId: string;
+  arFieldIds: string[];
+}
+
 export interface ProjectArMapping {
   projectKey: string;   // e.g. "MYPROJ" or "*" for default
   mode: 'consolidated' | 'iterative';
   consolidatedFieldId: string;
   iterativeFieldIds: string[];
+  inputMappings: ProjectFieldMapping;
+  outputMappings: ProjectFieldMapping;
   issueLinkType?: string; // per-project link type
 }
 
@@ -140,6 +148,16 @@ export const DEFAULT_CONFIG: TenantConfig = {
       mode: 'consolidated',
       consolidatedFieldId: 'description',
       iterativeFieldIds: [],
+      inputMappings: {
+        summaryFieldId: 'summary',
+        descriptionFieldId: 'description',
+        arFieldIds: [],
+      },
+      outputMappings: {
+        summaryFieldId: 'summary',
+        descriptionFieldId: 'description',
+        arFieldIds: [],
+      },
     }
   ],
   domainContexts: [

@@ -8,7 +8,7 @@
  */
 
 import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
-import { generateFeatures, generateSessionTitle } from '../core/story-generator';
+import { GenerationCancelledError, generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
@@ -18,7 +18,7 @@ import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
 
 interface RealtimeEvent {
-  type: 'progress' | 'complete' | 'error';
+  type: 'progress' | 'complete' | 'error' | 'cancelled';
   sessionId: string;
   message?: string;
   pass?: 1 | 2;
@@ -79,7 +79,7 @@ export async function handler(event: { body: GenerationEvent }) {
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
     const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
-    await sendProgress(sessionId, `Found ${goldCount} reference examples for ${projectLabel}. initializing…`);
+    await sendProgress(sessionId, `Reading reference examples, work instructions, and related stories for ${projectLabel}…`);
 
     const [goldItems, wiContext, similarStories] = await Promise.all([
       goldCount
@@ -93,11 +93,16 @@ export async function handler(event: { body: GenerationEvent }) {
         : Promise.resolve([]),
     ]);
 
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
     const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
 
     // Progress: pass 1
-    await sendProgress(sessionId, 'Decomposing requirement into features…', 1);
+    await sendProgress(sessionId, 'Planning feature structure from gathered context…', 1);
 
     const result = await generateFeatures({
       requirement,
@@ -107,13 +112,21 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
+      shouldCancel: () => isWorkflowCancelled(sessionId),
       onPass1Complete: async (featureCount) => {
-        await sendProgress(sessionId, `Writing acceptance criteria for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
+        if (await isWorkflowCancelled(sessionId)) return;
+        await sendProgress(sessionId, `Writing acceptance requirements for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
       },
     });
 
     result.similarStories = similarStories;
     result.sessionId = sessionId;
+
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
     const generationContext: GenerationContextMeta = {
       projectKey,
       domainRolesUsed: config.domainRoles ?? [],
@@ -130,6 +143,8 @@ export async function handler(event: { body: GenerationEvent }) {
         key: item.key,
         summary: item.summary,
         relevanceScore: item.relevanceScore,
+        url: item.url,
+        jiraIssueUrl: item.url,
       })),
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
@@ -147,6 +162,11 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     result.generationContext = generationContext;
 
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
     // Record usage
     await recordGeneration();
 
@@ -161,6 +181,11 @@ export async function handler(event: { body: GenerationEvent }) {
       generationContext,
       result.tokenUsage,
     );
+
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
 
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
@@ -194,6 +219,12 @@ export async function handler(event: { body: GenerationEvent }) {
         },
       });
     }
+
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
     await appendComplianceAuditEvent({
       actorAccountId: accountId,
       category: 'runtime',
@@ -206,13 +237,31 @@ export async function handler(event: { body: GenerationEvent }) {
       enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
     });
 
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
     // Generate session title (non-critical; should not fail the generation run)
     try {
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId);
+        return;
+      }
       const title = await generateSessionTitle(maskedRequirement.text, config);
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId);
+        return;
+      }
       await updateConversationTitle(sessionId, accountId, title);
     } catch (titleErr) {
       console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
       await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
+    }
+
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
     }
 
     // Write completed state to storage (frontend polls for this)
@@ -224,6 +273,10 @@ export async function handler(event: { body: GenerationEvent }) {
     } as RealtimeEvent);
 
   } catch (err) {
+    if (await isWorkflowCancelled(sessionId) || err instanceof GenerationCancelledError || String((err as { name?: string })?.name ?? '') === 'GenerationCancelledError') {
+      await markCancelled(sessionId);
+      return;
+    }
     console.error('[generation-queue] Error:', err);
     await entitySet(KEYS.generationProgress(sessionId), {
       type: 'error',
@@ -232,6 +285,20 @@ export async function handler(event: { body: GenerationEvent }) {
       updatedAt: Date.now(),
     } as RealtimeEvent);
   }
+}
+
+async function isWorkflowCancelled(sessionId: string): Promise<boolean> {
+  const progress = await entityGet<{ type?: string }>(KEYS.generationProgress(sessionId));
+  return progress?.type === 'cancelled';
+}
+
+async function markCancelled(sessionId: string) {
+  await entitySet(KEYS.generationProgress(sessionId), {
+    type: 'cancelled',
+    sessionId,
+    message: 'Generation cancelled.',
+    updatedAt: Date.now(),
+  } as RealtimeEvent);
 }
 
 // ─── Conversation history helpers ─────────────────────────────────────────────

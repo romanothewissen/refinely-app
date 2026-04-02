@@ -75,17 +75,22 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
       />
 
       <motion.div 
-        className="relative bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
+        className="relative bg-white w-full max-w-5xl h-[82vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
         {/* Header */}
-        <div className="px-6 py-5 border-b border-[var(--rf-border-subtle)] flex items-center gap-4 bg-white/80 backdrop-blur-md sticky top-0 z-20">
-          <div className="flex-1">
-            <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">Past Conversations</h2>
-            <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1">Review, rename, or resume your previous feature generation sessions.</p>
+        <div className="px-5 py-4 border-b border-[var(--rf-border-subtle)] flex items-center gap-4 bg-white/80 backdrop-blur-md sticky top-0 z-20">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Past Conversations</h2>
+              <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                {filtered.length} total
+              </span>
+            </div>
+            <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1.5">Review, rename, pin, or resume previous sessions faster.</p>
           </div>
           <motion.button 
             onClick={onClose} 
@@ -98,7 +103,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
         </div>
 
         {/* Search */}
-        <div className="px-6 py-4 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/50 z-10">
+        <div className="px-5 py-3.5 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/50 z-10">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--rf-text-tertiary)]" />
             <input
@@ -106,13 +111,13 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search sessions..."
-              className="w-full bg-white border border-[var(--rf-border)] rounded-xl pl-10 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+              className="w-full bg-white border border-[var(--rf-border)] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
             />
           </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-[var(--rf-surface-soft)]/50 p-6">
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-[var(--rf-surface-soft)]/50 p-4 sm:p-5">
           {filtered.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-[var(--rf-text-tertiary)] gap-4">
               <div className="w-16 h-16 rounded-2xl bg-white border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
@@ -121,15 +126,15 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">No conversations found.</p>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-8 pb-8">
+            <div className="max-w-5xl mx-auto space-y-6 pb-8">
               
               {/* Pinned Section */}
               {pinned.length > 0 && (
                 <div className="space-y-4 fade-in">
-                  <h3 className="text-xs font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2 mb-4">
-                    <Pin className="w-4 h-4 text-[var(--rf-brand)] fill-blue-500" /> Pinned
+                  <h3 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2">
+                    <Pin className="w-3.5 h-3.5 text-[var(--rf-brand)] fill-blue-500" /> Pinned
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {pinned.map((conv, idx) => (
                       <motion.div
                         key={conv.sessionId}
@@ -159,10 +164,10 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               {/* Recent Section */}
               {recent.length > 0 && (
                 <div className="space-y-4 fade-in">
-                  <h3 className={`text-xs font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest flex items-center gap-2 mb-4 ${pinned.length > 0 ? 'mt-8' : ''}`}>
-                    <Clock className="w-4 h-4" /> Recent
+                  <h3 className={`text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2 ${pinned.length > 0 ? 'mt-4' : ''}`}>
+                    <Clock className="w-3.5 h-3.5" /> Recent
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {recent.map((conv, idx) => (
                       <motion.div
                         key={conv.sessionId}
@@ -203,14 +208,14 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
   return (
     <motion.div 
       onClick={isEditing ? undefined : onRestore}
-      className={`group relative bg-white border rounded-2xl p-5 flex flex-col gap-4 h-full ${
+      className={`group relative bg-white border rounded-xl p-4 flex flex-col gap-3 h-full transition-all ${
         isCurrent ? 'border-blue-400 shadow-md shadow-blue-500/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
       }`}
       whileHover={!isCurrent && !isEditing ? { y: -2, scale: 1.01 } : {}}
       transition={{ duration: 0.2 }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 overflow-hidden flex-1 mt-0.5">
+        <div className="flex items-center gap-2 overflow-hidden flex-1 mt-0.5 min-w-0">
           {isEditing ? (
             <form onSubmit={(e) => saveEdit(e, conv.sessionId)} className="flex items-center gap-2 flex-1 relative z-10" onClick={e => e.stopPropagation()}>
               <input
@@ -223,7 +228,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
               <button type="submit" className="text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] px-2 py-1.5 rounded-md transition">Save</button>
             </form>
           ) : (
-            <h4 className={`text-base font-bold truncate tracking-tight ${isCurrent ? 'text-blue-900' : 'text-[var(--rf-text)]'}`}>
+            <h4 className={`text-sm font-semibold leading-snug tracking-tight line-clamp-2 ${isCurrent ? 'text-blue-900' : 'text-[var(--rf-text)]'}`}>
               {conv.title || 'Untitled session'}
             </h4>
           )}
@@ -250,7 +255,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
         {conv.isPinned && <div className="absolute top-5 right-5 group-hover:hidden"><Pin className="w-4 h-4 text-[var(--rf-brand)] fill-current" /></div>}
       </div>
 
-      <div className="flex items-center justify-between mt-auto pt-2">
+      <div className="flex items-center justify-between gap-2 mt-auto pt-1.5">
         <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </span>

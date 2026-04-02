@@ -99,6 +99,49 @@ async function recordRuntimeVersionIfChanged(actorAccountId?: string, auditEnabl
   }
 }
 
+function normalizeFieldIds(fieldIds: Array<string | null | undefined> = []) {
+  return [...new Set(fieldIds.map(id => id?.trim()).filter((id): id is string => Boolean(id)))];
+}
+
+function normalizeProjectArMapping(arMapping: any, projectKey?: string) {
+  const legacyOutputArFieldIds = normalizeFieldIds(
+    arMapping?.mode === 'iterative'
+      ? arMapping?.iterativeFieldIds
+      : arMapping?.consolidatedFieldId
+        ? [arMapping.consolidatedFieldId]
+        : [],
+  );
+  const hasOutputArFieldIds = Boolean(arMapping?.outputMappings && Object.prototype.hasOwnProperty.call(arMapping.outputMappings, 'arFieldIds'));
+  const hasInputArFieldIds = Boolean(arMapping?.inputMappings && Object.prototype.hasOwnProperty.call(arMapping.inputMappings, 'arFieldIds'));
+  const outputArFieldIds = hasOutputArFieldIds
+    ? normalizeFieldIds(arMapping?.outputMappings?.arFieldIds)
+    : legacyOutputArFieldIds;
+  const inputArFieldIds = hasInputArFieldIds
+    ? normalizeFieldIds(arMapping?.inputMappings?.arFieldIds)
+    : outputArFieldIds;
+
+  const outputMappings = {
+    summaryFieldId: arMapping?.outputMappings?.summaryFieldId || 'summary',
+    descriptionFieldId: arMapping?.outputMappings?.descriptionFieldId || 'description',
+    arFieldIds: outputArFieldIds,
+  };
+  const inputMappings = {
+    summaryFieldId: arMapping?.inputMappings?.summaryFieldId || 'summary',
+    descriptionFieldId: arMapping?.inputMappings?.descriptionFieldId || 'description',
+    arFieldIds: inputArFieldIds,
+  };
+
+  return {
+    projectKey: arMapping?.projectKey || projectKey || '*',
+    mode: outputMappings.arFieldIds.length > 1 ? 'iterative' : (arMapping?.mode || 'consolidated'),
+    consolidatedFieldId: outputMappings.arFieldIds[0] || outputMappings.descriptionFieldId || 'description',
+    iterativeFieldIds: outputMappings.arFieldIds,
+    inputMappings,
+    outputMappings,
+    issueLinkType: arMapping?.issueLinkType,
+  };
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 resolver.define('checkIsAdmin', async ({ context, payload }) => {
@@ -260,11 +303,32 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   return { success: true, sessionId: payload.sessionId };
 });
 
+async function cancelWorkflowProgress(
+  sessionId: string,
+  type: 'generation' | 'clarify',
+  message: string,
+) {
+  const key = type === 'generation'
+    ? KEYS.generationProgress(sessionId)
+    : KEYS.clarifyProgress(sessionId);
+  await entitySet(key, {
+    type: 'cancelled',
+    sessionId,
+    message,
+    updatedAt: Date.now(),
+  });
+  return { success: true };
+}
+
 // ─── Generation progress (polling) ───────────────────────────────────────────
 
 resolver.define('getProgress', async ({ payload }: { payload: { sessionId: string } }) => {
   const progress = await entityGet(KEYS.generationProgress(payload.sessionId));
   return { success: true, progress };
+});
+
+resolver.define('cancelGeneration', async ({ payload }: { payload: { sessionId: string } }) => {
+  return cancelWorkflowProgress(payload.sessionId, 'generation', 'Generation cancelled.');
 });
 
 // ─── Clarify ──────────────────────────────────────────────────────────────────
@@ -283,8 +347,13 @@ resolver.define('startClarify', async ({ payload, context }) => {
       license: context?.license,
       projectKey: payload.projectKey || '*',
     };
-    // Overwrite any stale result with a 'pending' marker so the polling hook waits
-    await entitySet(KEYS.clarifyProgress(payload.sessionId), { type: 'pending', updatedAt: Date.now() });
+    // Overwrite any stale result with a fresh progress marker
+    await entitySet(KEYS.clarifyProgress(payload.sessionId), {
+      type: 'progress',
+      sessionId: payload.sessionId,
+      message: 'Analyzing requirement and gathering project context…',
+      updatedAt: Date.now(),
+    });
     await clarifyQueue.push({ body: event });
     return { success: true };
   } catch (err) {
@@ -296,6 +365,10 @@ resolver.define('startClarify', async ({ payload, context }) => {
 resolver.define('getClarifyResult', async ({ payload }) => {
   const result = await entityGet(KEYS.clarifyProgress(payload.sessionId));
   return { success: true, result };
+});
+
+resolver.define('cancelClarify', async ({ payload }: { payload: { sessionId: string } }) => {
+  return cancelWorkflowProgress(payload.sessionId, 'clarify', 'Clarifying questions cancelled.');
 });
 
 resolver.define('evaluateSufficiency', async ({ payload, context }) => {
@@ -494,9 +567,12 @@ resolver.define('createIssue', async ({ payload, context }) => {
       return { success: false, error: 'Could not resolve the current user for issue creation.' };
     }
     const config = await getConfig();
-    const arMapping = config.arMappings?.find(m => m.projectKey === payload.projectKey) 
-      || config.arMappings?.find(m => m.projectKey === '*') 
-      || { mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [] };
+    const arMapping = normalizeProjectArMapping(
+      config.arMappings?.find(m => m.projectKey === payload.projectKey) 
+        || config.arMappings?.find(m => m.projectKey === '*') 
+        || { mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [] },
+      payload.projectKey as string,
+    );
 
     const result = await createFeatureIssue({
       feature: payload.feature as Feature,
@@ -511,7 +587,7 @@ resolver.define('createIssue', async ({ payload, context }) => {
     let linkError: string | null = null;
     if (payload.originIssueKey) {
       try {
-        const linkType = (arMapping as any).issueLinkType || config.issueLinkType || 'Relates to';
+        const linkType = arMapping.issueLinkType || config.issueLinkType || 'Relates to';
         
         await createIssueLink({
           inwardIssueKey: payload.originIssueKey as string,
@@ -663,9 +739,10 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
   // AR Mappings
   if (arMapping) {
     const idx = current.arMappings.findIndex(m => m.projectKey === projectKey);
-    // Note: arMapping already contains issueLinkType if passed from the frontend
-    if (idx >= 0) current.arMappings[idx] = arMapping;
-    else current.arMappings.push(arMapping);
+    const normalizedMapping = normalizeProjectArMapping(arMapping, projectKey);
+    // Note: the normalized mapping preserves both the new and legacy shapes.
+    if (idx >= 0) current.arMappings[idx] = normalizedMapping;
+    else current.arMappings.push(normalizedMapping);
   }
   
   // Domain Contexts

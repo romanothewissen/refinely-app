@@ -2,6 +2,7 @@ import React from 'react';
 import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UsageMeter } from './UsageMeter';
+import { api } from './hooks/useForge';
 
 interface SidebarProps {
   viewMode: 'generate' | 'settings';
@@ -20,13 +21,17 @@ interface SidebarProps {
   tier: string;
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
+  brandingLogoUrl?: string | null;
   width?: number;
   originIssueKey?: string | null;
   projectKey: string;
   setProjectKey: (key: string) => void;
+  contextMode: 'undecided' | 'project' | 'global';
+  setContextMode: (mode: 'undecided' | 'project' | 'global') => void;
   availableProjects: Array<{ key: string; name: string }>;
   goldSources: Array<{ key: string; targetProjects?: string[]; project?: string; issuetype?: string; statuses?: string[]; status?: string }>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
+  onRefreshWiDocs: () => void | Promise<void>;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
 }
 
@@ -56,18 +61,23 @@ export function Sidebar({
   tier,
   usage,
   limits,
+  brandingLogoUrl,
   width,
   originIssueKey,
   projectKey,
   setProjectKey,
+  contextMode,
+  setContextMode,
   availableProjects,
   goldSources,
   wiDocs,
+  onRefreshWiDocs,
   onOpenProjectSettings
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
-  const brainstormDisabled = !requirement.trim() || isWorking || isAtLimit;
+  const contextReady = contextMode === 'global' || (contextMode === 'project' && projectKey !== '*');
+  const brainstormDisabled = !contextReady || !requirement.trim() || isWorking || isAtLimit;
   const [showUsage, setShowUsage] = React.useState(true);
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
   const activeGoldSources = goldSources.filter(source => (source.targetProjects ?? []).includes(projectKey));
@@ -82,6 +92,62 @@ export function Sidebar({
     ? 'Global Workspace'
     : `${projectKey}${availableProject?.name ? ` \u00b7 ${availableProject.name}` : ''}`;
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [wiUploadState, setWiUploadState] = React.useState<{ filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null>(null);
+  const [wiUploadError, setWiUploadError] = React.useState<string | null>(null);
+  const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
+  const canUploadWi = Boolean(isAdmin) && contextReady && projectKey !== '*' && !wiUploadState;
+
+  React.useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [brandingLogoUrl]);
+
+  async function fileToBase64(file: File): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        resolve(dataUrl.split(',')[1] || dataUrl);
+      };
+      reader.onerror = () => reject(new Error('Read failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleWiUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+
+    const invalid = files.find(file => file.type !== 'application/pdf');
+    if (invalid) {
+      setWiUploadError('Only PDF documents are supported right now.');
+      return;
+    }
+
+    setWiUploadError(null);
+
+    try {
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const label = files.length > 1 ? `${file.name} (${i + 1}/${files.length})` : file.name;
+        setWiUploadState({ filename: label, stage: 'reading' });
+        const base64 = await fileToBase64(file);
+        setWiUploadState({ filename: label, stage: 'uploading' });
+        const res = await api.uploadWi(file.name, base64, undefined, projectKey) as any;
+        if (res.success === false) {
+          throw new Error(res.error || `Upload failed for ${file.name}`);
+        }
+        setWiUploadState({ filename: label, stage: 'indexing' });
+      }
+      await onRefreshWiDocs();
+    } catch (err: any) {
+      console.error('Sidebar WI upload failed', err);
+      setWiUploadError(err?.message || 'Upload failed.');
+    } finally {
+      setWiUploadState(null);
+    }
+  }
 
   return (
     <aside
@@ -96,21 +162,34 @@ export function Sidebar({
         animate="visible"
         custom={0}
       >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2.5">
-            <h1
-              className="font-bold text-[var(--rf-text)] text-lg tracking-tight cursor-pointer hover:text-[var(--rf-brand)] transition-colors"
-              onClick={() => setViewMode('generate')}
-            >
-              Refinely
-            </h1>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-muted)]">
-              {tierName}
-            </span>
+        <div className="min-w-0 flex items-center gap-3">
+          {brandingLogoUrl && !logoLoadFailed ? (
+            <div className="shrink-0 min-h-[48px] max-w-[144px] rounded-2xl border border-[var(--rf-sidebar-border)] bg-gradient-to-br from-white/95 via-[var(--rf-sidebar-card)] to-[var(--rf-sidebar-card)] px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-black/5 backdrop-blur-sm flex items-center justify-center">
+              <img
+                src={brandingLogoUrl}
+                alt="Workspace logo"
+                loading="lazy"
+                onError={() => setLogoLoadFailed(true)}
+                className="h-8 w-auto max-w-[116px] object-contain"
+              />
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5">
+              <h1
+                className="font-bold text-[var(--rf-text)] text-lg tracking-tight cursor-pointer hover:text-[var(--rf-brand)] transition-colors"
+                onClick={() => setViewMode('generate')}
+              >
+                Refinely
+              </h1>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-muted)]">
+                {tierName}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">
+              Requirement to Backlog
+            </p>
           </div>
-          <p className="mt-1 text-[11px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">
-            Requirement to Backlog
-          </p>
         </div>
         <div className="flex items-center gap-1">
           {isAdmin && (
@@ -152,7 +231,15 @@ export function Sidebar({
             </div>
             <select
               value={projectKey}
-              onChange={(e) => setProjectKey(e.target.value)}
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setProjectKey(nextValue);
+                if (nextValue === '*') {
+                  if (contextMode === 'project') setContextMode('undecided');
+                } else {
+                  setContextMode('project');
+                }
+              }}
               className="shrink-0 min-w-[132px] rounded-lg border border-[var(--rf-sidebar-border)] bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] transition-all hover:bg-[var(--rf-sidebar-card-hover)]"
             >
               <option value="*" className="text-[var(--rf-text)]">No project selected</option>
@@ -166,6 +253,41 @@ export function Sidebar({
           {projectKey === '*' && availableProjects.length > 0 && (
             <div className="mt-2.5 text-[11px] text-[var(--rf-sidebar-text-muted)]">
               Select a project to unlock project-scoped examples and instructions.
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (projectKey !== '*') setContextMode('project');
+              }}
+              disabled={projectKey === '*'}
+              className={`inline-flex items-center rounded-lg px-3 py-1.5 text-[11px] font-bold transition border ${
+                contextMode === 'project'
+                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)]'
+                  : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-sidebar-border)] hover:border-[var(--rf-brand-subtle)]'
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              Use selected project
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setProjectKey('*');
+                setContextMode('global');
+              }}
+              className={`inline-flex items-center rounded-lg px-3 py-1.5 text-[11px] font-bold transition border ${
+                contextMode === 'global'
+                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)]'
+                  : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-sidebar-border)] hover:border-[var(--rf-brand-subtle)]'
+              }`}
+            >
+              Run globally
+            </button>
+          </div>
+          {!contextReady && (
+            <div className="mt-2.5 text-[11px] text-[var(--rf-warning)] font-medium">
+              Choose either a project-specific run or a global run before entering requirements.
             </div>
           )}
         </motion.div>
@@ -209,6 +331,20 @@ export function Sidebar({
             <div className="text-xs font-medium text-[var(--rf-text)] leading-snug">
               {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
             </div>
+            {activeWiDocs.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {activeWiDocs.slice(0, 3).map(doc => (
+                  <div key={doc.docId} className="text-[11px] leading-snug text-[var(--rf-text-secondary)] break-words">
+                    {doc.filename}
+                  </div>
+                ))}
+                {activeWiDocs.length > 3 && (
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                    +{activeWiDocs.length - 3} more
+                  </div>
+                )}
+              </div>
+            )}
           </motion.button>
         </motion.div>
 
@@ -240,21 +376,64 @@ export function Sidebar({
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
             placeholder="Describe your feature requirement in detail... e.g. 'As a user, I want to be able to reset my password using an email link...'"
-            disabled={isWorking}
+            disabled={isWorking || !contextReady}
             className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
           />
           <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-sidebar-border)] px-4 py-2.5 bg-[var(--rf-bg-sidebar)]">
             <motion.button
-              title="Attach doc (PDF/TXT)"
+              type="button"
+              onClick={() => {
+                if (!isAdmin) {
+                  onOpenProjectSettings('jira', projectKey);
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
+              disabled={!canUploadWi}
+              title={!contextReady ? 'Choose project-specific or global mode first' : !isAdmin ? 'Admin access is required to upload grounding documents' : projectKey === '*' ? 'Select a project to upload work instructions' : 'Attach PDF work instructions'}
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-sidebar-card)] hover:text-[var(--rf-text)]"
               whileTap={{ scale: 0.97 }}
             >
               <Paperclip className="w-3.5 h-3.5" />
-              <span>Attach</span>
+              <span>{wiUploadState ? 'Uploading…' : 'Attach PDFs'}</span>
             </motion.button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleWiUpload}
+              accept=".pdf"
+              multiple
+              className="hidden"
+              disabled={!canUploadWi}
+            />
             <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)] tabular-nums">{wordCount} words</div>
           </div>
         </motion.div>
+
+        {(wiUploadState || wiUploadError) && (
+          <motion.div
+            className={`rf-sidebar-card px-4 py-3 ${wiUploadError ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]' : ''}`}
+            variants={fadeUpVariant}
+            initial="hidden"
+            animate="visible"
+            custom={4.5}
+          >
+            {wiUploadState && (
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">
+                  {wiUploadState.stage === 'reading' ? 'Reading PDF' : wiUploadState.stage === 'uploading' ? 'Uploading PDF' : 'Indexing PDF'}
+                </div>
+                <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{wiUploadState.filename}</div>
+              </div>
+            )}
+            {wiUploadError && (
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-danger)]">Upload failed</div>
+                <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{wiUploadError}</div>
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {/* Actions */}
         <motion.div

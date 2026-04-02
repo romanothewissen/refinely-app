@@ -82,6 +82,31 @@ interface ClarifyAmbiguityAssessment {
   generatedQuestions: number;
 }
 
+export class GenerationCancelledError extends Error {
+  constructor() {
+    super('Generation cancelled');
+    this.name = 'GenerationCancelledError';
+  }
+}
+
+const GENERIC_ROLE_WORDS = new Set([
+  'user',
+  'person',
+  'individual',
+  'professional',
+  'worker',
+  'staff',
+  'member',
+  'associate',
+  'resource',
+  'agent',
+  'operator',
+  'representative',
+  'specialist',
+  'technician',
+  'engineer',
+]);
+
 function assessRequirement(input: {
   requirement: string;
   attachmentText: string;
@@ -236,7 +261,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
       category: String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow',
       question: String((x as any).question ?? '').trim(),
       suggestions: Array.isArray((x as any).suggestions)
-        ? (x as any).suggestions.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 5)
+        ? (x as any).suggestions.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 4)
         : [],
     }))
     .filter(q => q.question.length > 0);
@@ -306,8 +331,9 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   onPass1Complete?: (featureCount: number) => Promise<void>;
+  shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete } = opts;
+  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete, shouldCancel } = opts;
   const { generatorConfig } = config;
   const assessment = assessRequirement({
     requirement,
@@ -317,6 +343,7 @@ export async function generateFeatures(opts: {
     goldExamplesText,
     similarStoriesText,
   });
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
   const providerOpts = {
     provider: generatorConfig.provider,
     geminiApiKey: generatorConfig.geminiApiKey,
@@ -375,6 +402,7 @@ export async function generateFeatures(opts: {
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
   // ── Pass 2: Acceptance Requirements ──
   const pass2System = buildArSystemPrompt({
@@ -394,6 +422,7 @@ export async function generateFeatures(opts: {
     maxTokens: pass2MaxTokens,
     ...providerOpts,
   });
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
   // Merge: use pass2 ARs; fall back to pass1 if pass2 missing or empty
   const rawFeatures = pass2Result.data.features?.length
@@ -470,7 +499,7 @@ export async function generateClarifyingQuestions(opts: {
       contextParts.join('\n\n'),
       `ALREADY GENERATED QUESTIONS (do not repeat):\n${filteredQuestions.map((q, idx) => `${idx + 1}. ${q.question}`).join('\n') || '(none)'}`,
       `Generate exactly ${needed} additional clarifying questions that are non-overlapping with the existing list.`,
-      'Return JSON array only in this shape: [{"category":"...","question":"...","suggestions":["..."]}]',
+      'Return JSON array only in this shape: [{"category":"...","question":"...","suggestions":["...","...","...","..."]}]',
     ].join('\n\n---\n\n');
 
     const topUpRaw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
@@ -646,7 +675,7 @@ export async function refineSingleFeature(opts: {
   };
 
   return {
-    feature: stableResult,
+    feature: harmonizeFeatureRoleLanguage(stableResult),
     tokenUsage: {
       input: result.usage.input,
       output: result.usage.output,
@@ -685,7 +714,7 @@ export async function checkRefineFeedbackSufficiency(opts: {
 export async function generateSessionTitle(requirement: string, config: TenantConfig): Promise<string> {
   const res = await callLlm({
     model: config.generatorConfig.themeModel,
-    systemPrompt: 'Generate a concise 5-8 word title summarizing this requirement. Output the title only, no quotes.',
+    systemPrompt: 'Generate a concise, prescriptive 5-7 word title for this business requirement. Make it action-oriented, outcome-focused, and easy to scan in a backlog. Avoid generic words like feature, flow, process, solution, or system. Output the title only, no quotes.',
     userMessage: requirement,
     maxTokens: 32,
     provider: config.generatorConfig.provider,
@@ -695,7 +724,7 @@ export async function generateSessionTitle(requirement: string, config: TenantCo
     openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   });
-  return res.text.replace(/^["']|["']$/g, '').trim() || requirement.slice(0, 60);
+  return formatSessionTitle(res.text, requirement);
 }
 
 // ─── Ask / Chat ───────────────────────────────────────────────────────────────
@@ -734,14 +763,14 @@ export async function askQuestion(opts: {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function normaliseFeature(raw: RawFeature): Feature {
-  return {
+  return harmonizeFeatureRoleLanguage({
     id: uuidv4(),
     summary: raw.summary ?? 'Untitled feature',
     description: raw.description ?? '',
     acceptanceRequirements: normaliseArs(getRawAcceptanceArray(raw)),
     storyPoints: raw.suggested_story_points,
     processCode: raw.process_code,
-  };
+  });
 }
 
 /** Read AR arrays whether the model used snake_case or camelCase. */
@@ -770,6 +799,77 @@ function normaliseArs(ars: unknown[]): Array<{ given: string; when: string; then
       return null;
     })
     .filter((x): x is { given: string; when: string; then: string } => x !== null && (!!x.given || !!x.when || !!x.then));
+}
+
+function extractRoleFromDescription(description: string): string | null {
+  const match = description.match(/^As an?\s+(.+?),\s*I need to\s+/i);
+  return match?.[1]?.trim() || null;
+}
+
+function tokenizeRole(text: string): string[] {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function roleOverlapScore(left: string, right: string): number {
+  const leftTokens = new Set(tokenizeRole(left));
+  const rightTokens = new Set(tokenizeRole(right));
+  if (!leftTokens.size || !rightTokens.size) return 0;
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1;
+  }
+  return overlap / Math.max(leftTokens.size, rightTokens.size);
+}
+
+function shouldAlignRolePhrase(candidateRole: string, featureRole: string): boolean {
+  const candidate = candidateRole.trim();
+  const target = featureRole.trim();
+  if (!candidate || !target) return false;
+
+  const normalizedCandidate = candidate.toLowerCase();
+  const normalizedTarget = target.toLowerCase();
+  if (normalizedCandidate === normalizedTarget) return false;
+  if (normalizedCandidate.includes(normalizedTarget) || normalizedTarget.includes(normalizedCandidate)) return true;
+
+  const candidateTokens = tokenizeRole(candidate);
+  const targetTokens = tokenizeRole(target);
+  const overlap = roleOverlapScore(candidate, target);
+  const candidateIsGeneric = candidateTokens.every(token => GENERIC_ROLE_WORDS.has(token) || targetTokens.includes(token));
+
+  return overlap >= 0.34 || (candidateIsGeneric && overlap >= 0.2);
+}
+
+function articleForRole(role: string): 'a' | 'an' {
+  return /^[aeiou]/i.test(role.trim()) ? 'an' : 'a';
+}
+
+function alignRoleInClause(clause: string, featureRole: string): string {
+  if (!clause || !featureRole) return clause;
+
+  return clause.replace(/\b(a|an|the)\s+([A-Za-z][A-Za-z\s/-]{1,60}?)(?=\s+(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|works|manages|uses|belongs)\b)/i, (match, article, rolePhrase) => {
+    if (!shouldAlignRolePhrase(rolePhrase, featureRole)) return match;
+    const nextArticle = String(article).toLowerCase() === 'the' ? 'the' : articleForRole(featureRole);
+    return `${nextArticle} ${featureRole}`;
+  });
+}
+
+function harmonizeFeatureRoleLanguage(feature: Feature): Feature {
+  const featureRole = extractRoleFromDescription(feature.description);
+  if (!featureRole) return feature;
+
+  return {
+    ...feature,
+    acceptanceRequirements: (feature.acceptanceRequirements || []).map(ar => ({
+      ...ar,
+      given: alignRoleInClause(ar.given, featureRole),
+      when: alignRoleInClause(ar.when, featureRole),
+      then: alignRoleInClause(ar.then, featureRole),
+    })),
+  };
 }
 
 /** Parse GIVEN/WHEN/THEN; supports multiline clauses (models often wrap lines). */
@@ -830,4 +930,25 @@ function toStageUsage(usage: { input: number; output: number }) {
     output: usage.output,
     total: usage.input + usage.output,
   };
+}
+
+async function maybeCancelled(shouldCancel?: () => Promise<boolean> | boolean): Promise<boolean> {
+  if (!shouldCancel) return false;
+  return Boolean(await shouldCancel());
+}
+
+function formatSessionTitle(rawTitle: string, fallbackRequirement: string): string {
+  const cleaned = String(rawTitle ?? '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*[-–—:;,.]+\s*$/g, '')
+    .trim();
+
+  if (!cleaned) {
+    return fallbackRequirement.slice(0, 80).trim();
+  }
+
+  const words = cleaned.split(' ').filter(Boolean);
+  const capped = words.length > 7 ? words.slice(0, 7).join(' ') : cleaned;
+  return capped.length > 80 ? capped.slice(0, 80).trimEnd() : capped;
 }

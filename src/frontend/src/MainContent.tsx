@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
@@ -141,6 +141,12 @@ function buildExcerpt(text: string, maxChars = 180): string {
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
+function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: string }) {
+  if (story.url || story.jiraIssueUrl) return story.url || story.jiraIssueUrl || '';
+  if (story.key && /^[A-Z][A-Z0-9]+-\d+$/.test(story.key)) return `/browse/${story.key}`;
+  return '';
+}
+
 // ─── AI Refine Popup ──────────────────────────────────────────────────────────
 function RefinePopup({ feature, sessionId, onClose, onResult }: {
   feature: Feature;
@@ -267,6 +273,9 @@ interface MainContentProps {
   onPushFeature: (index: number) => void;
   isGenerating: boolean;
   progress?: string;
+  loadingTitle?: string;
+  onCancelLoading?: () => void;
+  canCancelLoading?: boolean;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
   sessionId: string;
@@ -282,7 +291,7 @@ interface MainContentProps {
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
     referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
     similarStoriesCount?: number;
-    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   projectKey: string;
@@ -292,7 +301,7 @@ interface MainContentProps {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
-  features, setFeatures, onPushFeature, isGenerating, progress,
+  features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage
 }: MainContentProps) {
@@ -329,60 +338,93 @@ export function MainContent({
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
 
-  const buildSpreadsheetRow = (cells: Array<string | number | boolean>, header = false) =>
-    `<Row>${cells.map(cell => `<Cell${header ? ' ss:StyleID="header"' : ''}><Data ss:Type="String">${escapeSpreadsheetValue(cell)}</Data></Cell>`).join('')}</Row>`;
+  type SpreadsheetCell = {
+    value: string | number | boolean | null | undefined;
+    styleId?: string;
+    type?: 'String' | 'Number' | 'Boolean';
+    mergeAcross?: number;
+    href?: string;
+  };
+
+  const buildSpreadsheetCell = ({ value, styleId, type, mergeAcross, href }: SpreadsheetCell) => {
+    const resolvedType = type || (typeof value === 'number' ? 'Number' : typeof value === 'boolean' ? 'Boolean' : 'String');
+    const attrs = [
+      styleId ? ` ss:StyleID="${styleId}"` : '',
+      typeof mergeAcross === 'number' && mergeAcross > 0 ? ` ss:MergeAcross="${mergeAcross}"` : '',
+      href ? ` ss:HRef="${escapeSpreadsheetValue(href)}"` : '',
+    ].join('');
+    return `<Cell${attrs}><Data ss:Type="${resolvedType}">${escapeSpreadsheetValue(value)}</Data></Cell>`;
+  };
+
+  const buildSpreadsheetRow = (cells: SpreadsheetCell[]) => `<Row>${cells.map(buildSpreadsheetCell).join('')}</Row>`;
 
   const exportFeaturesToExcel = () => {
     if (!features.length) return;
 
-    const featureRows = [
-      buildSpreadsheetRow(['Feature #', 'Title', 'Description', 'AR Count', 'Accepted', 'Jira Issue', 'Jira URL', 'Pending Refinement', 'Pending Removal'], true),
-      ...features.map((feature, idx) => buildSpreadsheetRow([
-        idx + 1,
-        feature.title || feature.summary || `Feature ${idx + 1}`,
-        feature.description || feature.markdown || '',
-        feature.acceptanceRequirements?.length || 0,
-        feature.isAccepted ? 'Yes' : 'No',
-        feature.jiraIssueKey || '',
-        feature.jiraIssueUrl || '',
-        feature.pendingRefinement ? 'Yes' : 'No',
-        feature.pendingRemoval ? 'Yes' : 'No',
-      ])),
-    ].join('');
+    const exportedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-    const acceptanceRequirementRows = [
-      buildSpreadsheetRow(['Feature #', 'Feature Title', 'AR #', 'Given', 'When', 'Then', 'Accepted', 'Jira Issue'], true),
-      ...features.flatMap((feature, featureIdx) => {
-        const ars = feature.acceptanceRequirements || [];
-        if (!ars.length) {
-          return [
-            buildSpreadsheetRow([
-              featureIdx + 1,
-              feature.title || feature.summary || `Feature ${featureIdx + 1}`,
-              '',
-              '',
-              '',
-              '',
-              feature.isAccepted ? 'Yes' : 'No',
-              feature.jiraIssueKey || '',
-            ]),
-          ];
-        }
+    const rows = [
+      buildSpreadsheetRow([{ value: 'Refinely Feature Export', styleId: 'title', mergeAcross: 9 }]),
+      buildSpreadsheetRow([{ value: `Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`, styleId: 'meta', mergeAcross: 9 }]),
+      buildSpreadsheetRow([{ value: `Exported at (UTC): ${exportedAt}`, styleId: 'meta', mergeAcross: 9 }]),
+      buildSpreadsheetRow([{ value: `Features: ${features.length} · Acceptance requirements: ${totalArCount}`, styleId: 'meta', mergeAcross: 9 }]),
+      buildSpreadsheetRow([
+        { value: 'Type', styleId: 'header' },
+        { value: 'Feature #', styleId: 'header' },
+        { value: 'Feature Title', styleId: 'header' },
+        { value: 'Summary / AR Note', styleId: 'header' },
+        { value: 'Given', styleId: 'header' },
+        { value: 'When', styleId: 'header' },
+        { value: 'Then', styleId: 'header' },
+        { value: 'Status', styleId: 'header' },
+        { value: 'Jira Issue', styleId: 'header' },
+        { value: 'Jira URL', styleId: 'header' },
+      ]),
+      ...features.flatMap((feature, idx) => {
+        const featureNumber = idx + 1;
+        const featureTitle = feature.title || feature.summary || `Feature ${featureNumber}`;
+        const featureDescription = feature.description || feature.markdown || '';
+        const jiraUrl = feature.jiraIssueUrl || '';
+        const status = feature.pendingRemoval
+          ? 'Pending removal'
+          : feature.pendingRefinement
+            ? 'Pending refinement'
+            : feature.isAccepted
+              ? 'Accepted'
+              : 'Draft';
 
-        return ars.map((ar, arIdx) => buildSpreadsheetRow([
-          featureIdx + 1,
-          feature.title || feature.summary || `Feature ${featureIdx + 1}`,
-          arIdx + 1,
-          ar.given || '',
-          ar.when || '',
-          ar.then || '',
-          feature.isAccepted ? 'Yes' : 'No',
-          feature.jiraIssueKey || '',
+        const featureRows = [
+          buildSpreadsheetRow([
+            { value: 'Feature', styleId: 'featureLabel' },
+            { value: featureNumber, styleId: 'featureLabel', type: 'Number' },
+            { value: featureTitle, styleId: 'featureLabel' },
+            { value: featureDescription, styleId: 'featureValue' },
+            { value: `ARs: ${feature.acceptanceRequirements?.length || 0}`, styleId: 'featureValue' },
+            { value: '', styleId: 'featureValue' },
+            { value: '', styleId: 'featureValue' },
+            { value: status, styleId: 'featureValue' },
+            { value: feature.jiraIssueKey || '', styleId: jiraUrl ? 'link' : 'featureValue', href: jiraUrl || undefined },
+            { value: jiraUrl || '', styleId: jiraUrl ? 'link' : 'featureValue', href: jiraUrl || undefined },
+          ]),
+        ];
+
+        const arRows = (feature.acceptanceRequirements || []).map((ar, arIdx) => buildSpreadsheetRow([
+          { value: 'AR', styleId: 'arLabel' },
+          { value: featureNumber, styleId: 'arLabel', type: 'Number' },
+          { value: featureTitle, styleId: 'arLabel' },
+          { value: `Acceptance requirement ${arIdx + 1}`, styleId: 'arValue' },
+          { value: ar.given || '', styleId: 'arValue' },
+          { value: ar.when || '', styleId: 'arValue' },
+          { value: ar.then || '', styleId: 'arValue' },
+          { value: status, styleId: 'arValue' },
+          { value: feature.jiraIssueKey || '', styleId: jiraUrl ? 'link' : 'arValue', href: jiraUrl || undefined },
+          { value: jiraUrl || '', styleId: jiraUrl ? 'link' : 'arValue', href: jiraUrl || undefined },
         ]));
+
+        return [...featureRows, ...arRows];
       }),
     ].join('');
 
-    const exportedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const workbook = `<?xml version="1.0"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
@@ -391,27 +433,59 @@ export function MainContent({
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:html="http://www.w3.org/TR/REC-html40">
  <Styles>
+  <Style ss:ID="title">
+   <Font ss:Bold="1" ss:Size="14" ss:Color="#173a2e"/>
+   <Interior ss:Color="#f5f2ea" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Center"/>
+  </Style>
+  <Style ss:ID="meta">
+   <Font ss:Size="10" ss:Color="#5b6570"/>
+   <Interior ss:Color="#fbfaf6" ss:Pattern="Solid"/>
+  </Style>
   <Style ss:ID="header">
-   <Font ss:Bold="1"/>
-   <Interior ss:Color="#F4F5F7" ss:Pattern="Solid"/>
+   <Font ss:Bold="1" ss:Color="#ffffff"/>
+   <Interior ss:Color="#234a3d" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Center" ss:WrapText="1"/>
+  </Style>
+  <Style ss:ID="featureLabel">
+   <Font ss:Bold="1" ss:Color="#234a3d"/>
+   <Interior ss:Color="#e8f2ec" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+  </Style>
+  <Style ss:ID="featureValue">
+   <Font ss:Color="#1f2937"/>
+   <Interior ss:Color="#fbf9f4" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+  </Style>
+  <Style ss:ID="arLabel">
+   <Font ss:Bold="1" ss:Color="#7c5e00"/>
+   <Interior ss:Color="#fff8e8" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+  </Style>
+  <Style ss:ID="arValue">
+   <Font ss:Color="#1f2937"/>
+   <Interior ss:Color="#ffffff" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+  </Style>
+  <Style ss:ID="link">
+   <Font ss:Color="#0f766e" ss:Underline="Single"/>
+   <Interior ss:Color="#ffffff" ss:Pattern="Solid"/>
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
   </Style>
  </Styles>
- <Worksheet ss:Name="Features">
+ <Worksheet ss:Name="Features and ARs">
   <Table>
-   ${featureRows}
-  </Table>
- </Worksheet>
- <Worksheet ss:Name="Acceptance Requirements">
-  <Table>
-   ${acceptanceRequirementRows}
-  </Table>
- </Worksheet>
- <Worksheet ss:Name="Export Info">
-  <Table>
-   ${buildSpreadsheetRow(['Workspace Scope', projectKey === '*' ? 'Standalone workspace' : projectKey], true)}
-   ${buildSpreadsheetRow(['Exported At (UTC)', exportedAt])}
-   ${buildSpreadsheetRow(['Feature Count', features.length])}
-   ${buildSpreadsheetRow(['Acceptance Requirement Count', totalArCount])}
+   <Column ss:Width="70"/>
+   <Column ss:Width="68"/>
+   <Column ss:Width="220"/>
+   <Column ss:Width="280"/>
+   <Column ss:Width="240"/>
+   <Column ss:Width="240"/>
+   <Column ss:Width="280"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="150"/>
+   <Column ss:Width="260"/>
+   ${rows}
   </Table>
  </Worksheet>
 </Workbook>`;
@@ -605,50 +679,64 @@ export function MainContent({
   // ── Generating skeleton ──────────────────────────────────────────────────
   const GeneratingSkeleton = () => (
     <motion.div
-      className="w-full max-w-4xl mx-auto px-6 py-10 space-y-6 flex-1 flex flex-col items-center justify-center min-h-[400px]"
-      initial={{ opacity: 0, y: 10 }}
+      className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex-1 flex items-start justify-center"
+      initial={{ opacity: 0 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
     >
-      <motion.div
-        className="flex flex-col items-center gap-4 mb-6"
-        initial={{ opacity: 0, scale: 0.97 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-      >
-        <div className="w-14 h-14 rounded-2xl bg-white border border-[var(--rf-border)] shadow-sm flex items-center justify-center relative overflow-hidden">
-          <Sparkles className="w-6 h-6 text-[var(--rf-brand)] relative z-10" />
-          <div className="absolute inset-0 bg-[var(--rf-brand-muted)]/50 animate-pulse" />
-        </div>
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-[var(--rf-text)] tracking-tight">Crafting features</h2>
-          <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-1">{progress || 'Processing your request\u2026'}</p>
-        </div>
-        <div className="dot-bounce text-[var(--rf-brand)] mt-2"><span /><span /><span /></div>
-      </motion.div>
-
-      <div className="w-full space-y-4">
-        {[1, 2, 3].map(i => (
-          <motion.div
-            key={i}
-            className="w-full bg-white rounded-2xl border border-[var(--rf-border)] overflow-hidden"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.12, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <div className="flex">
-              <div className="w-2 shrink-0 bg-[var(--rf-surface-soft)]" />
-              <div className="flex-1 p-6 space-y-4">
-                <div className="shimmer h-5 w-2/5 rounded-md" />
-                <div className="shimmer h-4 w-full rounded-md" />
-                <div className="shimmer h-4 w-4/5 rounded-md" />
-                <div className="space-y-2 pt-3">
-                  {[1,2,3].map(j => <div key={j} className="shimmer h-3 rounded-md" style={{ width: `${60 + j * 10}%` }} />)}
-                </div>
+      <div className="w-full max-w-3xl rounded-[28px] border border-[var(--rf-border)] bg-white/95 shadow-xl shadow-slate-900/5 overflow-hidden">
+        <div className="px-6 sm:px-8 pt-7 sm:pt-8 pb-6 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/65">
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className="w-16 h-16 rounded-[22px] bg-white border border-[var(--rf-border)] shadow-sm flex items-center justify-center">
+              <div className="w-12 h-12 rounded-2xl bg-[var(--rf-brand-muted)]/60 flex items-center justify-center">
+                <Sparkles className="w-6 h-6 text-[var(--rf-brand)] animate-pulse" />
               </div>
             </div>
-          </motion.div>
-        ))}
+            <div className="space-y-1.5">
+              <h2 className="text-xl sm:text-2xl font-bold text-[var(--rf-text)] tracking-tight">
+                {loadingTitle || 'Crafting features'}
+              </h2>
+              <p className="text-sm font-medium text-[var(--rf-text-tertiary)] leading-relaxed max-w-xl">
+                {progress || 'Processing your request…'}
+              </p>
+            </div>
+            <div className="dot-bounce text-[var(--rf-brand)]"><span /><span /><span /></div>
+            {canCancelLoading && onCancelLoading && (
+              <motion.button
+                type="button"
+                onClick={onCancelLoading}
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
+                whileTap={{ scale: 0.98 }}
+              >
+                <X className="w-3.5 h-3.5" />
+                Stop
+              </motion.button>
+            )}
+          </div>
+        </div>
+        <div className="px-5 sm:px-6 py-5 sm:py-6 space-y-4">
+          {[1, 2, 3].map(i => (
+            <motion.div
+              key={i}
+              className="w-full bg-white rounded-2xl border border-[var(--rf-border)] overflow-hidden"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.1, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <div className="flex">
+                <div className="w-2 shrink-0 bg-[var(--rf-surface-soft)]" />
+                <div className="flex-1 p-5 sm:p-6 space-y-4">
+                  <div className="shimmer h-5 w-2/5 rounded-md" />
+                  <div className="shimmer h-4 w-full rounded-md" />
+                  <div className="shimmer h-4 w-4/5 rounded-md" />
+                  <div className="space-y-2 pt-3">
+                    {[1, 2, 3].map(j => <div key={j} className="shimmer h-3 rounded-md" style={{ width: `${60 + j * 10}%` }} />)}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </motion.div>
   );
@@ -886,73 +974,105 @@ export function MainContent({
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                     >
-                      {(generationContext.referencedGoldExamples?.length ?? 0) > 0 && (
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Reference examples</div>
-                          <div className="flex flex-wrap gap-2">
-                            {generationContext.referencedGoldExamples.map((example, i) => (
-                              <span
-                                key={`${example.source}-${example.key}-${i}`}
-                                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-[var(--rf-brand-subtle)]"
-                                title={example.summary}
-                              >
-                                {example.source}: {example.key}
-                              </span>
-                            ))}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Reference examples</div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
+                              {generationContext.referencedGoldExamples?.length || 0}
+                            </div>
                           </div>
+                          {(generationContext.referencedGoldExamples?.length ?? 0) > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {generationContext.referencedGoldExamples.map((example, i) => (
+                                <span
+                                  key={`${example.source}-${example.key}-${i}`}
+                                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-[var(--rf-brand-subtle)]"
+                                  title={example.summary}
+                                >
+                                  {example.source}: {example.key}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No reference examples found.</div>
+                          )}
                         </div>
-                      )}
 
-                      {(generationContext.referencedSimilarStories?.length ?? 0) > 0 && (
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>
-                          <div className="space-y-2">
-                            {generationContext.referencedSimilarStories!.map((story, i) => (
-                              <div key={`${story.key}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
-                                  {typeof story.relevanceScore === 'number' && (
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
-                                      {(story.relevanceScore * 100).toFixed(0)}% match
+                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
+                              {generationContext.referencedSimilarStories?.length || 0}
+                            </div>
+                          </div>
+                          {(generationContext.referencedSimilarStories?.length ?? 0) > 0 ? (
+                            <div className="space-y-2">
+                              {generationContext.referencedSimilarStories!.slice(0, 4).map((story, i) => {
+                                const storyUrl = resolveStoryUrl(story);
+                                return (
+                                  <div key={`${story.key}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                      {storyUrl ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => void router.navigate(storyUrl)}
+                                          className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-blue-900 transition"
+                                          title="Open referenced story"
+                                        >
+                                          {story.key}
+                                          <ExternalLink className="w-3 h-3" />
+                                        </button>
+                                      ) : (
+                                        <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
+                                      )}
+                                      {typeof story.relevanceScore === 'number' && (
+                                        <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-md px-2 py-1">
+                                          {(story.relevanceScore * 100).toFixed(0)}% match
+                                        </div>
+                                      )}
                                     </div>
-                                  )}
-                                </div>
-                                <div className="mt-1 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
-                                  {buildExcerpt(story.summary, 220)}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+                                    <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                                      {buildExcerpt(story.summary, 160)}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No similar stories were available.</div>
+                          )}
                         </div>
-                      )}
 
-                      <div>
-                        <div className="flex flex-wrap items-center gap-3 mb-2">
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                            Matched WI sections
+                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between gap-3 mb-3">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Matched WI sections</div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
+                              {generationContext.referencedWiSections?.length || 0}
+                            </div>
                           </div>
-                          <div className="text-[11px] text-[var(--rf-text-tertiary)]">
-                            {generationContext.referencedWiDocs?.length
-                              ? generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')
-                              : 'No matching docs found'}
-                          </div>
+                          {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
+                            <div className="space-y-2">
+                              {generationContext.referencedWiSections!.slice(0, 4).map((section, i) => (
+                                <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
+                                      <div className="mt-1 inline-flex items-center rounded-md border border-[var(--rf-border-subtle)] bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                                        Section {section.chunkIndex + 1}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                                    {section.excerpt}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No matched WI sections were used.</div>
+                          )}
                         </div>
-                        {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
-                          <div className="space-y-2">
-                            {generationContext.referencedWiSections!.map((section, i) => (
-                              <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
-                                <div className="text-[11px] font-bold text-[var(--rf-text)]">
-                                  {section.filename} · Section {section.chunkIndex + 1}
-                                </div>
-                                <div className="mt-1 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
-                                  {section.excerpt}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-[var(--rf-text-tertiary)] italic text-xs">No matched WI sections were used.</div>
-                        )}
                       </div>
                     </motion.div>
                   )}

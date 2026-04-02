@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
-  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, ExternalLink, AlertCircle
+  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, ExternalLink, AlertCircle, Image
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
@@ -23,6 +23,20 @@ interface JiraIssueType { name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
 interface JiraField { id: string; name: string }
 interface ProjectBacklogStatusScope { projectKey: string; statuses: string[] }
+interface ProjectFieldMapping {
+  summaryFieldId: string;
+  descriptionFieldId: string;
+  arFieldIds: string[];
+}
+interface ProjectArMapping {
+  projectKey: string;
+  mode: 'consolidated' | 'iterative';
+  consolidatedFieldId: string;
+  iterativeFieldIds: string[];
+  inputMappings: ProjectFieldMapping;
+  outputMappings: ProjectFieldMapping;
+  issueLinkType?: string;
+}
 interface BacklogDiagnostics {
   projectKey: string;
   configuredStatuses: string[];
@@ -113,7 +127,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [backlogStatusOptions, setBacklogStatusOptions] = useState<JiraStatus[]>([]);
   const [customFields, setCustomFields] = useState<JiraField[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
-  const [arMappings, setArMappings] = useState<any[]>([]);
+  const [arMappings, setArMappings] = useState<ProjectArMapping[]>([]);
   const [backlogStatusScopes, setBacklogStatusScopes] = useState<ProjectBacklogStatusScope[]>([]);
   const [activeArProj, setActiveArProj] = useState(initialProjectKey); // Global context selector
   const [backlogCacheInfo, setBacklogCacheInfo] = useState<{ projectKey: string; builtAt?: string; issueCount: number; stale: boolean } | null>(null);
@@ -131,6 +145,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [complianceEvents, setComplianceEvents] = useState<ComplianceAuditEvent[]>([]);
   const [transparencyReports, setTransparencyReports] = useState<TransparencyReportRow[]>([]);
   const [jiraAuditRecords, setJiraAuditRecords] = useState<Array<Record<string, unknown>>>([]);
+  const [brandingLogoUrl, setBrandingLogoUrl] = useState('');
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
@@ -225,9 +240,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         setAuditTrailEnabled(Boolean(existingConfig.compliance?.auditTrailEnabled));
         if (existingConfig.wiConfig?.enabled !== undefined) setWiEnabled(existingConfig.wiConfig.enabled);
         if (existingConfig.issueLinkType) setIssueLinkType(existingConfig.issueLinkType);
-        if (existingConfig.arMappings) setArMappings(existingConfig.arMappings);
+        if (existingConfig.arMappings) setArMappings(existingConfig.arMappings.map((mapping: any) => normalizeProjectArMapping(mapping)));
         if (existingConfig.domainContexts) setDomainContexts(existingConfig.domainContexts);
         if (existingConfig.backlogStatusScopes) setBacklogStatusScopes(existingConfig.backlogStatusScopes);
+        if (existingConfig.branding?.logoUrl !== undefined) setBrandingLogoUrl(existingConfig.branding.logoUrl || '');
         if (existingConfig.isAdmin !== undefined) setIsAdmin(existingConfig.isAdmin);
       }
       const usageRes = await api.getUsage() as any;
@@ -360,32 +376,36 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }, [activeTab, loadWiDocs]);
 
   async function handleWiPdfDrop(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!file) return;
-    if (file.type !== 'application/pdf') {
+    if (!files.length) return;
+    if (files.some(file => file.type !== 'application/pdf')) {
       setWiUploadError('Only PDF documents are supported right now.');
       return;
     }
     setWiUploadError(null);
-    setWiUploadState({ filename: file.name, stage: 'reading' });
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          resolve(dataUrl.split(',')[1] || dataUrl);
-        };
-        reader.onerror = () => reject(new Error('Read failed'));
-        reader.readAsDataURL(file);
-      });
-      setWiUploadState({ filename: file.name, stage: 'uploading' });
-      const res = await api.uploadWi(file.name, base64, undefined, activeArProj) as any;
-      if (res.success === false) {
-        throw new Error(res.error || 'Upload failed');
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const label = files.length > 1 ? `${file.name} (${i + 1}/${files.length})` : file.name;
+        setWiUploadState({ filename: label, stage: 'reading' });
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split(',')[1] || dataUrl);
+          };
+          reader.onerror = () => reject(new Error('Read failed'));
+          reader.readAsDataURL(file);
+        });
+        setWiUploadState({ filename: label, stage: 'uploading' });
+        const res = await api.uploadWi(file.name, base64, undefined, activeArProj) as any;
+        if (res.success === false) {
+          throw new Error(res.error || 'Upload failed');
+        }
+        setWiUploadState({ filename: label, stage: 'indexing' });
       }
-      setWiUploadState({ filename: file.name, stage: 'indexing' });
-      if (!res.duplicate) await loadWiDocs();
+      await loadWiDocs();
     } catch (err: any) {
       console.error('Upload failed', err);
       setWiUploadError(err?.message || 'Upload failed.');
@@ -429,6 +449,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           transparencyReportsEnabled: transparencyEnabled,
           piiMaskingEnabled,
           auditTrailEnabled,
+        },
+        branding: {
+          logoUrl: brandingLogoUrl.trim() || null,
         },
         issueLinkType,
         arMappings,
@@ -565,6 +588,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         ? 'Uploading document'
         : 'Indexing for retrieval'
     : null;
+  const canEditBranding = Boolean(isAdmin && tier === 'enterprise');
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[var(--rf-surface-soft)] relative overflow-hidden font-sans">
@@ -828,7 +852,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       >
                         {wiUploadState ? 'Uploading…' : 'Add PDF'}
                       </motion.button>
-                      <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
+                      <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" multiple className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
                     </div>
 
                     {activeArProj === '*' ? (
@@ -876,13 +900,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                             </div>
                           ) : (
                             wiDocs.map(doc => (
-                              <div key={doc.docId} className="bg-[var(--rf-surface-soft)] p-4 rounded-xl border border-[var(--rf-border)] flex items-center justify-between group hover:border-[var(--rf-border-strong)] transition-all">
-                                <div className="flex items-center gap-3 truncate">
+                              <div key={doc.docId} className="bg-[var(--rf-surface-soft)] p-4 rounded-xl border border-[var(--rf-border)] flex items-center justify-between gap-3 group hover:border-[var(--rf-border-strong)] transition-all">
+                                <div className="flex items-start gap-3 min-w-0 flex-1">
                                   <div className="shrink-0 w-10 h-10 bg-white rounded-lg border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
                                     <FileText className="w-5 h-5 text-[var(--rf-brand)]" />
                                   </div>
-                                  <div className="truncate">
-                                    <p className="text-sm font-bold text-[var(--rf-text)] truncate">{doc.filename}</p>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-bold text-[var(--rf-text)] leading-snug break-words">{doc.filename}</p>
                                     <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-widest mt-0.5">{doc.chunkCount} chunks</p>
                                   </div>
                                 </div>
@@ -1011,6 +1035,54 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 </div>
 
                 <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Image className="w-5 h-5 text-[var(--rf-brand)]" />
+                        <p className="text-[11px] uppercase tracking-widest text-[var(--rf-brand)] font-bold">Branding</p>
+                      </div>
+                      <h4 className="text-xl font-bold text-[var(--rf-text)]">Company logo</h4>
+                      <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">
+                        Configure a logo URL for enterprise workspaces so the app can carry your company identity.
+                      </p>
+                    </div>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${canEditBranding ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border-[var(--rf-border)]'}`}>
+                      {canEditBranding ? 'Editable' : 'Enterprise only'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Logo URL</label>
+                      <input
+                        value={brandingLogoUrl}
+                        onChange={e => setBrandingLogoUrl(e.target.value)}
+                        placeholder="https://example.com/company-logo.svg"
+                        disabled={!canEditBranding}
+                        className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none disabled:opacity-60"
+                      />
+                      <p className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                        Paste a publicly reachable image URL. The stored logo is saved in the workspace branding contract.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 flex items-center justify-center min-h-[132px]">
+                      {brandingLogoUrl.trim() ? (
+                        <img
+                          src={brandingLogoUrl.trim()}
+                          alt="Company logo preview"
+                          className="max-h-[92px] max-w-full object-contain"
+                        />
+                      ) : (
+                        <div className="text-center">
+                          <Image className="w-8 h-8 text-[var(--rf-text-tertiary)] mx-auto mb-2" />
+                          <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Logo preview</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <ShieldCheck className="w-5 h-5 text-indigo-600" />
@@ -1056,9 +1128,10 @@ function ProjectConfigurationManager({
   activeArProj, isAdmin, isProjectAdmin, issueTypes, statuses, onProjectSelect, newSource, setNewSource, addGoldSource,
   backlogCacheInfo, backlogDiagnostics, isRefreshingBacklogCache, onRefreshBacklogCache,
 }: any) {
-  const currentMapping = arMappings.find((m: any) => m.projectKey === activeArProj) || {
-    projectKey: activeArProj, mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [],
-  };
+  const currentMapping = useMemo(() => {
+    const existing = arMappings.find((m: any) => m.projectKey === activeArProj);
+    return normalizeProjectArMapping(existing || { projectKey: activeArProj });
+  }, [arMappings, activeArProj]);
   const currentContext = domainContexts.find((c: any) => c.projectKey === activeArProj) || { projectKey: activeArProj, context: '' };
   const currentGoldSources = goldSources.filter((s: any) => s.targetProjects?.includes(activeArProj));
   const currentBacklogScope = backlogStatusScopes.find((scope: any) => scope.projectKey === activeArProj) || { projectKey: activeArProj, statuses: [] };
@@ -1068,7 +1141,7 @@ function ProjectConfigurationManager({
 
   const updateMapping = (p: any) => {
     const idx = arMappings.findIndex((m: any) => m.projectKey === activeArProj);
-    const upd = { ...currentMapping, ...p };
+    const upd = normalizeProjectArMapping({ ...currentMapping, ...p, projectKey: activeArProj });
     if (idx >= 0) { const l = [...arMappings]; l[idx] = upd; setArMappings(l); }
     else setArMappings([...arMappings, upd]);
   };
@@ -1307,33 +1380,199 @@ function ProjectConfigurationManager({
             </button>
             {expandedSections.mapping && (
             <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-               <div className="flex p-1 bg-white rounded-lg border border-[var(--rf-border)] shadow-sm max-w-[240px]">
-                 <button onClick={() => updateMapping({ mode: 'consolidated' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>Consolidated</button>
-                 <button onClick={() => updateMapping({ mode: 'iterative' })} className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'iterative' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>Iterative</button>
-               </div>
-               
-               <div>
-                 {currentMapping.mode === 'consolidated' ? (
-                   <div className="flex items-center justify-between gap-4 bg-white p-3 rounded-xl border border-[var(--rf-border)]">
-                     <span className="text-xs font-bold text-[var(--rf-text-secondary)]">Storage Field</span>
-                     <FieldSelector value={currentMapping.consolidatedFieldId} onChange={(fid: string) => updateMapping({ consolidatedFieldId: fid })} customFields={customFields} />
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                 <div className="flex items-start justify-between gap-4">
+                   <div>
+                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Mapping mode</div>
+                     <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                       Preserve separate source and target fields when your Jira setup stores the same content in multiple places.
+                     </p>
                    </div>
-                 ) : (
-                   <div className="space-y-3">
-                     {currentMapping.iterativeFieldIds.map((fid: string, i: number) => (
-                       <div key={i} className="flex items-center gap-3 bg-white p-2 rounded-xl border border-[var(--rf-border)]">
-                         <span className="text-[10px] font-black text-[var(--rf-text-tertiary)] min-w-[24px] text-center">#{i+1}</span>
-                         <div className="flex-1"><FieldSelector value={fid} onChange={(newF: string) => { const ids = [...currentMapping.iterativeFieldIds]; ids[i] = newF; updateMapping({ iterativeFieldIds: ids }); }} customFields={customFields} /></div>
-                         <button onClick={() => updateMapping({ iterativeFieldIds: currentMapping.iterativeFieldIds.filter((_: any, idx: number) => idx !== i) })} className="p-1.5 text-[var(--rf-text-tertiary)] hover:text-rose-500 hover:bg-[var(--rf-danger-subtle)] rounded-md transition"><X className="w-4 h-4"/></button>
-                       </div>
-                     ))}
-                     <button onClick={() => updateMapping({ iterativeFieldIds: [...currentMapping.iterativeFieldIds, ''] })} className="text-[10px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg uppercase tracking-widest transition">+ Add slot</button>
+                   <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)] shadow-sm">
+                     <button
+                       type="button"
+                       onClick={() => updateMapping({ mode: 'consolidated' })}
+                       className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                     >
+                       Consolidated
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => updateMapping({ mode: 'iterative' })}
+                       className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'iterative' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                     >
+                       Iterative
+                     </button>
                    </div>
-                 )}
+                 </div>
+                 <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                   <FieldMappingEditor
+                     title="Input mapping"
+                     description="Fields used when reading or grounding existing Jira content."
+                     mapping={currentMapping.inputMappings}
+                     onChange={(next: ProjectFieldMapping) => updateMapping({ inputMappings: next })}
+                     customFields={customFields}
+                   />
+                   <FieldMappingEditor
+                     title="Output mapping"
+                     description="Fields used when writing generated content back to Jira."
+                     mapping={currentMapping.outputMappings}
+                     onChange={(next: ProjectFieldMapping) => updateMapping({ outputMappings: next })}
+                     customFields={customFields}
+                   />
+                 </div>
                </div>
             </div>
             )}
          </div>
+      </div>
+    </div>
+  );
+}
+
+function normalizeFieldIds(fieldIds: Array<string | null | undefined> = []) {
+  return [...new Set(fieldIds.map(id => id?.trim()).filter((id): id is string => Boolean(id)))];
+}
+
+function normalizeProjectArMapping(raw: any): ProjectArMapping {
+  const legacyArFieldIds = normalizeFieldIds(
+    raw?.mode === 'iterative'
+      ? raw?.iterativeFieldIds
+      : raw?.consolidatedFieldId
+        ? [raw.consolidatedFieldId]
+        : [],
+  );
+  const hasOutputArFieldIds = Boolean(raw?.outputMappings && Object.prototype.hasOwnProperty.call(raw.outputMappings, 'arFieldIds'));
+  const hasInputArFieldIds = Boolean(raw?.inputMappings && Object.prototype.hasOwnProperty.call(raw.inputMappings, 'arFieldIds'));
+  const outputArFieldIds = hasOutputArFieldIds
+    ? normalizeFieldIds(raw?.outputMappings?.arFieldIds)
+    : legacyArFieldIds;
+  const inputArFieldIds = hasInputArFieldIds
+    ? normalizeFieldIds(raw?.inputMappings?.arFieldIds)
+    : outputArFieldIds;
+  const outputMappings: ProjectFieldMapping = {
+    summaryFieldId: raw?.outputMappings?.summaryFieldId || 'summary',
+    descriptionFieldId: raw?.outputMappings?.descriptionFieldId || 'description',
+    arFieldIds: outputArFieldIds,
+  };
+  const inputMappings: ProjectFieldMapping = {
+    summaryFieldId: raw?.inputMappings?.summaryFieldId || 'summary',
+    descriptionFieldId: raw?.inputMappings?.descriptionFieldId || 'description',
+    arFieldIds: inputArFieldIds,
+  };
+  return {
+    projectKey: raw?.projectKey || '*',
+    mode: outputMappings.arFieldIds.length > 1 ? 'iterative' : (raw?.mode || 'consolidated'),
+    consolidatedFieldId: outputMappings.arFieldIds[0] || outputMappings.descriptionFieldId || 'description',
+    iterativeFieldIds: outputMappings.arFieldIds,
+    inputMappings,
+    outputMappings,
+    issueLinkType: raw?.issueLinkType,
+  };
+}
+
+function FieldMappingEditor({
+  title,
+  description,
+  mapping,
+  onChange,
+  customFields,
+}: {
+  title: string;
+  description: string;
+  mapping: ProjectFieldMapping;
+  onChange: (next: ProjectFieldMapping) => void;
+  customFields: JiraField[];
+}) {
+  const selectableFieldIds = ['description', ...customFields.map(field => field.id)];
+
+  const updateArField = (index: number, nextFieldId: string) => {
+    const arFieldIds = [...mapping.arFieldIds];
+    arFieldIds[index] = nextFieldId;
+    onChange({ ...mapping, arFieldIds: normalizeFieldIds(arFieldIds) });
+  };
+
+  const addArField = () => {
+    const nextFieldId = selectableFieldIds.find(fieldId => !mapping.arFieldIds.includes(fieldId));
+    if (!nextFieldId) return;
+    onChange({ ...mapping, arFieldIds: [...mapping.arFieldIds, nextFieldId] });
+  };
+
+  const removeArField = (index: number) => {
+    onChange({ ...mapping, arFieldIds: mapping.arFieldIds.filter((_: string, idx: number) => idx !== index) });
+  };
+
+  return (
+    <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{title}</div>
+          <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">{description}</p>
+        </div>
+        <span className="rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+          Summary is standard
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Summary</div>
+            <div className="text-sm font-bold text-[var(--rf-text-secondary)] mt-1">summary</div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Description</div>
+            <div className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Select the Jira field that should hold the narrative body.</div>
+          </div>
+          <FieldSelector
+            value={mapping.descriptionFieldId}
+            onChange={(fid: string) => onChange({ ...mapping, descriptionFieldId: fid })}
+            customFields={customFields}
+          />
+        </div>
+
+        <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Acceptance requirements</div>
+              <div className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Add one or more Jira fields where ARs should appear.</div>
+            </div>
+            <button
+              type="button"
+              onClick={addArField}
+              disabled={selectableFieldIds.every(fieldId => mapping.arFieldIds.includes(fieldId))}
+              className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition"
+            >
+              + Add field
+            </button>
+          </div>
+          <div className="space-y-2">
+            {mapping.arFieldIds.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-white px-4 py-3 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                No AR fields selected yet.
+              </div>
+            ) : (
+              mapping.arFieldIds.map((fid: string, i: number) => (
+                <div key={`${title}-${i}`} className="flex items-center gap-3 bg-white p-2 rounded-xl border border-[var(--rf-border)]">
+                  <span className="text-[10px] font-black text-[var(--rf-text-tertiary)] min-w-[24px] text-center">#{i + 1}</span>
+                  <div className="flex-1">
+                    <FieldSelector value={fid} onChange={(nextFieldId: string) => updateArField(i, nextFieldId)} customFields={customFields} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeArField(i)}
+                    className="p-1.5 text-[var(--rf-text-tertiary)] hover:text-rose-500 hover:bg-[var(--rf-danger-subtle)] rounded-md transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

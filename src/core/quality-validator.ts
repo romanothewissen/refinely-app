@@ -15,6 +15,48 @@ const GIVEN_CONFIG_ANTI_PATTERNS = [
   /system (is|has been) (set|configured)/i,
 ];
 
+const ROLE_HINT_WORDS = new Set([
+  'user',
+  'person',
+  'individual',
+  'professional',
+  'worker',
+  'staff',
+  'member',
+  'associate',
+  'resource',
+  'agent',
+  'operator',
+  'representative',
+  'specialist',
+  'technician',
+  'engineer',
+  'manager',
+  'administrator',
+  'admin',
+  'dispatcher',
+  'planner',
+]);
+
+function extractRoleFromDescription(description: string): string | null {
+  const match = description.match(/^As an?\s+(.+?),\s*I need to\s+/i);
+  return match?.[1]?.trim() || null;
+}
+
+function normalizeRole(text: string): string {
+  return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractLeadingRolePhrase(clause: string): string | null {
+  const match = clause.match(/\b(?:a|an|the)\s+([A-Za-z][A-Za-z\s/-]{1,60}?)(?=\s+(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|works|manages|uses|belongs)\b)/i);
+  return match?.[1]?.trim() || null;
+}
+
+function looksLikeRolePhrase(text: string): boolean {
+  const tokens = normalizeRole(text).split(' ').filter(Boolean);
+  return tokens.some(token => ROLE_HINT_WORDS.has(token));
+}
+
 export function validateFeatures(features: Feature[], config: TenantConfig): ValidationViolation[] {
   const violations: ValidationViolation[] = [];
 
@@ -54,6 +96,7 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
     }
 
     // Check ARs
+    const featureRole = extractRoleFromDescription(feature.description);
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {
         violations.push({
@@ -85,6 +128,17 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
             message: `AR contains solution language: "${term}"`,
           });
           break;
+        }
+      }
+
+      if (featureRole) {
+        const leadingRole = extractLeadingRolePhrase(ar.given);
+        if (leadingRole && looksLikeRolePhrase(leadingRole) && normalizeRole(leadingRole) !== normalizeRole(featureRole)) {
+          violations.push({
+            featureId: feature.id,
+            field: 'acceptanceRequirements',
+            message: `AR role wording differs from feature role "${featureRole}": "${leadingRole}"`,
+          });
         }
       }
     }

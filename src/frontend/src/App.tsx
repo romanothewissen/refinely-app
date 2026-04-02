@@ -42,7 +42,7 @@ interface GenerationContextMeta {
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
@@ -54,7 +54,7 @@ interface ClarifyContextMeta {
   goldExamplesCount?: number;
   referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
   similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
+  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
@@ -181,8 +181,10 @@ export default function App() {
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
   const [projectKey, setProjectKey] = useState<string>('*');
+  const [contextMode, setContextMode] = useState<'undecided' | 'project' | 'global'>('undecided');
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [goldSources, setGoldSources] = useState<any[]>([]);
+  const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
 
   // History
@@ -207,7 +209,10 @@ export default function App() {
         (ctx.extension?.project?.key as string | undefined) ||
         (ctx.extension?.projectKey as string | undefined) ||
         (issueKey ? issueKey.split('-')[0] : undefined);
-      if (ctxProjectKey) setProjectKey(ctxProjectKey);
+      if (ctxProjectKey) {
+        setProjectKey(ctxProjectKey);
+        setContextMode('project');
+      }
 
       if (issueKey) {
         setOriginIssueKey(issueKey);
@@ -248,6 +253,7 @@ export default function App() {
         setAvailableProjects(projects);
         if (projectKey === '*' && projects.length === 1) {
           setProjectKey(projects[0].key);
+          setContextMode('project');
         }
       })
       .catch(() => {});
@@ -257,17 +263,21 @@ export default function App() {
     api.getConfig()
       .then((res: any) => {
         setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
+        setBrandingLogoUrl(res?.branding?.logoUrl || null);
       })
       .catch(() => {});
   }, []); // eslint-disable-line
 
+  const loadWiDocs = async (nextProjectKey = projectKey) => {
+    try {
+      const res = await api.listWiDocs(nextProjectKey) as any;
+      setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
+    } catch {}
+  };
+
   useEffect(() => {
-    api.listWiDocs(projectKey)
-      .then((res: any) => {
-        setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
-      })
-      .catch(() => {});
-  }, [projectKey]);
+    loadWiDocs(projectKey);
+  }, [projectKey]); // eslint-disable-line
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
@@ -308,6 +318,7 @@ export default function App() {
       if (!res) return;
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
+      setBrandingLogoUrl(res?.branding?.logoUrl || null);
     }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
   }, []);
@@ -323,7 +334,11 @@ export default function App() {
     } catch {}
   };
 
-  const { isGenerating, progress } = useGenerationRealtime(
+  const {
+    isGenerating,
+    progress: generationProgress,
+    cancelGeneration,
+  } = useGenerationRealtime(
     pendingSessionId,
     (payload: any) => {
       if (payload.features) {
@@ -333,7 +348,6 @@ export default function App() {
       setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
       setIsWorking(false);
-      setIsGenerationStarted(false);
       loadHistory();
       loadUsage();
     },
@@ -341,11 +355,19 @@ export default function App() {
       setGenerationError(errMsg);
       setPendingSessionId(null);
       setIsWorking(false);
-      setIsGenerationStarted(false);
+    }
+    ,
+    () => {
+      setPendingSessionId(null);
+      setIsWorking(false);
     }
   );
 
-  useClarifyRealtime(
+  const {
+    cancelClarify,
+    progress: clarifyProgress,
+    isClarifying,
+  } = useClarifyRealtime(
     pendingClarifySessionId,
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
@@ -364,7 +386,29 @@ export default function App() {
       setPendingClarifySessionId(null);
       startGeneration(requirement, []);
     },
+    () => {
+      setPendingClarifySessionId(null);
+      setIsWorking(false);
+    }
   );
+
+  const isCanvasLoading = Boolean(pendingClarifySessionId || pendingSessionId || isClarifying || isGenerating);
+  const loadingPhase: 'clarify' | 'generation' =
+    pendingClarifySessionId || isClarifying ? 'clarify' : 'generation';
+  const loadingTitle = loadingPhase === 'clarify' ? 'Exploring the requirement' : 'Crafting features';
+  const loadingProgress = loadingPhase === 'clarify'
+    ? (clarifyProgress || 'Analyzing requirement and gathering context…')
+    : (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'));
+
+  const handleCancelWorkflow = async () => {
+    if (pendingClarifySessionId || isClarifying) {
+      await cancelClarify();
+      return;
+    }
+    if (pendingSessionId || isGenerating) {
+      await cancelGeneration();
+    }
+  };
 
   const handleStartBrainstorm = async () => {
     if (!requirement.trim()) return;
@@ -397,14 +441,11 @@ export default function App() {
   requirementRef.current = requirement;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
-  const [isGenerationStarted, setIsGenerationStarted] = useState(false);
-
   const startGeneration = async (reqText: string, clarifyAnswers: any[]) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
     
     setIsWorking(true);
-    setIsGenerationStarted(true);
     setGenerationError(null);
     setClarifyQuestions([]);
     // CRITICAL: Stop clarify polling if it was active
@@ -427,13 +468,11 @@ export default function App() {
       } else {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setIsWorking(false);
-        setIsGenerationStarted(false);
         setPendingSessionId(null);
       }
     } catch (err: any) {
       setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
       setIsWorking(false);
-      setIsGenerationStarted(false);
       setPendingSessionId(null);
     }
   };
@@ -521,9 +560,14 @@ export default function App() {
                 setClarifyContext(null);
                 setWorkflowTokenUsage(null);
                 setClarifyQuestions([]);
+                setPendingSessionId(null);
+                setPendingClarifySessionId(null);
+                setIsWorking(false);
                 setSidebarOpen(true);
                 setSidebarExiting(false);
                 setSessionId(newSid);
+                setProjectKey('*');
+                setContextMode('undecided');
               }}
               conversations={conversations}
               currentSessionId={sessionId}
@@ -535,13 +579,17 @@ export default function App() {
               tier={tier}
               usage={usage}
               limits={limits}
+              brandingLogoUrl={brandingLogoUrl}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
               projectKey={projectKey}
               setProjectKey={setProjectKey}
+              contextMode={contextMode}
+              setContextMode={setContextMode}
               availableProjects={availableProjects}
               goldSources={goldSources}
               wiDocs={wiDocs}
+              onRefreshWiDocs={() => loadWiDocs(projectKey)}
               onOpenProjectSettings={openProjectSettings}
             />
               {/* Resize Handle */}
@@ -562,7 +610,19 @@ export default function App() {
       {/* Main Right Pane / Settings */}
       {viewMode === 'settings' && isAdmin ? (
         <SettingsView
-          onClose={() => { setViewMode('generate'); setSidebarOpen(true); }}
+          onClose={() => {
+            setViewMode('generate');
+            setSidebarOpen(true);
+            api.getConfig()
+              .then((res: any) => {
+                if (!res) return;
+                setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
+                setBrandingLogoUrl(res?.branding?.logoUrl || null);
+                if (res.tier) setTier(res.tier);
+                if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
+              })
+              .catch(() => {});
+          }}
           initialTab={settingsStartTab}
           initialProjectKey={settingsStartProjectKey}
         />
@@ -600,12 +660,11 @@ export default function App() {
               features={features}
               setFeatures={setFeatures}
               onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
-              isGenerating={isGenerating || isWorking}
-              progress={
-                isWorking && !isGenerating 
-                  ? (isGenerationStarted ? 'Preparing generation engine...' : 'Discovery phase: Deep-dive requirement analysis...') 
-                  : progress
-              }
+              isGenerating={isCanvasLoading}
+              progress={loadingProgress}
+              loadingTitle={loadingTitle}
+              onCancelLoading={handleCancelWorkflow}
+              canCancelLoading={isCanvasLoading}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
               sessionId={sessionId}

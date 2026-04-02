@@ -55,6 +55,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
+    await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and reference stories…');
     const [wiContext, goldItems, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
@@ -67,6 +68,12 @@ export async function handler(event: { body: ClarifyEvent }) {
         : Promise.resolve([]),
     ]);
 
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
+    await sendClarifyProgress(sessionId, 'Drafting clarifying questions from the gathered context…');
     const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
@@ -76,6 +83,12 @@ export async function handler(event: { body: ClarifyEvent }) {
       config,
     });
 
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
+
+    await sendClarifyProgress(sessionId, 'Finalizing discovery questions…');
     const clarifyContext: ClarifyContextMeta = {
       projectKey,
       domainRolesUsed: config.domainRoles ?? [],
@@ -92,6 +105,8 @@ export async function handler(event: { body: ClarifyEvent }) {
         key: item.key,
         summary: item.summary,
         relevanceScore: item.relevanceScore,
+        url: item.url,
+        jiraIssueUrl: item.url,
       })),
       ambiguityAssessment: {
         ...ambiguityAssessment,
@@ -111,6 +126,11 @@ export async function handler(event: { body: ClarifyEvent }) {
         excerpt: buildWiExcerpt(chunk.text),
       })),
     };
+
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
 
     await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext);
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
@@ -159,12 +179,39 @@ export async function handler(event: { body: ClarifyEvent }) {
     });
   } catch (err) {
     console.error('[clarify-queue] Error:', err);
+    if (await isWorkflowCancelled(sessionId)) {
+      await markCancelled(sessionId);
+      return;
+    }
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'error',
       error: err instanceof Error ? err.message : 'Clarify failed',
       updatedAt: Date.now(),
     });
   }
+}
+
+async function sendClarifyProgress(sessionId: string, message: string) {
+  await entitySet(KEYS.clarifyProgress(sessionId), {
+    type: 'progress',
+    sessionId,
+    message,
+    updatedAt: Date.now(),
+  });
+}
+
+async function isWorkflowCancelled(sessionId: string): Promise<boolean> {
+  const result = await entityGet<{ type?: string }>(KEYS.clarifyProgress(sessionId));
+  return result?.type === 'cancelled';
+}
+
+async function markCancelled(sessionId: string) {
+  await entitySet(KEYS.clarifyProgress(sessionId), {
+    type: 'cancelled',
+    sessionId,
+    message: 'Clarifying questions cancelled.',
+    updatedAt: Date.now(),
+  });
 }
 
 async function saveClarifyTurn(

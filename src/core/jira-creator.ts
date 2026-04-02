@@ -4,7 +4,7 @@
  */
 
 import { asUser, assumeTrustedRoute } from '@forge/api';
-import { Feature } from '../types';
+import { Feature, ProjectArMapping, ProjectFieldMapping } from '../types';
 
 export interface CreateIssueResult {
   issueKey: string;
@@ -17,13 +17,13 @@ export async function createFeatureIssue(opts: {
   issueType: string;
   reporterAccountId: string;
   assigneeAccountId?: string;
-  arMapping?: {
-    mode: 'consolidated' | 'iterative';
-    consolidatedFieldId: string;
-    iterativeFieldIds: string[];
+  arMapping?: Partial<ProjectArMapping> & {
+    inputMappings?: Partial<ProjectFieldMapping>;
+    outputMappings?: Partial<ProjectFieldMapping>;
   };
 }): Promise<CreateIssueResult> {
   const { feature, projectKey, issueType, reporterAccountId, assigneeAccountId, arMapping } = opts;
+  const mapping = normalizeProjectArMapping(arMapping);
 
   // Story points vary per site (custom field); omit here to avoid invalid field errors.
   const body = {
@@ -36,28 +36,28 @@ export async function createFeatureIssue(opts: {
     } as any,
   };
 
-  const mode = arMapping?.mode || 'consolidated';
-  const consolidatedFieldId = arMapping?.consolidatedFieldId || 'description';
-  const iterativeFieldIds = arMapping?.iterativeFieldIds || [];
+  const outputMappings = mapping.outputMappings;
+  const descriptionFieldId = outputMappings.descriptionFieldId || 'description';
+  const arFieldIds = normalizeFieldIds(outputMappings.arFieldIds);
+  const descriptionDocOnly = buildAdfDocument(feature, false);
+  const descriptionDocWithArs = buildAdfDocument(feature, true);
+  const arDoc = buildAdfContentOnly(feature.acceptanceRequirements);
 
-  if (mode === 'consolidated') {
-    // Current behavior: Map to a single field (default Description)
-    if (consolidatedFieldId === 'description') {
-      body.fields.description = buildAdfDocument(feature, true);
-    } else {
-      // User mapping to a custom field
-      body.fields.description = buildAdfDocument(feature, false);
-      body.fields[consolidatedFieldId] = buildAdfContentOnly(feature.acceptanceRequirements);
+  body.fields.description = descriptionFieldId === 'description' && arFieldIds.includes('description')
+    ? descriptionDocWithArs
+    : descriptionDocOnly;
+
+  if (descriptionFieldId && descriptionFieldId !== 'description') {
+    body.fields[descriptionFieldId] = arFieldIds.includes(descriptionFieldId) ? descriptionDocWithArs : descriptionDocOnly;
+  }
+
+  for (const fieldId of arFieldIds) {
+    if (!fieldId || fieldId === descriptionFieldId) continue;
+    if (fieldId === 'description') {
+      body.fields.description = descriptionDocWithArs;
+      continue;
     }
-  } else {
-    // Mapping each AR to a specific field
-    body.fields.description = buildAdfDocument(feature, false); // No ARs in description
-    feature.acceptanceRequirements.forEach((ar, idx) => {
-      const fieldId = iterativeFieldIds[idx];
-      if (fieldId) {
-        body.fields[fieldId] = buildSingleArAdf(ar);
-      }
-    });
+    body.fields[fieldId] = arDoc;
   }
 
   const response = await asUser().requestJira(assumeTrustedRoute('/rest/api/3/issue'), {
@@ -77,6 +77,53 @@ export async function createFeatureIssue(opts: {
     issueKey: data.key,
     issueUrl: `${baseUrl}/browse/${data.key}`,
   };
+}
+
+function normalizeProjectArMapping(
+  arMapping?: Partial<ProjectArMapping> & {
+    inputMappings?: Partial<ProjectFieldMapping>;
+    outputMappings?: Partial<ProjectFieldMapping>;
+  },
+): ProjectArMapping {
+  const legacyOutputArFieldIds = normalizeFieldIds(
+    arMapping?.mode === 'iterative'
+      ? arMapping?.iterativeFieldIds
+      : arMapping?.consolidatedFieldId
+        ? [arMapping.consolidatedFieldId]
+        : [],
+  );
+  const hasOutputArFieldIds = Boolean(arMapping?.outputMappings && Object.prototype.hasOwnProperty.call(arMapping.outputMappings, 'arFieldIds'));
+  const hasInputArFieldIds = Boolean(arMapping?.inputMappings && Object.prototype.hasOwnProperty.call(arMapping.inputMappings, 'arFieldIds'));
+  const outputArFieldIds = hasOutputArFieldIds
+    ? normalizeFieldIds(arMapping?.outputMappings?.arFieldIds)
+    : legacyOutputArFieldIds;
+  const inputArFieldIds = hasInputArFieldIds
+    ? normalizeFieldIds(arMapping?.inputMappings?.arFieldIds)
+    : outputArFieldIds;
+  const outputMappings: ProjectFieldMapping = {
+    summaryFieldId: arMapping?.outputMappings?.summaryFieldId || 'summary',
+    descriptionFieldId: arMapping?.outputMappings?.descriptionFieldId || 'description',
+    arFieldIds: outputArFieldIds,
+  };
+  const inputMappings: ProjectFieldMapping = {
+    summaryFieldId: arMapping?.inputMappings?.summaryFieldId || 'summary',
+    descriptionFieldId: arMapping?.inputMappings?.descriptionFieldId || 'description',
+    arFieldIds: inputArFieldIds,
+  };
+
+  return {
+    projectKey: arMapping?.projectKey || '*',
+    mode: outputMappings.arFieldIds.length > 1 ? 'iterative' : (arMapping?.mode || 'consolidated'),
+    consolidatedFieldId: outputMappings.arFieldIds[0] || outputMappings.descriptionFieldId || 'description',
+    iterativeFieldIds: outputMappings.arFieldIds,
+    inputMappings,
+    outputMappings,
+    issueLinkType: arMapping?.issueLinkType,
+  };
+}
+
+function normalizeFieldIds(fieldIds: Array<string | null | undefined> = []) {
+  return [...new Set(fieldIds.map(id => id?.trim()).filter((id): id is string => Boolean(id)))];
 }
 
 export async function createIssueLink(opts: {

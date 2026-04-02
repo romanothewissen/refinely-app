@@ -39,11 +39,27 @@ export interface ProcessCode {
   definition: string;
 }
 
+export interface ProjectFieldMapping {
+  summaryFieldId: string;
+  descriptionFieldId: string;
+  arFieldIds: string[];
+}
+
 export interface Branding {
   appTitle: string;
   logoUrl: string | null;
   primaryColor: string;
   secondaryColor: string;
+}
+
+export interface ProjectArMapping {
+  projectKey: string;
+  mode: 'consolidated' | 'iterative';
+  consolidatedFieldId: string;
+  iterativeFieldIds: string[];
+  inputMappings: ProjectFieldMapping;
+  outputMappings: ProjectFieldMapping;
+  issueLinkType?: string;
 }
 
 export interface ProjectBacklogStatusScope {
@@ -76,6 +92,7 @@ export interface TenantConfig {
     auditTrailEnabled: boolean;
   };
   issueLinkType: string;  // default: 'Relates to'
+  arMappings: ProjectArMapping[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
 }
 
@@ -118,6 +135,24 @@ export const DEFAULT_CONFIG: TenantConfig = {
     auditTrailEnabled: false,
   },
   issueLinkType: 'Relates to',
+  arMappings: [
+    {
+      projectKey: '*',
+      mode: 'consolidated',
+      consolidatedFieldId: 'description',
+      iterativeFieldIds: [],
+      inputMappings: {
+        summaryFieldId: 'summary',
+        descriptionFieldId: 'description',
+        arFieldIds: [],
+      },
+      outputMappings: {
+        summaryFieldId: 'summary',
+        descriptionFieldId: 'description',
+        arFieldIds: [],
+      },
+    }
+  ],
   backlogStatusScopes: [],
 };
 

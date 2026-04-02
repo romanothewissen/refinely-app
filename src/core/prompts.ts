@@ -161,6 +161,8 @@ RULES:
 - Write as if describing business outcomes to someone who has never seen the system
 - Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
 - Each AR tests one distinct thing
+- If an AR refers to the same actor named in the feature description, use that exact same role label
+- Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
@@ -215,7 +217,7 @@ TASK: Generate targeted clarifying questions total, categorized into the areas b
 4. Business Rules & Exceptions — what constraints, edge cases, failure modes
 5. Success & Measurement — how do we know it worked
 
-For each question, provide 4-5 realistic, specific answer suggestions based on the domain.
+For each question, provide exactly 4 realistic, specific answer suggestions based on the domain.
 
 Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
 }
@@ -228,8 +230,8 @@ export function buildEvaluateSystemPrompt(): string {
 Assess the Q&A and decide: is there enough information to write clear GIVEN/WHEN/THEN acceptance requirements that cover the happy path, key business rules, and main edge cases?
 
 If sufficient: return {"sufficient": true}
-If not sufficient: return {"sufficient": false, "questions": [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}]}
-Ask at most 5 follow-up questions. Focus only on what is genuinely missing. Avoid repetitive questions, but ensure critical gaps are closed.`;
+If not sufficient: return {"sufficient": false, "questions": [{"category": "...", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}
+Ask at most 5 follow-up questions. Focus only on what is genuinely missing. Avoid repetitive questions, but ensure critical gaps are closed. For every follow-up question, provide exactly 4 realistic answer suggestions.`;
 }
 
 // ─── Refinement (full feature set) ───────────────────────────────────────────
@@ -260,6 +262,7 @@ ACCEPTANCE REQUIREMENT RULES:
 - Be CONCEPTUAL — describe behavior patterns, never example values
 - The GIVEN must describe a real-world business situation, not a system configuration state
 - Each AR tests one distinct thing; include happy path, key business rules, relevant edge cases
+- Keep role naming consistent with each feature description; when an AR refers to the same actor, reuse the exact role label from "As a [role]"
 
 ${taxonomySection}
 
@@ -299,6 +302,7 @@ QUALITY RULES:
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
 - Be CONCEPTUAL — describe behavior patterns, not specific instances
+- Preserve role wording exactly: if the feature description says "As a [role]", do not rename that actor inside related ARs unless the feedback explicitly changes the role
 
 ${taxonomySection}
 
