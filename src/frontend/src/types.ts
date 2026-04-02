@@ -158,6 +158,13 @@ export interface ReferencedSimilarStory {
   relevanceScore?: number;
 }
 
+export interface ReferencedWiSection {
+  docId: string;
+  filename: string;
+  chunkIndex: number;
+  excerpt: string;
+}
+
 export interface ContextSourceMeta {
   projectKey: string;
   domainRolesUsed: string[];
@@ -165,6 +172,7 @@ export interface ContextSourceMeta {
   attachmentIncluded?: boolean;
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+  referencedWiSections?: ReferencedWiSection[];
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {

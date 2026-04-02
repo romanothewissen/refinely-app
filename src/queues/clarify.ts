@@ -30,6 +30,12 @@ function resolveRelevantGoldSources(
   return Array.from(deduped.values());
 }
 
+function buildWiExcerpt(text: string, maxChars = 180): string {
+  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trimEnd()}...`;
+}
+
 export async function handler(event: { body: ClarifyEvent }) {
   const { sessionId, accountId, requirement, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
@@ -52,7 +58,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     const [wiContext, goldItems, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
-        : Promise.resolve({ text: '', docs: [] }),
+        : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.goldSources.length
         ? fetchGoldExamples(config.goldSources, 6)
         : Promise.resolve([]),
@@ -97,6 +103,12 @@ export async function handler(event: { body: ClarifyEvent }) {
         docId: doc.docId,
         filename: doc.filename,
         chunkCount: doc.chunkCount,
+      })),
+      referencedWiSections: wiContext.chunks.slice(0, 8).map(chunk => ({
+        docId: chunk.docId,
+        filename: chunk.filename,
+        chunkIndex: chunk.chunkIndex,
+        excerpt: buildWiExcerpt(chunk.text),
       })),
     };
 

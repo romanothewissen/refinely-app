@@ -27,10 +27,17 @@ interface ClarifyProps {
     };
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
+}
+
+function buildExcerpt(text: string, maxChars = 180): string {
+  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
 export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMeta, sidebarOpen, setSidebarOpen }: ClarifyProps) {
@@ -182,6 +189,75 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                     <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
                     {contextMeta.domainRolesUsed?.length > 0 && (
                       <div className="col-span-2"><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed.join(', ')}</div>
+                    )}
+                  </div>
+
+                  {(contextMeta.referencedGoldExamples?.length ?? 0) > 0 && (
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Reference examples</div>
+                      <div className="flex flex-wrap gap-2">
+                        {contextMeta.referencedGoldExamples!.map((example, i) => (
+                          <span
+                            key={`${example.source}-${example.key}-${i}`}
+                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-[var(--rf-brand-subtle)]"
+                            title={example.summary}
+                          >
+                            {example.source}: {example.key}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(contextMeta.referencedSimilarStories?.length ?? 0) > 0 && (
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>
+                      <div className="space-y-2">
+                        {contextMeta.referencedSimilarStories!.map((story, i) => (
+                          <div key={`${story.key}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
+                              {typeof story.relevanceScore === 'number' && (
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
+                                  {(story.relevanceScore * 100).toFixed(0)}% match
+                                </div>
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                              {buildExcerpt(story.summary, 220)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3 mb-2">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                        Matched WI sections
+                      </div>
+                      <div className="text-[11px] text-[var(--rf-text-tertiary)]">
+                        {contextMeta.referencedWiDocs?.length
+                          ? contextMeta.referencedWiDocs.map(doc => doc.filename).join(', ')
+                          : 'No matching docs found'}
+                      </div>
+                    </div>
+                    {(contextMeta.referencedWiSections?.length ?? 0) > 0 ? (
+                      <div className="space-y-2">
+                        {contextMeta.referencedWiSections!.map((section, i) => (
+                          <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                            <div className="text-[11px] font-bold text-[var(--rf-text)]">
+                              {section.filename} · Section {section.chunkIndex + 1}
+                            </div>
+                            <div className="mt-1 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                              {section.excerpt}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[var(--rf-text-tertiary)] italic text-xs">No matched WI sections were used.</div>
                     )}
                   </div>
                   

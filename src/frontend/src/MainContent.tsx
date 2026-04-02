@@ -8,9 +8,13 @@ import { router } from '@forge/bridge';
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
 type AcceptanceRequirement = { given: string; when: string; then: string };
 
+function tokenizeDiffText(text: string): string[] {
+  return (text || '').match(/\s+|[^\s]+/g) ?? [];
+}
+
 function wordDiff(oldText: string, newText: string): DiffToken[] {
-  const oldWords = (oldText || '').split(/\b/);
-  const newWords = (newText || '').split(/\b/);
+  const oldWords = tokenizeDiffText(oldText);
+  const newWords = tokenizeDiffText(newText);
   const m = oldWords.length, n = newWords.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = m - 1; i >= 0; i--)
@@ -70,39 +74,71 @@ function arSimilarity(left: AcceptanceRequirement, right: AcceptanceRequirement)
   const rightText = `${right.given} ${right.when} ${right.then}`.trim();
   const exact = normaliseWhitespace(leftText) === normaliseWhitespace(rightText);
   if (exact) return 1;
-  return jaccard(tokenSet(leftText), tokenSet(rightText));
+  const wholeScore = jaccard(tokenSet(leftText), tokenSet(rightText));
+  const givenScore = jaccard(tokenSet(left.given), tokenSet(right.given));
+  const whenScore = jaccard(tokenSet(left.when), tokenSet(right.when));
+  const thenScore = jaccard(tokenSet(left.then), tokenSet(right.then));
+  return Math.max(wholeScore, ((givenScore + whenScore + thenScore) / 3) * 0.8 + wholeScore * 0.2);
 }
 
 function alignAcceptanceRequirements(
   original: AcceptanceRequirement[],
   proposed: AcceptanceRequirement[],
 ): Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> {
-  const usedOriginalIndices = new Set<number>();
   const rows: Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> = [];
+  const m = original.length;
+  const n = proposed.length;
+  const gapCost = 0.55;
+  const matchThreshold = 0.2;
+  const lowSimilarityPenalty = 1.35;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array.from({ length: n + 1 }, () => Number.POSITIVE_INFINITY));
 
-  for (const nextAr of proposed) {
-    let bestIndex = -1;
-    let bestScore = 0;
-
-    for (let i = 0; i < original.length; i += 1) {
-      if (usedOriginalIndices.has(i)) continue;
-      const score = arSimilarity(original[i], nextAr);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
+  dp[m][n] = 0;
+  for (let i = m; i >= 0; i -= 1) {
+    for (let j = n; j >= 0; j -= 1) {
+      if (i < m) dp[i][j] = Math.min(dp[i][j], gapCost + dp[i + 1][j]);
+      if (j < n) dp[i][j] = Math.min(dp[i][j], gapCost + dp[i][j + 1]);
+      if (i < m && j < n) {
+        const similarity = arSimilarity(original[i], proposed[j]);
+        const matchCost = similarity >= matchThreshold ? (1 - similarity) * 0.9 : lowSimilarityPenalty;
+        dp[i][j] = Math.min(dp[i][j], matchCost + dp[i + 1][j + 1]);
       }
-    }
-
-    const matched = bestIndex >= 0 && bestScore >= 0.45;
-    if (matched) {
-      usedOriginalIndices.add(bestIndex);
-      rows.push({ proposed: nextAr, oldAr: original[bestIndex], oldIndex: bestIndex, isNew: false });
-    } else {
-      rows.push({ proposed: nextAr, isNew: true });
     }
   }
 
+  let i = 0;
+  let j = 0;
+  while (j < n) {
+    const advanceOriginalCost = i < m ? gapCost + dp[i + 1][j] : Number.POSITIVE_INFINITY;
+    const advanceProposedCost = gapCost + dp[i][j + 1];
+    const similarity = i < m ? arSimilarity(original[i], proposed[j]) : 0;
+    const matchCost = i < m
+      ? (similarity >= matchThreshold ? (1 - similarity) * 0.9 : lowSimilarityPenalty) + dp[i + 1][j + 1]
+      : Number.POSITIVE_INFINITY;
+
+    if (i < m && matchCost <= advanceProposedCost && matchCost <= advanceOriginalCost) {
+      rows.push({ proposed: proposed[j], oldAr: original[i], oldIndex: i, isNew: false });
+      i += 1;
+      j += 1;
+      continue;
+    }
+
+    if (advanceProposedCost <= advanceOriginalCost || i >= m) {
+      rows.push({ proposed: proposed[j], isNew: true });
+      j += 1;
+      continue;
+    }
+
+    i += 1;
+  }
+
   return rows;
+}
+
+function buildExcerpt(text: string, maxChars = 180): string {
+  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
 // ─── AI Refine Popup ──────────────────────────────────────────────────────────
@@ -244,6 +280,7 @@ interface MainContentProps {
     attachmentIncluded?: boolean;
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number }>;
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
@@ -265,6 +302,7 @@ export function MainContent({
 
   const [diffMode, setDiffMode] = useState<'redline' | 'blackline'>('redline');
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
+  const [showContextDetails, setShowContextDetails] = useState(false);
 
   const toggleExpand = (idx: number) => {
     setExpandedIndices(prev => {
@@ -816,47 +854,109 @@ export function MainContent({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="flex flex-wrap items-center gap-4 text-xs">
-                  <div className="font-bold text-[var(--rf-text)]">
-                    Context: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.goldExamplesCount} example{generationContext.goldExamplesCount !== 1 ? 's' : ''}</span>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
+                      Project: <span className="font-bold text-[var(--rf-text)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
+                    </span>
+                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
+                      Reference stories: <span className="font-bold text-[var(--rf-text)]">{generationContext.goldExamplesCount + (generationContext.similarStoriesCount ?? 0)}</span>
+                    </span>
+                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
+                      WI sections: <span className="font-bold text-[var(--rf-text)]">{generationContext.referencedWiSections?.length ?? 0}</span>
+                    </span>
+                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
+                      Domain guidance: <span className="font-bold text-[var(--rf-text)]">{generationContext.domainContextApplied ? 'Included' : 'None'}</span>
+                    </span>
                   </div>
-                  <div className="font-bold text-[var(--rf-text)]">
-                    Project: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
-                  </div>
-                  <div className="font-bold text-[var(--rf-text)]">
-                    Domain guidance: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.domainContextApplied ? 'Included' : 'None'}</span>
-                  </div>
-                  <div className="font-bold text-[var(--rf-text)]">
-                    Attachment: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.attachmentIncluded ? 'Included' : 'None'}</span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowContextDetails(prev => !prev)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
+                  >
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showContextDetails ? 'rotate-180' : ''}`} />
+                    {showContextDetails ? 'Hide sources' : 'Show sources'}
+                  </button>
                 </div>
-                {generationContext.referencedGoldExamples?.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {generationContext.referencedGoldExamples.map((example, i) => (
-                      <span
-                        key={`${example.source}-${example.key}-${i}`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-blue-100"
-                        title={example.summary}
-                      >
-                        {example.source}: {example.key}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-4 pt-4 border-t border-[var(--rf-border)]/60">
-                  <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <div className="font-bold text-[var(--rf-text)]">
-                      Work instructions ({generationContext.wiDocsCount ?? 0}):
-                    </div>
-                    {generationContext.referencedWiDocs?.length ? (
-                      <div className="font-medium text-[var(--rf-text-secondary)]">
-                        {generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')}
+                <AnimatePresence initial={false}>
+                  {showContextDetails && (
+                    <motion.div
+                      className="mt-4 pt-4 border-t border-[var(--rf-border)]/60 space-y-4"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                    >
+                      {(generationContext.referencedGoldExamples?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Reference examples</div>
+                          <div className="flex flex-wrap gap-2">
+                            {generationContext.referencedGoldExamples.map((example, i) => (
+                              <span
+                                key={`${example.source}-${example.key}-${i}`}
+                                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-[var(--rf-brand-subtle)]"
+                                title={example.summary}
+                              >
+                                {example.source}: {example.key}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {(generationContext.referencedSimilarStories?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>
+                          <div className="space-y-2">
+                            {generationContext.referencedSimilarStories!.map((story, i) => (
+                              <div key={`${story.key}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
+                                  {typeof story.relevanceScore === 'number' && (
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
+                                      {(story.relevanceScore * 100).toFixed(0)}% match
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="mt-1 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                                  {buildExcerpt(story.summary, 220)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3 mb-2">
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                            Matched WI sections
+                          </div>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)]">
+                            {generationContext.referencedWiDocs?.length
+                              ? generationContext.referencedWiDocs.map(doc => doc.filename).join(', ')
+                              : 'No matching docs found'}
+                          </div>
+                        </div>
+                        {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
+                          <div className="space-y-2">
+                            {generationContext.referencedWiSections!.map((section, i) => (
+                              <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                                <div className="text-[11px] font-bold text-[var(--rf-text)]">
+                                  {section.filename} · Section {section.chunkIndex + 1}
+                                </div>
+                                <div className="mt-1 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                                  {section.excerpt}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[var(--rf-text-tertiary)] italic text-xs">No matched WI sections were used.</div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="text-[var(--rf-text-tertiary)] italic">No matching docs found</div>
-                    )}
-                  </div>
-                </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
 

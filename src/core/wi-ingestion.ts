@@ -18,6 +18,7 @@ interface WiCache {
 interface WiContextResult {
   text: string;
   docs: WiDoc[];
+  chunks: WiChunk[];
 }
 
 // ─── Ingest ───────────────────────────────────────────────────────────────────
@@ -76,7 +77,7 @@ export async function retrieveWiContext(
   projectKey: string = '*',
 ): Promise<WiContextResult> {
   const cache = await loadCache();
-  if (!cache.chunks.length) return { text: '', docs: [] };
+  if (!cache.chunks.length) return { text: '', docs: [], chunks: [] };
 
   const allowedDocIds = new Set(
     cache.docs
@@ -84,7 +85,7 @@ export async function retrieveWiContext(
       .map(doc => doc.docId),
   );
   const scopedChunks = cache.chunks.filter(chunk => allowedDocIds.has(chunk.docId));
-  if (!scopedChunks.length) return { text: '', docs: [] };
+  if (!scopedChunks.length) return { text: '', docs: [], chunks: [] };
 
   const scored = bm25Score(query, scopedChunks);
   const top = scored.slice(0, topK);
@@ -94,7 +95,7 @@ export async function retrieveWiContext(
 
   let result = parts.join('\n\n---\n\n');
   if (result.length > maxChars) result = result.slice(0, maxChars);
-  return { text: result, docs };
+  return { text: result, docs, chunks: top };
 }
 
 // ─── Document management ──────────────────────────────────────────────────────

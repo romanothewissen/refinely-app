@@ -48,6 +48,12 @@ function resolveRelevantGoldSources(
   return Array.from(deduped.values());
 }
 
+function buildWiExcerpt(text: string, maxChars = 180): string {
+  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trimEnd()}...`;
+}
+
 export async function handler(event: { body: GenerationEvent }) {
   const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
@@ -81,7 +87,7 @@ export async function handler(event: { body: GenerationEvent }) {
         : Promise.resolve([]),
       config.wiConfig.enabled
         ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
-        : Promise.resolve({ text: '', docs: [] }),
+        : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
         ? findSimilarStories(maskedRequirement.text, config, projectKey)
         : Promise.resolve([]),
@@ -131,6 +137,12 @@ export async function handler(event: { body: GenerationEvent }) {
         docId: doc.docId,
         filename: doc.filename,
         chunkCount: doc.chunkCount,
+      })),
+      referencedWiSections: wiContext.chunks.slice(0, 8).map(chunk => ({
+        docId: chunk.docId,
+        filename: chunk.filename,
+        chunkIndex: chunk.chunkIndex,
+        excerpt: buildWiExcerpt(chunk.text),
       })),
     };
     result.generationContext = generationContext;
