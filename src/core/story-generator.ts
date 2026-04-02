@@ -23,6 +23,7 @@ import { getTierModel } from '../services/billing';
 import { buildPlannerContext } from './planner';
 import {
   buildGenerationSystemPrompt,
+  buildBusinessVoiceRewriteSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
   buildRefineSystemPrompt,
@@ -752,6 +753,43 @@ function buildCoverageSummary(dimensions: DiscoveryCoverageDimension[], missingC
   return `Coverage is still weakest around ${weakestRequired.join(' and ')}.`;
 }
 
+function normaliseMissingCriticalItems(
+  rawMissing: string[],
+  derivedMissing: string[],
+  dimensions: DiscoveryCoverageDimension[],
+): string[] {
+  const dimensionsByKey = new Map(
+    dimensions.map((dimension) => [dimension.key.toLowerCase(), dimension.label]),
+  );
+  const dimensionsByLabel = new Map(
+    dimensions.map((dimension) => [dimension.label.toLowerCase(), dimension.label]),
+  );
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  const canonicalize = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const lowered = trimmed.toLowerCase();
+    return (
+      dimensionsByKey.get(lowered) ||
+      dimensionsByLabel.get(lowered) ||
+      trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+    );
+  };
+
+  for (const raw of [...rawMissing, ...derivedMissing]) {
+    const canonical = canonicalize(raw);
+    if (!canonical) continue;
+    const dedupeKey = canonical.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    items.push(canonical);
+  }
+
+  return items;
+}
+
 function normaliseCoverageResult(rawData: unknown, questions: ClarifyQuestion[], scopeMode: ScopeMode): DiscoveryCoverageResult {
   const dimensions = normaliseCoverageDimensions(rawData, scopeMode);
   const requiredDimensions = dimensions.filter(dimension => dimension.required);
@@ -768,7 +806,7 @@ function normaliseCoverageResult(rawData: unknown, questions: ClarifyQuestion[],
     .filter(dimension => dimension.score < threshold || dimension.status !== 'covered')
     .map(dimension => dimension.label);
 
-  const missingCritical = Array.from(new Set([...(rawMissing.length ? rawMissing : []), ...derivedMissing]));
+  const missingCritical = normaliseMissingCriticalItems(rawMissing, derivedMissing, dimensions);
   const hasHardGap = requiredDimensions.some(dimension => dimension.score < 45 || dimension.status === 'missing');
   const canGenerate = requiredAverage >= threshold && !hasHardGap;
   const summary = rawData && typeof rawData === 'object' && typeof (rawData as any).summary === 'string'
@@ -824,7 +862,8 @@ export async function generateFeatures(opts: {
   }).join('\n\n---\n\n');
 
   let rawFeatures: RawFeature[] = [];
-  let usage = { input: 0, output: 0 };
+  let generationUsage = { input: 0, output: 0 };
+  let rewriteUsage = { input: 0, output: 0 };
 
   try {
     const result = await Promise.race([
@@ -844,7 +883,7 @@ export async function generateFeatures(opts: {
       throwAfterTimeout(120000, 'Feature generation'),
     ]);
 
-    usage = result.usage;
+    generationUsage = result.usage;
     rawFeatures = ensureAcceptanceRequirements(result.data.features ?? []);
   } catch (error) {
     console.warn('[story-generator] Single-pass feature generation failed; using fallback feature:', error);
@@ -858,15 +897,31 @@ export async function generateFeatures(opts: {
     rawFeatures = [rawFeatures[0]];
   }
 
+  try {
+    const rewritten = await rewriteFeaturesForBusinessVoice(
+      rawFeatures,
+      config,
+      config.generatorConfig.arModel,
+      45000,
+    );
+    rawFeatures = rewritten.features;
+    rewriteUsage = rewritten.usage;
+  } catch (error) {
+    console.warn('[story-generator] Business-voice rewrite failed; keeping original generated features:', error);
+  }
+
   const features = rawFeatures.map(normaliseFeature);
   const violations = validateFeatures(features, config);
+  const totalInput = generationUsage.input + rewriteUsage.input;
+  const totalOutput = generationUsage.output + rewriteUsage.output;
 
   const tokenUsage: TokenUsageSummary = {
-    input: usage.input,
-    output: usage.output,
-    total: usage.input + usage.output,
+    input: totalInput,
+    output: totalOutput,
+    total: totalInput + totalOutput,
     byStage: {
-      generation: toStageUsage(usage),
+      generation: toStageUsage(generationUsage),
+      businessVoiceRewrite: toStageUsage(rewriteUsage),
     },
   };
 
@@ -1084,13 +1139,35 @@ export async function refineFeatures(opts: {
     ...getProviderOpts(config),
   });
 
+  let refinedFeatures = ensureAcceptanceRequirements(result.data.features ?? []);
+  let rewriteUsage = { input: 0, output: 0 };
+
+  try {
+    const rewritten = await rewriteFeaturesForBusinessVoice(
+      refinedFeatures,
+      config,
+      config.generatorConfig.refineModel,
+      30000,
+    );
+    refinedFeatures = rewritten.features;
+    rewriteUsage = rewritten.usage;
+  } catch (error) {
+    console.warn('[story-generator] Business-voice rewrite failed after bulk refine; keeping refined features:', error);
+  }
+
+  const totalInput = result.usage.input + rewriteUsage.input;
+  const totalOutput = result.usage.output + rewriteUsage.output;
+
   return {
-    features: (result.data.features ?? []).map(normaliseFeature),
+    features: refinedFeatures.map(normaliseFeature),
     tokenUsage: {
-      input: result.usage.input,
-      output: result.usage.output,
-      total: result.usage.input + result.usage.output,
-      byStage: { refine: toStageUsage(result.usage) },
+      input: totalInput,
+      output: totalOutput,
+      total: totalInput + totalOutput,
+      byStage: {
+        refine: toStageUsage(result.usage),
+        refineBusinessVoiceRewrite: toStageUsage(rewriteUsage),
+      },
     },
   };
 }
@@ -1122,11 +1199,30 @@ export async function refineSingleFeature(opts: {
     ...getProviderOpts(config),
   });
 
-  const refined = result.data.features?.[0];
+  let refined = ensureAcceptanceRequirements(result.data.features ?? [])[0];
+  let rewriteUsage = { input: 0, output: 0 };
+
+  if (refined) {
+    try {
+      const rewritten = await rewriteFeaturesForBusinessVoice(
+        [refined],
+        config,
+        config.generatorConfig.refineModel,
+        20000,
+      );
+      refined = rewritten.features[0] ?? refined;
+      rewriteUsage = rewritten.usage;
+    } catch (error) {
+      console.warn('[story-generator] Business-voice rewrite failed after single-feature refine; keeping refined feature:', error);
+    }
+  }
+
   const feedbackLower = feedback.toLowerCase();
   const touchesStoryPoints = /(story point|story points|estimate|estimation|sizing|size)/i.test(feedbackLower);
   const touchesProcessCode = /(process code|process_code|taxonomy|code)/i.test(feedbackLower);
   const candidate = refined ? normaliseFeature(refined) : feature;
+  const totalInput = result.usage.input + rewriteUsage.input;
+  const totalOutput = result.usage.output + rewriteUsage.output;
   const stableResult: Feature = {
     ...feature,
     id: feature.id,
@@ -1142,10 +1238,13 @@ export async function refineSingleFeature(opts: {
   return {
     feature: stableResult,
     tokenUsage: {
-      input: result.usage.input,
-      output: result.usage.output,
-      total: result.usage.input + result.usage.output,
-      byStage: { refineSingle: toStageUsage(result.usage) },
+      input: totalInput,
+      output: totalOutput,
+      total: totalInput + totalOutput,
+      byStage: {
+        refineSingle: toStageUsage(result.usage),
+        refineSingleBusinessVoiceRewrite: toStageUsage(rewriteUsage),
+      },
     },
   };
 }
@@ -1255,6 +1354,36 @@ function decodeEscapedUnicode(text: string): string {
     .replace(/\\n/g, '\n')
     .replace(/\\r/g, '\r')
     .replace(/\\t/g, '\t');
+}
+
+async function rewriteFeaturesForBusinessVoice(
+  rawFeatures: RawFeature[],
+  config: TenantConfig,
+  model: string,
+  timeoutMs: number,
+): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
+  if (!rawFeatures.length) {
+    return { features: rawFeatures, usage: { input: 0, output: 0 } };
+  }
+
+  const result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+    model: getTierModel(model, config.tier),
+    systemPrompt: buildBusinessVoiceRewriteSystemPrompt({
+      domainContext: config.domainContext,
+      domainRoles: config.domainRoles,
+    }),
+    userMessage: JSON.stringify({ features: rawFeatures }, null, 2),
+    maxTokens: Math.min(config.generatorConfig.maxTokens, 4096),
+    timeoutMs,
+    geminiThinkingBudget: 0,
+    ...getProviderOpts(config),
+  });
+
+  const rewritten = ensureAcceptanceRequirements(result.data.features ?? []);
+  return {
+    features: rewritten.length ? rewritten : rawFeatures,
+    usage: result.usage,
+  };
 }
 
 /** Read AR arrays whether the model used snake_case or camelCase. */

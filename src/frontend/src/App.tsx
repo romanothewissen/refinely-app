@@ -887,6 +887,12 @@ export default function App() {
               questions={clarifyQuestions} 
               onComplete={handleClarifyComplete}
               onSkip={handleClarifySkip}
+              isReviewing={isReviewingDiscovery}
+              reviewMessage={
+                reasoningMode === 'deep'
+                  ? 'Reviewing this discovery round, checking coverage gaps, and deciding whether to generate features now or continue with another round.'
+                  : 'Reviewing your answers and preparing the next generation step.'
+              }
               contextMeta={clarifyContext}
               coverageSummary={discoveryCoverage}
               sidebarOpen={sidebarOpen}

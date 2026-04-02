@@ -63,6 +63,10 @@ OUTPUT CALIBRATION — match the output to the real scope:
 Do NOT over-split a narrow request into trivial features. Do NOT under-specify a broad request.
 
 FEATURE RULES:
+- Each feature summary must be a stakeholder-facing business capability title.
+- Write the summary in plain business language that an end user or business sponsor would naturally say.
+- Never use technical, architectural, or implementation-led title patterns such as engine, orchestration, logic, algorithm, framework, service, automation layer, technical workflow, or similar wording.
+- The summary must describe the business outcome or responsibility, not the internal mechanism.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - One feature = one primary business capability for one primary role or role family
 - If materially different roles need different permissions, outcomes, or flows, split them into separate features
@@ -83,6 +87,49 @@ ACCEPTANCE REQUIREMENT RULES:
 
 Output strict JSON only:
 {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ...", "..."], "suggested_story_points": N}]}`;
+}
+
+export function buildBusinessVoiceRewriteSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles: string[];
+}): string {
+  const roleList = opts.domainRoles.length
+    ? `Prefer these business roles when they fit: ${opts.domainRoles.join(', ')}.`
+    : 'Infer the most credible end-user or business stakeholder role from the feature intent.';
+
+  return `You are a senior business analyst editing backlog features for business voice and solution neutrality.
+${platformContextBlock(opts.domainContext)}
+${roleList}
+
+YOUR JOB:
+- Rewrite the provided features so they sound like real end-user or business stakeholder needs.
+- Remove technical, architectural, implementation-specific, or solution-proposing language.
+- Preserve the business intent, scope, decomposition, story points, process codes, and acceptance requirement count unless a wording change is required to remove technical phrasing.
+
+FEATURE TITLE RULES:
+- Summary must be a concise business capability title, not a system design title.
+- Write what the business needs to achieve, not how the solution works.
+- Never use architectural or implementation phrasing such as engine, orchestration, logic, algorithm, framework, module, service layer, technical workflow, system automation, or similar wording.
+
+FEATURE DESCRIPTION RULES:
+- Must be exactly in the form: "As a [business role], I need to [business action] so that [business benefit]"
+- The role must be an end user, business stakeholder, or operational role, never the system.
+- The action must describe a business outcome or responsibility, not a technical mechanism.
+- The benefit must describe business value, control, visibility, timeliness, risk reduction, or service quality.
+
+ACCEPTANCE REQUIREMENT RULES:
+- Keep GIVEN / WHEN / THEN structure.
+- Rewrite every clause in business language only.
+- Remove technical implementation wording, hidden solution proposals, architectural terms, and system design language.
+- Keep them conceptual and verifiable.
+
+IMPORTANT:
+- Do not add explanations.
+- Do not change the number of features unless a feature is completely unusable and must be minimally repaired.
+- Return the same JSON shape you received.
+
+Output strict JSON only:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."], "suggested_story_points": N, "process_code": "..."}]}`;
 }
 
 export function buildClarifySystemPrompt(opts: {
@@ -249,6 +296,8 @@ ${platformContextBlock(opts.domainContext)}
 YOUR JOB: Given existing features and user feedback, refine the feature set and write complete acceptance requirements.
 
 FEATURE RULES:
+- Each feature summary must be a stakeholder-facing business capability title in plain business language.
+- Never use technical or architectural summary patterns such as engine, orchestration, logic, algorithm, framework, service, automation layer, or similar wording.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms
@@ -293,6 +342,8 @@ CHANGE RULES:
 - Never restructure or rewrite sections that weren't mentioned
 
 QUALITY RULES:
+- Summary must stay as a business capability title that an end user or stakeholder would recognize.
+- Never introduce technical or architectural summary phrasing such as engine, orchestration, logic, algorithm, framework, service, or similar wording.
 - Feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]

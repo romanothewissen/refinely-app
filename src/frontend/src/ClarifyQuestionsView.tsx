@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Menu, Sparkles, AlertCircle, FileText, ExternalLink, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -9,6 +9,8 @@ interface ClarifyProps {
   questions: Question[];
   onComplete: (answers: Answer[]) => void;
   onSkip: () => void;
+  isReviewing?: boolean;
+  reviewMessage?: string;
   roundNumber?: number;
   reasoningMode?: 'fast' | 'deep';
   skipLabel?: string;
@@ -93,6 +95,8 @@ export function ClarifyQuestionsView({
   questions,
   onComplete,
   onSkip,
+  isReviewing = false,
+  reviewMessage,
   roundNumber = 1,
   reasoningMode = 'fast',
   skipLabel = 'Skip questions',
@@ -106,6 +110,10 @@ export function ClarifyQuestionsView({
   const activeCoverage = coverageSummary ?? contextMeta?.discoveryCoverage ?? null;
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
+
+  useEffect(() => {
+    setAnswers({});
+  }, [questions, roundNumber]);
 
   function ensureAnswer(idx: number) {
     return answers[idx] ?? { selected: [], custom: '' };
@@ -127,6 +135,7 @@ export function ClarifyQuestionsView({
   }
 
   function handleSubmit() {
+    if (isReviewing) return;
     const result: Answer[] = questions.map((q, i) => {
       const a = ensureAnswer(i);
       const combined = a.custom.trim() || a.selected.join('; ');
@@ -152,7 +161,7 @@ export function ClarifyQuestionsView({
   let displayCounter = 0;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
+    <div className="relative flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
       {/* Header */}
       <motion.header
         className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm flex items-center justify-between gap-4"
@@ -198,17 +207,19 @@ export function ClarifyQuestionsView({
         <div className="flex items-center gap-3 shrink-0">
           <motion.button
             onClick={onSkip}
-            className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)]"
+            disabled={isReviewing}
+            className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)] disabled:opacity-60 disabled:cursor-wait"
             whileTap={{ scale: 0.97 }}
           >
             {skipLabel}
           </motion.button>
           <motion.button
             onClick={handleSubmit}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-sm shadow-[var(--rf-brand)]/20"
+            disabled={isReviewing}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-sm shadow-[var(--rf-brand)]/20 disabled:opacity-70 disabled:cursor-wait"
             whileTap={{ scale: 0.98 }}
           >
-            Generate Features <ArrowRight className="w-4 h-4" />
+            {isReviewing ? 'Reviewing…' : 'Generate Features'} <ArrowRight className="w-4 h-4" />
           </motion.button>
         </div>
       </motion.header>
@@ -239,6 +250,7 @@ export function ClarifyQuestionsView({
                 <button
                   type="button"
                   onClick={() => setIsContextModalOpen(true)}
+                  disabled={isReviewing}
                   className="text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
                 >
                   View full details
@@ -319,11 +331,12 @@ export function ClarifyQuestionsView({
                                   <button
                                     key={si}
                                     onClick={() => toggleSuggestion(idx, sug)}
+                                    disabled={isReviewing}
                                     className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
                                       sel
                                         ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border-[var(--rf-brand-subtle)] shadow-sm'
                                         : 'border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] bg-white hover:bg-[var(--rf-surface-soft)]'
-                                    }`}
+                                    } disabled:opacity-60 disabled:cursor-wait`}
                                   >
                                     <div className="flex items-center gap-1.5">
                                       {sel && <Check className="w-3.5 h-3.5" />}
@@ -338,9 +351,10 @@ export function ClarifyQuestionsView({
                           <textarea
                             value={ans.custom}
                             onChange={e => handleCustomChange(idx, e.target.value)}
+                            disabled={isReviewing}
                             placeholder={q.suggestions.length > 0 ? 'Click suggestions above or type your own answer\u2026' : 'Type your detailed answer here\u2026'}
                             rows={3}
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-slate-400"
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-slate-400 disabled:opacity-70 disabled:cursor-wait"
                           />
                         </div>
                       </div>
@@ -359,13 +373,40 @@ export function ClarifyQuestionsView({
           >
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
+              disabled={isReviewing}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait"
             >
-              Generate Features <ArrowRight className="w-4 h-4" />
+              {isReviewing ? 'Reviewing discovery…' : 'Generate Features'} <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
         </div>
       </div>
+
+      {isReviewing && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/78 backdrop-blur-sm px-6">
+          <motion.div
+            className="w-full max-w-lg rounded-3xl border border-[var(--rf-border)] bg-white px-6 py-7 shadow-2xl"
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="mt-0.5 h-11 w-11 shrink-0 rounded-2xl border border-blue-100 bg-[var(--rf-brand-muted)] flex items-center justify-center">
+                <div className="h-5 w-5 rounded-full border-[2.5px] border-blue-200 border-t-[var(--rf-brand)] animate-spin" />
+              </div>
+              <div className="space-y-2">
+                <div className="text-lg font-bold tracking-tight text-[var(--rf-text)]">Reviewing discovery</div>
+                <div className="text-sm leading-relaxed text-[var(--rf-text-secondary)]">
+                  {reviewMessage ?? 'Checking the answers from this round and deciding whether we can generate now or need another discovery pass.'}
+                </div>
+                <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                  This can take a moment in deep mode because coverage is being evaluated before the next step.
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {contextMeta && isContextModalOpen && (
         <ContextDetailsModal contextMeta={contextMeta} onClose={() => setIsContextModalOpen(false)} />
