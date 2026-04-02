@@ -59,50 +59,37 @@ export function resolveGeneratorConfig(
     ...DEFAULT_CONFIG.generatorConfig,
     ...(config.generatorConfig || {}),
   };
-  const effectivePolicy = resolveAiExecutionPolicy(config, projectKey);
-  const effectiveReasoningMode = reasoningMode ?? effectivePolicy.defaultReasoningMode;
   const projectPolicy = getProjectAiPolicy(config, projectKey);
 
-  const fastProfileProvider =
+  // Fast vs deep now controls workflow depth, not model routing. The selected
+  // pipeline provider/model must stay consistent across the full LLM workflow.
+  const pipelineProvider =
     projectPolicy?.fastProfileProvider ??
-    baseConfig.fastProfileProvider ??
-    baseConfig.provider;
-  const fastProfileModel =
-    projectPolicy?.fastProfileModel ??
-    baseConfig.fastProfileModel ??
-    baseConfig.clarifyModel;
-  const deepProfileProvider =
     projectPolicy?.deepProfileProvider ??
+    baseConfig.fastProfileProvider ??
     baseConfig.deepProfileProvider ??
     baseConfig.provider;
-  const deepProfileModel =
+  const pipelineModel =
+    projectPolicy?.fastProfileModel ??
     projectPolicy?.deepProfileModel ??
+    baseConfig.fastProfileModel ??
     baseConfig.deepProfileModel ??
+    baseConfig.clarifyModel ??
     baseConfig.arModel;
-  const resolvedConfig: GeneratorConfig = {
-    ...baseConfig,
-    profileMode: 'simplified',
-    fastProfileProvider,
-    fastProfileModel,
-    deepProfileProvider,
-    deepProfileModel,
-  };
-
-  const selectedProvider =
-    effectiveReasoningMode === 'deep' ? deepProfileProvider : fastProfileProvider;
-  const selectedModel =
-    effectiveReasoningMode === 'deep' ? deepProfileModel : fastProfileModel;
 
   return {
-    ...resolvedConfig,
-    provider: selectedProvider,
-    arModel: selectedModel,
-    clarifyModel: selectedModel,
-    refineModel: selectedModel,
-    // evaluateModel and themeModel are used for classification/lightweight tasks
-    // (planner, rerank, theme extraction) — always keep them on the fast profile
-    // so they don't inherit a heavy thinking model in deep mode.
-    evaluateModel: fastProfileModel,
-    themeModel: fastProfileModel,
+    ...baseConfig,
+    profileMode: 'simplified',
+    provider: pipelineProvider,
+    fastProfileProvider: pipelineProvider,
+    deepProfileProvider: pipelineProvider,
+    fastProfileModel: pipelineModel,
+    deepProfileModel: pipelineModel,
+    decompositionModel: pipelineModel,
+    arModel: pipelineModel,
+    clarifyModel: pipelineModel,
+    refineModel: pipelineModel,
+    evaluateModel: pipelineModel,
+    themeModel: pipelineModel,
   };
 }

@@ -454,6 +454,7 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
     answers: payload.answers as ClarifyAnswer[],
     config,
     reasoningMode: payload.reasoningMode,
+    outputMode: payload.outputMode,
   });
   if (payload?.sessionId) {
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';

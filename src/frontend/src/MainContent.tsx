@@ -383,7 +383,6 @@ interface MainContentProps {
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   fastProfileModel?: string;
-  deepProfileModel?: string;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
   loadingTitle?: string;
 }
@@ -466,13 +465,10 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 function calculateEstimatedCost(
   input: number,
   output: number,
-  fastModel: string,
-  deepModel: string,
+  pipelineModel: string,
 ): number {
-  const fastPrice = MODEL_PRICING[fastModel] ?? { input: 0.80, output: 4.00 };
-  const deepPrice = MODEL_PRICING[deepModel] ?? { input: 15.00, output: 75.00 };
-  // Input tokens come mostly from fast profile (clarify/preflight); output from deep profile (generation)
-  return (input / 1_000_000) * fastPrice.input + (output / 1_000_000) * deepPrice.output;
+  const price = MODEL_PRICING[pipelineModel] ?? { input: 0.80, output: 4.00 };
+  return (input / 1_000_000) * price.input + (output / 1_000_000) * price.output;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -480,8 +476,7 @@ export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  fastProfileModel = 'claude-haiku-4-5-20251001',
-  deepProfileModel = 'claude-opus-4-6',
+  fastProfileModel = 'claude-sonnet-4-6',
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1141,7 +1136,7 @@ export function MainContent({
             >
               <Coins className="w-4 h-4 text-[var(--rf-text-tertiary)]" />
               {workflowTokenUsage?.total
-                ? `~$${calculateEstimatedCost(workflowTokenUsage.input, workflowTokenUsage.output, fastProfileModel, deepProfileModel).toFixed(3)}`
+                ? `~$${calculateEstimatedCost(workflowTokenUsage.input, workflowTokenUsage.output, fastProfileModel).toFixed(3)}`
                 : 'Tokens'}
             </motion.button>
             <AnimatePresence>
@@ -1171,13 +1166,13 @@ export function MainContent({
                       <div className="flex items-center justify-between pt-1.5 border-t border-[var(--rf-border-subtle)]">
                         <span className="text-xs font-semibold text-[var(--rf-brand)]">Est. cost</span>
                         <span className="text-sm font-black text-[var(--rf-brand)]">
-                          ~${calculateEstimatedCost(workflowTokenUsage.input, workflowTokenUsage.output, fastProfileModel, deepProfileModel).toFixed(4)}
+                          ~${calculateEstimatedCost(workflowTokenUsage.input, workflowTokenUsage.output, fastProfileModel).toFixed(4)}
                         </span>
                       </div>
                     ) : null}
                   </div>
                   <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-[11px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                    Includes clarify, generation, and all refinements. Cost is an estimate based on your configured model profiles.
+                    Includes clarify, generation, and all refinements. Cost is an estimate based on your configured pipeline model.
                   </div>
                   {lastAiTokenUsage && (
                     <div className="mt-2 text-[11px] font-medium text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] rounded-lg p-2 border border-[var(--rf-border-subtle)]">

@@ -584,44 +584,54 @@ function resolveClarifyQuestionPlan(input: {
   attachmentText: string;
   wiContextText: string;
   similarStoriesText: string;
+  config: TenantConfig;
+  reasoningMode: 'fast' | 'deep';
   outputMode: 'single' | 'auto' | 'full_breakdown';
 }): ClarifyQuestionPlan {
+  const simpleMaxQuestions = Math.max(3, Math.min(input.config.aiExecutionPolicy.simpleAskMaxQuestions ?? 4, 6));
+  const deepModeRoundTarget = Math.max(4, Math.min(input.config.aiExecutionPolicy.deepModeRoundTarget ?? 6, 12));
+  const enterpriseMaxQuestions = Math.max(
+    deepModeRoundTarget,
+    Math.min(input.config.aiExecutionPolicy.enterpriseMaxQuestionsPerRound ?? 10, 16),
+  );
+
   if (input.outputMode === 'single') {
-    return { min: 3, max: 5, target: 4, clarity: 'clear' };
+    return {
+      min: 3,
+      max: simpleMaxQuestions,
+      target: Math.min(simpleMaxQuestions, 4),
+      clarity: 'clear',
+    };
   }
 
-  const words = input.requirement.trim().split(/\s+/).filter(Boolean).length;
-  const paragraphs = input.requirement.split(/\n{2,}/).filter((part) => part.trim().length > 0).length;
-  const bullets = (input.requirement.match(/^[\s*-]+/gm) ?? []).length;
-  const multiClauseSignals =
-    (input.requirement.match(/\b(and|or|while|except|unless|approval|notification|integration|exception|rule|workflow)\b/gi) ?? []).length;
-  const contextSignals = Number(Boolean(input.attachmentText.trim())) + Number(Boolean(input.wiContextText.trim())) + Number(Boolean(input.similarStoriesText.trim()));
-  const complexityScore = Number(words > 90) + Number(paragraphs > 1) + Number(bullets > 2) + Number(multiClauseSignals >= 4) + Number(contextSignals >= 2);
+  if (input.reasoningMode === 'deep') {
+    if (input.outputMode === 'full_breakdown') {
+      const min = Math.max(8, deepModeRoundTarget);
+      const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 9));
+      return { min, max: Math.max(target, enterpriseMaxQuestions), target, clarity: 'vague' };
+    }
 
-  if (complexityScore >= 3 || input.outputMode === 'full_breakdown') {
-    return { min: 8, max: 12, target: 10, clarity: 'vague' };
+    const min = deepModeRoundTarget;
+    const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 8));
+    return { min, max: Math.max(target, enterpriseMaxQuestions), target, clarity: 'medium' };
   }
-  if (complexityScore >= 1 || words > 35) {
-    return { min: 5, max: 8, target: 6, clarity: 'medium' };
+
+  if (input.outputMode === 'full_breakdown') {
+    const min = Math.max(6, simpleMaxQuestions + 2);
+    const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 8));
+    return { min, max: Math.max(target, enterpriseMaxQuestions), target, clarity: 'vague' };
   }
-  return { min: 3, max: 5, target: 4, clarity: 'clear' };
+
+  const min = simpleMaxQuestions;
+  const target = Math.min(enterpriseMaxQuestions, Math.max(min + 2, 6));
+  const max = Math.max(target, Math.min(enterpriseMaxQuestions, 8));
+  return { min, max, target, clarity: 'medium' };
 }
 
-function inferScopeMode(requirement: string, answers: ClarifyAnswer[], outputMode: 'single' | 'auto' | 'full_breakdown'): ScopeMode {
+function resolveScopeMode(outputMode: 'single' | 'auto' | 'full_breakdown'): ScopeMode {
   if (outputMode === 'single') return 'atomic';
-
-  const words = requirement.trim().split(/\s+/).filter(Boolean).length;
-  const answerCount = answers.length;
-  const complexitySignals =
-    Number(words > 140) +
-    Number(answerCount >= 6) +
-    Number((requirement.match(/\b(and|across|multiple|roles|workflow|approval|notification|exception|integration)\b/gi) ?? []).length >= 4);
-
-  if (outputMode === 'full_breakdown' && complexitySignals >= 2) return 'initiative';
-  if (complexitySignals >= 3) return 'initiative';
-  if (complexitySignals >= 2) return 'standard';
-  if (complexitySignals >= 1) return 'focused';
-  return 'atomic';
+  if (outputMode === 'full_breakdown') return 'initiative';
+  return 'standard';
 }
 
 const DISCOVERY_DIMENSIONS: Array<{ key: DiscoveryCoverageDimension['key']; label: string }> = [
@@ -711,6 +721,17 @@ function getCoverageThreshold(scopeMode: ScopeMode): number {
       return 75;
     default:
       return 65;
+  }
+}
+
+function getFollowUpQuestionLimit(scopeMode: ScopeMode): number {
+  switch (scopeMode) {
+    case 'initiative':
+      return 7;
+    case 'standard':
+      return 6;
+    default:
+      return 5;
   }
 }
 
@@ -815,7 +836,7 @@ export async function generateFeatures(opts: {
           outputMode: resolved.outputMode,
         }),
         userMessage,
-        maxTokens: Math.min(config.generatorConfig.maxTokens, resolved.reasoningMode === 'deep' ? 5000 : 3800),
+        maxTokens: Math.min(config.generatorConfig.maxTokens, resolved.reasoningMode === 'deep' ? 6200 : 4600),
         timeoutMs: 120000,
         geminiThinkingBudget: resolved.reasoningMode === 'deep' ? 16000 : 8000,
         ...providerOpts,
@@ -889,6 +910,8 @@ export async function generateClarifyingQuestions(opts: {
     attachmentText,
     wiContextText,
     similarStoriesText,
+    config,
+    reasoningMode: resolved.reasoningMode,
     outputMode: resolved.outputMode,
   });
   const desiredQuestionCount = Math.min(questionPlan.max, Math.max(questionPlan.min, questionPlan.target));
@@ -896,7 +919,7 @@ export async function generateClarifyingQuestions(opts: {
 
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
-    `DISCOVERY TARGET: produce about ${desiredQuestionCount} clarifying questions.`,
+    `DISCOVERY RANGE: produce between ${questionPlan.min} and ${questionPlan.max} clarifying questions. Ideal target: ${desiredQuestionCount}. If ambiguity is still material, lean toward the upper half of the range. If the requirement and context are unusually explicit, you may go lower, but do not exceed the maximum.`,
   ];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 3000)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 8000)}`);
@@ -981,12 +1004,13 @@ export async function evaluateSufficiency(opts: {
   answers: ClarifyAnswer[];
   config: TenantConfig;
   reasoningMode?: 'fast' | 'deep';
+  outputMode?: 'single' | 'auto' | 'full_breakdown';
 }): Promise<DiscoveryCoverageResult> {
   const resolved = buildPlannerContext({
     reasoningMode: opts.reasoningMode ?? opts.config.aiExecutionPolicy.defaultReasoningMode,
-    outputMode: opts.config.aiExecutionPolicy.defaultOutputMode,
+    outputMode: opts.outputMode ?? opts.config.aiExecutionPolicy.defaultOutputMode,
   });
-  const scopeMode = inferScopeMode(opts.requirement, opts.answers, resolved.outputMode);
+  const scopeMode = resolveScopeMode(resolved.outputMode);
   const qaText = opts.answers
     .map(a => `Q: ${a.question}\nA: ${a.answer}`)
     .join('\n\n');
@@ -1011,7 +1035,7 @@ export async function evaluateSufficiency(opts: {
     ...getProviderOpts(opts.config),
   });
 
-  const questions = dedupeQuestions(parseQuestionCandidates(result.data)).slice(0, 5);
+  const questions = dedupeQuestions(parseQuestionCandidates(result.data)).slice(0, getFollowUpQuestionLimit(scopeMode));
   const coverage = normaliseCoverageResult(result.data, questions, scopeMode);
 
   return {

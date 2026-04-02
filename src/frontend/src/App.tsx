@@ -159,8 +159,7 @@ export default function App() {
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
   const [discoveryCoverage, setDiscoveryCoverage] = useState<DiscoveryCoverageSummary | null>(null);
   const [workflowTokenUsage, setWorkflowTokenUsage] = useState<WorkflowTokenUsage | null>(null);
-  const [fastProfileModel, setFastProfileModel] = useState<string>('claude-haiku-4-5-20251001');
-  const [deepProfileModel, setDeepProfileModel] = useState<string>('claude-opus-4-6');
+  const [fastProfileModel, setFastProfileModel] = useState<string>('claude-sonnet-4-6');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
     try { return crypto.randomUUID(); } 
@@ -437,7 +436,6 @@ export default function App() {
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
       if (res.effectiveGeneratorConfig?.fastProfileModel) setFastProfileModel(res.effectiveGeneratorConfig.fastProfileModel);
-      if (res.effectiveGeneratorConfig?.deepProfileModel) setDeepProfileModel(res.effectiveGeneratorConfig.deepProfileModel);
       const nextPolicy = (res.effectiveAiPolicy as AiExecutionPolicy | undefined) ?? DEFAULT_CONFIG.aiExecutionPolicy;
       setEffectiveAiPolicy(nextPolicy);
       setReasoningMode(nextPolicy.defaultReasoningMode);
@@ -660,6 +658,7 @@ export default function App() {
           nextAnswers,
           projectKey,
           reasoningMode,
+          outputMode,
         ) as DiscoveryCoverageSummary;
         coverageResult = evaluation;
         setDiscoveryCoverage(evaluation);
@@ -924,7 +923,6 @@ export default function App() {
               projectKey={projectKey}
               workflowTokenUsage={workflowTokenUsage}
               fastProfileModel={fastProfileModel}
-              deepProfileModel={deepProfileModel}
               onWorkflowTokenUsage={(usageDelta) => {
                 setWorkflowTokenUsage(prev => addTokenUsage(prev, usageDelta));
               }}

@@ -39,8 +39,15 @@ export const api = {
     invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, reasoningMode, outputMode }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
-  evaluateSufficiency: (sessionId: string, requirement: string, answers: unknown[], projectKey?: string, reasoningMode?: ReasoningMode) =>
-    invoke('evaluateSufficiency', { sessionId, requirement, answers, projectKey, reasoningMode }),
+  evaluateSufficiency: (
+    sessionId: string,
+    requirement: string,
+    answers: unknown[],
+    projectKey?: string,
+    reasoningMode?: ReasoningMode,
+    outputMode?: OutputMode,
+  ) =>
+    invoke('evaluateSufficiency', { sessionId, requirement, answers, projectKey, reasoningMode, outputMode }),
   saveDiscoveryRound: (payload: {
     sessionId: string;
     roundNumber: number;

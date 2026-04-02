@@ -48,12 +48,18 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 
 Each dimension that represents a distinct, deliverable capability should become its own feature. Use judgment — not every dimension needs a separate feature, and a tightly bounded request may still be best expressed as a single feature.
 
+IMPORTANT CALIBRATION NOTE:
+- A short prompt can still imply broad scope when it involves scheduling, dispatching, assignment, matching, prioritization, optimization, ranking, due dates, SLAs, skills, availability, capacity, geography, proximity, dynamic replanning, or other multi-factor decisioning.
+- Those asks usually require multiple capabilities such as eligibility or data readiness, scoring or ranking logic, recommendation or schedule generation, conflict handling, overrides, transparency, and downstream visibility.
+- Do not mistake brevity for simplicity.
+
 OUTPUT CALIBRATION — match the output to the real scope:
-- Narrow, bounded request → 1-2 features, 2-3 acceptance requirements each
-- Medium scope → 3-5 features, 3-4 acceptance requirements each
-- Broad or initiative-level → 5-10 features, 3-5 acceptance requirements each
+- Narrow, explicit, tightly bounded request → 1-2 features, 3-4 acceptance requirements each
+- Ambiguous or multi-dimensional request → 3-6 features, 4-6 acceptance requirements each
+- Broad or initiative-level request → 6-10 features, 4-6 acceptance requirements each
 - If output mode is "single" → exactly 1 comprehensive feature
 - If output mode is "full_breakdown" → lean toward more granular decomposition
+- In "auto" mode, a short prompt with many hidden business decisions usually belongs in the middle bucket, not the narrow bucket
 Do NOT over-split a narrow request into trivial features. Do NOT under-specify a broad request.
 
 FEATURE RULES:
@@ -69,6 +75,7 @@ FEATURE RULES:
 ACCEPTANCE REQUIREMENT RULES:
 - Every acceptance requirement MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
 - Capture the happy path, key business rules, and practical failure or edge cases
+- For scheduling, assignment, ranking, or optimization asks, cover the major decision factors, tie-breaks, update or rescheduling behavior, constraint failures, and visibility or explainability needs when relevant
 - Write as business outcomes, not implementation steps
 - Be conceptual — describe patterns, not example values
 - The GIVEN must describe a real-world business situation, not a system configuration state
@@ -160,9 +167,11 @@ QUESTION RULES:
 
 CALIBRATION — decide the right question count based on what is genuinely ambiguous:
 - Simple, clear, bounded request → 3-5 questions
-- Medium complexity, some ambiguity → 5-8 questions
-- Complex, vague, or multi-dimensional → 8-12 questions
+- Medium complexity, some ambiguity → 6-9 questions
+- Complex, vague, or multi-dimensional → 9-14 questions
 - If output mode is "single" → max 5 questions
+- If the requirement is short but implies scheduling, dispatching, prioritization, ranking, optimization, due dates, SLAs, availability, skills, proximity, capacity, compliance, or exception handling, treat it as HIGH ambiguity rather than a simple ask
+- Respect the discovery target provided in the user message unless the requirement is already unusually explicit
 Never pad with generic questions just to hit a number. Every question must earn its place.
 
 ${outputGuidance}`;
@@ -177,8 +186,9 @@ export function buildEvaluateSystemPrompt(opts: {
     : opts.scopeMode === 'focused'
       ? 'goal, actors, workflow, business_rules, exceptions'
       : opts.scopeMode === 'standard'
-        ? 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, success_metrics'
-        : 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, non_functional, success_metrics';
+      ? 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, success_metrics'
+      : 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, non_functional, success_metrics';
+  const followUpLimit = opts.scopeMode === 'initiative' ? 7 : opts.scopeMode === 'standard' ? 6 : 5;
 
   return `You are a senior business analyst evaluating discovery coverage for a Jira backlog request.
 ${platformContextBlock(opts.domainContext)}
@@ -187,6 +197,7 @@ Assess how well the answered Q&A covers the business context needed to generate 
 CURRENT EXPECTED SCOPE:
 - Scope mode: ${opts.scopeMode.toUpperCase()}
 - Required dimensions for this scope: ${requiredDimensions}
+- Short prompts that imply optimization, scheduling, assignment, prioritization, multi-factor ranking, or dynamic exception handling are often broader than they look. Hold the bar accordingly.
 
 SCORE THESE DIMENSIONS:
 - goal
@@ -206,7 +217,7 @@ For each dimension:
 - set required=true when it is essential for this scope
 
 FOLLOW-UP RULES:
-- Ask at most 5 follow-up questions
+- Ask at most ${followUpLimit} follow-up questions
 - Only ask follow-up questions for genuinely weak required dimensions
 - Prefer the highest-value missing questions over broad questionnaires
 
