@@ -6,6 +6,7 @@
  */
 
 import { GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
+import { fetchReferenceExamples } from '../core/reference-examples';
 import { generateFeatures, generateSessionTitle, normalizeConversationTitle } from '../core/story-generator';
 import { findSimilarStoriesWithUsage, formatSimilarStoriesText } from '../core/similar-stories';
 import { retrieveWiContext } from '../core/wi-ingestion';
@@ -129,13 +130,13 @@ export async function handler(event: { body: GenerationEvent }) {
     const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
     const outputMode = event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode;
     const retrievalBudget = reasoningMode === 'deep'
-      ? { wiTopK: 6, wiMaxChars: 18000, contextTimeoutMs: 40000 }
-      : { wiTopK: 4, wiMaxChars: 9000, contextTimeoutMs: 22000 };
+      ? { wiTopK: 24, wiMaxChars: 70000, contextTimeoutMs: 45000 }
+      : { wiTopK: 8, wiMaxChars: 25000, contextTimeoutMs: 25000 };
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'workspace';
 
     await sendProgress(sessionId, runId, `Loading context for ${projectLabel}…`);
 
-    const [wiContext, similarStoriesResult] = await Promise.all([
+    const [wiContext, similarStoriesResult, referenceExamplesResult] = await Promise.all([
       config.wiConfig.enabled
         ? withTimeoutFallback(
             retrieveWiContext(
@@ -143,6 +144,21 @@ export async function handler(event: { body: GenerationEvent }) {
               Math.min(config.wiConfig.topKChunks, retrievalBudget.wiTopK),
               Math.min(config.wiConfig.maxChars, retrievalBudget.wiMaxChars),
               projectKey,
+              {
+                enabled: Boolean(config.similarityConfig.useLlmRerank),
+                model: config.generatorConfig.themeModel,
+                provider: config.generatorConfig.provider,
+                geminiApiKey: config.generatorConfig.geminiApiKey,
+                geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+                openaiApiKey: config.generatorConfig.openaiApiKey,
+                openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+                azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
+                azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
+                azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
+                azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
+                shortlistSize: reasoningMode === 'deep' ? 24 : 14,
+                timeoutMs: reasoningMode === 'deep' ? 18000 : 12000,
+              },
             ),
             retrievalBudget.contextTimeoutMs,
             { text: '', docs: [] },
@@ -155,12 +171,25 @@ export async function handler(event: { body: GenerationEvent }) {
         { stories: [], tokenUsage: { input: 0, output: 0, total: 0, byStage: {} } },
         'similar stories',
       ),
+      withTimeoutFallback(
+        fetchReferenceExamples(config, projectKey, {
+          perSourceLimit: reasoningMode === 'deep' ? 6 : 3,
+          overallLimit: reasoningMode === 'deep' ? 10 : 5,
+        }),
+        retrievalBudget.contextTimeoutMs,
+        { text: '', count: 0, examples: [] },
+        'reference examples',
+      ),
     ]);
 
     const similarStories = similarStoriesResult.stories;
+    const referenceContextText = [referenceExamplesResult.text, formatSimilarStoriesText(similarStories, 12)]
+      .filter(Boolean)
+      .join('\n\n---\n\n');
     const contextParts: string[] = [];
     if (similarStories.length > 0) contextParts.push(`${similarStories.length} related stor${similarStories.length !== 1 ? 'ies' : 'y'}`);
     if (wiContext.docs.length > 0) contextParts.push(`${wiContext.docs.length} work instruction${wiContext.docs.length !== 1 ? 's' : ''}`);
+    if (referenceExamplesResult.count > 0) contextParts.push(`${referenceExamplesResult.count} reference example${referenceExamplesResult.count !== 1 ? 's' : ''}`);
     const contextSummary = contextParts.length > 0 ? contextParts.join(', ') : 'no prior context';
     await sendProgress(sessionId, runId, `Context loaded (${contextSummary}).`);
 
@@ -170,7 +199,7 @@ export async function handler(event: { body: GenerationEvent }) {
       requirement,
       clarifyAnswers: maskedAnswers.answers,
       attachmentText: maskedAttachment.text,
-      similarStoriesText: formatSimilarStoriesText(similarStories),
+      similarStoriesText: referenceContextText,
       wiContextText: wiContext.text,
       config,
       reasoningMode,

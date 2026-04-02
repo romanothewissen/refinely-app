@@ -1,12 +1,13 @@
 /**
- * Work instruction ingestion: PDF → chunks → BM25 retrieval.
+ * Work instruction ingestion: PDF → chunks → hybrid retrieval.
  *
  * Uses pdf-parse (npm) for text extraction.
- * Uses BM25 scoring for retrieval (no embeddings needed for small corpora).
+ * Uses BM25 scoring with optional LLM reranking for better semantic selection.
  * Stores in Forge Object Store.
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { callLlmJsonWithUsage } from './llm';
 import { WiChunk, WiDoc } from '../types';
 import { objectRead, objectWrite, entityGet, entitySet, KEYS } from '../services/cache';
 
@@ -18,6 +19,22 @@ interface WiCache {
 interface WiContextResult {
   text: string;
   docs: WiDoc[];
+}
+
+interface WiRerankOptions {
+  enabled?: boolean;
+  model: string;
+  provider?: 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
+  geminiApiKey?: string;
+  geminiBaseUrl?: string;
+  openaiApiKey?: string;
+  openaiBaseUrl?: string;
+  azureOpenaiApiKey?: string;
+  azureOpenaiEndpoint?: string;
+  azureOpenaiDeployment?: string;
+  azureOpenaiApiVersion?: string;
+  shortlistSize?: number;
+  timeoutMs?: number;
 }
 
 // ─── Ingest ───────────────────────────────────────────────────────────────────
@@ -74,6 +91,7 @@ export async function retrieveWiContext(
   topK = 8,
   maxChars = 100000,
   projectKey: string = '*',
+  rerank?: WiRerankOptions,
 ): Promise<WiContextResult> {
   const cache = await loadCache();
   if (!cache.chunks.length) return { text: '', docs: [] };
@@ -87,14 +105,79 @@ export async function retrieveWiContext(
   if (!scopedChunks.length) return { text: '', docs: [] };
 
   const scored = bm25Score(query, scopedChunks);
-  const top = selectDiverseTopChunks(scored, topK, 2);
-  const parts = top.map(c => c.text);
+  const shortlist = selectDiverseTopChunks(
+    scored,
+    Math.max(topK, Math.min(scored.length, rerank?.shortlistSize ?? Math.max(topK * 3, 12))),
+    4,
+  );
+  const top = rerank?.enabled && shortlist.length > topK
+    ? await rerankWiChunks(query, shortlist, topK, rerank)
+    : selectDiverseTopChunks(shortlist, topK, 3);
+  const parts = top.map(c => formatChunkForContext(c));
   const referencedDocIds = new Set(top.map(c => c.docId));
   const docs = cache.docs.filter(doc => referencedDocIds.has(doc.docId) && docMatchesProject(doc, projectKey));
 
   let result = parts.join('\n\n---\n\n');
   if (result.length > maxChars) result = result.slice(0, maxChars);
   return { text: result, docs };
+}
+
+async function rerankWiChunks(
+  query: string,
+  chunks: WiChunk[],
+  topK: number,
+  options: WiRerankOptions,
+): Promise<WiChunk[]> {
+  try {
+    const numberedChunks = chunks.map((chunk, index) => ([
+      `Chunk ${index + 1}`,
+      `Document: ${chunk.filename} (${chunk.revision})`,
+      `Excerpt: ${chunk.text.slice(0, 650)}`,
+    ].join('\n')));
+
+    const ranked = await callLlmJsonWithUsage<number[]>({
+      model: options.model,
+      systemPrompt: `Rank work-instruction excerpts by usefulness for understanding a business requirement.
+
+Prioritize excerpts that best clarify:
+- real process steps and states
+- business rules and decision criteria
+- roles, responsibilities, and approvals
+- exceptions, constraints, thresholds, or timing conditions
+
+Return only a JSON array of 1-based chunk numbers in best-first order.`,
+      userMessage: `Requirement:\n${query.slice(0, 1200)}\n\nWork instruction excerpts:\n\n${numberedChunks.join('\n\n---\n\n')}`,
+      maxTokens: 256,
+      timeoutMs: options.timeoutMs ?? 12000,
+      geminiThinkingBudget: 0,
+      provider: options.provider,
+      geminiApiKey: options.geminiApiKey,
+      geminiBaseUrl: options.geminiBaseUrl,
+      openaiApiKey: options.openaiApiKey,
+      openaiBaseUrl: options.openaiBaseUrl,
+      azureOpenaiApiKey: options.azureOpenaiApiKey,
+      azureOpenaiEndpoint: options.azureOpenaiEndpoint,
+      azureOpenaiDeployment: options.azureOpenaiDeployment,
+      azureOpenaiApiVersion: options.azureOpenaiApiVersion,
+    });
+
+    if (!Array.isArray(ranked.data) || !ranked.data.length) {
+      return selectDiverseTopChunks(chunks, topK, 3);
+    }
+
+    const selected = ranked.data
+      .map(index => chunks[index - 1])
+      .filter((chunk): chunk is WiChunk => !!chunk);
+
+    return selectDiverseTopChunks(selected, topK, 3);
+  } catch {
+    return selectDiverseTopChunks(chunks, topK, 3);
+  }
+}
+
+function formatChunkForContext(chunk: WiChunk): string {
+  const header = `[${chunk.filename} rev ${chunk.revision}]`;
+  return `${header}\n${chunk.text}`;
 }
 
 function selectDiverseTopChunks(chunks: WiChunk[], topK: number, maxPerDoc: number): WiChunk[] {
@@ -136,7 +219,7 @@ export async function removeDoc(docId: string): Promise<void> {
 
 // ─── Text chunking ────────────────────────────────────────────────────────────
 
-function chunkText(text: string, maxChars = 800, minChars = 200): string[] {
+function chunkText(text: string, maxChars = 1200, minChars = 400): string[] {
   const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
   const chunks: string[] = [];
   let current = '';

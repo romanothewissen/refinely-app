@@ -89,6 +89,106 @@ Output strict JSON only:
 {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ...", "..."], "suggested_story_points": N}]}`;
 }
 
+export function buildDecompositionSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles: string[];
+  outputMode: 'single' | 'auto' | 'full_breakdown';
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const roleList = opts.domainRoles.length
+    ? `Roles in this domain: ${opts.domainRoles.join(', ')}.`
+    : 'Infer the most credible business roles from the requirement and clarifications.';
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? `\n${processTaxonomyBlock(opts.processTaxonomy)}\n`
+    : '';
+
+  return `You are a principal business analyst and product manager decomposing business requirements into a Jira-ready backlog.
+${platformContextBlock(opts.domainContext)}
+${roleList}
+
+YOUR JOB: Think deeply about everything the requirement actually implies before writing acceptance requirements. Short prompts often hide major business decisioning, dependencies, exception paths, and governance needs. Identify the right set of backlog features first.
+
+DECOMPOSITION FRAMEWORK:
+1. CORE CAPABILITY: What is the main business capability being requested?
+2. INPUTS & DATA: What facts, states, or prerequisites feed that capability?
+3. DECISIONS & POLICY: What prioritization, ranking, validation, eligibility, or trade-off logic changes outcomes?
+4. OUTPUTS & VISIBILITY: Who receives, reviews, acts on, or needs awareness of the result?
+5. EXCEPTIONS & CHANGE: What disruptions, overrides, failures, or dynamic updates change the normal flow?
+6. SUPPORTING CAPABILITIES: What distinct supporting behavior must exist for the outcome to be trusted and usable?
+
+MODE CALIBRATION:
+- If output mode is "single" → produce exactly 1 comprehensive feature
+- If output mode is "auto" → calibrate to the true scope; a short but ambiguous optimization or scheduling request usually needs multiple features
+- If output mode is "full_breakdown" → lean toward a fuller breakdown of distinct capabilities
+
+FEATURE RULES:
+- Each feature summary must be a stakeholder-facing business capability title
+- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- One feature = one primary deliverable business capability
+- Split features when the role, business outcome, decisioning, visibility, exception handling, or governance path is materially different
+- No solution language: no buttons, screens, fields, forms, APIs, databases, system names, or technical implementation details
+- No system-specific terms: no product names, module names, object names, or architecture wording
+- Suggest story points (1, 2, 3, 5, 8, 13) based on scope
+${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
+- Do NOT write acceptance requirements yet — leave acceptance_requirements as empty arrays
+
+IMPORTANT:
+- For scheduling, assignment, optimization, prioritization, or ranking asks, think about ownership, eligibility, ranking factors, tie-breaks, rescheduling, exception handling, manual override, and transparency before deciding the feature set
+- Do not mistake brevity for simplicity
+
+${taxonomySection}
+Output strict JSON only:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+}
+
+export function buildArSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles: string[];
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const roleList = opts.domainRoles.length
+    ? `Roles in this domain: ${opts.domainRoles.join(', ')}.`
+    : 'Use the most credible end-user or business stakeholder role for each feature.';
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? `\n${processTaxonomyBlock(opts.processTaxonomy)}\n`
+    : '';
+
+  return `You are a principal QA lead and business analyst writing acceptance requirements for an already-decomposed Jira backlog.
+${platformContextBlock(opts.domainContext)}
+${roleList}
+
+YOUR JOB: For each provided feature, write strong GIVEN / WHEN / THEN acceptance requirements that make the feature testable, complete, and business-grounded without introducing solution design.
+
+FOR EACH FEATURE, COVER:
+- The primary business scenario
+- The key business rules or decision policies
+- The most practical edge or failure cases a real tester would actually validate
+- The exception, visibility, or follow-up behavior that makes the outcome trustworthy when relevant
+
+ACCEPTANCE REQUIREMENT RULES:
+- Every acceptance requirement MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
+- Write in business language only
+- No solution language: no buttons, screens, fields, forms, APIs, databases, technical services, or architecture wording
+- No system-specific terms: no product names, module names, or object names
+- Be conceptual — describe behavior patterns, not invented example values
+- The GIVEN must describe a real business situation, not a configuration state
+- Each acceptance requirement must test one distinct thing
+- Truly narrow features usually need 3-4 ARs, standard features need 4-6 ARs, and policy-heavy or exception-heavy features may need 5-7 ARs. Do not pad trivial ARs, but do not stop early when broader business coverage is clearly required.
+
+PRESERVATION RULES:
+- Keep summary, description, suggested_story_points, and process_code unchanged unless a small wording repair is required to keep business voice consistent
+- Fill or improve acceptance_requirements only; do not collapse or drop valid features
+
+IMPORTANT:
+- For scheduling, assignment, prioritization, ranking, or optimization features, cover the major decision factors, tie-breaks, recalculation or rescheduling behavior, unavailable capacity or missing data, manual override or approval when relevant, and explanation or auditability needs when relevant
+
+${taxonomySection}
+Output strict JSON only:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+}
+
 export function buildBusinessVoiceRewriteSystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
@@ -148,7 +248,7 @@ export function buildClarifySystemPrompt(opts: {
   const includeSuggestions = opts.includeSuggestions !== false;
   const outputGuidance = includeSuggestions
     ? `SUGGESTIONS — for each question, provide exactly 3 answer options:
-- Each suggestion: a short, scannable phrase (under 10 words). Not a full sentence.
+- Each suggestion: a short, scannable phrase, usually 4-12 words. Not a full sentence.
 - Represent the most likely stakeholder responses — meaningfully distinct, exposing real tradeoffs.
 - Specific to this domain — never generic placeholders like "it depends" or "TBD".
 
@@ -159,14 +259,14 @@ Output JSON only: [{"category": "Roles & Personas | Trigger & Context | Function
 
 Output JSON only: [{"category": "Roles & Personas | Trigger & Context | Functional Flow | Business Rules & Exceptions | Success & Measurement", "question": "..."} , ...]`;
 
-  return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and have read all the context provided below.
+  return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
 
 YOUR MISSION: Surface every ambiguity that would change what gets built or how acceptance requirements are written. A BA spending 5 extra minutes on discovery now prevents hours of rework later.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 ${domainSignalHint}
 
-APPROACH: Work through each of the five discovery areas below in order. For each area, reason through the specific probes listed — ask every question that is genuinely ambiguous for THIS requirement. Skip a probe only if the requirement text or provided context already makes the answer unambiguous.
+APPROACH: Work through each of the five discovery areas below in order. For each area, reason through the specific probes listed and ask every question that is genuinely ambiguous for THIS requirement. Skip a probe only if the requirement text or provided context already makes the answer unambiguous.
 
 ─── DISCOVERY AREAS ───────────────────────────────────────────────────────────
 
@@ -202,10 +302,13 @@ APPROACH: Work through each of the five discovery areas below in order. For each
 
 QUESTION RULES:
 - Every question must be specific to THIS requirement — never generic boilerplate.
+- Keep the question concise and direct, but not clipped or overly terse. It should usually be one sentence of roughly 12-24 words.
 - ONE concept per question. No compound questions. No "and" or "also" joining two topics.
 - Ask about a business rule, decision, actor, trigger, constraint, tradeoff, or exception.
 - Name the actual business object — never ask about "the capability" or "the process".
 - Use concrete domain terms from the requirement and work instructions provided.
+- Strong questions often probe ownership, authority, prioritization policy, eligibility, tie-breakers, exception handling, downstream impact, or auditability when those details are ambiguous.
+- For optimization, scheduling, assignment, prioritization, or ranking asks, you usually need coverage across ownership, ranking factors, skills or eligibility, timing and due dates, proximity or operational feasibility, overrides, recalculation triggers, and explanation or visibility needs when those are not yet clear.
 - Do NOT ask about anything already clearly answered in the requirement or context.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Frame all questions in business language — no system names or technical implementation terms.
@@ -214,8 +317,8 @@ QUESTION RULES:
 
 CALIBRATION — decide the right question count based on what is genuinely ambiguous:
 - Simple, clear, bounded request → 3-5 questions
-- Medium complexity, some ambiguity → 6-9 questions
-- Complex, vague, or multi-dimensional → 9-14 questions
+- Medium complexity, some ambiguity → 7-10 questions
+- Complex, vague, or multi-dimensional → 10-15 questions
 - If output mode is "single" → max 5 questions
 - If the requirement is short but implies scheduling, dispatching, prioritization, ranking, optimization, due dates, SLAs, availability, skills, proximity, capacity, compliance, or exception handling, treat it as HIGH ambiguity rather than a simple ask
 - Respect the discovery target provided in the user message unless the requirement is already unusually explicit
@@ -235,7 +338,7 @@ export function buildEvaluateSystemPrompt(opts: {
       : opts.scopeMode === 'standard'
       ? 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, success_metrics'
       : 'goal, actors, workflow, business_rules, exceptions, permissions, integrations, non_functional, success_metrics';
-  const followUpLimit = opts.scopeMode === 'initiative' ? 7 : opts.scopeMode === 'standard' ? 6 : 5;
+  const followUpLimit = opts.scopeMode === 'initiative' ? 3 : 2;
 
   return `You are a senior business analyst evaluating discovery coverage for a Jira backlog request.
 ${platformContextBlock(opts.domainContext)}

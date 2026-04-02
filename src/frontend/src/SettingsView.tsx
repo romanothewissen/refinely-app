@@ -838,7 +838,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           maxDeepDiscoveryRounds: normalizePolicyNumber(maxDeepDiscoveryRounds, 1, 6),
           hideModelSelectionFromEndUsers: true,
         },
-        wiConfig: { enabled: wiEnabled, topKChunks: 8, maxChars: 100000 },
+        wiConfig: { enabled: wiEnabled, topKChunks: 30, maxChars: 100000 },
         compliance: {
           enabled: complianceEnabled,
           transparencyReportsEnabled: transparencyEnabled,

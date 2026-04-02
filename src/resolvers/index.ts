@@ -619,7 +619,21 @@ resolver.define('ask', async ({ payload, context }) => {
   );
 
   const [wiContext, similarItems] = await Promise.all([
-    config.wiConfig.enabled ? retrieveWiContext(maskedPrompt.text, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
+    config.wiConfig.enabled ? retrieveWiContext(maskedPrompt.text, 8, 25000, '*', {
+      enabled: Boolean(config.similarityConfig.useLlmRerank),
+      model: config.generatorConfig.themeModel,
+      provider: config.generatorConfig.provider,
+      geminiApiKey: config.generatorConfig.geminiApiKey,
+      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+      openaiApiKey: config.generatorConfig.openaiApiKey,
+      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+      azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
+      azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
+      azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
+      azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
+      shortlistSize: 12,
+      timeoutMs: 10000,
+    }) : Promise.resolve({ text: '', docs: [] }),
     findSimilarStories(maskedPrompt.text, config, payload.projectKey || '*'),
   ]);
 

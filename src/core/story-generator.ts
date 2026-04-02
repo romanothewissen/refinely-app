@@ -1,9 +1,9 @@
 /**
  * Story generation pipeline.
  *
- * Clarify and generation are now self-calibrating prompt flows. Deep mode can
- * still run multi-round discovery via sufficiency evaluation, but feature
- * generation itself happens in a single LLM pass.
+ * Discovery remains prompt-driven, but generation now uses a richer multi-pass
+ * flow: clarify, decompose the backlog shape, then write acceptance
+ * requirements against that decomposition.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -22,9 +22,10 @@ import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
 import { buildPlannerContext } from './planner';
 import {
-  buildGenerationSystemPrompt,
+  buildArSystemPrompt,
   buildBusinessVoiceRewriteSystemPrompt,
   buildClarifySystemPrompt,
+  buildDecompositionSystemPrompt,
   buildEvaluateSystemPrompt,
   buildRefineSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
@@ -509,6 +510,165 @@ function buildGenerationContextSections(opts: {
   return sections;
 }
 
+function extractRelevantRoles(
+  requirement: string,
+  clarifyAnswers: ClarifyAnswer[],
+  config: TenantConfig,
+): string[] {
+  const seen = new Set<string>();
+  const roles: string[] = [];
+
+  const add = (value: string) => {
+    const cleaned = value.trim().replace(/\s+/g, ' ').replace(/[.,;:]$/, '');
+    if (!cleaned || cleaned.length < 3 || cleaned.length > 80) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    roles.push(cleaned);
+  };
+
+  for (const answer of clarifyAnswers) {
+    const questionText = String(answer.question ?? '').toLowerCase();
+    if (!/(role|persona|who\b|owner|approv|review|stakeholder|user type|user role|responsible)/i.test(questionText)) continue;
+    const raw = String(answer.answer ?? '').trim();
+    if (!raw) continue;
+    raw
+      .split(/[,;]|\s+\band\b\s+/i)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach(add);
+  }
+
+  const explicitRolePattern = /\bas\s+an?\s+([A-Za-z][A-Za-z0-9 /-]{2,60}?)(?=\s*,|\s+(?:I|we|they|who|that|the)\b)/gi;
+  let explicitRoleMatch: RegExpExecArray | null;
+  while ((explicitRoleMatch = explicitRolePattern.exec(requirement)) !== null) {
+    add(explicitRoleMatch[1] ?? '');
+  }
+
+  for (const configuredRole of config.domainRoles ?? []) {
+    if (roles.length >= 8) break;
+    add(configuredRole);
+  }
+
+  return roles.slice(0, 8);
+}
+
+function buildRoleConstraintSection(roles: string[]): string {
+  if (!roles.length) return '';
+  const quotedRoles = roles.map((role) => `"${role}"`).join(', ');
+  if (roles.length === 1) {
+    return `ROLE CONSTRAINT: Every feature description must use exactly ${quotedRoles} as the role. Use it verbatim with no paraphrasing or abbreviation.`;
+  }
+  return `ROLE CONSTRAINT: Assign the most appropriate role to each feature from this exact list: ${quotedRoles}. Use these role names verbatim. Do not invent, paraphrase, merge, or generalize role names.`;
+}
+
+function buildOutputShapeGuidance(reasoningMode: 'fast' | 'deep', outputMode: 'single' | 'auto' | 'full_breakdown'): string {
+  if (outputMode === 'single') {
+    return 'OUTPUT SHAPE: exactly 1 comprehensive feature with rich acceptance coverage.';
+  }
+  if (outputMode === 'full_breakdown') {
+    return reasoningMode === 'deep'
+      ? 'OUTPUT SHAPE: prefer a fuller breakdown, typically 5-8 features when the capability spans multiple business concerns.'
+      : 'OUTPUT SHAPE: prefer a fuller breakdown, typically 4-6 features when the capability spans multiple business concerns.';
+  }
+  return reasoningMode === 'deep'
+    ? 'OUTPUT SHAPE: calibrate to the true scope. Ambiguous or policy-heavy asks usually need 3-6 features; clearly narrow asks can stay at 1-2.'
+    : 'OUTPUT SHAPE: calibrate to the true scope. Keep simple asks tight, but allow 2-4 features when multiple business concerns are implied.';
+}
+
+function buildDecompositionUserMessage(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  wiContextText: string;
+  similarStoriesText: string;
+  roles: string[];
+  reasoningMode: 'fast' | 'deep';
+  outputMode: 'single' | 'auto' | 'full_breakdown';
+}): string {
+  const parts: string[] = [];
+  const roleConstraint = buildRoleConstraintSection(opts.roles);
+  if (roleConstraint) parts.push(roleConstraint);
+  parts.push(buildOutputShapeGuidance(opts.reasoningMode, opts.outputMode));
+
+  if (opts.attachmentText) {
+    parts.push(`ATTACHMENT CONTEXT:\n${truncateContext(opts.attachmentText, opts.reasoningMode === 'deep' ? 5000 : 3200)}`);
+  }
+
+  if (opts.wiContextText) {
+    parts.push(
+      `DOMAIN CONTEXT FROM WORK INSTRUCTIONS — use this to understand process steps, business rules, conditions, roles, and domain terminology. Ground the decomposition in these real process details while keeping output in business language only:\n${truncateContext(opts.wiContextText, opts.reasoningMode === 'deep' ? 30000 : 12000)}`,
+    );
+  }
+
+  if (opts.similarStoriesText) {
+    parts.push(
+      `REFERENCE BACKLOG ITEMS — use these to calibrate scope, specificity, and decomposition depth. Match their business depth, not their system wording:\n${truncateContext(opts.similarStoriesText, opts.reasoningMode === 'deep' ? 14000 : 7000)}`,
+    );
+  }
+
+  if (opts.clarifyAnswers.length) {
+    const qaText = opts.clarifyAnswers
+      .map((answer) => `Q: ${answer.question}\nA: ${answer.answer}`)
+      .join('\n\n');
+    parts.push(`STAKEHOLDER CLARIFICATIONS:\n${qaText}`);
+  }
+
+  parts.push(`REQUIREMENT:\n${opts.requirement}`);
+  return parts.join('\n\n---\n\n');
+}
+
+function buildArUserMessage(opts: {
+  requirement: string;
+  features: RawFeature[];
+  wiContextText: string;
+  similarStoriesText: string;
+  roles: string[];
+  reasoningMode: 'fast' | 'deep';
+}): string {
+  const parts: string[] = [];
+  const roleConstraint = buildRoleConstraintSection(opts.roles);
+  if (roleConstraint) parts.push(roleConstraint);
+
+  if (opts.wiContextText) {
+    parts.push(
+      `DOMAIN CONTEXT FROM WORK INSTRUCTIONS — use this to write precise, process-grounded acceptance requirements. Reference real states, conditions, thresholds, and exception patterns when available, while staying in business language only:\n${truncateContext(opts.wiContextText, opts.reasoningMode === 'deep' ? 26000 : 10000)}`,
+    );
+  }
+
+  if (opts.similarStoriesText) {
+    parts.push(
+      `REFERENCE BACKLOG ITEMS — study the specificity, breadth, and business depth of these backlog items and their acceptance criteria. Match this standard of completeness:\n${truncateContext(opts.similarStoriesText, opts.reasoningMode === 'deep' ? 16000 : 8000)}`,
+    );
+  }
+
+  parts.push(`ORIGINAL REQUIREMENT:\n${opts.requirement}`);
+  parts.push(`FEATURES TO COMPLETE:\n${JSON.stringify({ features: opts.features.map((feature) => ({ ...feature, acceptance_requirements: [] })) }, null, 2)}`);
+  return parts.join('\n\n---\n\n');
+}
+
+function mergeFeaturePasses(baseFeatures: RawFeature[], arFeatures: RawFeature[]): RawFeature[] {
+  if (!baseFeatures.length) return arFeatures;
+  if (!arFeatures.length) return baseFeatures;
+  if (arFeatures.length > baseFeatures.length) return arFeatures;
+
+  return baseFeatures.map((feature, index) => {
+    const arFeature = arFeatures[index];
+    if (!arFeature) return feature;
+    const ars = getRawAcceptanceArray(arFeature);
+
+    return {
+      ...feature,
+      ...arFeature,
+      summary: arFeature.summary ?? feature.summary,
+      description: arFeature.description ?? feature.description,
+      suggested_story_points: arFeature.suggested_story_points ?? feature.suggested_story_points,
+      process_code: arFeature.process_code ?? feature.process_code,
+      acceptance_requirements: ars.length ? ars : getRawAcceptanceArray(feature),
+    };
+  });
+}
+
 function buildFallbackFeatureSummary(requirement: string): string {
   const cleaned = requirement
     .replace(/\s+/g, ' ')
@@ -589,43 +749,43 @@ function resolveClarifyQuestionPlan(input: {
   reasoningMode: 'fast' | 'deep';
   outputMode: 'single' | 'auto' | 'full_breakdown';
 }): ClarifyQuestionPlan {
-  const simpleMaxQuestions = Math.max(3, Math.min(input.config.aiExecutionPolicy.simpleAskMaxQuestions ?? 4, 6));
-  const deepModeRoundTarget = Math.max(4, Math.min(input.config.aiExecutionPolicy.deepModeRoundTarget ?? 6, 12));
+  const simpleMaxQuestions = Math.max(4, Math.min(input.config.aiExecutionPolicy.simpleAskMaxQuestions ?? 5, 7));
+  const deepModeRoundTarget = Math.max(8, Math.min(input.config.aiExecutionPolicy.deepModeRoundTarget ?? 11, 14));
   const enterpriseMaxQuestions = Math.max(
     deepModeRoundTarget,
-    Math.min(input.config.aiExecutionPolicy.enterpriseMaxQuestionsPerRound ?? 10, 16),
+    Math.min(input.config.aiExecutionPolicy.enterpriseMaxQuestionsPerRound ?? 15, 18),
   );
 
   if (input.outputMode === 'single') {
     return {
       min: 3,
-      max: simpleMaxQuestions,
-      target: Math.min(simpleMaxQuestions, 4),
+      max: Math.min(simpleMaxQuestions, 5),
+      target: Math.min(simpleMaxQuestions, 5),
       clarity: 'clear',
     };
   }
 
   if (input.reasoningMode === 'deep') {
     if (input.outputMode === 'full_breakdown') {
-      const min = Math.max(8, deepModeRoundTarget);
-      const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 9));
+      const min = Math.max(10, deepModeRoundTarget + 1);
+      const target = Math.min(enterpriseMaxQuestions, Math.max(min + 2, 13));
       return { min, max: Math.max(target, enterpriseMaxQuestions), target, clarity: 'vague' };
     }
 
     const min = deepModeRoundTarget;
-    const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 8));
+    const target = Math.min(enterpriseMaxQuestions, Math.max(min + 2, 12));
     return { min, max: Math.max(target, enterpriseMaxQuestions), target, clarity: 'medium' };
   }
 
   if (input.outputMode === 'full_breakdown') {
-    const min = Math.max(6, simpleMaxQuestions + 2);
-    const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 8));
+    const min = Math.max(7, simpleMaxQuestions + 2);
+    const target = Math.min(enterpriseMaxQuestions, Math.max(min + 1, 9));
     return { min, max: Math.max(target, enterpriseMaxQuestions), target, clarity: 'vague' };
   }
 
   const min = simpleMaxQuestions;
-  const target = Math.min(enterpriseMaxQuestions, Math.max(min + 2, 6));
-  const max = Math.max(target, Math.min(enterpriseMaxQuestions, 8));
+  const target = Math.min(enterpriseMaxQuestions, Math.max(min + 2, 7));
+  const max = Math.max(target, Math.min(enterpriseMaxQuestions, 9));
   return { min, max, target, clarity: 'medium' };
 }
 
@@ -728,11 +888,11 @@ function getCoverageThreshold(scopeMode: ScopeMode): number {
 function getFollowUpQuestionLimit(scopeMode: ScopeMode): number {
   switch (scopeMode) {
     case 'initiative':
-      return 7;
+      return 3;
     case 'standard':
-      return 6;
+      return 2;
     default:
-      return 5;
+      return 2;
   }
 }
 
@@ -853,49 +1013,101 @@ export async function generateFeatures(opts: {
   });
   const providerOpts = getProviderOpts(config);
 
-  const userMessage = buildGenerationContextSections({
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    similarStoriesText,
-  }).join('\n\n---\n\n');
-
+  const roles = extractRelevantRoles(requirement, clarifyAnswers, config);
   let rawFeatures: RawFeature[] = [];
-  let generationUsage = { input: 0, output: 0 };
+  let decompositionUsage = { input: 0, output: 0 };
+  let arUsage = { input: 0, output: 0 };
   let rewriteUsage = { input: 0, output: 0 };
+  let usedFallback = false;
 
   try {
-    const result = await Promise.race([
+    const decompositionResult = await Promise.race([
       callLlmJsonWithUsage<{ features?: RawFeature[] }>({
         model: getTierModel(config.generatorConfig.arModel, config.tier),
-        systemPrompt: buildGenerationSystemPrompt({
+        systemPrompt: buildDecompositionSystemPrompt({
           domainContext: config.domainContext,
-          domainRoles: config.domainRoles,
+          domainRoles: roles.length ? roles : config.domainRoles,
+          outputMode: resolved.outputMode,
+          processTaxonomy: config.processTaxonomy,
+          processTaxonomyEnabled: config.processTaxonomyEnabled,
+        }),
+        userMessage: buildDecompositionUserMessage({
+          requirement,
+          clarifyAnswers,
+          attachmentText,
+          wiContextText,
+          similarStoriesText,
+          roles,
+          reasoningMode: resolved.reasoningMode,
           outputMode: resolved.outputMode,
         }),
-        userMessage,
-        maxTokens: Math.min(config.generatorConfig.maxTokens, resolved.reasoningMode === 'deep' ? 6200 : 4600),
+        maxTokens: Math.max(
+          resolved.reasoningMode === 'deep' ? 6400 : 4200,
+          Math.min(config.generatorConfig.maxTokens, resolved.reasoningMode === 'deep' ? 12288 : 8192),
+        ),
         timeoutMs: 120000,
         geminiThinkingBudget: resolved.reasoningMode === 'deep' ? 16000 : 8000,
         ...providerOpts,
       }),
-      throwAfterTimeout(120000, 'Feature generation'),
+      throwAfterTimeout(120000, 'Feature decomposition'),
     ]);
 
-    generationUsage = result.usage;
-    rawFeatures = ensureAcceptanceRequirements(result.data.features ?? []);
+    decompositionUsage = decompositionResult.usage;
+    rawFeatures = (decompositionResult.data.features ?? []).map((feature) => ({
+      ...feature,
+      acceptance_requirements: [],
+    }));
   } catch (error) {
-    console.warn('[story-generator] Single-pass feature generation failed; using fallback feature:', error);
+    console.warn('[story-generator] Decomposition pass failed; using fallback feature:', error);
   }
 
   if (!rawFeatures.length) {
     rawFeatures = [buildFallbackFeatureCandidate(requirement, config)];
+    usedFallback = true;
   }
 
   if (resolved.outputMode === 'single' && rawFeatures.length > 1) {
     rawFeatures = [rawFeatures[0]];
   }
+
+  if (!usedFallback && rawFeatures.length) {
+    try {
+      const arResult = await Promise.race([
+        callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+          model: getTierModel(config.generatorConfig.arModel, config.tier),
+          systemPrompt: buildArSystemPrompt({
+            domainContext: config.domainContext,
+            domainRoles: roles.length ? roles : config.domainRoles,
+            processTaxonomy: config.processTaxonomy,
+            processTaxonomyEnabled: config.processTaxonomyEnabled,
+          }),
+          userMessage: buildArUserMessage({
+            requirement,
+            features: rawFeatures,
+            wiContextText,
+            similarStoriesText,
+            roles,
+            reasoningMode: resolved.reasoningMode,
+          }),
+          maxTokens: Math.max(
+            resolved.reasoningMode === 'deep' ? 12288 : 8192,
+            Math.min(config.generatorConfig.maxTokens, resolved.reasoningMode === 'deep' ? 16384 : 8192),
+          ),
+          timeoutMs: 120000,
+          geminiThinkingBudget: resolved.reasoningMode === 'deep' ? 16000 : 8000,
+          ...providerOpts,
+        }),
+        throwAfterTimeout(120000, 'Acceptance requirement generation'),
+      ]);
+
+      arUsage = arResult.usage;
+      rawFeatures = mergeFeaturePasses(rawFeatures, arResult.data.features ?? []);
+    } catch (error) {
+      console.warn('[story-generator] AR pass failed; keeping decomposed features and filling fallback ARs:', error);
+    }
+  }
+
+  rawFeatures = ensureAcceptanceRequirements(rawFeatures);
 
   try {
     const rewritten = await rewriteFeaturesForBusinessVoice(
@@ -912,15 +1124,16 @@ export async function generateFeatures(opts: {
 
   const features = rawFeatures.map(normaliseFeature);
   const violations = validateFeatures(features, config);
-  const totalInput = generationUsage.input + rewriteUsage.input;
-  const totalOutput = generationUsage.output + rewriteUsage.output;
+  const totalInput = decompositionUsage.input + arUsage.input + rewriteUsage.input;
+  const totalOutput = decompositionUsage.output + arUsage.output + rewriteUsage.output;
 
   const tokenUsage: TokenUsageSummary = {
     input: totalInput,
     output: totalOutput,
     total: totalInput + totalOutput,
     byStage: {
-      generation: toStageUsage(generationUsage),
+      decomposition: toStageUsage(decompositionUsage),
+      acceptanceRequirements: toStageUsage(arUsage),
       businessVoiceRewrite: toStageUsage(rewriteUsage),
     },
   };
@@ -970,20 +1183,22 @@ export async function generateClarifyingQuestions(opts: {
     outputMode: resolved.outputMode,
   });
   const desiredQuestionCount = Math.min(questionPlan.max, Math.max(questionPlan.min, questionPlan.target));
-  const clarifyMaxTokens = resolved.reasoningMode === 'deep' ? 4096 : 3072;
+  const clarifyMaxTokens = resolved.reasoningMode === 'deep'
+    ? Math.max(config.generatorConfig.maxTokens, 8192)
+    : Math.max(Math.min(config.generatorConfig.maxTokens, 6144), 4096);
 
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
     `DISCOVERY RANGE: produce between ${questionPlan.min} and ${questionPlan.max} clarifying questions. Ideal target: ${desiredQuestionCount}. If ambiguity is still material, lean toward the upper half of the range. If the requirement and context are unusually explicit, you may go lower, but do not exceed the maximum.`,
   ];
-  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 3000)}`);
-  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 8000)}`);
-  if (similarStoriesText) contextParts.push(`RELATED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 4000)}`);
+  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, resolved.reasoningMode === 'deep' ? 6000 : 3500)}`);
+  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, resolved.reasoningMode === 'deep' ? 24000 : 12000)}`);
+  if (similarStoriesText) contextParts.push(`RELATED BACKLOG ITEMS:\n${similarStoriesText.slice(0, resolved.reasoningMode === 'deep' ? 12000 : 6000)}`);
   const domainSignals = extractDomainSignals([
     requirement,
-    attachmentText.slice(0, 1200),
-    wiContextText.slice(0, 2200),
-    similarStoriesText.slice(0, 2200),
+    attachmentText.slice(0, 2200),
+    wiContextText.slice(0, 6000),
+    similarStoriesText.slice(0, 5000),
     ...(config.domainRoles ?? []),
   ]);
   if (domainSignals.length) {

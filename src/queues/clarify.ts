@@ -8,6 +8,7 @@
 import { AsyncEvent } from '@forge/events';
 import { ClarifyContextMeta, ClarifyEvent, TokenUsageSummary } from '../types';
 import { generateClarifyingQuestions, normalizeConversationTitle } from '../core/story-generator';
+import { fetchReferenceExamples } from '../core/reference-examples';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStoriesWithUsage, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
@@ -120,8 +121,8 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
     const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
     const outputMode = event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode;
     const retrievalBudget = reasoningMode === 'deep'
-      ? { wiTopK: 6, wiMaxChars: 20000, contextTimeoutMs: 20000 }
-      : { wiTopK: 4, wiMaxChars: 10000, contextTimeoutMs: 15000 };
+      ? { wiTopK: 24, wiMaxChars: 70000, contextTimeoutMs: 30000 }
+      : { wiTopK: 8, wiMaxChars: 25000, contextTimeoutMs: 18000 };
 
     if (retryCount > 1) {
       await writeClarifyProgress(sessionId, runId, {
@@ -159,7 +160,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       eventId: event.eventId,
     });
 
-    const [wiContext, similarStoriesResult] = await Promise.all([
+    const [wiContext, similarStoriesResult, referenceExamplesResult] = await Promise.all([
       config.wiConfig.enabled
         ? withTimeoutFallback(
             retrieveWiContext(
@@ -167,6 +168,21 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
               Math.min(config.wiConfig.topKChunks, retrievalBudget.wiTopK),
               Math.min(config.wiConfig.maxChars, retrievalBudget.wiMaxChars),
               projectKey,
+              {
+                enabled: Boolean(config.similarityConfig.useLlmRerank),
+                model: config.generatorConfig.themeModel,
+                provider: config.generatorConfig.provider,
+                geminiApiKey: config.generatorConfig.geminiApiKey,
+                geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+                openaiApiKey: config.generatorConfig.openaiApiKey,
+                openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+                azureOpenaiApiKey: config.generatorConfig.azureOpenaiApiKey,
+                azureOpenaiEndpoint: config.generatorConfig.azureOpenaiEndpoint,
+                azureOpenaiDeployment: config.generatorConfig.azureOpenaiDeployment,
+                azureOpenaiApiVersion: config.generatorConfig.azureOpenaiApiVersion,
+                shortlistSize: reasoningMode === 'deep' ? 24 : 14,
+                timeoutMs: reasoningMode === 'deep' ? 18000 : 12000,
+              },
             ),
             retrievalBudget.contextTimeoutMs,
             { text: '', docs: [] },
@@ -181,8 +197,20 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
             'similar stories',
           )
         : Promise.resolve({ stories: [], tokenUsage: zeroClarifyTokenUsage() }),
+      withTimeoutFallback(
+        fetchReferenceExamples(config, projectKey, {
+          perSourceLimit: reasoningMode === 'deep' ? 6 : 3,
+          overallLimit: reasoningMode === 'deep' ? 10 : 5,
+        }),
+        retrievalBudget.contextTimeoutMs,
+        { text: '', count: 0, examples: [] },
+        'reference examples',
+      ),
     ]);
     const similarStories = similarStoriesResult.stories;
+    const referenceContextText = [referenceExamplesResult.text, formatSimilarStoriesText(similarStories, 10)]
+      .filter(Boolean)
+      .join('\n\n---\n\n');
 
     await sendClarifyProgress(sessionId, runId, 'Generating clarifying questions...', {
       phase: 'question_generation',
@@ -196,7 +224,7 @@ export async function handler(event: AsyncEvent<Record<string, unknown>> & { bod
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
-      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+      similarStoriesText: referenceContextText,
       config,
       reasoningMode,
       outputMode,

@@ -50,10 +50,10 @@ interface SearchJqlResponse {
 }
 
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_INDEX_ITEMS = 1000;
-const MAX_SIMILAR_STORIES = 12;
+const MAX_INDEX_ITEMS = 2500;
+const MAX_SIMILAR_STORIES = 16;
 const MIN_STORY_RELEVANCE = 0.26;
-const MIN_BASELINE_STORIES = 4;
+const MIN_BASELINE_STORIES = 5;
 
 function zeroTokenUsage(): TokenUsageSummary {
   return {
@@ -558,13 +558,93 @@ async function getJiraBaseUrl(): Promise<string> {
 
 export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): string {
   if (!items.length) return '';
-  return items
-    .slice(0, maxItems)
-    .map((item, index) => ([
-      `--- Backlog Reference ${index + 1} (${item.key}) ---`,
-      `Summary: ${item.summary}`,
-      item.description ? `Description: ${item.description.slice(0, 900)}` : '',
-      item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1400)}` : '',
-    ].filter(Boolean).join('\n')))
-    .join('\n\n');
+
+  const selected = items.slice(0, maxItems);
+  const roles = extractCommonRoles(selected).slice(0, 12);
+  const topics = selected
+    .map(item => item.summary?.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+  const arPatterns = extractArPatterns(selected).slice(0, 10);
+  const examples = selected.slice(0, Math.min(4, selected.length));
+
+  const sections: string[] = [
+    'REFERENCE BACKLOG CONTEXT FROM DEPLOYED ITEMS:',
+    'Use the roles, scope, and level of detail reflected below. Match the business depth and acceptance rigor, not any customer-specific system wording.',
+  ];
+
+  if (roles.length) {
+    sections.push(`Common roles in similar backlog items: ${roles.join(', ')}`);
+  }
+
+  if (topics.length) {
+    sections.push(
+      `Related backlog topics:\n${topics.map((topic, index) => `  ${index + 1}. ${topic}`).join('\n')}`,
+    );
+  }
+
+  if (arPatterns.length) {
+    sections.push(
+      `Sample acceptance requirement patterns:\n${arPatterns.map((pattern, index) => `  ${index + 1}. ${pattern}`).join('\n')}`,
+    );
+  }
+
+  sections.push(
+    examples
+      .map((item, index) => ([
+        `--- Reference Example ${index + 1} (${item.key}) ---`,
+        `Summary: ${item.summary}`,
+        item.description ? `Description: ${item.description.slice(0, 700)}` : '',
+        item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1200)}` : '',
+      ].filter(Boolean).join('\n')))
+      .join('\n\n'),
+  );
+
+  return sections.filter(Boolean).join('\n\n');
+}
+
+function extractCommonRoles(items: SimilarStory[]): string[] {
+  const seen = new Set<string>();
+  const roles: string[] = [];
+
+  for (const item of items) {
+    const description = String(item.description ?? '');
+    const matches = description.matchAll(/\bas\s+an?\s+([^,]+),/gi);
+    for (const match of matches) {
+      const role = String(match[1] ?? '').trim().replace(/\s+/g, ' ');
+      if (!role || role.length > 80) continue;
+      const key = role.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      roles.push(role);
+    }
+  }
+
+  return roles;
+}
+
+function extractArPatterns(items: SimilarStory[]): string[] {
+  const seen = new Set<string>();
+  const patterns: string[] = [];
+
+  for (const item of items) {
+    const raw = String(item.acceptanceCriteria ?? '');
+    if (!raw) continue;
+    const lines = raw
+      .split(/\n+/)
+      .map(line => line.trim().replace(/^[-*]\s*/, ''))
+      .filter(Boolean);
+
+    for (const line of lines) {
+      if (!/given|when|then/i.test(line)) continue;
+      const normalized = line.replace(/\s+/g, ' ');
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      patterns.push(normalized.slice(0, 240));
+      if (patterns.length >= 14) return patterns;
+    }
+  }
+
+  return patterns;
 }

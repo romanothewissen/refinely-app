@@ -273,7 +273,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
   },
   wiConfig: {
     enabled: true,
-    topKChunks: 8,
+    topKChunks: 30,
     maxChars: 100000,
   },
   tier: 'free',
