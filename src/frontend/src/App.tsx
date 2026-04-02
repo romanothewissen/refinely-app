@@ -107,6 +107,19 @@ function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
   return total;
 }
 
+function getDefaultSidebarWidth(viewportWidth?: number): number {
+  const width =
+    typeof viewportWidth === 'number'
+      ? viewportWidth
+      : typeof window !== 'undefined'
+        ? window.innerWidth
+        : 0;
+
+  if (!width || width <= 0) return 420;
+  if (width <= 720) return Math.max(300, width - 48);
+  return Math.min(Math.max(Math.round(width * 0.5), 360), Math.round(width * 0.7));
+}
+
 export default function App() {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>('generate');
   const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
@@ -134,8 +147,11 @@ export default function App() {
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tier, setTier] = useState('free');
-  const [sidebarWidth, setSidebarWidth] = useState(window.innerWidth / 2);
+  const [sidebarWidth, setSidebarWidth] = useState(() => getDefaultSidebarWidth());
   const isResizing = useRef(false);
+  const resolvedSidebarWidth = Number.isFinite(sidebarWidth) && sidebarWidth >= 300
+    ? sidebarWidth
+    : getDefaultSidebarWidth();
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!isResizing.current) return;
@@ -155,6 +171,12 @@ export default function App() {
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', endResizing);
   };
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    if (sidebarWidth >= 300) return;
+    setSidebarWidth(getDefaultSidebarWidth());
+  }, [sidebarOpen, sidebarWidth]);
   
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
@@ -473,7 +495,7 @@ export default function App() {
           <motion.div
             key="sidebar"
             initial={{ opacity: 0, x: -16, width: 0 }}
-            animate={{ opacity: 1, x: 0, width: sidebarWidth }}
+            animate={{ opacity: 1, x: 0, width: resolvedSidebarWidth }}
             exit={{ opacity: 0, x: -16, width: 0 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             className="shrink-0 overflow-hidden shadow-2xl z-40 relative"
@@ -513,7 +535,7 @@ export default function App() {
               tier={tier}
               usage={usage}
               limits={limits}
-              width={sidebarWidth}
+              width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
               projectKey={projectKey}
               setProjectKey={setProjectKey}
