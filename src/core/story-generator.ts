@@ -23,6 +23,7 @@ import {
   buildDecompositionSystemPrompt,
   buildArSystemPrompt,
   buildArPerFeatureUserMessage,
+  buildTriageSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
   buildRefineSystemPrompt,
@@ -331,6 +332,95 @@ async function runParallelArPass(input: {
   return { features: results.map(r => r.feature), usage: totalUsage };
 }
 
+// ─── LLM-based Requirement Triage ────────────────────────────────────────────
+
+interface TriageResult {
+  estimatedFeatures: number;
+  shape: FeaturePlan['shape'];
+  complexity: FeaturePlan['complexity'];
+  arDepth: ArPlan['depth'];
+}
+
+const VALID_SHAPES = new Set<FeaturePlan['shape']>(['minimal', 'narrow', 'balanced', 'broad', 'epic']);
+const VALID_COMPLEXITIES = new Set<FeaturePlan['complexity']>(['trivial', 'low', 'medium', 'high', 'very_high']);
+const VALID_AR_DEPTHS = new Set<ArPlan['depth']>(['minimal', 'lean', 'standard', 'thorough', 'comprehensive']);
+
+function parseTriageResult(raw: unknown): TriageResult | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const estimatedFeatures = typeof obj.estimatedFeatures === 'number' ? obj.estimatedFeatures : null;
+  const shape = typeof obj.shape === 'string' && VALID_SHAPES.has(obj.shape as FeaturePlan['shape'])
+    ? obj.shape as FeaturePlan['shape'] : null;
+  const complexity = typeof obj.complexity === 'string' && VALID_COMPLEXITIES.has(obj.complexity as FeaturePlan['complexity'])
+    ? obj.complexity as FeaturePlan['complexity'] : null;
+  const arDepth = typeof obj.arDepth === 'string' && VALID_AR_DEPTHS.has(obj.arDepth as ArPlan['depth'])
+    ? obj.arDepth as ArPlan['depth'] : null;
+  if (estimatedFeatures == null || !shape || !complexity || !arDepth) return null;
+  return { estimatedFeatures: Math.min(15, Math.max(1, Math.round(estimatedFeatures))), shape, complexity, arDepth };
+}
+
+function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan } {
+  // Build feature plan from LLM's assessment
+  const est = triage.estimatedFeatures;
+  const featurePlan: FeaturePlan = {
+    min: Math.max(1, est - Math.ceil(est * 0.3)),
+    max: Math.min(15, est + Math.ceil(est * 0.3)),
+    target: est,
+    shape: triage.shape,
+    complexity: triage.complexity,
+  };
+
+  // Build AR plan from LLM's depth assessment
+  const arPlanMap: Record<ArPlan['depth'], Omit<ArPlan, 'depth'>> = {
+    minimal:       { min: 1, max: 2, target: 1 },
+    lean:          { min: 2, max: 3, target: 2 },
+    standard:      { min: 3, max: 5, target: 4 },
+    thorough:      { min: 4, max: 6, target: 5 },
+    comprehensive: { min: 5, max: 8, target: 6 },
+  };
+  const arPlan: ArPlan = { ...arPlanMap[triage.arDepth], depth: triage.arDepth };
+
+  return { featurePlan, arPlan };
+}
+
+async function assessRequirementWithLlm(input: {
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  generatorConfig: TenantConfig['generatorConfig'];
+  tier: TenantConfig['tier'];
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<TriageResult | null> {
+  try {
+    const userMessage = input.clarifyAnswers?.length
+      ? `REQUIREMENT:\n${input.requirement}\n\nCLARIFYING Q&A:\n${input.clarifyAnswers.map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n')}`
+      : `REQUIREMENT:\n${input.requirement}`;
+
+    const result = await callLlmJsonWithUsage<Record<string, unknown>>({
+      model: getTierModel(input.generatorConfig.triageModel, input.tier),
+      systemPrompt: buildTriageSystemPrompt(),
+      userMessage,
+      maxTokens: 256,
+      ...input.providerOpts,
+    });
+    return parseTriageResult(result.data);
+  } catch {
+    return null;
+  }
+}
+
+// ─── Heuristic Fallback Assessment ───────────────────────────────────────────
+
 function assessRequirement(input: {
   requirement: string;
   attachmentText: string;
@@ -369,6 +459,19 @@ function assessRequirement(input: {
   ) ?? []);
   const distinctWorkflows = new Set(workflowMatches.map(w => w.toLowerCase())).size;
 
+  // Detect broad domain concepts that imply multi-feature scope even in short sentences.
+  // These are compound capabilities that typically require inputs, processing, outputs, and exceptions.
+  const broadDomainConcepts = (requirement.match(
+    /\b(schedule|scheduling|dashboard|reporting|notification|approval|integration|sync|assignment|prioriti[sz]ation|optimi[sz]ation|workflow|end[- ]to[- ]end|allocation|routing|escalation|automation|monitoring|analytics|forecast|compliance|audit)\b/gi,
+  ) ?? []);
+  const distinctBroadConcepts = new Set(broadDomainConcepts.map(c => c.toLowerCase())).size;
+
+  // Detect multiple dimensions mentioned (e.g. "criticality and due dates", "skills and availability")
+  const dimensionMatches = (requirement.match(
+    /\b(criticality|priority|urgency|due date|deadline|skill|availability|capacity|location|travel|cost|sla|rating|score|weight|rank)\b/gi,
+  ) ?? []);
+  const distinctDimensions = new Set(dimensionMatches.map(d => d.toLowerCase())).size;
+
   // Count genuinely distinct roles (exclude generic terms)
   const roleMatches = (requirement.match(
     /\b(admin|administrator|manager|planner|dispatcher|technician|fse|field service engineer|customer|analyst|qa|developer|operator|supervisor|coordinator|lead|director|reviewer|approver|scheduler|engineer)\b/gi,
@@ -386,7 +489,11 @@ function assessRequirement(input: {
     (distinctRoles >= 3 ? 2 : distinctRoles >= 2 ? 1 : 0) +
     (enumeratedItems >= 6 ? 2 : enumeratedItems >= 3 ? 1 : 0) +
     (reqWords >= 200 ? 2 : reqWords >= 80 ? 1 : 0) +
-    (reqSentences >= 8 ? 1 : 0);
+    (reqSentences >= 8 ? 1 : 0) +
+    // Broad domain concepts imply multi-feature scope even in short requirements
+    (distinctBroadConcepts >= 3 ? 2 : distinctBroadConcepts >= 1 ? 1 : 0) +
+    // Multiple decision dimensions imply processing/weighting features
+    (distinctDimensions >= 3 ? 2 : distinctDimensions >= 2 ? 1 : 0);
 
   // ── Continuous complexity score (0–10 scale) ──
   const complexityScore =
@@ -394,7 +501,9 @@ function assessRequirement(input: {
     (exceptionMentions >= 3 ? 2 : exceptionMentions >= 1 ? 1 : 0) +
     (answers.length >= 8 ? 2 : answers.length >= 5 ? 1 : 0) +
     (distinctRoles >= 3 ? 2 : distinctRoles >= 2 ? 1 : 0) +
-    (distinctWorkflows >= 5 ? 2 : distinctWorkflows >= 2 ? 1 : 0);
+    (distinctWorkflows >= 5 ? 2 : distinctWorkflows >= 2 ? 1 : 0) +
+    (distinctDimensions >= 2 ? 1 : 0) +
+    (distinctBroadConcepts >= 2 ? 1 : 0);
 
   // ── Ambiguity / clarity ──
   const ambiguityPenalty =
@@ -421,11 +530,16 @@ function assessRequirement(input: {
         : { min: 6, max: 9, target: 7, clarity: 'medium' };
 
   // ── Shape tier (5 buckets) ──
+  // Floor: short underspecified requirements with any broad concept should not
+  // land in narrow/minimal — they need room for the LLM to decompose.
+  const isShortButImplicitlyBroad = reqWords <= 30 && (distinctBroadConcepts >= 1 || distinctDimensions >= 2);
+  const effectiveShapeScore = isShortButImplicitlyBroad ? Math.max(shapeScore, 3) : shapeScore;
+
   const shape: FeaturePlan['shape'] =
-    shapeScore >= 7 ? 'epic'
-      : shapeScore >= 5 ? 'broad'
-        : shapeScore >= 3 ? 'balanced'
-          : shapeScore >= 1 ? 'narrow'
+    effectiveShapeScore >= 7 ? 'epic'
+      : effectiveShapeScore >= 5 ? 'broad'
+        : effectiveShapeScore >= 3 ? 'balanced'
+          : effectiveShapeScore >= 1 ? 'narrow'
             : 'minimal';
 
   // ── Complexity tier (5 buckets) ──
@@ -603,21 +717,13 @@ export async function generateFeatures(opts: {
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
+  onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string }) => Promise<void>;
   onPass1Complete?: (featureCount: number) => Promise<void>;
   onArProgress?: (completed: number, total: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onPass1Complete, onArProgress, shouldCancel } = opts;
+  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onTriageComplete, onPass1Complete, onArProgress, shouldCancel } = opts;
   const { generatorConfig } = config;
-  const assessment = assessRequirement({
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    goldExamplesText,
-    similarStoriesText,
-  });
-  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
   const providerOpts = {
     provider: generatorConfig.provider,
     geminiApiKey: generatorConfig.geminiApiKey,
@@ -630,6 +736,43 @@ export async function generateFeatures(opts: {
     modelCatalogs: generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
+
+  // ── Triage: fast LLM assessment of scope & complexity ──
+  // Falls back to heuristic if LLM triage fails.
+  const heuristicAssessment = assessRequirement({
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    wiContextText,
+    goldExamplesText,
+    similarStoriesText,
+  });
+
+  const triageResult = await assessRequirementWithLlm({
+    requirement,
+    clarifyAnswers,
+    generatorConfig,
+    tier: config.tier,
+    providerOpts,
+  });
+
+  const assessment: RequirementAssessment = triageResult
+    ? {
+        ...heuristicAssessment,
+        ...triageToAssessment(triageResult),
+      }
+    : heuristicAssessment;
+
+  if (onTriageComplete) {
+    await onTriageComplete({
+      shape: assessment.featurePlan.shape,
+      complexity: assessment.featurePlan.complexity,
+      featureTarget: assessment.featurePlan.target,
+      arDepth: assessment.arPlan.depth,
+    });
+  }
+
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
   const pass1UserMessage = buildGenerationUserMessage({
     requirement,

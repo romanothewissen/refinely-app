@@ -183,7 +183,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   await saveConfig(payload);
 
   const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const modelFields = ['decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'themeModel'];
+  const modelFields = ['decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'triageModel', 'themeModel'];
   const changedModelFields = modelFields.filter((field) => {
     return ngc[field] !== undefined && ngc[field] !== egc[field];
   });
@@ -734,11 +734,11 @@ resolver.define('uploadWi', async ({ payload, context }) => {
 
   const limits = getLimits(config.tier);
   if (limits.maxWiDocs !== -1) {
-    const existing = await listDocs();
+    const existing = await listDocs(payload.projectKey || '*', { exactOnly: true });
     if (existing.length >= limits.maxWiDocs) {
       return {
         success: false,
-        error: `Your plan allows up to ${limits.maxWiDocs} reference document(s). Remove one to upload another.`,
+        error: `Your plan allows up to ${limits.maxWiDocs} reference document(s) for this project. Remove one to upload another.`,
       };
     }
   }
@@ -755,7 +755,7 @@ resolver.define('uploadWi', async ({ payload, context }) => {
 });
 
 resolver.define('listWiDocs', async ({ payload }) => {
-  const docs = await listDocs(payload?.projectKey);
+  const docs = await listDocs(payload?.projectKey, { exactOnly: true });
   return { success: true, docs };
 });
 

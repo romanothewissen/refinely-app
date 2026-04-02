@@ -53,6 +53,7 @@ export interface GeneratorConfig {
   clarifyModel: string;         // e.g. claude-sonnet-4-6, gpt-4o-mini
   refineModel: string;          // e.g. claude-opus-4-6, gpt-4o
   evaluateModel: string;        // e.g. claude-haiku-4-5, gpt-4o-mini
+  triageModel: string;          // e.g. claude-haiku-4-5, gpt-4o-mini — fast scope/complexity assessment
   themeModel: string;           // e.g. claude-haiku-4-5, gpt-4o-mini
   maxTokens: number;            // default: 8192
   geminiApiKey?: string;
@@ -143,6 +144,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     clarifyModel: 'claude-sonnet-4-5-20250929',
     refineModel: 'claude-opus-4-6',
     evaluateModel: 'claude-haiku-4-5-20251001',
+    triageModel: 'claude-haiku-4-5-20251001',
     themeModel: 'claude-haiku-4-5-20251001',
     maxTokens: 8192,
   },

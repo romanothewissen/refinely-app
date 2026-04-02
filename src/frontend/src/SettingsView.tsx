@@ -183,6 +183,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [arModel, setArModel] = useState('claude-opus-4-6');
   const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-5-20250929');
   const [evaluateModel, setEvaluateModel] = useState('claude-haiku-4-5-20251001');
+  const [triageModel, setTriageModel] = useState('claude-haiku-4-5-20251001');
   const [refineModel, setRefineModel] = useState('claude-sonnet-4-5-20250929');
   const [themeModel, setThemeModel] = useState('claude-haiku-4-5-20251001');
 
@@ -345,6 +346,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.arModel) setArModel(gc.arModel);
         if (gc.clarifyModel) setClarifyModel(gc.clarifyModel);
         if (gc.evaluateModel) setEvaluateModel(gc.evaluateModel);
+        if (gc.triageModel) setTriageModel(gc.triageModel);
         if (gc.refineModel) setRefineModel(gc.refineModel);
         if (gc.themeModel) setThemeModel(gc.themeModel);
         
@@ -553,6 +555,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           clarifyModel,
           refineModel,
           evaluateModel,
+          triageModel,
           themeModel,
           maxTokens: 8192,
           geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || "",
@@ -685,6 +688,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (!arModel.startsWith('gemini-') || isLatestAlias(arModel)) setArModel(proModel || 'gemini-2.5-pro');
       if (!clarifyModel.startsWith('gemini-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gemini-2.5-flash');
       if (!evaluateModel.startsWith('gemini-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash');
+      if (!triageModel.startsWith('gemini-') || isLatestAlias(triageModel)) setTriageModel(liteModel || flashModel || 'gemini-2.5-flash');
       if (!refineModel.startsWith('gemini-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gemini-2.5-flash');
       if (!themeModel.startsWith('gemini-') || isLatestAlias(themeModel)) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash');
     } else if (provider === 'openai') {
@@ -692,6 +696,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o')) || isLatestAlias(arModel)) setArModel(proModel || 'gpt-4o');
       if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o')) || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gpt-4o');
       if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o')) || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'gpt-4o-mini');
+      if ((!triageModel.startsWith('gpt-') && !triageModel.startsWith('o')) || isLatestAlias(triageModel)) setTriageModel(liteModel || 'gpt-4o-mini');
       if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o')) || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gpt-4o');
       if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o')) || isLatestAlias(themeModel)) setThemeModel(liteModel || 'gpt-4o-mini');
     } else if (provider === 'azure_openai') {
@@ -706,6 +711,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (shouldResetAzureModel(arModel) && proModel) setArModel(proModel);
       if (shouldResetAzureModel(clarifyModel) && flashModel) setClarifyModel(flashModel);
       if (shouldResetAzureModel(evaluateModel) && (liteModel || flashModel)) setEvaluateModel(liteModel || flashModel);
+      if (shouldResetAzureModel(triageModel) && (liteModel || flashModel)) setTriageModel(liteModel || flashModel);
       if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
       if (shouldResetAzureModel(themeModel) && (liteModel || flashModel)) setThemeModel(liteModel || flashModel);
     } else {
@@ -713,10 +719,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (!arModel.startsWith('claude-') || isLatestAlias(arModel)) setArModel(proModel || 'claude-opus-4-6');
       if (!clarifyModel.startsWith('claude-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'claude-sonnet-4-5-20250929');
       if (!evaluateModel.startsWith('claude-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'claude-haiku-4-5-20251001');
+      if (!triageModel.startsWith('claude-') || isLatestAlias(triageModel)) setTriageModel(liteModel || 'claude-haiku-4-5-20251001');
       if (!refineModel.startsWith('claude-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'claude-sonnet-4-5-20250929');
       if (!themeModel.startsWith('claude-') || isLatestAlias(themeModel)) setThemeModel(liteModel || 'claude-haiku-4-5-20251001');
     }
-  }, [provider, modelCatalogs, decompositionModel, arModel, clarifyModel, evaluateModel, refineModel, themeModel]);
+  }, [provider, modelCatalogs, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
 
   const refreshModelCatalog = useCallback(async () => {
     setIsRefreshingModels(true);
@@ -1001,6 +1008,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           },
                         },
                         {
+                          label: 'Triage',
+                          hint: 'Quick assessment of requirement scope and complexity before generation. Determines how many features and acceptance requirements to produce.',
+                          val: triageModel,
+                          set: (value: string) => {
+                            setTriageModel(value);
+                          },
+                        },
+                        {
                           label: 'Review & Titles',
                           hint: 'Checks whether enough context was captured, spots grouped gaps, and generates concise themes and titles.',
                           val: evaluateModel,
@@ -1182,7 +1197,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[420px] overflow-y-auto pr-1 custom-scrollbar">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {wiDocs.length === 0 ? (
                             <div className="col-span-2 p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)]">
                               <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />

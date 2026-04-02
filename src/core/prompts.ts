@@ -234,6 +234,42 @@ OUTPUT FORMAT (strict):
 Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
 }
 
+// ─── Requirement Triage (fast LLM-based assessment) ─────────────────────────
+
+export function buildTriageSystemPrompt(): string {
+  return `You are a senior business analyst doing a quick triage of a software requirement. Your job is to assess the scope and complexity so the decomposition step knows how many features to produce.
+
+Think about what it actually takes to deliver the requirement:
+- What are the distinct capabilities, workflows, or independently deliverable pieces?
+- How many decision dimensions, business rules, or roles are involved?
+- Is this a small tweak (1 feature) or a multi-workflow epic (10+ features)?
+
+Return a JSON object with:
+- "estimatedFeatures": number (1-15) — how many independent, deliverable features this requirement implies
+- "shape": one of "minimal", "narrow", "balanced", "broad", "epic"
+  - minimal: a single small change or addition (1 feature)
+  - narrow: a tightly scoped capability (1-3 features)
+  - balanced: a moderate requirement with a few distinct parts (3-6 features)
+  - broad: a multi-capability requirement (5-9 features)
+  - epic: a complex multi-workflow requirement with many moving parts (8-15 features)
+- "complexity": one of "trivial", "low", "medium", "high", "very_high"
+  - trivial: no business rules, single happy path
+  - low: a few straightforward rules
+  - medium: multiple rules, some edge cases
+  - high: many rules, multiple roles, exception handling
+  - very_high: cross-cutting concerns, complex orchestration, many roles and workflows
+- "arDepth": one of "minimal", "lean", "standard", "thorough", "comprehensive"
+  - minimal: 1-2 acceptance requirements per feature
+  - lean: 2-3 per feature
+  - standard: 3-5 per feature
+  - thorough: 4-6 per feature
+  - comprehensive: 5-8 per feature
+
+Be precise. A short sentence can still imply a broad, complex system. "Optimize scheduling based on criticality and due dates" is NOT narrow — it implies schedule generation, data inputs, scoring/weighting, visibility, exception handling, and more.
+
+Output JSON only: {"estimatedFeatures": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
+}
+
 // ─── Per-Feature AR User Message (for parallel AR generation) ────────────────
 
 export function buildArPerFeatureUserMessage(opts: {

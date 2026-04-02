@@ -143,6 +143,10 @@ export async function handler(event: { body: GenerationEvent }) {
       wiContextText: wiContext.text,
       config,
       shouldCancel: () => isWorkflowCancelled(sessionId),
+      onTriageComplete: async (triage) => {
+        if (await isWorkflowCancelled(sessionId)) return;
+        await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1);
+      },
       onPass1Complete: async (featureCount) => {
         if (await isWorkflowCancelled(sessionId)) return;
         await updateProgress(`Writing acceptance requirements for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
