@@ -33,19 +33,6 @@ interface ClarifyProps {
     domainRolesUsed: string[];
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
-    plannerDecision?: {
-      reasoningMode: 'fast' | 'deep';
-      outputMode: 'single' | 'auto' | 'full_breakdown';
-      scopeMode: 'atomic' | 'focused' | 'standard' | 'initiative';
-      clarificationMode: 'none' | 'light' | 'standard' | 'deep';
-      featurePlan: { min: number; max: number; target: number };
-      questionPlan: { min: number; max: number; target: number; clarity: 'clear' | 'medium' | 'vague' };
-      useHierarchy: boolean;
-      confidence: number;
-      rationale: string[];
-    };
-    goldExamplesCount?: number;
-    referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
     discoveryTranscript?: Array<{
@@ -86,13 +73,6 @@ interface ClarifyProps {
         evidence: string;
       }>;
     };
-    ambiguityAssessment?: {
-      level: 'clear' | 'medium' | 'vague';
-      score: number;
-      reasons: string[];
-      questionPlan: { min: number; max: number; target: number };
-      generatedQuestions: number;
-    };
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
@@ -108,18 +88,6 @@ const CLARIFY_CATEGORY_ORDER = [
   'Business Rules & Exceptions',
   'Success & Measurement',
 ] as const;
-
-function formatPlannerLabel(value: string): string {
-  return value
-    .split('_')
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function formatMatchPercent(score: number): number {
-  if (!Number.isFinite(score)) return 0;
-  return Math.round(Math.max(0, Math.min(score, 1)) * 100);
-}
 
 export function ClarifyQuestionsView({
   questions,
@@ -276,22 +244,6 @@ export function ClarifyQuestionsView({
                   View full details
                 </button>
               </div>
-              {contextMeta.plannerDecision && (
-                <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] font-medium text-[var(--rf-text-tertiary)]">
-                  <span className="rounded-md bg-[var(--rf-brand-muted)]/70 px-2.5 py-1 text-[var(--rf-brand-hover)] border border-blue-100">
-                    Scope: {formatPlannerLabel(contextMeta.plannerDecision.scopeMode)}
-                  </span>
-                  <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 border border-[var(--rf-border-subtle)]">
-                    Discovery: {formatPlannerLabel(contextMeta.plannerDecision.clarificationMode)}
-                  </span>
-                  <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 border border-[var(--rf-border-subtle)]">
-                    Target output: {contextMeta.plannerDecision.featurePlan.target}
-                  </span>
-                  <span className="rounded-md bg-[var(--rf-surface-soft)] px-2.5 py-1 border border-[var(--rf-border-subtle)]">
-                    Reasoning: {formatPlannerLabel(contextMeta.plannerDecision.reasoningMode)}
-                  </span>
-                </div>
-              )}
               <div className="mt-3 text-[11px] font-medium text-[var(--rf-text-tertiary)]">
                 {reasoningMode === 'deep'
                   ? `Deep mode can continue into additional rounds if critical discovery gaps remain after round ${roundNumber}.`
@@ -468,16 +420,9 @@ function ContextDetailsModal({
             <StatCard label="Project" value={contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey} />
             <StatCard label="Work instructions" value={`${contextMeta.wiDocsCount ?? 0}`} />
             <StatCard label="Related stories" value={`${contextMeta.similarStoriesCount ?? 0}`} />
-            <StatCard label="Questions" value={`${contextMeta.ambiguityAssessment?.generatedQuestions ?? 0}`} />
+            <StatCard label="Roles" value={`${contextMeta.domainRolesUsed?.length ?? 0}`} />
             <StatCard label="Coverage" value={contextMeta.discoveryCoverage ? `${contextMeta.discoveryCoverage.overallScore}%` : 'N/A'} />
           </div>
-
-          {contextMeta.ambiguityAssessment?.reasons?.length ? (
-            <div className="mt-6 rounded-2xl border border-blue-100 bg-[var(--rf-brand-muted)]/50 p-4 text-sm text-[var(--rf-text-secondary)]">
-              <div className="mb-1 font-bold text-blue-900">Analysis</div>
-              {contextMeta.ambiguityAssessment.reasons.join(' ')}
-            </div>
-          ) : null}
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40 p-4">
@@ -486,15 +431,6 @@ function ContextDetailsModal({
                 <div><strong className="text-[var(--rf-text)]">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
                 <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
                 <div><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed?.length ? contextMeta.domainRolesUsed.join(', ') : 'None'}</div>
-                {contextMeta.plannerDecision && (
-                  <>
-                    <div><strong className="text-[var(--rf-text)]">Scope:</strong> {formatPlannerLabel(contextMeta.plannerDecision.scopeMode)}</div>
-                    <div><strong className="text-[var(--rf-text)]">Discovery:</strong> {formatPlannerLabel(contextMeta.plannerDecision.clarificationMode)}</div>
-                    <div><strong className="text-[var(--rf-text)]">Reasoning:</strong> {formatPlannerLabel(contextMeta.plannerDecision.reasoningMode)}</div>
-                    <div><strong className="text-[var(--rf-text)]">Target output:</strong> {contextMeta.plannerDecision.featurePlan.target} feature(s)</div>
-                    <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Planner rationale:</strong> {contextMeta.plannerDecision.rationale.join(' ') || 'No additional rationale recorded.'}</div>
-                  </>
-                )}
               </div>
             </div>
 
@@ -626,7 +562,7 @@ function ContextDetailsModal({
                         )}
                         {typeof story.relevanceScore === 'number' && (
                           <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
-                            Match {formatMatchPercent(story.relevanceScore)}%
+                            Match {Math.round(Math.max(0, Math.min(story.relevanceScore, 1)) * 100)}%
                           </span>
                         )}
                       </div>

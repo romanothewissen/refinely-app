@@ -25,7 +25,6 @@ interface SidebarProps {
   projectKey: string;
   setProjectKey: (key: string) => void;
   availableProjects: Array<{ key: string; name: string }>;
-  goldSources: Array<{ key: string; targetProjects?: string[]; project?: string; issuetype?: string; statuses?: string[]; status?: string }>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
   reasoningMode: 'fast' | 'deep';
@@ -67,7 +66,6 @@ export function Sidebar({
   projectKey,
   setProjectKey,
   availableProjects,
-  goldSources,
   wiDocs,
   onOpenProjectSettings,
   reasoningMode,
@@ -83,14 +81,6 @@ export function Sidebar({
   const brainstormDisabled = !hasSelectedScope || !requirement.trim() || isWorking || isAtLimit;
   const [showUsage, setShowUsage] = React.useState(true);
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
-  const activeGoldSources = goldSources.filter(source => (source.targetProjects ?? []).includes(projectKey));
-  const matchedConnectorLabel = !projectKey
-    ? 'Choose a scope first'
-    : projectKey === '*'
-      ? 'Standalone workspace mode'
-      : activeGoldSources.length > 0
-        ? `${activeGoldSources.length} active connector${activeGoldSources.length !== 1 ? 's' : ''}`
-        : 'No connectors active';
   const activeWiDocs = wiDocs.filter(doc => (doc.targetProjects ?? ['*']).includes('*') || (doc.targetProjects ?? []).includes(projectKey));
   const availableProject = availableProjects.find(p => p.key === projectKey);
   const projectTitle = !projectKey
@@ -100,9 +90,9 @@ export function Sidebar({
       : `${projectKey} · ${availableProject?.name || 'Project context'}`;
   const projectHint = !projectKey
     ? 'Select a Jira project for context, or deliberately choose Standalone workspace.'
-    : activeGoldSources.length > 0
-      ? 'Backlog context will use the selected project settings.'
-      : 'Project selected. Connectors and docs can now be configured for this scope.';
+    : activeWiDocs.length > 0
+      ? 'Project selected. Work instructions are available to ground discovery and generation.'
+      : 'Project selected. Add work instructions for stronger context-aware generation.';
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
 
   return (
@@ -205,8 +195,10 @@ export function Sidebar({
             disabled={!hasSelectedScope}
             whileTap={{ scale: 0.98 }}
           >
-            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Connectors</div>
-            <div className="text-[12px] font-medium text-[var(--rf-text)] truncate">{matchedConnectorLabel}</div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Delivery</div>
+            <div className="text-[12px] font-medium text-[var(--rf-text)] truncate">
+              {!hasSelectedScope ? 'Choose a scope first' : 'Jira mappings & backlog settings'}
+            </div>
           </motion.button>
 
           <motion.button

@@ -1,32 +1,18 @@
 /**
- * Forge Queue Consumer: two-pass feature generation.
+ * Forge Queue Consumer: single-pass feature generation.
  *
- * Runs with 900s (15 min) timeout — handles the full generation pipeline
- * including gold standard fetching, WI context retrieval, pass 1 + pass 2.
- *
- * Progress is streamed back to the UI via Forge Realtime.
+ * Runs with 900s timeout, but the generation path itself now performs one
+ * prompt-driven LLM call after retrieving supporting context.
  */
 
-import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
-import { buildHeuristicPlannerDecision } from '../core/planner';
+import { GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
 import { generateFeatures, generateSessionTitle, normalizeConversationTitle } from '../core/story-generator';
 import { findSimilarStoriesWithUsage, formatSimilarStoriesText } from '../core/similar-stories';
-import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { upsertAiSessionInsight } from '../services/ai-insights';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
-
-interface RealtimeEvent {
-  type: 'progress' | 'complete' | 'error';
-  sessionId: string;
-  runId?: string;
-  jobId?: string;
-  message?: string;
-  pass?: 1 | 2;
-  payload?: unknown;
-}
 
 async function writeGenerationProgress(
   sessionId: string,
@@ -56,16 +42,12 @@ async function sendProgress(
   sessionId: string,
   runId: string,
   message: string,
-  pass?: 1 | 2,
-  payload?: unknown,
   extra?: Record<string, unknown>,
 ) {
   await writeGenerationProgress(sessionId, runId, {
     type: 'progress',
     sessionId,
     message,
-    pass,
-    payload,
     ...(extra ?? {}),
   });
 }
@@ -106,44 +88,13 @@ function mergeTokenUsage(
   };
 }
 
-function buildGenerationRetrievalBudget(reasoningMode: 'fast' | 'deep') {
-  if (reasoningMode === 'deep') {
-    return {
-      wiTopK: 6,
-      wiMaxChars: 18000,
-      goldLimit: 6,
-      contextTimeoutMs: 40000,
-    };
-  }
-
-  return {
-    wiTopK: 4,
-    wiMaxChars: 9000,
-    goldLimit: 4,
-    contextTimeoutMs: 22000,
-  };
-}
-
-function resolveRelevantGoldSources(
-  sources: GenerationEvent['config']['goldSources'],
-  projectKey: string,
-) {
-  const exact = sources.filter(s => s.targetProjects?.includes(projectKey));
-  const global = sources.filter(s => s.targetProjects?.includes('*'));
-  if (projectKey === '*') return global;
-
-  const deduped = new Map<string, (typeof sources)[number]>();
-  [...exact, ...global].forEach(source => deduped.set(source.key, source));
-  return Array.from(deduped.values());
-}
-
 async function getLatestDiscoveryCoverage(sessionId: string, accountId: string) {
   const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(KEYS.userConversations(accountId, sessionId));
   const rawTurns = conversation?.turns;
   const turns = Array.isArray(rawTurns) ? rawTurns : [];
   const latestClarifyTurn = [...turns]
     .reverse()
-    .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryCoverage);
+    .find((turn) => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryCoverage);
   return latestClarifyTurn?.clarifyContext?.discoveryCoverage;
 }
 
@@ -153,26 +104,21 @@ async function getLatestDiscoveryTranscript(sessionId: string, accountId: string
   const turns = Array.isArray(rawTurns) ? rawTurns : [];
   const latestClarifyTurn = [...turns]
     .reverse()
-    .find(turn => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryTranscript?.length);
+    .find((turn) => turn?.turnType === 'clarify' && turn?.clarifyContext?.discoveryTranscript?.length);
   return latestClarifyTurn?.clarifyContext?.discoveryTranscript;
 }
 
 export async function handler(event: { body: GenerationEvent }) {
   const { runId, sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
-  
-  // Resolve project-specific context and filter gold sources
-  const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
-    || eventConfig.domainContexts?.find(c => c.projectKey === '*')
+
+  const relevantContext = eventConfig.domainContexts?.find((c) => c.projectKey === projectKey)
+    || eventConfig.domainContexts?.find((c) => c.projectKey === '*')
     || { context: eventConfig.domainContext || '' };
-    
-  // STRICT PROJECT-LEVEL: Only sources that explicitly target this project. No global fallback.
-  const relevantGoldSources = resolveRelevantGoldSources(eventConfig.goldSources, projectKey);
-  
-  const config = { 
-    ...eventConfig, 
+
+  const config = {
+    ...eventConfig,
     domainContext: relevantContext.context,
-    goldSources: relevantGoldSources,
-    tier: getEffectiveTier(eventConfig, { license }) 
+    tier: getEffectiveTier(eventConfig, { license }),
   };
 
   try {
@@ -181,20 +127,15 @@ export async function handler(event: { body: GenerationEvent }) {
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
     const reasoningMode = event.body.reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode;
-    const retrievalBudget = buildGenerationRetrievalBudget(reasoningMode);
-    const goldCount = relevantGoldSources.length;
+    const outputMode = event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode;
+    const retrievalBudget = reasoningMode === 'deep'
+      ? { wiTopK: 6, wiMaxChars: 18000, contextTimeoutMs: 40000 }
+      : { wiTopK: 4, wiMaxChars: 9000, contextTimeoutMs: 22000 };
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'workspace';
+
     await sendProgress(sessionId, runId, `Loading context for ${projectLabel}…`);
 
-    const [goldItems, wiContext, similarStoriesResult] = await Promise.all([
-      goldCount
-        ? withTimeoutFallback(
-            fetchGoldExamples(config.goldSources, retrievalBudget.goldLimit),
-            retrievalBudget.contextTimeoutMs,
-            [],
-            'gold examples',
-          )
-        : Promise.resolve([]),
+    const [wiContext, similarStoriesResult] = await Promise.all([
       config.wiConfig.enabled
         ? withTimeoutFallback(
             retrieveWiContext(
@@ -217,52 +158,23 @@ export async function handler(event: { body: GenerationEvent }) {
     ]);
 
     const similarStories = similarStoriesResult.stories;
-    const goldExamplesText = formatGoldExamplesText(goldItems);
-    const similarStoriesText = formatSimilarStoriesText(similarStories);
-
     const contextParts: string[] = [];
-    if (goldItems.length > 0) contextParts.push(`${goldItems.length} curated example${goldItems.length !== 1 ? 's' : ''}`);
     if (similarStories.length > 0) contextParts.push(`${similarStories.length} related stor${similarStories.length !== 1 ? 'ies' : 'y'}`);
     if (wiContext.docs.length > 0) contextParts.push(`${wiContext.docs.length} work instruction${wiContext.docs.length !== 1 ? 's' : ''}`);
     const contextSummary = contextParts.length > 0 ? contextParts.join(', ') : 'no prior context';
-    await sendProgress(sessionId, runId, `Context loaded (${contextSummary}). Planning features…`);
+    await sendProgress(sessionId, runId, `Context loaded (${contextSummary}).`);
 
-    const plannerDecision = buildHeuristicPlannerDecision({
-      requirement: maskedRequirement.text,
-      clarifyAnswers: maskedAnswers.answers,
-      attachmentText: maskedAttachment.text,
-      goldExamplesText,
-      similarStoriesText,
-      wiContextText: wiContext.text,
-      reasoningMode,
-      outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
-      policy: config.aiExecutionPolicy,
-    });
-
-    // Progress: pass 1
-    await sendProgress(sessionId, runId, 'Decomposing requirement into features…', 1);
+    await sendProgress(sessionId, runId, 'Generating features and acceptance requirements...');
 
     const result = await generateFeatures({
       requirement,
       clarifyAnswers: maskedAnswers.answers,
       attachmentText: maskedAttachment.text,
-      goldExamplesText,
-      similarStoriesText,
+      similarStoriesText: formatSimilarStoriesText(similarStories),
       wiContextText: wiContext.text,
       config,
       reasoningMode,
-      outputMode: event.body.outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
-      plannerDecision,
-      onPass1Complete: async ({ featureCount, draftFeatures, arBatchCount }) => {
-        const batchHint = arBatchCount > 1 ? ` across ${arBatchCount} batches` : '';
-        await sendProgress(
-          sessionId,
-          runId,
-          `Drafted ${featureCount} feature${featureCount !== 1 ? 's' : ''}. Writing acceptance requirements${batchHint}…`,
-          2,
-          { features: draftFeatures, draft: true },
-        );
-      },
+      outputMode,
     });
 
     result.similarStories = similarStories;
@@ -275,26 +187,18 @@ export async function handler(event: { body: GenerationEvent }) {
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
-      plannerDecision,
-      goldExamplesCount: goldItems.length,
-      referencedGoldExamples: goldItems.slice(0, 15).map(item => ({
-        key: item.key,
-        source: item.source,
-        summary: item.summary,
-      })),
       similarStoriesCount: similarStories.length,
-      referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
+      referencedSimilarStories: similarStories.slice(0, 12).map((item) => ({
         key: item.key,
         summary: item.summary,
         relevanceScore: item.relevanceScore,
         url: item.url,
       })),
-      initiativeGroups: result.initiativeGroups,
       discoveryCoverage: latestDiscoveryCoverage,
       discoveryTranscript: latestDiscoveryTranscript,
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
-      referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
+      referencedWiDocs: wiContext.docs.slice(0, 12).map((doc) => ({
         docId: doc.docId,
         filename: doc.filename,
         chunkCount: doc.chunkCount,
@@ -312,12 +216,8 @@ export async function handler(event: { body: GenerationEvent }) {
       await upsertAiSessionInsight({
         sessionId,
         projectKey,
-        reasoningMode: plannerDecision.reasoningMode,
-        outputMode: plannerDecision.outputMode,
-        scopeMode: plannerDecision.scopeMode,
-        clarificationMode: plannerDecision.clarificationMode,
-        plannedFeatureTarget: plannerDecision.featurePlan.target,
-        plannedQuestionTarget: plannerDecision.questionPlan.target,
+        reasoningMode,
+        outputMode,
         latestCoverageScore: latestDiscoveryCoverage?.overallScore ?? null,
         latestMissingCriticalCount: latestDiscoveryCoverage?.missingCritical?.length ?? 0,
         discoveryRounds: Array.isArray(latestDiscoveryTranscript) ? latestDiscoveryTranscript.length : undefined,
@@ -328,7 +228,6 @@ export async function handler(event: { body: GenerationEvent }) {
           ? latestDiscoveryTranscript.reduce((sum, round) => sum + (Array.isArray(round?.answers) ? round.answers.length : 0), 0)
           : undefined,
         generatedFeatureCount: result.features.length,
-        initiativeGroupCount: result.initiativeGroups?.length ?? 0,
       });
 
       await recordGeneration();
@@ -354,22 +253,16 @@ export async function handler(event: { body: GenerationEvent }) {
           projectKey,
           requirementExcerpt: maskedRequirement.text.slice(0, 240),
           decisionSummary: [
-            `Planner classified this request as ${plannerDecision.scopeMode} with ${plannerDecision.featurePlan.target} target feature(s).`,
-            `Generated features using ${goldItems.length} curated examples and ${similarStories.length} backlog references.`,
-            `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
-            result.initiativeGroups?.length
-              ? `Organized the output into ${result.initiativeGroups.length} initiative group(s) for easier backlog review.`
-              : 'Returned a flat feature list because no initiative grouping was needed.',
-            'Acceptance requirements were produced in a dedicated second pass for consistency.',
+            'Generated features and acceptance requirements in a single prompt-driven pass.',
+            `Applied ${wiContext.docs.length} work instruction documents and ${similarStories.length} backlog references.`,
+            `Produced ${result.features.length} feature${result.features.length === 1 ? '' : 's'} with validation checks after generation.`,
           ],
           contextUsage: {
-            goldExamplesCount: goldItems.length,
             similarStoriesCount: similarStories.length,
             wiDocsCount: wiContext.docs.length,
             domainRolesCount: config.domainRoles?.length ?? 0,
-            scopeMode: plannerDecision.scopeMode,
-            featureTarget: plannerDecision.featurePlan.target,
-            initiativeGroupCount: result.initiativeGroups?.length ?? 0,
+            reasoningMode,
+            outputMode,
           },
           tokenUsage: result.tokenUsage,
           piiMasking: {
@@ -391,9 +284,9 @@ export async function handler(event: { body: GenerationEvent }) {
           sessionId,
           projectKey,
           model: config.generatorConfig.arModel,
-          scopeMode: plannerDecision.scopeMode,
-          featureTarget: plannerDecision.featurePlan.target,
-          initiativeGroupCount: result.initiativeGroups?.length ?? 0,
+          reasoningMode,
+          outputMode,
+          featureCount: result.features.length,
         },
         enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
       });
@@ -408,7 +301,6 @@ export async function handler(event: { body: GenerationEvent }) {
     } catch (tailErr) {
       console.warn('[generation-queue] Non-blocking post-processing failed:', tailErr);
     }
-
   } catch (err) {
     console.error('[generation-queue] Error:', err);
     await writeGenerationProgress(sessionId, runId, {
@@ -418,8 +310,6 @@ export async function handler(event: { body: GenerationEvent }) {
     });
   }
 }
-
-// ─── Conversation history helpers ─────────────────────────────────────────────
 
 async function saveConversationTurn(
   sessionId: string,
@@ -445,8 +335,6 @@ async function saveConversationTurn(
       timestamp: new Date().toISOString(),
     });
     await entitySet(key, existing);
-
-    // Update per-user conversation index
     await updateConversationIndex(sessionId, accountId, normalizeConversationTitle('', requirement));
   } catch (err) {
     console.warn('[generation-queue] Failed to save conversation turn:', err);
@@ -462,10 +350,9 @@ async function updateConversationTitle(sessionId: string, accountId: string, tit
       await entitySet(key, existing);
     }
 
-    // Update per-user index with title
     const indexKey = KEYS.userConversationIndex(accountId);
     const index = await entityGet<ConvIndex[]>(indexKey) ?? [];
-    const entry = index.find(e => e.sessionId === sessionId);
+    const entry = index.find((e) => e.sessionId === sessionId);
     if (entry) {
       entry.title = title;
       await entitySet(indexKey, index);
@@ -486,14 +373,13 @@ async function updateConversationIndex(sessionId: string, accountId: string, tit
   try {
     const indexKey = KEYS.userConversationIndex(accountId);
     const index = await entityGet<ConvIndex[]>(indexKey) ?? [];
-    const existing = index.find(e => e.sessionId === sessionId);
+    const existing = index.find((e) => e.sessionId === sessionId);
     if (existing) {
       existing.updatedAt = new Date().toISOString();
       existing.turnCount = (existing.turnCount ?? 0) + 1;
     } else {
       index.unshift({ sessionId, title, updatedAt: new Date().toISOString(), turnCount: 1 });
     }
-    // Keep last 100 conversations per user in index
     await entitySet(indexKey, index.slice(0, 100));
   } catch {
     // ignore

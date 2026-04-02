@@ -1,10 +1,9 @@
 /**
- * Two-pass feature generation pipeline.
+ * Story generation pipeline.
  *
- * Pass 1: Decompose requirement into features (summary, description, process_code, story_points)
- * Pass 2: Write GIVEN/WHEN/THEN acceptance requirements for each feature
- *
- * All LLM calls route through the configured provider abstraction.
+ * Clarify and generation are now self-calibrating prompt flows. Deep mode can
+ * still run multi-round discovery via sufficiency evaluation, but feature
+ * generation itself happens in a single LLM pass.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -16,26 +15,19 @@ import {
   GenerationResult,
   DiscoveryCoverageDimension,
   DiscoveryCoverageResult,
-  InitiativeGroup,
-  PlannerDecision,
   ScopeMode,
-  ValidationViolation,
   TokenUsageSummary,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
-import { buildHeuristicPlannerDecision, buildPlannerDecision } from './planner';
+import { buildPlannerContext } from './planner';
 import {
-  buildDecompositionSystemPrompt,
-  buildDecompositionRepairSystemPrompt,
-  buildArSystemPrompt,
+  buildGenerationSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
-  buildInitiativeGroupingSystemPrompt,
   buildRefineSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
-  formatGoldExample,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 
@@ -52,14 +44,6 @@ interface RawFeature {
   process_code?: string;
 }
 
-interface RawInitiativeGroup {
-  id?: string;
-  title?: string;
-  summary?: string;
-  feature_ids?: unknown[];
-  featureIds?: unknown[];
-}
-
 interface RawCoverageDimension {
   key?: string;
   label?: string;
@@ -74,29 +58,6 @@ interface ClarifyQuestionPlan {
   max: number;
   target: number;
   clarity: 'clear' | 'medium' | 'vague';
-}
-
-interface FeaturePlan {
-  min: number;
-  max: number;
-  target: number;
-  shape: 'narrow' | 'balanced' | 'broad';
-  complexity: 'low' | 'medium' | 'high';
-}
-
-interface ArPlan {
-  min: number;
-  max: number;
-  target: number;
-  depth: 'lean' | 'standard' | 'thorough';
-}
-
-interface ClarifyAmbiguityAssessment {
-  level: 'clear' | 'medium' | 'vague';
-  score: number;
-  reasons: string[];
-  questionPlan: { min: number; max: number; target: number };
-  generatedQuestions: number;
 }
 
 const CLARIFY_CATEGORY_ORDER = [
@@ -511,35 +472,6 @@ function sumUsage(usages: Array<{ input: number; output: number }>) {
   );
 }
 
-function resolveArBatchPlan(reasoningMode: PlannerDecision['reasoningMode'], featureCount: number) {
-  const batchSize = reasoningMode === 'deep'
-    ? (featureCount >= 7 ? 3 : 4)
-    : (featureCount >= 4 ? 2 : 3);
-  const batches = chunkArray(Array.from({ length: featureCount }), batchSize).length;
-  const batchTimeoutMs = reasoningMode === 'deep' ? 90000 : 45000;
-  return { batchSize, batches, batchTimeoutMs };
-}
-
-
-function resolveGenerationStageTimeouts(reasoningMode: PlannerDecision['reasoningMode']) {
-  // These are safety-net timeouts to catch genuine hangs (network issues, unresponsive model),
-  // NOT performance targets. Real calls can legitimately take 60-120s on deep mode.
-  // The queue has 900s total, so there is plenty of headroom.
-  if (reasoningMode === 'deep') {
-    return {
-      pass1Ms: 120000,   // 2 min — Opus decomposition with large context
-      pass2Ms: 240000,   // 4 min — Opus AR writing for a broad initiative
-      groupingMs: 45000,
-    };
-  }
-
-  return {
-    pass1Ms: 90000,    // 90s — Sonnet decomposition
-    pass2Ms: 150000,   // 2.5 min — Sonnet AR writing
-    groupingMs: 30000,
-  };
-}
-
 function truncateContext(text: string, maxChars: number): string {
   if (!text) return '';
   return text.length > maxChars ? `${text.slice(0, maxChars)}\n...[truncated]` : text;
@@ -550,53 +482,28 @@ function buildGenerationContextSections(opts: {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   wiContextText: string;
-  goldExamplesText: string;
   similarStoriesText: string;
-  mode: 'pass1' | 'pass2';
-  reasoningMode: PlannerDecision['reasoningMode'];
 }): string[] {
-  // Pass 1 (decomposition): full context — gold examples and similar stories inform the feature shape.
-  // Pass 2 (AR writing): lean context — the features from pass 1 already carry the decomposition
-  //   reasoning; pass 2 only needs the requirement, Q&A, and a small WI excerpt for domain accuracy.
-  const budgets = opts.mode === 'pass1'
-    ? (
-      opts.reasoningMode === 'deep'
-        ? { attachment: 5000, wi: 12000, gold: 6000, similar: 5000 }
-        : { attachment: 1800, wi: 4500, gold: 2400, similar: 1800 }
-    )
-    : (
-      // Pass 2 only needs WI context — it grounds ARs in real process steps and conditions.
-      // Gold examples and similar stories were already used in pass 1.
-      opts.reasoningMode === 'deep'
-        ? { attachment: 600, wi: 4000, gold: 0, similar: 0 }
-        : { attachment: 400, wi: 2500, gold: 0, similar: 0 }
-    );
-
   const sections: string[] = [`REQUIREMENT: ${opts.requirement}`];
 
   if (opts.clarifyAnswers.length) {
     const qaText = opts.clarifyAnswers
-      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
+      .map((a) => `Q: ${a.question}\nA: ${a.answer}`)
       .join('\n\n');
     sections.push(`CLARIFICATION Q&A:\n${qaText}`);
   }
 
   if (opts.attachmentText) {
-    sections.push(`ATTACHMENT CONTEXT:\n${truncateContext(opts.attachmentText, budgets.attachment)}`);
+    sections.push(`ATTACHMENT CONTEXT:\n${truncateContext(opts.attachmentText, 3000)}`);
   }
 
   if (opts.wiContextText) {
-    sections.push(`WORK INSTRUCTIONS:\n${truncateContext(opts.wiContextText, budgets.wi)}`);
+    sections.push(`WORK INSTRUCTIONS:\n${truncateContext(opts.wiContextText, 10000)}`);
   }
 
-  if (opts.mode === 'pass1' && opts.goldExamplesText) {
-    sections.push(`GOLD STANDARD EXAMPLES (for high-level format reference):\n${truncateContext(opts.goldExamplesText, budgets.gold)}`);
+  if (opts.similarStoriesText) {
+    sections.push(`SIMILAR STORIES FROM BACKLOG:\n${truncateContext(opts.similarStoriesText, 4000)}`);
   }
-
-  if (opts.mode === 'pass1' && opts.similarStoriesText) {
-    sections.push(`SIMILAR STORIES FROM BACKLOG (for business context and writing style cues):\n${truncateContext(opts.similarStoriesText, budgets.similar)}`);
-  }
-  // Pass 2 does not need similar stories — features from pass 1 already reflect that context.
 
   return sections;
 }
@@ -633,57 +540,22 @@ function buildFallbackDescription(requirement: string, config: TenantConfig): st
   return `As a ${role}, I need to complete the requested business process with the right rules and decisions so that ${benefit}`;
 }
 
-function fallbackStoryPoints(complexity: FeaturePlan['complexity']): number {
-  if (complexity === 'high') return 8;
-  if (complexity === 'medium') return 5;
-  return 3;
-}
-
-function buildFallbackFeatureCandidates(
-  requirement: string,
-  config: TenantConfig,
-  decision: PlannerDecision,
-): RawFeature[] {
+function buildFallbackAcceptanceRequirements(): string[] {
   return [
-    {
-      summary: buildFallbackFeatureSummary(requirement),
-      description: buildFallbackDescription(requirement, config),
-      acceptance_requirements: [],
-      suggested_story_points: fallbackStoryPoints(decision.featurePlan.complexity),
-      process_code:
-        config.processTaxonomyEnabled && config.processTaxonomy.length
-          ? config.processTaxonomy[0].code
-          : undefined,
-    },
+    'GIVEN a valid business case exists and the required information is available WHEN the requested capability is initiated THEN the responsible role receives the expected business outcome',
+    'GIVEN the request is subject to defined business rules or prioritization criteria WHEN the capability evaluates the case THEN the resulting outcome follows those rules consistently',
+    'GIVEN the request cannot be completed under current conditions or contains conflicting information WHEN the capability is assessed THEN the case is clearly flagged for the appropriate follow-up action',
   ];
 }
 
-function buildFallbackAcceptanceRequirements(arPlan: ArPlan): string[] {
-  const templates = [
-    'GIVEN a valid business case exists and the required information is available WHEN the requested business capability is initiated THEN the expected business outcome is delivered for the responsible role',
-    'GIVEN the request is subject to defined business rules or prioritization criteria WHEN the requested business capability evaluates the case THEN the resulting outcome follows those rules consistently',
-    'GIVEN the request cannot be completed under the current conditions or contains conflicting information WHEN the requested business capability is assessed THEN the case is clearly flagged for the appropriate follow-up action',
-    'GIVEN the outcome affects approvals, ownership, or downstream responsibilities WHEN the requested business capability reaches a decision THEN the correct business party receives the resulting responsibility',
-    'GIVEN the request depends on related business context or upstream activity WHEN the requested business capability processes the case THEN the outcome remains consistent with that connected business context',
-  ];
-
-  const target = Math.max(2, Math.min(arPlan.target, arPlan.depth === 'thorough' ? 4 : 3));
-  return templates.slice(0, target);
-}
-
-function ensureAcceptanceRequirements(
-  rawFeatures: RawFeature[],
-  arPlan: ArPlan,
-): RawFeature[] {
-  const minimumRequired = Math.max(2, Math.min(arPlan.min, arPlan.depth === 'thorough' ? 4 : 3));
-
+function ensureAcceptanceRequirements(rawFeatures: RawFeature[]): RawFeature[] {
   return rawFeatures.map((feature) => {
     const existing = getRawAcceptanceArray(feature);
-    if (existing.length >= minimumRequired) {
+    if (existing.length >= 2) {
       return feature;
     }
 
-    const fallbacks = buildFallbackAcceptanceRequirements(arPlan).slice(0, minimumRequired - existing.length);
+    const fallbacks = buildFallbackAcceptanceRequirements().slice(0, 2 - existing.length);
     return {
       ...feature,
       acceptance_requirements: [...existing, ...fallbacks],
@@ -691,55 +563,65 @@ function ensureAcceptanceRequirements(
   });
 }
 
-function clampFeatureCandidates(rawFeatures: RawFeature[], featurePlan: FeaturePlan): RawFeature[] {
-  if (featurePlan.max <= 0) return [];
-  return rawFeatures.slice(0, featurePlan.max);
+function estimateFallbackStoryPoints(requirement: string): number {
+  const words = requirement.trim().split(/\s+/).filter(Boolean).length;
+  if (words >= 120) return 8;
+  if (words >= 50) return 5;
+  return 3;
 }
 
-function countRoleNarratives(text: string): number {
-  return (text.match(/\bAs a[n]?\b/gi) ?? []).length;
-}
-
-function hasCompoundFeatureSignals(feature: RawFeature): boolean {
-  const summary = cleanModelText(feature.summary ?? '').toLowerCase();
-  const description = cleanModelText(feature.description ?? '');
-  const roleNarratives = countRoleNarratives(description);
-  const compoundSummary =
-    /\b(and|plus|across|including)\b/i.test(summary) &&
-    /(access|permissions?|approval|audit|notification|report|view|edit|create|update|delete|sync|integration)/i.test(summary);
-
-  return roleNarratives > 1 || compoundSummary;
-}
-
-function shouldRepairDecomposition(rawFeatures: RawFeature[], featurePlan: FeaturePlan): boolean {
-  if (featurePlan.min <= 1) return rawFeatures.some(hasCompoundFeatureSignals);
-  if (rawFeatures.length < featurePlan.min) return true;
-  return rawFeatures.some(hasCompoundFeatureSignals);
-}
-
-async function runDecompositionPass(opts: {
-  systemPrompt: string;
-  userMessage: string;
-  config: TenantConfig;
-  timeoutMs: number;
-}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
-  const result = await Promise.race([
-    callLlmJsonWithUsage<{ features: RawFeature[] }>({
-      model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
-      systemPrompt: opts.systemPrompt,
-      userMessage: opts.userMessage,
-      maxTokens: Math.min(opts.config.generatorConfig.maxTokens, 3500),
-      timeoutMs: opts.timeoutMs,
-      geminiThinkingBudget: 16000,
-      ...getProviderOpts(opts.config),
-    }),
-    throwAfterTimeout(opts.timeoutMs, 'Pass 1 (decomposition)'),
-  ]);
-
+function buildFallbackFeatureCandidate(requirement: string, config: TenantConfig): RawFeature {
   return {
-    features: result.data.features ?? [],
-    usage: result.usage,
+    summary: buildFallbackFeatureSummary(requirement),
+    description: buildFallbackDescription(requirement, config),
+    acceptance_requirements: buildFallbackAcceptanceRequirements(),
+    suggested_story_points: estimateFallbackStoryPoints(requirement),
   };
+}
+
+function resolveClarifyQuestionPlan(input: {
+  requirement: string;
+  attachmentText: string;
+  wiContextText: string;
+  similarStoriesText: string;
+  outputMode: 'single' | 'auto' | 'full_breakdown';
+}): ClarifyQuestionPlan {
+  if (input.outputMode === 'single') {
+    return { min: 3, max: 5, target: 4, clarity: 'clear' };
+  }
+
+  const words = input.requirement.trim().split(/\s+/).filter(Boolean).length;
+  const paragraphs = input.requirement.split(/\n{2,}/).filter((part) => part.trim().length > 0).length;
+  const bullets = (input.requirement.match(/^[\s*-]+/gm) ?? []).length;
+  const multiClauseSignals =
+    (input.requirement.match(/\b(and|or|while|except|unless|approval|notification|integration|exception|rule|workflow)\b/gi) ?? []).length;
+  const contextSignals = Number(Boolean(input.attachmentText.trim())) + Number(Boolean(input.wiContextText.trim())) + Number(Boolean(input.similarStoriesText.trim()));
+  const complexityScore = Number(words > 90) + Number(paragraphs > 1) + Number(bullets > 2) + Number(multiClauseSignals >= 4) + Number(contextSignals >= 2);
+
+  if (complexityScore >= 3 || input.outputMode === 'full_breakdown') {
+    return { min: 8, max: 12, target: 10, clarity: 'vague' };
+  }
+  if (complexityScore >= 1 || words > 35) {
+    return { min: 5, max: 8, target: 6, clarity: 'medium' };
+  }
+  return { min: 3, max: 5, target: 4, clarity: 'clear' };
+}
+
+function inferScopeMode(requirement: string, answers: ClarifyAnswer[], outputMode: 'single' | 'auto' | 'full_breakdown'): ScopeMode {
+  if (outputMode === 'single') return 'atomic';
+
+  const words = requirement.trim().split(/\s+/).filter(Boolean).length;
+  const answerCount = answers.length;
+  const complexitySignals =
+    Number(words > 140) +
+    Number(answerCount >= 6) +
+    Number((requirement.match(/\b(and|across|multiple|roles|workflow|approval|notification|exception|integration)\b/gi) ?? []).length >= 4);
+
+  if (outputMode === 'full_breakdown' && complexitySignals >= 2) return 'initiative';
+  if (complexitySignals >= 3) return 'initiative';
+  if (complexitySignals >= 2) return 'standard';
+  if (complexitySignals >= 1) return 'focused';
+  return 'atomic';
 }
 
 const DISCOVERY_DIMENSIONS: Array<{ key: DiscoveryCoverageDimension['key']; label: string }> = [
@@ -884,181 +766,31 @@ function normaliseCoverageResult(rawData: unknown, questions: ClarifyQuestion[],
   };
 }
 
-function parseInitiativeGroupCandidates(rawData: unknown): RawInitiativeGroup[] {
-  if (Array.isArray(rawData)) return rawData as RawInitiativeGroup[];
-  if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).groups)) {
-    return (rawData as any).groups as RawInitiativeGroup[];
-  }
-  return [];
-}
-
-function buildFallbackInitiativeGroups(features: Feature[]): InitiativeGroup[] {
-  if (!features.length) return [];
-  return [
-    {
-      id: uuidv4(),
-      title: 'Initiative backlog',
-      summary: 'Grouped view was unavailable, so the generated backlog is shown as one initiative section.',
-      featureIds: features.map(feature => feature.id),
-    },
-  ];
-}
-
-function normaliseInitiativeGroups(rawData: unknown, features: Feature[]): InitiativeGroup[] {
-  const candidates = parseInitiativeGroupCandidates(rawData);
-  const featureIds = new Set(features.map(feature => feature.id));
-  const assigned = new Set<string>();
-  const groups: InitiativeGroup[] = [];
-
-  candidates.forEach((candidate, index) => {
-    if (!candidate || typeof candidate !== 'object') return;
-    const title = String(candidate.title ?? '').trim();
-    if (!title) return;
-
-    const rawFeatureIds = Array.isArray(candidate.feature_ids)
-      ? candidate.feature_ids
-      : Array.isArray(candidate.featureIds)
-        ? candidate.featureIds
-        : [];
-
-    const featureIdsForGroup = rawFeatureIds
-      .map(value => String(value ?? '').trim())
-      .filter(Boolean)
-      .filter(id => featureIds.has(id))
-      .filter(id => {
-        if (assigned.has(id)) return false;
-        assigned.add(id);
-        return true;
-      });
-
-    if (!featureIdsForGroup.length) return;
-
-    groups.push({
-      id: String(candidate.id ?? '').trim() || uuidv4(),
-      title,
-      summary: String(candidate.summary ?? '').trim() || `Group ${index + 1}`,
-      featureIds: featureIdsForGroup,
-    });
-  });
-
-  const unassigned = features
-    .map(feature => feature.id)
-    .filter(id => !assigned.has(id));
-
-  if (unassigned.length) {
-    if (groups.length) {
-      groups[groups.length - 1] = {
-        ...groups[groups.length - 1],
-        featureIds: [...groups[groups.length - 1].featureIds, ...unassigned],
-      };
-    } else {
-      return buildFallbackInitiativeGroups(features);
-    }
-  }
-
-  return groups;
-}
-
-async function buildInitiativeGroups(opts: {
-  requirement: string;
-  features: Feature[];
-  config: TenantConfig;
-}): Promise<{ initiativeGroups: InitiativeGroup[]; tokenUsage?: TokenUsageSummary }> {
-  const { requirement, features, config } = opts;
-
-  if (features.length <= 1) {
-    return { initiativeGroups: buildFallbackInitiativeGroups(features) };
-  }
-
-  const systemPrompt = buildInitiativeGroupingSystemPrompt({
-    domainContext: config.domainContext,
-    featureCount: features.length,
-  });
-
-  const userMessage = [
-    `REQUIREMENT: ${requirement}`,
-    `FEATURES:\n${JSON.stringify(features.map(feature => ({
-      id: feature.id,
-      summary: feature.summary,
-      description: feature.description,
-      storyPoints: feature.storyPoints,
-      processCode: feature.processCode,
-    })), null, 2)}`,
-  ].join('\n\n---\n\n');
-
-  try {
-    const result = await callLlmJsonWithUsage<{ groups?: RawInitiativeGroup[] } | RawInitiativeGroup[]>({
-      model: getTierModel(config.generatorConfig.themeModel, config.tier),
-      systemPrompt,
-      userMessage,
-      maxTokens: 1024,
-      timeoutMs: 15000,
-      geminiThinkingBudget: 0,
-      ...getProviderOpts(config),
-    });
-
-    const initiativeGroups = normaliseInitiativeGroups(result.data, features);
-
-    return {
-      initiativeGroups: initiativeGroups.length ? initiativeGroups : buildFallbackInitiativeGroups(features),
-      tokenUsage: {
-        input: result.usage.input,
-        output: result.usage.output,
-        total: result.usage.input + result.usage.output,
-        byStage: {
-          initiativeGrouping: toStageUsage(result.usage),
-        },
-      },
-    };
-  } catch (error) {
-    console.warn('[story-generator] Initiative grouping failed; falling back to a single section:', error);
-    return { initiativeGroups: buildFallbackInitiativeGroups(features) };
-  }
-}
-
 // ─── Main Generation ──────────────────────────────────────────────────────────
 
 export async function generateFeatures(opts: {
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
-  goldExamplesText: string;
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
   reasoningMode?: 'fast' | 'deep';
   outputMode?: 'single' | 'auto' | 'full_breakdown';
-  plannerDecision?: PlannerDecision;
-  onPass1Complete?: (payload: {
-    featureCount: number;
-    draftFeatures: Feature[];
-    arBatchCount: number;
-  }) => Promise<void>;
 }): Promise<GenerationResult> {
   const {
     requirement,
     clarifyAnswers,
     attachmentText,
-    goldExamplesText,
     similarStoriesText,
     wiContextText,
     config,
     reasoningMode,
     outputMode,
-    plannerDecision,
-    onPass1Complete,
   } = opts;
-  const { generatorConfig } = config;
-  const decision = plannerDecision ?? buildHeuristicPlannerDecision({
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    goldExamplesText,
-    similarStoriesText,
+  const resolved = buildPlannerContext({
     reasoningMode: reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
     outputMode: outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
-    policy: config.aiExecutionPolicy,
   });
   const providerOpts = getProviderOpts(config);
 
@@ -1067,166 +799,53 @@ export async function generateFeatures(opts: {
     clarifyAnswers,
     attachmentText,
     wiContextText,
-    goldExamplesText,
     similarStoriesText,
-    mode: 'pass1',
-    reasoningMode: decision.reasoningMode,
   }).join('\n\n---\n\n');
 
-  // ── Pass 1: Decomposition ──
-  const pass1System = buildDecompositionSystemPrompt({
-    domainContext: config.domainContext,
-    domainRoles: config.domainRoles,
-    processTaxonomy: config.processTaxonomy,
-    processTaxonomyEnabled: config.processTaxonomyEnabled,
-    featurePlan: decision.featurePlan,
-  });
+  let rawFeatures: RawFeature[] = [];
+  let usage = { input: 0, output: 0 };
 
-  const stageTimeouts = resolveGenerationStageTimeouts(decision.reasoningMode);
+  try {
+    const result = await Promise.race([
+      callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+        model: getTierModel(config.generatorConfig.arModel, config.tier),
+        systemPrompt: buildGenerationSystemPrompt({
+          domainContext: config.domainContext,
+          domainRoles: config.domainRoles,
+          outputMode: resolved.outputMode,
+        }),
+        userMessage,
+        maxTokens: Math.min(config.generatorConfig.maxTokens, resolved.reasoningMode === 'deep' ? 5000 : 3800),
+        timeoutMs: 120000,
+        geminiThinkingBudget: resolved.reasoningMode === 'deep' ? 16000 : 8000,
+        ...providerOpts,
+      }),
+      throwAfterTimeout(120000, 'Feature generation'),
+    ]);
 
-  // Pass 1 produces features with empty AR arrays — 3 500 tokens is generous for up to ~15 features.
-  const pass1Result = await runDecompositionPass({
-    systemPrompt: pass1System,
-    userMessage,
-    config,
-    timeoutMs: stageTimeouts.pass1Ms,
-  });
-  let pass1Usage = pass1Result.usage;
-  let pass1Features = clampFeatureCandidates(pass1Result.features, decision.featurePlan);
-
-  if (shouldRepairDecomposition(pass1Features, decision.featurePlan)) {
-    const repairSystemPrompt = buildDecompositionRepairSystemPrompt({
-      domainContext: config.domainContext,
-      domainRoles: config.domainRoles,
-      processTaxonomy: config.processTaxonomy,
-      processTaxonomyEnabled: config.processTaxonomyEnabled,
-      featurePlan: decision.featurePlan,
-    });
-    const repairUserMessage = [
-      userMessage,
-      `PREVIOUS DECOMPOSITION (UNDER-SPLIT OR COMPOUND):\n${JSON.stringify(pass1Features, null, 2)}`,
-      `REPAIR INSTRUCTIONS:
-- The planner expected at least ${decision.featurePlan.min} and ideally ${decision.featurePlan.target} features.
-- Split any feature that combines multiple roles, permission levels, workflows, or independently testable outcomes.
-- Return only the repaired feature list in strict JSON.`,
-    ].join('\n\n---\n\n');
-
-    try {
-      const repairResult = await runDecompositionPass({
-        systemPrompt: repairSystemPrompt,
-        userMessage: repairUserMessage,
-        config,
-        timeoutMs: Math.min(stageTimeouts.pass1Ms, decision.reasoningMode === 'deep' ? 75000 : 45000),
-      });
-      const repairedFeatures = clampFeatureCandidates(repairResult.features, decision.featurePlan);
-      pass1Usage = sumUsage([pass1Usage, repairResult.usage]);
-      if (
-        repairedFeatures.length > pass1Features.length ||
-        !shouldRepairDecomposition(repairedFeatures, decision.featurePlan)
-      ) {
-        pass1Features = repairedFeatures;
-      }
-    } catch (repairError) {
-      console.warn('[story-generator] Decomposition repair pass failed; keeping initial pass 1 result:', repairError);
-    }
+    usage = result.usage;
+    rawFeatures = ensureAcceptanceRequirements(result.data.features ?? []);
+  } catch (error) {
+    console.warn('[story-generator] Single-pass feature generation failed; using fallback feature:', error);
   }
 
-  if (!pass1Features.length) {
-    throw new Error('Feature decomposition returned no valid features.');
+  if (!rawFeatures.length) {
+    rawFeatures = [buildFallbackFeatureCandidate(requirement, config)];
   }
 
-  const draftFeatures = pass1Features.map(normaliseFeature);
-  const arBatchPlan = resolveArBatchPlan(decision.reasoningMode, pass1Features.length);
-
-  if (onPass1Complete) {
-    await onPass1Complete({
-      featureCount: pass1Features.length,
-      draftFeatures,
-      arBatchCount: arBatchPlan.batches,
-    });
+  if (resolved.outputMode === 'single' && rawFeatures.length > 1) {
+    rawFeatures = [rawFeatures[0]];
   }
-
-  // ── Pass 2: Acceptance Requirements ──
-  const pass2System = buildArSystemPrompt({
-    domainContext: config.domainContext,
-    arPlan: decision.arPlan,
-  });
-  const pass2Context = buildGenerationContextSections({
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    goldExamplesText,
-    similarStoriesText,
-    mode: 'pass2',
-    reasoningMode: decision.reasoningMode,
-  }).join('\n\n---\n\n');
-  const pass2FeatureBatches = chunkArray(pass1Features, arBatchPlan.batchSize);
-
-  // Pass 2 writes ARs in smaller batches so fast mode stays responsive and one
-  // slow feature does not block the entire result set.
-  const pass2BatchResults = await Promise.all(
-    pass2FeatureBatches.map(async (featureBatch, batchIndex) => {
-      const pass2UserMessage = `${pass2Context}\n\n---\n\nFEATURES FROM PASS 1 BATCH ${batchIndex + 1}/${pass2FeatureBatches.length} (fill in acceptance_requirements for each and keep order unchanged):\n${JSON.stringify(featureBatch, null, 2)}`;
-
-      try {
-        const pass2Result = await Promise.race([
-          callLlmJsonWithUsage<{ features: RawFeature[] }>({
-            model: getTierModel(generatorConfig.arModel, config.tier),
-            systemPrompt: pass2System,
-            userMessage: pass2UserMessage,
-            maxTokens: Math.min(
-              generatorConfig.maxTokens,
-              decision.reasoningMode === 'deep'
-                ? Math.max(2400, featureBatch.length * 1200)
-                : Math.max(1800, featureBatch.length * 900),
-            ),
-            timeoutMs: Math.min(stageTimeouts.pass2Ms, arBatchPlan.batchTimeoutMs),
-            geminiThinkingBudget: 16000,
-            ...providerOpts,
-          }),
-          throwAfterTimeout(
-            Math.min(stageTimeouts.pass2Ms, arBatchPlan.batchTimeoutMs),
-            `Pass 2 batch ${batchIndex + 1} (acceptance requirements)`,
-          ),
-        ]);
-
-        const mergedBatch = pass2Result.data.features?.length
-          ? mergeFeatures(featureBatch, pass2Result.data.features)
-          : featureBatch;
-        return {
-          features: ensureAcceptanceRequirements(mergedBatch, decision.arPlan),
-          usage: pass2Result.usage,
-        };
-      } catch (pass2Err) {
-        console.warn(`[story-generator] Pass 2 batch ${batchIndex + 1} failed — using fallback ARs for that batch:`, pass2Err);
-        return {
-          features: ensureAcceptanceRequirements(featureBatch, decision.arPlan),
-          usage: { input: 0, output: 0 },
-        };
-      }
-    }),
-  );
-
-  const pass2Usage = sumUsage(pass2BatchResults.map(result => result.usage));
-  const rawFeatures = ensureAcceptanceRequirements(
-    pass2BatchResults.flatMap(result => result.features),
-    decision.arPlan,
-  );
 
   const features = rawFeatures.map(normaliseFeature);
-  if (!features.length) {
-    throw new Error('Acceptance requirement generation returned no valid features.');
-  }
   const violations = validateFeatures(features, config);
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Usage.input + pass2Usage.input,
-    output: pass1Usage.output + pass2Usage.output,
-    total: pass1Usage.input + pass1Usage.output + pass2Usage.input + pass2Usage.output,
+    input: usage.input,
+    output: usage.output,
+    total: usage.input + usage.output,
     byStage: {
-      decomposition: toStageUsage(pass1Usage),
-      acceptanceRequirements: toStageUsage(pass2Usage),
+      generation: toStageUsage(usage),
     },
   };
 
@@ -1235,7 +854,6 @@ export async function generateFeatures(opts: {
     violations,
     similarStories: [],   // filled in by the caller after this returns
     sessionId: uuidv4(),
-    plannerDecision: decision,
     tokenUsage,
   };
 }
@@ -1246,102 +864,59 @@ export async function generateClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
-  goldExamplesText: string;
   similarStoriesText: string;
   config: TenantConfig;
   reasoningMode?: 'fast' | 'deep';
   outputMode?: 'single' | 'auto' | 'full_breakdown';
-  plannerDecision?: PlannerDecision;
   timeoutMs?: number;
-}): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
+}): Promise<{ questions: ClarifyQuestion[]; tokenUsage?: TokenUsageSummary }> {
   const {
     requirement,
     attachmentText,
     wiContextText,
-    goldExamplesText,
     similarStoriesText,
     config,
     reasoningMode,
     outputMode,
-    plannerDecision,
     timeoutMs,
   } = opts;
-  const decision = plannerDecision ?? buildHeuristicPlannerDecision({
+  const resolved = buildPlannerContext({
+    reasoningMode: reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
+    outputMode: outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
+  });
+  const questionPlan = resolveClarifyQuestionPlan({
     requirement,
     attachmentText,
     wiContextText,
-    goldExamplesText,
     similarStoriesText,
-    reasoningMode: reasoningMode ?? config.aiExecutionPolicy.defaultReasoningMode,
-    outputMode: outputMode ?? config.aiExecutionPolicy.defaultOutputMode,
-    policy: config.aiExecutionPolicy,
+    outputMode: resolved.outputMode,
   });
-  const questionPlan = decision.questionPlan;
-  const desiredQuestionCount = Math.min(
-    questionPlan.max,
-    Math.max(questionPlan.min, questionPlan.target),
-  );
-  const includeBacklogContext = decision.reasoningMode !== 'deep' && decision.clarificationMode !== 'deep';
-  // WI context is the dominant signal for question quality — give it the most room.
-  // Deep clarify is intentionally closer to jira-story-assistant: requirement + WI
-  // are the main discovery inputs; backlog references stay out of the deep question
-  // prompt so the model can focus on ambiguity rather than example mimicry.
-  const contextCharBudget = decision.reasoningMode === 'deep'
-    ? { attachment: 3200, wi: 12000, gold: 0, similar: 0 }
-    : { attachment: 2800, wi: 8000, gold: 3200, similar: 3200 };
-  // jira-story-assistant capped clarify at 4096 output tokens. Keeping a real
-  // ceiling here prevents deep models from spending too much time on suggestion
-  // rendering and long JSON payloads.
-  const clarifyMaxTokens = decision.reasoningMode === 'deep' ? 4096 : 3072;
+  const desiredQuestionCount = Math.min(questionPlan.max, Math.max(questionPlan.min, questionPlan.target));
+  const clarifyMaxTokens = resolved.reasoningMode === 'deep' ? 4096 : 3072;
 
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
     `DISCOVERY TARGET: produce about ${desiredQuestionCount} clarifying questions.`,
   ];
-  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, contextCharBudget.attachment)}`);
-  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, contextCharBudget.wi)}`);
-  if (includeBacklogContext && goldExamplesText) {
-    contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, contextCharBudget.gold)}`);
-  }
-  if (includeBacklogContext && similarStoriesText) {
-    contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, contextCharBudget.similar)}`);
-  }
+  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 3000)}`);
+  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 8000)}`);
+  if (similarStoriesText) contextParts.push(`RELATED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 4000)}`);
   const domainSignals = extractDomainSignals([
     requirement,
     attachmentText.slice(0, 1200),
     wiContextText.slice(0, 2200),
-    includeBacklogContext ? goldExamplesText.slice(0, 2200) : '',
-    includeBacklogContext ? similarStoriesText.slice(0, 2200) : '',
+    similarStoriesText.slice(0, 2200),
     ...(config.domainRoles ?? []),
   ]);
   if (domainSignals.length) {
     contextParts.push(`DOMAIN SIGNALS TO REUSE: ${domainSignals.join(', ')}`);
   }
 
-  if (questionPlan.max <= 0) {
-    return {
-      questions: [],
-      tokenUsage: {
-        input: 0,
-        output: 0,
-        total: 0,
-        byStage: { clarify: { input: 0, output: 0, total: 0 } },
-      },
-      ambiguityAssessment: {
-        level: questionPlan.clarity,
-        score: decision.ambiguityScore,
-        reasons: decision.ambiguityReasons.slice(0, 4),
-        questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
-        generatedQuestions: 0,
-      },
-    };
-  }
-
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
     domainRoles: config.domainRoles,
     domainSignals,
-    questionPlan,
+    outputMode: resolved.outputMode,
   });
   let raw: Awaited<ReturnType<typeof callLlmJsonWithUsage<ClarifyQuestion[]>>>;
   try {
@@ -1351,7 +926,7 @@ export async function generateClarifyingQuestions(opts: {
       userMessage: contextParts.join('\n\n'),
       maxTokens: clarifyMaxTokens,
       timeoutMs,
-      geminiThinkingBudget: decision.reasoningMode === 'deep' ? 16000 : 8000,
+      geminiThinkingBudget: resolved.reasoningMode === 'deep' ? 16000 : 8000,
       ...getProviderOpts(config),
     });
   } catch (error) {
@@ -1365,24 +940,14 @@ export async function generateClarifyingQuestions(opts: {
         total: 0,
         byStage: { clarify: { input: 0, output: 0, total: 0 } },
       },
-      ambiguityAssessment: {
-        level: questionPlan.clarity,
-        score: decision.ambiguityScore,
-        reasons: [
-          ...decision.ambiguityReasons.slice(0, 3),
-          'Used fallback discovery questions after the model returned invalid clarify JSON.',
-        ].slice(0, 4),
-        questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
-        generatedQuestions: fallback.length,
-      },
     };
   }
 
-  const filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
+  const filteredQuestions = sortClarifyingQuestions(
+    dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max),
+  );
 
   if (filteredQuestions.length === 0) {
-    // LLM returned nothing parseable — fall back to domain-aware template questions
-    // so the user always sees something to answer rather than an error.
     console.warn('[generateClarifyingQuestions] LLM returned 0 valid questions; using fallback template.');
     const fallback = buildFallbackClarifyingQuestions(requirement, questionPlan);
     return {
@@ -1393,19 +958,7 @@ export async function generateClarifyingQuestions(opts: {
         total: raw.usage.input + raw.usage.output,
         byStage: { clarify: { input: raw.usage.input, output: raw.usage.output, total: raw.usage.input + raw.usage.output } },
       },
-      ambiguityAssessment: {
-        level: questionPlan.clarity,
-        score: decision.ambiguityScore,
-        reasons: decision.ambiguityReasons.slice(0, 4),
-        questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
-        generatedQuestions: fallback.length,
-      },
     };
-  }
-
-  if (filteredQuestions.length < questionPlan.min) {
-    // Fewer questions than ideal but still usable — proceed rather than throwing.
-    console.warn(`[generateClarifyingQuestions] LLM returned ${filteredQuestions.length} questions; target min was ${questionPlan.min}. Proceeding.`);
   }
 
   const totalTokens = raw.usage.input + raw.usage.output;
@@ -1418,13 +971,6 @@ export async function generateClarifyingQuestions(opts: {
       total: totalTokens,
       byStage: { clarify: { input: raw.usage.input, output: raw.usage.output, total: totalTokens } },
     },
-    ambiguityAssessment: {
-      level: questionPlan.clarity,
-      score: decision.ambiguityScore,
-      reasons: decision.ambiguityReasons.slice(0, 4),
-      questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
-      generatedQuestions: filteredQuestions.length,
-    },
   };
 }
 
@@ -1436,18 +982,11 @@ export async function evaluateSufficiency(opts: {
   config: TenantConfig;
   reasoningMode?: 'fast' | 'deep';
 }): Promise<DiscoveryCoverageResult> {
-  const decision = await buildPlannerDecision({
-    requirement: opts.requirement,
-    clarifyAnswers: opts.answers,
-    attachmentText: '',
-    wiContextText: '',
-    goldExamplesText: '',
-    similarStoriesText: '',
-    config: opts.config,
+  const resolved = buildPlannerContext({
     reasoningMode: opts.reasoningMode ?? opts.config.aiExecutionPolicy.defaultReasoningMode,
     outputMode: opts.config.aiExecutionPolicy.defaultOutputMode,
-    policy: opts.config.aiExecutionPolicy,
   });
+  const scopeMode = inferScopeMode(opts.requirement, opts.answers, resolved.outputMode);
   const qaText = opts.answers
     .map(a => `Q: ${a.question}\nA: ${a.answer}`)
     .join('\n\n');
@@ -1463,7 +1002,7 @@ export async function evaluateSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildEvaluateSystemPrompt({
       domainContext: opts.config.domainContext,
-      scopeMode: decision.scopeMode,
+      scopeMode,
     }),
     userMessage,
     maxTokens: 2048,
@@ -1473,7 +1012,7 @@ export async function evaluateSufficiency(opts: {
   });
 
   const questions = dedupeQuestions(parseQuestionCandidates(result.data)).slice(0, 5);
-  const coverage = normaliseCoverageResult(result.data, questions, decision.scopeMode);
+  const coverage = normaliseCoverageResult(result.data, questions, scopeMode);
 
   return {
     ...coverage,
@@ -1750,30 +1289,6 @@ function parseArString(s: string): { given: string; when: string; then: string }
  * Merge pass1 and pass2: prefer pass2's ARs, keep pass1's metadata.
  * Matches by array index when summaries align; otherwise matches by summary text.
  */
-function mergeFeatures(pass1: RawFeature[], pass2: RawFeature[]): RawFeature[] {
-  if (!pass2.length) return pass1;
-  return pass1.map((f1, i) => {
-    const k = (f1.summary ?? '').trim().toLowerCase();
-    const atI = pass2[i];
-    const byIndexOk =
-      atI && (atI.summary ?? '').trim().toLowerCase() === k ? atI : undefined;
-    const byName = k ? pass2.find(f => (f.summary ?? '').trim().toLowerCase() === k) : undefined;
-    const f2 =
-      byIndexOk ??
-      byName ??
-      (pass2.length === pass1.length ? atI : undefined);
-    if (!f2) return f1;
-    const ar2 = getRawAcceptanceArray(f2);
-    const ar1 = getRawAcceptanceArray(f1);
-    return {
-      ...f1,
-      acceptance_requirements: ar2.length ? (ar2 as string[]) : (ar1 as string[]),
-    };
-  });
-}
-
-export { formatGoldExample };
-
 export function normalizeConversationTitle(candidate: string, requirement: string): string {
   const cleaned = String(candidate ?? '')
     .replace(/^["']|["']$/g, '')

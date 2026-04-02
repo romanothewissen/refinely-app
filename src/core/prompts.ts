@@ -1,13 +1,10 @@
 /**
  * All LLM prompts for the story generator.
  *
- * BSC-specific content (Salesforce, ServiceMax, SAP, BSC references) has been
- * removed. Domain context is injected dynamically from tenant configuration.
+ * Domain context is injected dynamically from tenant configuration.
  */
 
 import { ProcessCode, ScopeMode } from '../types';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function platformContextBlock(domainContext: string): string {
   if (!domainContext || !domainContext.trim()) return '';
@@ -19,88 +16,27 @@ export function processTaxonomyBlock(taxonomy: ProcessCode[]): string {
   const lines = [
     'PROCESS TAXONOMY — assign each feature exactly one code from this list:',
     '',
-    ...taxonomy.map(p => `  ${p.code}  ${p.name}: ${p.definition}`),
+    ...taxonomy.map((p) => `  ${p.code}  ${p.name}: ${p.definition}`),
     '',
     '- Each feature MUST include a process_code from this list (never invent a code)',
   ];
   return lines.join('\n');
 }
 
-export function formatGoldExample(item: {
-  summary?: string;
-  description?: string;
-  acceptance_criteria?: string;
-  story_points?: number;
-}, descMax?: number, acMax?: number): string {
-  let desc = item.description || '(no description)';
-  if (descMax && desc.length > descMax) desc = desc.slice(0, descMax) + '…';
-
-  const lines = [
-    `Example Feature: ${item.summary || ''}`,
-    `Description: ${desc}`,
-    'Acceptance Requirements:',
-  ];
-
-  let ac = item.acceptance_criteria || '';
-  if (ac) {
-    if (acMax && ac.length > acMax) ac = ac.slice(0, acMax) + '…';
-    for (const line of ac.trim().split('\n')) {
-      const t = line.trim();
-      if (t && (t.startsWith('-') || t.startsWith('*') || /GIVEN|WHEN|THEN/i.test(t))) {
-        lines.push(`  - ${t.replace(/^[-*]\s*/, '')}`);
-      } else if (t) {
-        lines.push(`  - ${t}`);
-      }
-    }
-  } else {
-    lines.push('  - (none)');
-  }
-
-  if (item.story_points != null) lines.push(`(Story points: ${item.story_points})`);
-  return lines.join('\n');
-}
-
-// ─── Pass 1: Decomposition ────────────────────────────────────────────────────
-
-export function buildDecompositionSystemPrompt(opts: {
+export function buildGenerationSystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
-  processTaxonomy: ProcessCode[];
-  processTaxonomyEnabled: boolean;
-  featurePlan?: {
-    min: number;
-    max: number;
-    target: number;
-    shape: 'narrow' | 'balanced' | 'broad';
-    complexity: 'low' | 'medium' | 'high';
-  };
+  outputMode: 'single' | 'auto' | 'full_breakdown';
 }): string {
   const roleList = opts.domainRoles.length
     ? `Roles in this domain: ${opts.domainRoles.join(', ')}.`
     : 'Infer appropriate business roles from the requirement context.';
 
-  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
-    ? processTaxonomyBlock(opts.processTaxonomy)
-    : '';
-
-  const processRule = opts.processTaxonomyEnabled && opts.processTaxonomy.length
-    ? '- Each feature MUST include a process_code from the taxonomy above (never invent a code)'
-    : '- Omit process_code from output';
-
-  const planningGuidance = opts.featurePlan
-    ? `OUTPUT CALIBRATION:
-- The requirement shape appears: ${opts.featurePlan.shape.toUpperCase()}
-- The requirement complexity appears: ${opts.featurePlan.complexity.toUpperCase()}
-- Aim for ${opts.featurePlan.min}-${opts.featurePlan.max} features (target ${opts.featurePlan.target})
-- If the requirement is narrow, do NOT split into trivial or UI-level features
-- If the requirement is broad, include supporting capabilities only when they are independently deliverable`
-    : '';
-
-  return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
+  return `You are a principal business analyst, product manager, and QA lead generating Jira-ready backlog features.
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
 
-YOUR JOB: Calibrate the output to the real size of the request. Some asks should produce exactly one strong feature. Other asks need a broader breakdown. Think deeply, but do not split a narrow request into trivial or UI-level features.
+YOUR JOB: Calibrate the output to the real size of the request. Some asks should produce one comprehensive feature. Other asks require a broader breakdown. Generate complete features with acceptance requirements in one pass.
 
 DECOMPOSITION FRAMEWORK — reason through each dimension:
 1. CORE CAPABILITY: What is the primary thing being requested?
@@ -112,110 +48,41 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 
 Each dimension that represents a distinct, deliverable capability should become its own feature. Use judgment — not every dimension needs a separate feature, and a tightly bounded request may still be best expressed as a single feature.
 
-RULES:
+OUTPUT CALIBRATION — match the output to the real scope:
+- Narrow, bounded request → 1-2 features, 2-3 acceptance requirements each
+- Medium scope → 3-5 features, 3-4 acceptance requirements each
+- Broad or initiative-level → 5-10 features, 3-5 acceptance requirements each
+- If output mode is "single" → exactly 1 comprehensive feature
+- If output mode is "full_breakdown" → lean toward more granular decomposition
+Do NOT over-split a narrow request into trivial features. Do NOT under-specify a broad request.
+
+FEATURE RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - One feature = one primary business capability for one primary role or role family
 - If materially different roles need different permissions, outcomes, or flows, split them into separate features
 - If the ask combines edit access, read-only access, approvals, auditability, notifications, or exception handling, split those into separate features when they are independently deliverable
-- Use business roles appropriate to the domain (from the list above if provided)
-- No solution language: no buttons, screens, fields, forms, APIs, databases, system names
+- Use business roles appropriate to the domain
+- No solution language: no buttons, screens, fields, forms, APIs, databases, or technical implementation details
 - No system-specific terms: no product names, module names, or object names
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
-- Do NOT write acceptance_requirements — leave them as empty arrays
-- Never include more than one "As a ..." role narrative in a single description
-${processRule}
-${planningGuidance ? `\n${planningGuidance}` : ''}
 
-${taxonomySection}
+ACCEPTANCE REQUIREMENT RULES:
+- Every acceptance requirement MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
+- Capture the happy path, key business rules, and practical failure or edge cases
+- Write as business outcomes, not implementation steps
+- Be conceptual — describe patterns, not example values
+- The GIVEN must describe a real-world business situation, not a system configuration state
+- Each acceptance requirement tests one distinct thing
 
-Think step by step about the full scope of this requirement, then output JSON:
-{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+Output strict JSON only:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ...", "..."], "suggested_story_points": N}]}`;
 }
-
-export function buildDecompositionRepairSystemPrompt(opts: {
-  domainContext: string;
-  domainRoles: string[];
-  processTaxonomy: ProcessCode[];
-  processTaxonomyEnabled: boolean;
-  featurePlan: {
-    min: number;
-    max: number;
-    target: number;
-    shape: 'narrow' | 'balanced' | 'broad';
-    complexity: 'low' | 'medium' | 'high';
-  };
-}): string {
-  return `${buildDecompositionSystemPrompt(opts)}
-
-DECOMPOSITION REPAIR MODE:
-- A previous attempt merged distinct capabilities into too few features
-- Repair the decomposition so it matches the expected scope more closely
-- If one draft feature combines multiple roles, multiple permission levels, multiple business outcomes, or multiple independently testable behaviors, split it
-- Preserve business meaning, but separate distinct deliverables into separate backlog-ready features
-- Return at least ${opts.featurePlan.min} features unless the request is truly atomic beyond reasonable doubt`;
-}
-
-// ─── Pass 2: Acceptance Requirements ─────────────────────────────────────────
-
-export function buildArSystemPrompt(opts: {
-  domainContext: string;
-  arPlan?: {
-    min: number;
-    max: number;
-    target: number;
-    depth: 'lean' | 'standard' | 'thorough';
-  };
-}): string {
-  const arGuidance = opts.arPlan
-    ? `AR CALIBRATION:
-- Target ${opts.arPlan.min}-${opts.arPlan.max} acceptance requirements per feature (target ${opts.arPlan.target})
-- Depth should be ${opts.arPlan.depth.toUpperCase()}
-- Do not under-specify broad or risky features
-- Do not over-specify very small, straightforward features`
-    : '';
-
-  return `You are a principal QA lead and business analyst writing acceptance requirements for a Jira backlog.
-${platformContextBlock(opts.domainContext)}
-For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that capture:
-- The primary business scenario (happy path)
-- Key business rules that must hold true
-- Practical failure or edge cases a real tester would run
-
-RULES:
-- Every AR MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
-- No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
-- No system-specific terms: no product names, module names, system object names
-- Write as if describing business outcomes to someone who has never seen the system
-- Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
-- Each AR tests one distinct thing
-
-COMMON MISTAKES TO AVOID:
-- BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
-- Never reference internal system concepts or admin configurations as preconditions
-- Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
-${arGuidance ? `\n${arGuidance}` : ''}
-
-OUTPUT FORMAT (strict):
-- Return a single JSON object: {"features":[...]} — same number of features as input, same order and same "summary" strings.
-- Each feature MUST include the key "acceptance_requirements" (snake_case, array of strings). Do NOT use "acceptanceRequirements" (camelCase).
-- Each string MUST be one full requirement in the form: GIVEN ... WHEN ... THEN ... (you may use line breaks inside the string for readability).
-- Fill at least 2–4 acceptance_requirements per feature unless the feature is truly trivial (then at least 1).
-
-Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
-}
-
-// ─── Clarifying Questions ─────────────────────────────────────────────────────
 
 export function buildClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
   domainSignals?: string[];
-  questionPlan: {
-    min: number;
-    max: number;
-    target: number;
-    clarity: 'clear' | 'medium' | 'vague';
-  };
+  outputMode: 'single' | 'auto' | 'full_breakdown';
   includeSuggestions?: boolean;
 }): string {
   const roleHint = opts.domainRoles.length
@@ -291,15 +158,15 @@ QUESTION RULES:
 - Never return features, user stories, acceptance requirements, or a {"features": [...]} object.
 - The output must be discovery questions only.
 
-QUANTITY:
-- The input appears: ${opts.questionPlan.clarity.toUpperCase()}
-- Generate between ${opts.questionPlan.min}–${opts.questionPlan.max} questions (target ${opts.questionPlan.target}).
-- Never output fewer than ${opts.questionPlan.min} questions.
+CALIBRATION — decide the right question count based on what is genuinely ambiguous:
+- Simple, clear, bounded request → 3-5 questions
+- Medium complexity, some ambiguity → 5-8 questions
+- Complex, vague, or multi-dimensional → 8-12 questions
+- If output mode is "single" → max 5 questions
+Never pad with generic questions just to hit a number. Every question must earn its place.
 
 ${outputGuidance}`;
 }
-
-// ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
 
 export function buildEvaluateSystemPrompt(opts: {
   domainContext: string;
@@ -356,35 +223,6 @@ Return strict JSON only:
 }`;
 }
 
-// ─── Initiative Grouping ──────────────────────────────────────────────────────
-
-export function buildInitiativeGroupingSystemPrompt(opts: {
-  domainContext: string;
-  featureCount: number;
-}): string {
-  const preferredGroupCount = opts.featureCount >= 8
-    ? 'Aim for 3-5 initiative groups.'
-    : 'Aim for 2-4 initiative groups.';
-
-  return `You are a principal product manager organizing a large backlog into an initiative-level structure.
-${platformContextBlock(opts.domainContext)}
-YOUR JOB: Group the provided features into meaningful initiative sections so the backlog is easier to review and prioritize.
-
-GROUPING RULES:
-- Every feature must appear in exactly one group
-- Use business-oriented group titles, not technical implementation labels
-- Each group title should be short and scannable
-- Each group summary should explain the shared business outcome in 1 sentence
-- Do not invent or rename feature IDs
-- Avoid singleton groups unless a feature is truly standalone
-- ${preferredGroupCount}
-
-OUTPUT FORMAT (strict JSON):
-{"groups":[{"title":"...", "summary":"...", "feature_ids":["feature-id-1","feature-id-2"]}]}`;
-}
-
-// ─── Refinement (full feature set) ───────────────────────────────────────────
-
 export function buildRefineSystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
@@ -416,8 +254,6 @@ ${taxonomySection}
 
 Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ...", ...], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
 }
-
-// ─── Single Feature Refinement ────────────────────────────────────────────────
 
 export function buildSingleFeatureRefineSystemPrompt(opts: {
   domainContext: string;
@@ -456,8 +292,6 @@ ${taxonomySection}
 Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [...], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
 }
 
-// ─── Single Feature Refine Sufficiency Check ──────────────────────────────────
-
 export function buildRefineSufficiencyPrompt(): string {
   return `You are a business analyst evaluating whether feedback on a single Jira feature is specific enough to act on.
 
@@ -466,8 +300,6 @@ If clarification is needed: return {"sufficient": false, "question": "..."}
 
 The question should be short and specific — one sentence max.`;
 }
-
-// ─── Theme Extraction (for similar story search) ──────────────────────────────
 
 export function buildThemeExtractionPrompt(requirement: string): string {
   return `Extract 3-5 key business themes from this requirement for searching related Jira issues.
@@ -481,8 +313,6 @@ Requirement: ${requirement}
 Output JSON: ["theme 1", "theme 2", "theme 3"]`;
 }
 
-// ─── Similar Story Reranking ──────────────────────────────────────────────────
-
 export function buildRerankPrompt(requirement: string, candidates: string[]): string {
   const list = candidates.map((c, i) => `${i + 1}. ${c}`).join('\n');
   return `Given this requirement:
@@ -495,8 +325,6 @@ ${list}
 
 Output JSON: [index1, index2, ...] (e.g. [3, 1, 5, 2, 4])`;
 }
-
-// ─── Chat / Ask ───────────────────────────────────────────────────────────────
 
 export function buildAskSystemPrompt(opts: {
   domainContext: string;
@@ -519,7 +347,9 @@ export function buildAskSystemPrompt(opts: {
     sections.push(`RELEVANT JIRA ITEMS:\n${opts.similarItems}`);
   }
 
-  sections.push('Answer questions clearly and concisely. When referencing Jira items, cite the issue key.');
+  sections.push(
+    'Answer in concise business language. Be helpful, specific, and grounded in the available context. If the context is insufficient, say what is missing instead of guessing.',
+  );
 
   return sections.join('\n\n');
 }

@@ -30,13 +30,10 @@ export interface Feature {
 export interface AppConfig {
   branding?: { appTitle?: string; primaryColor?: string; secondaryColor?: string; logoUrl?: string | null };
   tier?: string;
-  goldSources?: unknown[];
 }
 
 interface GenerationContextMeta {
   domainRolesUsed: string[];
-  goldExamplesCount: number;
-  referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
   projectKey: string;
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -44,7 +41,6 @@ interface GenerationContextMeta {
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   similarStoriesCount?: number;
   referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
-  initiativeGroups?: Array<{ id: string; title: string; summary: string; featureIds: string[] }>;
   discoveryCoverage?: DiscoveryCoverageSummary;
   discoveryTranscript?: DiscoveryRoundSummary[];
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
@@ -55,8 +51,6 @@ interface ClarifyContextMeta {
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
-  goldExamplesCount?: number;
-  referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
   similarStoriesCount?: number;
   referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
   wiDocsCount?: number;
@@ -219,7 +213,6 @@ export default function App() {
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
   const [projectKey, setProjectKey] = useState<string>('');
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
-  const [goldSources, setGoldSources] = useState<any[]>([]);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
 
   // History
@@ -441,7 +434,6 @@ export default function App() {
     try {
       const res = await api.getConfig({ projectKey: selectedProjectKey || '*' }) as any;
       if (!res) return;
-      setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
       if (res.effectiveGeneratorConfig?.fastProfileModel) setFastProfileModel(res.effectiveGeneratorConfig.fastProfileModel);
@@ -840,7 +832,6 @@ export default function App() {
               projectKey={projectKey}
               setProjectKey={setProjectKey}
               availableProjects={availableProjects}
-              goldSources={goldSources}
               wiDocs={wiDocs}
               onOpenProjectSettings={openProjectSettings}
               reasoningMode={reasoningMode}

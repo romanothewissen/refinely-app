@@ -45,12 +45,6 @@ export function resolveAiExecutionPolicy(
       projectPolicy.allowReasoningModeOverride ?? workspacePolicy.allowReasoningModeOverride,
     allowOutputModeOverride:
       projectPolicy.allowOutputModeOverride ?? workspacePolicy.allowOutputModeOverride,
-    simpleAskMaxQuestions:
-      projectPolicy.simpleAskMaxQuestions ?? workspacePolicy.simpleAskMaxQuestions,
-    deepModeRoundTarget:
-      projectPolicy.deepModeRoundTarget ?? workspacePolicy.deepModeRoundTarget,
-    enterpriseMaxQuestionsPerRound:
-      projectPolicy.enterpriseMaxQuestionsPerRound ?? workspacePolicy.enterpriseMaxQuestionsPerRound,
     maxDeepDiscoveryRounds:
       projectPolicy.maxDeepDiscoveryRounds ?? workspacePolicy.maxDeepDiscoveryRounds,
   };
@@ -84,7 +78,7 @@ export function resolveGeneratorConfig(
   const deepProfileModel =
     projectPolicy?.deepProfileModel ??
     baseConfig.deepProfileModel ??
-    baseConfig.decompositionModel;
+    baseConfig.arModel;
   const resolvedConfig: GeneratorConfig = {
     ...baseConfig,
     profileMode: 'simplified',
@@ -102,7 +96,6 @@ export function resolveGeneratorConfig(
   return {
     ...resolvedConfig,
     provider: selectedProvider,
-    decompositionModel: selectedModel,
     arModel: selectedModel,
     clarifyModel: selectedModel,
     refineModel: selectedModel,

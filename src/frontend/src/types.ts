@@ -372,29 +372,16 @@ export interface ContextSourceMeta {
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {
-  plannerDecision?: PlannerDecision;
-  goldExamplesCount?: number;
-  referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   discoveryCoverage?: DiscoveryCoverageResult;
   discoveryTranscript?: DiscoveryRoundTranscript[];
-  ambiguityAssessment?: {
-    level: 'clear' | 'medium' | 'vague';
-    score: number;
-    reasons: string[];
-    questionPlan: { min: number; max: number; target: number };
-    generatedQuestions: number;
-  };
+  tokenUsage?: TokenUsageSummary;
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
-  plannerDecision?: PlannerDecision;
-  goldExamplesCount: number;
-  referencedGoldExamples: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
-  initiativeGroups?: InitiativeGroup[];
   discoveryCoverage?: DiscoveryCoverageResult;
   discoveryTranscript?: DiscoveryRoundTranscript[];
   tokenUsage?: TokenUsageSummary;
@@ -405,8 +392,6 @@ export interface GenerationResult {
   violations: ValidationViolation[];
   similarStories: SimilarStory[];
   sessionId: string;
-  plannerDecision?: PlannerDecision;
-  initiativeGroups?: InitiativeGroup[];
   generationContext?: GenerationContextMeta;
   tokenUsage?: TokenUsageSummary;
 }
@@ -509,8 +494,6 @@ export interface GenerationEvent {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   config: TenantConfig;
-  goldExamples: string;
-  wiContext: string;
   reasoningMode?: ReasoningMode;
   outputMode?: OutputMode;
 }

@@ -38,7 +38,6 @@ import {
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
-import { refreshGoldCache, getCacheInfo } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
@@ -342,8 +341,6 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     attachmentText: payload.attachmentText ?? '',
     config: eventConfig,
     license: context?.license,
-    goldExamples: '',   // fetched inside queue consumer
-    wiContext: '',      // fetched inside queue consumer
     projectKey: payload.projectKey || '*',
     reasoningMode: payload.reasoningMode,
     outputMode: payload.outputMode,
@@ -933,11 +930,14 @@ resolver.define('removeWiDoc', async ({ payload, context }) => {
   return { success: true };
 });
 
-// ─── Gold Standards Cache ─────────────────────────────────────────────────────
-
 resolver.define('getCacheInfo', async () => {
-  const info = await getCacheInfo();
-  return { success: true, ...info };
+  return {
+    success: true,
+    enabled: false,
+    itemCount: 0,
+    cachedAt: null,
+    message: 'Curated gold example caching has been removed from the redesigned pipeline.',
+  };
 });
 
 resolver.define('getBacklogCacheInfo', async ({ payload }) => {
@@ -960,14 +960,10 @@ resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
 
 resolver.define('refreshCache', async ({ context }) => {
   await ensureAdmin(context);
-  const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
-  
-  if (!config.goldSources.length) {
-    return { success: false, error: 'No gold standard sources configured.' };
-  }
-  const cache = await refreshGoldCache(config.goldSources);
-  return { success: true, itemCount: cache.itemCount, cachedAt: cache.cachedAt };
+  return {
+    success: false,
+    error: 'Curated gold example caching has been removed from the redesigned pipeline.',
+  };
 });
 
 resolver.define('refreshBacklogCache', async ({ payload, context }) => {
@@ -1012,10 +1008,7 @@ resolver.define('getHistory', async ({ payload, context }) => {
         ...entry,
         lastTurnType: lastTurn?.turnType ?? null,
         lastFeatureCount: Array.isArray(lastTurn?.features) ? lastTurn.features.length : 0,
-        lastScopeMode:
-          lastTurn?.generationContext?.plannerDecision?.scopeMode ??
-          lastTurn?.clarifyContext?.plannerDecision?.scopeMode ??
-          null,
+        lastScopeMode: null,
         lastDiscoveryScore: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.overallScore ?? null,
         lastDiscoverySummary: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.summary ?? null,
         lastMissingCriticalCount: latestClarifyWithCoverage?.clarifyContext?.discoveryCoverage?.missingCritical?.length ?? 0,
@@ -1294,7 +1287,9 @@ async function persistDiscoveryRound(
     0,
   );
   const latestCoverage = coverage ?? clarifyTurn?.clarifyContext?.discoveryCoverage;
-  const plannerDecision = clarifyTurn?.clarifyContext?.plannerDecision;
+  const initialQuestionCount = Array.isArray(existingTranscript[0]?.questions)
+    ? existingTranscript[0].questions.length
+    : undefined;
 
   clarifyTurn.clarifyContext = {
     ...(clarifyTurn.clarifyContext ?? {}),
@@ -1309,16 +1304,7 @@ async function persistDiscoveryRound(
   await upsertAiSessionInsight({
     sessionId,
     projectKey: clarifyTurn?.clarifyContext?.projectKey ?? '*',
-    reasoningMode: plannerDecision?.reasoningMode,
-    outputMode: plannerDecision?.outputMode,
-    scopeMode: plannerDecision?.scopeMode,
-    clarificationMode: plannerDecision?.clarificationMode,
-    plannedFeatureTarget: plannerDecision?.featurePlan?.target,
-    plannedQuestionTarget: plannerDecision?.questionPlan?.target,
-    initialClarifyQuestionCount:
-      typeof clarifyTurn?.clarifyContext?.ambiguityAssessment?.generatedQuestions === 'number'
-        ? clarifyTurn.clarifyContext.ambiguityAssessment.generatedQuestions
-        : undefined,
+    initialClarifyQuestionCount: initialQuestionCount,
     discoveryRounds: existingTranscript.length,
     totalDiscoveryQuestions,
     totalDiscoveryAnswers,

@@ -8,18 +8,6 @@ import { router } from '@forge/bridge';
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
 type AcceptanceRequirement = { given: string; when: string; then: string };
 
-function formatPlannerLabel(value: string): string {
-  return value
-    .split('_')
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function formatMatchPercent(score: number): number {
-  if (!Number.isFinite(score)) return 0;
-  return Math.round(Math.max(0, Math.min(score, 1)) * 100);
-}
-
 function wordDiff(oldText: string, newText: string): DiffToken[] {
   const oldWords = (oldText || '').split(/\b/);
   const newWords = (newText || '').split(/\b/);
@@ -239,13 +227,6 @@ interface Feature {
   jiraIssueUrl?: string;
 }
 
-interface InitiativeGroup {
-  id: string;
-  title: string;
-  summary: string;
-  featureIds: string[];
-}
-
 interface MainContentProps {
   features: Feature[];
   setFeatures: React.Dispatch<React.SetStateAction<Feature[]>>;
@@ -258,27 +239,13 @@ interface MainContentProps {
   requirement: string;
   generationContext?: {
     domainRolesUsed: string[];
-    goldExamplesCount: number;
-    referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
     projectKey: string;
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
-    plannerDecision?: {
-      reasoningMode: 'fast' | 'deep';
-      outputMode: 'single' | 'auto' | 'full_breakdown';
-      scopeMode: 'atomic' | 'focused' | 'standard' | 'initiative';
-      clarificationMode: 'none' | 'light' | 'standard' | 'deep';
-      featurePlan: { min: number; max: number; target: number };
-      questionPlan: { min: number; max: number; target: number; clarity: 'clear' | 'medium' | 'vague' };
-      useHierarchy: boolean;
-      confidence: number;
-      rationale: string[];
-    };
     wiDocsCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string }>;
-    initiativeGroups?: InitiativeGroup[];
     discoveryTranscript?: Array<{
       roundNumber: number;
       questions: Array<{ category: string; question: string; suggestions: string[] }>;
@@ -445,23 +412,15 @@ export function MainContent({
     ? 100
     : hasFeatures
       ? 88
-      : /acceptance requirement|drafting ar|pass 2/i.test(generationProgressText)
-        ? 75
-        : /decompos|planning feature|pass 1/i.test(generationProgressText)
-          ? 45
-          : /context loaded|curated|related stor|work instruction/i.test(generationProgressText)
-            ? 28
+      : /generating features|acceptance requirements/i.test(generationProgressText)
+        ? 68
+        : /context loaded|related stor|work instruction/i.test(generationProgressText)
+          ? 32
           : /loading context|initializ/i.test(generationProgressText)
             ? 18
             : /queu|prepar|preparing/i.test(generationProgressText)
               ? 8
-              : /drafting.*question|question_gen/i.test(generationProgressText)
-                ? 60
-                : /loading.*context|contextual signal/i.test(generationProgressText)
-                  ? 25
-                  : /assess|preflight/i.test(generationProgressText)
-                    ? 12
-                    : 10;
+              : 12;
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [showTokenDetails, setShowTokenDetails] = useState(false);
   const [isContextModalOpen, setIsContextModalOpen] = useState(false);
@@ -469,58 +428,18 @@ export function MainContent({
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
   const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
-  const initiativeGroups = generationContext?.initiativeGroups ?? [];
   const hasInlineReferences = Boolean(
-    generationContext?.referencedGoldExamples?.length ||
     generationContext?.referencedWiDocs?.length ||
     generationContext?.referencedSimilarStories?.length,
   );
-  const featureIndexById = new Map(features.map((feature, index) => [feature.id, index] as const));
   const featureGroupTitleById = new Map<string, string>();
-  const groupedFeatureIds = new Set<string>();
-
-  initiativeGroups.forEach(group => {
-    group.featureIds.forEach(featureId => {
-      if (featureIndexById.has(featureId)) {
-        groupedFeatureIds.add(featureId);
-        featureGroupTitleById.set(featureId, group.title);
-      }
-    });
-  });
-
-  const featureSections: FeatureSection[] = initiativeGroups.length
-    ? [
-        ...initiativeGroups
-          .map(group => ({
-            id: group.id,
-            title: group.title,
-            summary: group.summary,
-            items: group.featureIds
-              .map(featureId => {
-                const index = featureIndexById.get(featureId);
-                return index === undefined ? null : { feature: features[index], index };
-              })
-              .filter((item): item is { feature: Feature; index: number } => item !== null),
-          }))
-          .filter(section => section.items.length > 0),
-        ...(features.some(feature => !groupedFeatureIds.has(feature.id))
-          ? [{
-              id: 'ungrouped-features',
-              title: 'Additional features',
-              summary: 'These items remained outside the generated initiative groupings.',
-              items: features
-                .map((feature, index) => ({ feature, index }))
-                .filter(({ feature }) => !groupedFeatureIds.has(feature.id)),
-            }]
-          : []),
-      ]
-    : [{
-        id: 'all-features',
-        title: 'Generated features',
-        summary: '',
-        items: features.map((feature, index) => ({ feature, index })),
-      }];
-  const hasInitiativeSections = initiativeGroups.length > 0 && featureSections.some(section => section.items.length > 0);
+  const featureSections: FeatureSection[] = [{
+    id: 'all-features',
+    title: 'Generated features',
+    summary: '',
+    items: features.map((feature, index) => ({ feature, index })),
+  }];
+  const hasInitiativeSections = false;
 
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
@@ -1329,9 +1248,6 @@ export function MainContent({
               >
                 <div className="flex flex-wrap items-center gap-4 text-xs">
                   <div className="font-bold text-[var(--rf-text)]">
-                    Context: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.goldExamplesCount} example{generationContext.goldExamplesCount !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="font-bold text-[var(--rf-text)]">
                     Project: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
                   </div>
                   <div className="font-bold text-[var(--rf-text)]">
@@ -1340,31 +1256,16 @@ export function MainContent({
                   <div className="font-bold text-[var(--rf-text)]">
                     Attachment: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.attachmentIncluded ? 'Included' : 'None'}</span>
                   </div>
-                  {generationContext.plannerDecision && (
-                    <>
-                      <div className="font-bold text-[var(--rf-text)]">
-                        Scope: <span className="font-medium text-[var(--rf-text-secondary)]">{formatPlannerLabel(generationContext.plannerDecision.scopeMode)}</span>
-                      </div>
-                      <div className="font-bold text-[var(--rf-text)]">
-                        Target: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.plannerDecision.featurePlan.target} features</span>
-                      </div>
-                      {generationContext.discoveryCoverage ? (
-                        <div className="font-bold text-[var(--rf-text)]">
-                          Discovery: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.discoveryCoverage.overallScore}% coverage</span>
-                        </div>
-                      ) : null}
-                      {generationContext.discoveryTranscript?.length ? (
-                        <div className="font-bold text-[var(--rf-text)]">
-                          Discovery rounds: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.discoveryTranscript.length}</span>
-                        </div>
-                      ) : null}
-                      {generationContext.initiativeGroups?.length ? (
-                        <div className="font-bold text-[var(--rf-text)]">
-                          Structure: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.initiativeGroups.length} initiative group{generationContext.initiativeGroups.length !== 1 ? 's' : ''}</span>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
+                  {generationContext.discoveryCoverage ? (
+                    <div className="font-bold text-[var(--rf-text)]">
+                      Discovery: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.discoveryCoverage.overallScore}% coverage</span>
+                    </div>
+                  ) : null}
+                  {generationContext.discoveryTranscript?.length ? (
+                    <div className="font-bold text-[var(--rf-text)]">
+                      Discovery rounds: <span className="font-medium text-[var(--rf-text-secondary)]">{generationContext.discoveryTranscript.length}</span>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setIsContextModalOpen(true)}
@@ -1384,19 +1285,6 @@ export function MainContent({
                 </div>
                 {showInlineReferences && (
                   <>
-                    {generationContext.referencedGoldExamples?.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {generationContext.referencedGoldExamples.map((example, i) => (
-                          <span
-                            key={`${example.source}-${example.key}-${i}`}
-                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-blue-100"
-                            title={example.summary}
-                          >
-                            {example.source}: {example.key}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                     <div className="mt-4 pt-4 border-t border-[var(--rf-border)]/60">
                       <div className="flex flex-wrap items-center gap-3 text-xs">
                         <div className="font-bold text-[var(--rf-text)]">
@@ -1413,35 +1301,6 @@ export function MainContent({
                     </div>
                   </>
                 )}
-              </motion.div>
-            )}
-
-            {hasInitiativeSections && (
-              <motion.div
-                className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-brand-muted)]/45 p-5 shadow-sm"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="inline-flex items-center rounded-full border border-[var(--rf-brand-subtle)] bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)]">
-                    Initiative structure
-                  </span>
-                  <div className="text-sm font-semibold text-[var(--rf-text)]">
-                    {initiativeGroups.length} group{initiativeGroups.length !== 1 ? 's' : ''} organizing {features.length} generated features
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {featureSections.map(section => (
-                    <div key={section.id} className="rounded-2xl border border-[var(--rf-border)] bg-white/85 p-4">
-                      <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
-                        {section.items.length} feature{section.items.length !== 1 ? 's' : ''}
-                      </div>
-                      <div className="mt-1 text-base font-bold text-[var(--rf-text)]">{section.title}</div>
-                      <div className="mt-2 text-sm text-[var(--rf-text-secondary)]">{section.summary}</div>
-                    </div>
-                  ))}
-                </div>
               </motion.div>
             )}
 
@@ -1538,12 +1397,10 @@ function GenerationContextModal({
         </div>
 
         <div className="max-h-[calc(88vh-92px)] overflow-y-auto p-6 custom-scrollbar">
-          <div className="grid gap-4 md:grid-cols-7">
+          <div className="grid gap-4 md:grid-cols-5">
             <ContextStatCard label="Project" value={contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey} />
-            <ContextStatCard label="Examples" value={`${contextMeta.goldExamplesCount ?? 0}`} />
             <ContextStatCard label="Work instructions" value={`${contextMeta.wiDocsCount ?? 0}`} />
             <ContextStatCard label="Related stories" value={`${contextMeta.similarStoriesCount ?? 0}`} />
-            <ContextStatCard label="Initiative groups" value={`${contextMeta.initiativeGroups?.length ?? 0}`} />
             <ContextStatCard label="Discovery coverage" value={contextMeta.discoveryCoverage ? `${contextMeta.discoveryCoverage.overallScore}%` : 'N/A'} />
             <ContextStatCard label="Discovery rounds" value={`${contextMeta.discoveryTranscript?.length ?? 0}`} />
           </div>
@@ -1557,38 +1414,9 @@ function GenerationContextModal({
                 <div><strong className="text-[var(--rf-text)]">Domain guidance:</strong> {contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
                 <div><strong className="text-[var(--rf-text)]">Attachment:</strong> {contextMeta.attachmentIncluded ? 'Included' : 'None'}</div>
                 <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Roles:</strong> {contextMeta.domainRolesUsed?.length ? contextMeta.domainRolesUsed.join(', ') : 'None'}</div>
-                {contextMeta.plannerDecision && (
-                  <>
-                    <div><strong className="text-[var(--rf-text)]">Scope:</strong> {formatPlannerLabel(contextMeta.plannerDecision.scopeMode)}</div>
-                    <div><strong className="text-[var(--rf-text)]">Discovery:</strong> {formatPlannerLabel(contextMeta.plannerDecision.clarificationMode)}</div>
-                    <div><strong className="text-[var(--rf-text)]">Reasoning:</strong> {formatPlannerLabel(contextMeta.plannerDecision.reasoningMode)}</div>
-                    <div><strong className="text-[var(--rf-text)]">Target output:</strong> {contextMeta.plannerDecision.featurePlan.target} feature(s)</div>
-                    <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Planner rationale:</strong> {contextMeta.plannerDecision.rationale.join(' ') || 'No additional rationale recorded.'}</div>
-                  </>
-                )}
                 <div className="md:col-span-2"><strong className="text-[var(--rf-text)]">Tokens:</strong> {contextMeta.tokenUsage ? `${contextMeta.tokenUsage.total.toLocaleString()} total (${contextMeta.tokenUsage.input.toLocaleString()} in / ${contextMeta.tokenUsage.output.toLocaleString()} out)` : 'Not available'}</div>
               </div>
             </div>
-
-          {contextMeta.initiativeGroups?.length ? (
-            <section className="mt-6 rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
-                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Initiative groups</h3>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {contextMeta.initiativeGroups.map(group => (
-                  <div key={group.id} className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55 p-4">
-                    <div className="text-sm font-bold text-[var(--rf-text)]">{group.title}</div>
-                    <div className="mt-2 text-sm text-[var(--rf-text-secondary)]">{group.summary}</div>
-                    <div className="mt-3 inline-flex rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
-                      {group.featureIds.length} feature{group.featureIds.length !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
 
           {contextMeta.discoveryCoverage ? (
             <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm">
@@ -1698,7 +1526,7 @@ function GenerationContextModal({
                         )}
                         {typeof story.relevanceScore === 'number' && (
                           <span className="rounded-md bg-white px-2 py-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] border border-[var(--rf-border-subtle)]">
-                            Match {formatMatchPercent(story.relevanceScore)}%
+                            Match {Math.round(Math.max(0, Math.min(story.relevanceScore, 1)) * 100)}%
                           </span>
                         )}
                       </div>
