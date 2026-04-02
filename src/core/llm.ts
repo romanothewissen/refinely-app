@@ -365,7 +365,8 @@ export async function discoverLlmModelCatalog(opts: {
   if (!res.ok) {
     throw new Error(`Azure OpenAI deployment discovery failed with status ${res.status}`);
   }
-  const deployments = payload.data ?? payload.value ?? [];
+  type AzureDeployment = { id?: string; model?: string; created_at?: number; createdAt?: number; status?: string };
+  const deployments: AzureDeployment[] = [...(payload.data ?? []), ...(payload.value ?? [])];
   const models = deployments
     .filter((deployment) => deployment.id)
     .map((deployment) => {
