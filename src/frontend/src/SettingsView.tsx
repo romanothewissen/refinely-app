@@ -97,11 +97,7 @@ const OPENAI_MODELS = [
   { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
   { id: 'o1-preview', label: 'o1 Preview' },
 ];
-const AZURE_OPENAI_MODELS = [
-  { id: 'latest-pro', label: 'Latest Pro deployment' },
-  { id: 'latest-flash', label: 'Latest Flash deployment' },
-  { id: 'latest-lite', label: 'Latest Lite deployment' },
-];
+const AZURE_OPENAI_MODELS: Array<{ id: string; label: string }> = [];
 const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 
@@ -121,8 +117,18 @@ function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
   return AZURE_OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
 }
 
-function supportsLatestSelector(entries: LlmModelCatalogEntry[], family: ConcreteModelFamily) {
-  return entries.some(entry => entry.family === family);
+function getCatalogModelId(entry?: LlmModelCatalogEntry) {
+  return entry?.deploymentName || entry?.id || '';
+}
+
+function getPreferredFamilyModel(entries: LlmModelCatalogEntry[], family: ConcreteModelFamily) {
+  const preferred = entries.find(entry => entry.family === family && entry.isLatest)
+    || entries.find(entry => entry.family === family);
+  return getCatalogModelId(preferred);
+}
+
+function isLatestAlias(modelId: string) {
+  return modelId.trim().toLowerCase().startsWith('latest');
 }
 
 function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
@@ -543,11 +549,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         generatorConfig: {
           provider,
           decompositionModel,
-          arModel: decompositionModel,
+          arModel,
           clarifyModel,
-          refineModel: clarifyModel,
+          refineModel,
           evaluateModel,
-          themeModel: evaluateModel,
+          themeModel,
           maxTokens: 8192,
           geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || "",
           geminiBaseUrl: geminiBaseUrl.trim() || undefined,
@@ -588,14 +594,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   async function testLlmConnection() {
     setIsTestingLlm(true); setLlmTestResult(null);
     try {
-      const resolvedTestModel = clarifyModel.startsWith('latest')
-        ? currentCatalogEntries.find(entry => {
-            if (clarifyModel === 'latest-pro') return entry.family === 'pro';
-            if (clarifyModel === 'latest-flash') return entry.family === 'flash';
-            if (clarifyModel === 'latest-lite') return entry.family === 'lite';
-            return true;
-          })?.deploymentName || currentCatalogEntries[0]?.deploymentName || currentCatalogEntries[0]?.id || clarifyModel
-        : clarifyModel;
+      const resolvedTestModel = isLatestAlias(clarifyModel)
+        ? (clarifyModel === 'latest-pro'
+            ? getPreferredFamilyModel(currentCatalogEntries, 'pro')
+            : clarifyModel === 'latest-flash'
+              ? getPreferredFamilyModel(currentCatalogEntries, 'flash')
+              : clarifyModel === 'latest-lite'
+                ? getPreferredFamilyModel(currentCatalogEntries, 'lite')
+                : getCatalogModelId(currentCatalogEntries[0]))
+        : clarifyModel.trim();
+      if (!resolvedTestModel) {
+        throw new Error(provider === 'azure_openai'
+          ? 'No Azure OpenAI deployment is available yet. Refresh models and choose a concrete deployment first.'
+          : 'Choose a concrete model before testing the connection.');
+      }
       const res = await api.testLlmConnection({
         provider,
         model: resolvedTestModel,
@@ -663,36 +675,48 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }
 
   useEffect(() => {
+    const providerEntries = modelCatalogs[provider]?.models?.length ? modelCatalogs[provider]!.models : buildStaticCatalog(provider);
+    const proModel = getPreferredFamilyModel(providerEntries, 'pro');
+    const flashModel = getPreferredFamilyModel(providerEntries, 'flash');
+    const liteModel = getPreferredFamilyModel(providerEntries, 'lite');
+
     if (provider === 'gemini') {
-      if (!decompositionModel.startsWith('gemini-') && !decompositionModel.startsWith('latest')) setDecompositionModel('latest-pro');
-      if (!arModel.startsWith('gemini-') && !arModel.startsWith('latest')) setArModel('latest-pro');
-      if (!clarifyModel.startsWith('gemini-') && !clarifyModel.startsWith('latest')) setClarifyModel('latest-flash');
-      if (!evaluateModel.startsWith('gemini-') && !evaluateModel.startsWith('latest')) setEvaluateModel('latest-lite');
-      if (!refineModel.startsWith('gemini-') && !refineModel.startsWith('latest')) setRefineModel('latest-flash');
-      if (!themeModel.startsWith('gemini-') && !themeModel.startsWith('latest')) setThemeModel('latest-lite');
+      if (!decompositionModel.startsWith('gemini-') || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gemini-2.5-pro');
+      if (!arModel.startsWith('gemini-') || isLatestAlias(arModel)) setArModel(proModel || 'gemini-2.5-pro');
+      if (!clarifyModel.startsWith('gemini-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gemini-2.5-flash');
+      if (!evaluateModel.startsWith('gemini-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash');
+      if (!refineModel.startsWith('gemini-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gemini-2.5-flash');
+      if (!themeModel.startsWith('gemini-') || isLatestAlias(themeModel)) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash');
     } else if (provider === 'openai') {
-      if (!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o') && !decompositionModel.startsWith('latest')) setDecompositionModel('latest-pro');
-      if (!arModel.startsWith('gpt-') && !arModel.startsWith('o') && !arModel.startsWith('latest')) setArModel('latest-pro');
-      if (!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o') && !clarifyModel.startsWith('latest')) setClarifyModel('latest-flash');
-      if (!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o') && !evaluateModel.startsWith('latest')) setEvaluateModel('latest-lite');
-      if (!refineModel.startsWith('gpt-') && !refineModel.startsWith('o') && !refineModel.startsWith('latest')) setRefineModel('latest-flash');
-      if (!themeModel.startsWith('gpt-') && !themeModel.startsWith('o') && !themeModel.startsWith('latest')) setThemeModel('latest-lite');
+      if ((!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o')) || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gpt-4o');
+      if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o')) || isLatestAlias(arModel)) setArModel(proModel || 'gpt-4o');
+      if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o')) || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gpt-4o');
+      if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o')) || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'gpt-4o-mini');
+      if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o')) || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gpt-4o');
+      if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o')) || isLatestAlias(themeModel)) setThemeModel(liteModel || 'gpt-4o-mini');
     } else if (provider === 'azure_openai') {
-      if (!decompositionModel.startsWith('latest') && !decompositionModel.trim()) setDecompositionModel('latest-pro');
-      if (!arModel.startsWith('latest') && !arModel.trim()) setArModel('latest-pro');
-      if (!clarifyModel.startsWith('latest') && !clarifyModel.trim()) setClarifyModel('latest-flash');
-      if (!evaluateModel.startsWith('latest') && !evaluateModel.trim()) setEvaluateModel('latest-lite');
-      if (!refineModel.startsWith('latest') && !refineModel.trim()) setRefineModel('latest-flash');
-      if (!themeModel.startsWith('latest') && !themeModel.trim()) setThemeModel('latest-lite');
+      const shouldResetAzureModel = (modelId: string) =>
+        !modelId.trim()
+        || isLatestAlias(modelId)
+        || modelId.startsWith('gemini-')
+        || modelId.startsWith('gpt-')
+        || modelId.startsWith('o')
+        || modelId.startsWith('claude-');
+      if (shouldResetAzureModel(decompositionModel) && proModel) setDecompositionModel(proModel);
+      if (shouldResetAzureModel(arModel) && proModel) setArModel(proModel);
+      if (shouldResetAzureModel(clarifyModel) && flashModel) setClarifyModel(flashModel);
+      if (shouldResetAzureModel(evaluateModel) && (liteModel || flashModel)) setEvaluateModel(liteModel || flashModel);
+      if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
+      if (shouldResetAzureModel(themeModel) && (liteModel || flashModel)) setThemeModel(liteModel || flashModel);
     } else {
-      if (decompositionModel.startsWith('gemini-') || decompositionModel.startsWith('gpt-') || decompositionModel.startsWith('o') || decompositionModel.startsWith('latest')) setDecompositionModel('latest-pro');
-      if (arModel.startsWith('gemini-') || arModel.startsWith('gpt-') || arModel.startsWith('o') || arModel.startsWith('latest')) setArModel('latest-pro');
-      if (clarifyModel.startsWith('gemini-') || clarifyModel.startsWith('gpt-') || clarifyModel.startsWith('o') || clarifyModel.startsWith('latest')) setClarifyModel('latest-flash');
-      if (evaluateModel.startsWith('gemini-') || evaluateModel.startsWith('gpt-') || evaluateModel.startsWith('o') || evaluateModel.startsWith('latest')) setEvaluateModel('latest-lite');
-      if (refineModel.startsWith('gemini-') || refineModel.startsWith('gpt-') || refineModel.startsWith('o') || refineModel.startsWith('latest')) setRefineModel('latest-flash');
-      if (themeModel.startsWith('gemini-') || themeModel.startsWith('gpt-') || themeModel.startsWith('o') || themeModel.startsWith('latest')) setThemeModel('latest-lite');
+      if (!decompositionModel.startsWith('claude-') || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'claude-opus-4-6');
+      if (!arModel.startsWith('claude-') || isLatestAlias(arModel)) setArModel(proModel || 'claude-opus-4-6');
+      if (!clarifyModel.startsWith('claude-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'claude-sonnet-4-5-20250929');
+      if (!evaluateModel.startsWith('claude-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'claude-haiku-4-5-20251001');
+      if (!refineModel.startsWith('claude-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'claude-sonnet-4-5-20250929');
+      if (!themeModel.startsWith('claude-') || isLatestAlias(themeModel)) setThemeModel(liteModel || 'claude-haiku-4-5-20251001');
     }
-  }, [provider]); // eslint-disable-line
+  }, [provider, modelCatalogs, decompositionModel, arModel, clarifyModel, evaluateModel, refineModel, themeModel]);
 
   const refreshModelCatalog = useCallback(async () => {
     setIsRefreshingModels(true);
@@ -741,9 +765,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   const availableModels = useMemo(() => {
     const options: Array<{ id: string; label: string }> = [];
-    if (supportsLatestSelector(currentCatalogEntries, 'pro')) options.push({ id: 'latest-pro', label: 'Latest Pro' });
-    if (supportsLatestSelector(currentCatalogEntries, 'flash')) options.push({ id: 'latest-flash', label: 'Latest Flash' });
-    if (supportsLatestSelector(currentCatalogEntries, 'lite')) options.push({ id: 'latest-lite', label: 'Latest Lite' });
     currentCatalogEntries.forEach(entry => {
       const id = entry.deploymentName || entry.id;
       if (!options.some(option => option.id === id)) {
@@ -753,13 +774,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         });
       }
     });
-    [decompositionModel, clarifyModel, evaluateModel].forEach(modelId => {
+    [clarifyModel, decompositionModel, arModel, evaluateModel].forEach(modelId => {
       if (modelId && !options.some(option => option.id === modelId)) {
         options.push({ id: modelId, label: modelId });
       }
     });
     return options;
-  }, [currentCatalogEntries, decompositionModel, clarifyModel, evaluateModel]);
+  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel]);
 
   const settingsNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
@@ -955,17 +976,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <div className="space-y-3">
                       {[
                         {
-                          label: 'Decomposition Pass',
-                          hint: 'Breaks the request into the major feature ideas, user needs, and scope boundaries before drafting anything.',
-                          val: decompositionModel,
-                          set: (value: string) => {
-                            setDecompositionModel(value);
-                            setArModel(value);
-                          },
-                        },
-                        {
-                          label: 'Reasoning & Clarify',
-                          hint: 'Asks follow-up questions when the request is ambiguous or likely to change the solution direction.',
+                          label: 'Clarifying Questions',
+                          hint: 'Asks follow-up questions when the request is ambiguous and powers the follow-on refine step.',
                           val: clarifyModel,
                           set: (value: string) => {
                             setClarifyModel(value);
@@ -973,8 +985,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           },
                         },
                         {
-                          label: 'Evaluation & Theme',
-                          hint: 'Checks whether the response has enough context, groups similar gaps, and decides if another round is needed.',
+                          label: 'Feature Breakdown',
+                          hint: 'Breaks the request into the main feature ideas, user needs, and scope boundaries before drafting details.',
+                          val: decompositionModel,
+                          set: (value: string) => {
+                            setDecompositionModel(value);
+                          },
+                        },
+                        {
+                          label: 'Acceptance Requirements',
+                          hint: 'Writes the GIVEN / WHEN / THEN acceptance requirements for each feature after the breakdown is complete.',
+                          val: arModel,
+                          set: (value: string) => {
+                            setArModel(value);
+                          },
+                        },
+                        {
+                          label: 'Review & Titles',
+                          hint: 'Checks whether enough context was captured, spots grouped gaps, and generates concise themes and titles.',
                           val: evaluateModel,
                           set: (value: string) => {
                             setEvaluateModel(value);
