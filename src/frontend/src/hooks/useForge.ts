@@ -1,4 +1,5 @@
 import { invoke } from '@forge/bridge';
+import type { LlmProvider } from '../types';
 
 type Payload = Record<string, unknown>;
 const p = (v: unknown) => v as Payload;
@@ -102,13 +103,26 @@ export const api = {
   // LLM config
   checkIsAdmin: (payload?: any) => invoke('checkIsAdmin', payload),
   testLlmConnection: (payload: {
-    provider: 'forge_llms' | 'gemini' | 'openai';
+    provider: LlmProvider;
     model: string;
     geminiApiKey?: string;
     geminiBaseUrl?: string;
     openaiApiKey?: string;
     openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
   }) => invoke('testLlmConnection', payload),
+  discoverLlmModels: (payload: {
+    provider: LlmProvider;
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+  }) => invoke('discoverLlmModels', payload),
 };
 
 export type ApiResponse<T> = { success: boolean; error?: string } & T;

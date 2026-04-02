@@ -18,8 +18,35 @@ export interface GoldSource {
   labels?: string[];                     // optional label filter
 }
 
+export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
+export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
+export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
+export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
+
+export interface LlmModelCatalogEntry {
+  id: string;
+  displayName?: string;
+  family?: ConcreteModelFamily;
+  isLatest?: boolean;
+  releaseDate?: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  aliases?: string[];
+  deploymentName?: string;
+  source?: 'discovered' | 'manual' | 'fallback';
+}
+
+export interface LlmVendorModelCatalog {
+  vendor: LlmProvider;
+  fetchedAt?: string;
+  source?: 'discovered' | 'manual' | 'fallback';
+  models: LlmModelCatalogEntry[];
+}
+
+export type LlmModelCatalogByVendor = Partial<Record<LlmProvider, LlmVendorModelCatalog>>;
+
 export interface GeneratorConfig {
-  provider: 'forge_llms' | 'gemini' | 'openai';
+  provider: LlmProvider;
   decompositionModel: string;   // e.g. claude-opus-4-6, gpt-4o
   arModel: string;              // e.g. claude-opus-4-6, gpt-4o
   clarifyModel: string;         // e.g. claude-sonnet-4-6, gpt-4o-mini
@@ -31,6 +58,10 @@ export interface GeneratorConfig {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  azureOpenAIApiKey?: string;
+  azureOpenAIBaseUrl?: string;
+  azureOpenAIApiVersion?: string;
+  modelCatalogs?: LlmModelCatalogByVendor;
 }
 
 export interface ProcessCode {

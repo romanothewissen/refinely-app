@@ -140,6 +140,7 @@ export default function App() {
   const [clarifyQuestions, setClarifyQuestions] = useState<any[]>([]);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingClarifySessionId, setPendingClarifySessionId] = useState<string | null>(null);
+  const [workflowRunId, setWorkflowRunId] = useState(0);
   const [isWorking, setIsWorking] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -289,6 +290,9 @@ export default function App() {
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
+        setPendingSessionId(null);
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
         if (lastTurn?.features?.length > 0) {
           setFeatures(lastTurn.features);
           setGenerationContext(lastTurn.generationContext ?? null);
@@ -340,6 +344,7 @@ export default function App() {
     cancelGeneration,
   } = useGenerationRealtime(
     pendingSessionId,
+    workflowRunId,
     (payload: any) => {
       if (payload.features) {
         setFeatures(payload.features);
@@ -369,6 +374,7 @@ export default function App() {
     isClarifying,
   } = useClarifyRealtime(
     pendingClarifySessionId,
+    workflowRunId,
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
@@ -401,11 +407,21 @@ export default function App() {
     : (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'));
 
   const handleCancelWorkflow = async () => {
-    if (pendingClarifySessionId || isClarifying) {
+    const clarifyActive = Boolean(pendingClarifySessionId || isClarifying);
+    const generationActive = Boolean(pendingSessionId || isGenerating);
+
+    if (!clarifyActive && !generationActive) return;
+
+    setWorkflowRunId(prev => prev + 1);
+    setIsWorking(false);
+    setPendingClarifySessionId(null);
+    setPendingSessionId(null);
+    setClarifyQuestions([]);
+
+    if (clarifyActive) {
       await cancelClarify();
-      return;
     }
-    if (pendingSessionId || isGenerating) {
+    if (generationActive) {
       await cancelGeneration();
     }
   };
@@ -413,6 +429,7 @@ export default function App() {
   const handleStartBrainstorm = async () => {
     if (!requirement.trim()) return;
     setIsWorking(true);
+    setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
     setFeatures([]);
     setGenerationContext(null);
@@ -446,6 +463,7 @@ export default function App() {
     const req = reqText || requirementRef.current;
     
     setIsWorking(true);
+    setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
     setClarifyQuestions([]);
     // CRITICAL: Stop clarify polling if it was active
@@ -500,6 +518,11 @@ export default function App() {
     try {
       const res = await api.getConversation(sid) as any;
       if (res.success && res.conversation) {
+        setWorkflowRunId(prev => prev + 1);
+        setPendingSessionId(null);
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
+        setClarifyQuestions([]);
         setSessionId(res.conversation.sessionId);
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
@@ -562,6 +585,8 @@ export default function App() {
                 setClarifyQuestions([]);
                 setPendingSessionId(null);
                 setPendingClarifySessionId(null);
+                setGenerationError(null);
+                setWorkflowRunId(prev => prev + 1);
                 setIsWorking(false);
                 setSidebarOpen(true);
                 setSidebarExiting(false);

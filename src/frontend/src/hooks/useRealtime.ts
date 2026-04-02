@@ -19,6 +19,7 @@ const CLARIFY_TIMEOUT_MS = 180000; // 3 min — generous for Pro thinking mode
 
 export function useClarifyRealtime(
   sessionId: string | null,
+  runId: number,
   onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
   onFallthrough: () => void,
   onCancel?: () => void,
@@ -48,17 +49,21 @@ export function useClarifyRealtime(
 
   useEffect(() => {
     if (!sessionId) return;
+    void runId;
+    let active = true;
     cancelledRef.current = false;
     startedAtRef.current = Date.now();
     setIsClarifying(true);
     setProgress('Analyzing requirement and gathering context…');
 
     timerRef.current = setInterval(async () => {
+      if (!active) return;
       try {
         const res = await invoke('getClarifyResult', { sessionId }) as {
           success: boolean;
           result?: { type: string; message?: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number };
         };
+        if (!active) return;
         const result = res.result;
 
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
@@ -112,6 +117,7 @@ export function useClarifyRealtime(
     }, POLL_INTERVAL_MS);
 
     return () => {
+      active = false;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -120,13 +126,14 @@ export function useClarifyRealtime(
       setIsClarifying(false);
       setProgress('');
     };
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { cancelClarify: stopClarify, progress, isClarifying };
 }
 
 export function useGenerationRealtime(
   sessionId: string | null,
+  runId: number,
   onComplete: (payload: unknown) => void,
   onError: (message: string) => void,
   onCancel?: (message: string) => void,
@@ -190,6 +197,8 @@ export function useGenerationRealtime(
 
   useEffect(() => {
     if (!sessionId) return;
+    void runId;
+    let active = true;
 
     setIsGenerating(true);
     visibleProgressRef.current = '';
@@ -197,8 +206,10 @@ export function useGenerationRealtime(
     startedAtRef.current = Date.now();
 
     timerRef.current = setInterval(async () => {
+      if (!active) return;
       try {
         const res = await invoke('getProgress', { sessionId }) as { success: boolean; progress?: GenerationProgress };
+        if (!active) return;
         const event = res.progress;
         if (!event) {
           // Queue job hasn't written anything yet — give it 90s before giving up
@@ -273,6 +284,7 @@ export function useGenerationRealtime(
     }, POLL_INTERVAL_MS);
 
     return () => {
+      active = false;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -282,7 +294,7 @@ export function useGenerationRealtime(
       visibleProgressRef.current = '';
       setProgress('');
     };
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { isGenerating, progress, cancelGeneration: stopGeneration };
 }

@@ -350,6 +350,10 @@ export async function generateFeatures(opts: {
     geminiBaseUrl: generatorConfig.geminiBaseUrl,
     openaiApiKey: generatorConfig.openaiApiKey,
     openaiBaseUrl: generatorConfig.openaiBaseUrl,
+    azureOpenAIApiKey: generatorConfig.azureOpenAIApiKey,
+    azureOpenAIBaseUrl: generatorConfig.azureOpenAIBaseUrl,
+    azureOpenAIApiVersion: generatorConfig.azureOpenAIApiVersion,
+    modelCatalogs: generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
 
@@ -481,12 +485,7 @@ export async function generateClarifyingQuestions(opts: {
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(config),
   });
 
   let totalInputTokens = raw.usage.input;
@@ -506,12 +505,7 @@ export async function generateClarifyingQuestions(opts: {
       model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
       systemPrompt: system,
       userMessage: topUpUserMessage,
-      provider: config.generatorConfig.provider,
-      geminiApiKey: config.generatorConfig.geminiApiKey,
-      geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-      openaiApiKey: config.generatorConfig.openaiApiKey,
-      openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-      piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+      ...buildLlmProviderOpts(config),
     });
     totalInputTokens += topUpRaw.usage.input;
     totalOutputTokens += topUpRaw.usage.output;
@@ -567,12 +561,7 @@ export async function evaluateSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildEvaluateSystemPrompt(),
     userMessage,
-    provider: opts.config.generatorConfig.provider,
-    geminiApiKey: opts.config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(opts.config),
   });
 
   return result;
@@ -606,12 +595,7 @@ export async function refineFeatures(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: config.generatorConfig.maxTokens,
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(config),
   });
 
   return {
@@ -647,12 +631,7 @@ export async function refineSingleFeature(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: 4096,
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(config),
   });
 
   const refined = result.data.features?.[0];
@@ -698,12 +677,7 @@ export async function checkRefineFeedbackSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildRefineSufficiencyPrompt(),
     userMessage,
-    provider: opts.config.generatorConfig.provider,
-    geminiApiKey: opts.config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(opts.config),
   });
 
   return result;
@@ -717,12 +691,7 @@ export async function generateSessionTitle(requirement: string, config: TenantCo
     systemPrompt: 'Generate a concise, prescriptive 5-7 word title for this business requirement. Make it action-oriented, outcome-focused, and easy to scan in a backlog. Avoid generic words like feature, flow, process, solution, or system. Output the title only, no quotes.',
     userMessage: requirement,
     maxTokens: 32,
-    provider: config.generatorConfig.provider,
-    geminiApiKey: config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(config),
   });
   return formatSessionTitle(res.text, requirement);
 }
@@ -749,12 +718,7 @@ export async function askQuestion(opts: {
     systemPrompt: opts.systemPrompt,
     userMessage,
     maxTokens: 2048,
-    provider: opts.config.generatorConfig.provider,
-    geminiApiKey: opts.config.generatorConfig.geminiApiKey,
-    geminiBaseUrl: opts.config.generatorConfig.geminiBaseUrl,
-    openaiApiKey: opts.config.generatorConfig.openaiApiKey,
-    openaiBaseUrl: opts.config.generatorConfig.openaiBaseUrl,
-    piiMaskingEnabled: Boolean(opts.config.compliance?.enabled && opts.config.compliance?.piiMaskingEnabled),
+    ...buildLlmProviderOpts(opts.config),
   });
 
   return res.text;
@@ -771,6 +735,21 @@ function normaliseFeature(raw: RawFeature): Feature {
     storyPoints: raw.suggested_story_points,
     processCode: raw.process_code,
   });
+}
+
+function buildLlmProviderOpts(config: TenantConfig) {
+  return {
+    provider: config.generatorConfig.provider,
+    geminiApiKey: config.generatorConfig.geminiApiKey,
+    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
+    azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
+    azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+    modelCatalogs: config.generatorConfig.modelCatalogs,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+  } as const;
 }
 
 /** Read AR arrays whether the model used snake_case or camelCase. */

@@ -39,7 +39,7 @@ import { refreshGoldCache, getCacheInfo } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
-import { callLlm } from '../core/llm';
+import { callLlm, discoverLlmModelCatalog } from '../core/llm';
 import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
@@ -162,6 +162,7 @@ resolver.define('getConfig', async ({ context }) => {
     // Scrub keys for the frontend
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
+    if (gc.azureOpenAIApiKey) gc.azureOpenAIApiKey = REDACTED;
   }
   
   return { ...config, isAdmin };
@@ -177,6 +178,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
+  if (ngc.azureOpenAIApiKey === REDACTED) ngc.azureOpenAIApiKey = egc.azureOpenAIApiKey;
   
   await saveConfig(payload);
 
@@ -187,7 +189,8 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   });
   const apiKeyRotated = Boolean(
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
-    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey),
+    (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
+    (ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED && ngc.azureOpenAIApiKey !== egc.azureOpenAIApiKey),
   );
   const auditEnabled = Boolean(existingConfig.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled);
   if (changedModelFields.length > 0) {
@@ -208,6 +211,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
         providerKeysUpdated: [
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
+          ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED ? 'azure_openai' : null,
         ].filter(Boolean),
       },
       enabled: auditEnabled,
@@ -246,6 +250,7 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
+    const isAzureOpenAI = payload.provider === 'azure_openai';
     
     const res = await callLlm({
       provider: payload.provider,
@@ -254,11 +259,38 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       geminiBaseUrl: isGemini ? (payload.geminiBaseUrl?.trim() || gc.geminiBaseUrl) : undefined,
       openaiApiKey: isOpenAI ? (payload.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload.openaiApiKey?.trim() || gc.openaiApiKey)) : undefined,
       openaiBaseUrl: isOpenAI ? (payload.openaiBaseUrl?.trim() || gc.openaiBaseUrl) : undefined,
+      azureOpenAIApiKey: isAzureOpenAI ? (payload.azureOpenAIApiKey === REDACTED ? gc.azureOpenAIApiKey : (payload.azureOpenAIApiKey?.trim() || gc.azureOpenAIApiKey)) : undefined,
+      azureOpenAIBaseUrl: isAzureOpenAI ? (payload.azureOpenAIBaseUrl?.trim() || gc.azureOpenAIBaseUrl) : undefined,
+      azureOpenAIApiVersion: isAzureOpenAI ? (payload.azureOpenAIApiVersion?.trim() || gc.azureOpenAIApiVersion) : undefined,
+      modelCatalog: payload.provider ? gc.modelCatalogs?.[payload.provider] : undefined,
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
       noFallback: true,
     });
     return { success: true, reply: res.text };
+  } catch (err) {
+    const message = String((err as { message?: unknown })?.message ?? err ?? 'Unknown error');
+    return { success: false, error: message };
+  }
+});
+
+resolver.define('discoverLlmModels', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  try {
+    const cfg = await getConfig();
+    const gc = cfg.generatorConfig || {};
+    const provider = payload?.provider || gc.provider || 'forge_llms';
+    const catalog = await discoverLlmModelCatalog({
+      provider,
+      geminiApiKey: payload?.geminiApiKey === REDACTED ? gc.geminiApiKey : (payload?.geminiApiKey?.trim() || gc.geminiApiKey),
+      geminiBaseUrl: payload?.geminiBaseUrl?.trim() || gc.geminiBaseUrl,
+      openaiApiKey: payload?.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload?.openaiApiKey?.trim() || gc.openaiApiKey),
+      openaiBaseUrl: payload?.openaiBaseUrl?.trim() || gc.openaiBaseUrl,
+      azureOpenAIApiKey: payload?.azureOpenAIApiKey === REDACTED ? gc.azureOpenAIApiKey : (payload?.azureOpenAIApiKey?.trim() || gc.azureOpenAIApiKey),
+      azureOpenAIBaseUrl: payload?.azureOpenAIBaseUrl?.trim() || gc.azureOpenAIBaseUrl,
+      azureOpenAIApiVersion: payload?.azureOpenAIApiVersion?.trim() || gc.azureOpenAIApiVersion,
+    });
+    return { success: true, catalog };
   } catch (err) {
     const message = String((err as { message?: unknown })?.message ?? err ?? 'Unknown error');
     return { success: false, error: message };

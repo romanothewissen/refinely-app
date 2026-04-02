@@ -97,6 +97,7 @@ export function Sidebar({
   const [wiUploadError, setWiUploadError] = React.useState<string | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
   const canUploadWi = Boolean(isAdmin) && contextReady && projectKey !== '*' && !wiUploadState;
+  const supportedWiExtensions = ['.pdf', '.xlsx', '.xls', '.csv', '.txt', '.md', '.eml'];
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -119,9 +120,12 @@ export function Sidebar({
     e.target.value = '';
     if (!files.length) return;
 
-    const invalid = files.find(file => file.type !== 'application/pdf');
+    const invalid = files.find(file => {
+      const name = file.name.toLowerCase();
+      return !supportedWiExtensions.some(ext => name.endsWith(ext));
+    });
     if (invalid) {
-      setWiUploadError('Only PDF documents are supported right now.');
+      setWiUploadError('Supported formats are PDF, Excel (.xlsx/.xls), CSV, TXT, Markdown, and EML.');
       return;
     }
 
@@ -331,20 +335,6 @@ export function Sidebar({
             <div className="text-xs font-medium text-[var(--rf-text)] leading-snug">
               {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
             </div>
-            {activeWiDocs.length > 0 && (
-              <div className="mt-2 space-y-1.5">
-                {activeWiDocs.slice(0, 3).map(doc => (
-                  <div key={doc.docId} className="text-[11px] leading-snug text-[var(--rf-text-secondary)] break-words">
-                    {doc.filename}
-                  </div>
-                ))}
-                {activeWiDocs.length > 3 && (
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                    +{activeWiDocs.length - 3} more
-                  </div>
-                )}
-              </div>
-            )}
           </motion.button>
         </motion.div>
 
@@ -390,18 +380,18 @@ export function Sidebar({
                 fileInputRef.current?.click();
               }}
               disabled={!canUploadWi}
-              title={!contextReady ? 'Choose project-specific or global mode first' : !isAdmin ? 'Admin access is required to upload grounding documents' : projectKey === '*' ? 'Select a project to upload work instructions' : 'Attach PDF work instructions'}
+              title={!contextReady ? 'Choose project-specific or global mode first' : !isAdmin ? 'Admin access is required to upload grounding documents' : projectKey === '*' ? 'Select a project to upload work instructions' : 'Attach grounding documents'}
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-sidebar-card)] hover:text-[var(--rf-text)]"
               whileTap={{ scale: 0.97 }}
             >
               <Paperclip className="w-3.5 h-3.5" />
-              <span>{wiUploadState ? 'Uploading…' : 'Attach PDFs'}</span>
+              <span>{wiUploadState ? 'Uploading…' : 'Attach docs'}</span>
             </motion.button>
             <input
               ref={fileInputRef}
               type="file"
               onChange={handleWiUpload}
-              accept=".pdf"
+              accept=".pdf,.xlsx,.xls,.csv,.txt,.md,.eml"
               multiple
               className="hidden"
               disabled={!canUploadWi}
@@ -421,7 +411,7 @@ export function Sidebar({
             {wiUploadState && (
               <div className="space-y-2">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">
-                  {wiUploadState.stage === 'reading' ? 'Reading PDF' : wiUploadState.stage === 'uploading' ? 'Uploading PDF' : 'Indexing PDF'}
+                  {wiUploadState.stage === 'reading' ? 'Reading document' : wiUploadState.stage === 'uploading' ? 'Uploading document' : 'Indexing document'}
                 </div>
                 <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{wiUploadState.filename}</div>
               </div>

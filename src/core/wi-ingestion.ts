@@ -1,7 +1,7 @@
 /**
- * Work instruction ingestion: PDF → chunks → BM25 retrieval.
+ * Work instruction ingestion: document text extraction -> chunks -> BM25 retrieval.
  *
- * Uses pdf-parse (npm) for text extraction.
+ * Uses pdf-parse (npm) for PDFs and xlsx (npm) for spreadsheets.
  * Uses BM25 scoring for retrieval (no embeddings needed for small corpora).
  * Stores in Forge Object Store.
  */
@@ -29,10 +29,7 @@ export async function ingestPdf(opts: {
   revision?: string;
   targetProjects?: string[];
 }): Promise<{ docId: string; chunkCount: number; duplicate: boolean }> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require('pdf-parse');
-  const parsed = await pdfParse(opts.buffer);
-  const text: string = parsed.text ?? '';
+  const text = await extractDocumentText(opts.filename, opts.buffer);
 
   const revision = opts.revision || hashText(text).slice(0, 8);
   const cache = await loadCache();
@@ -66,6 +63,78 @@ export async function ingestPdf(opts: {
   await saveCache(cache);
 
   return { docId, chunkCount: chunks.length, duplicate: false };
+}
+
+async function extractDocumentText(filename: string, buffer: Buffer): Promise<string> {
+  const kind = detectDocumentKind(filename);
+
+  if (kind === 'pdf') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse');
+    const parsed = await pdfParse(buffer);
+    return String(parsed.text ?? '');
+  }
+
+  if (kind === 'xlsx') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const XLSX = require('xlsx');
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const parts: string[] = [];
+    for (const sheetName of workbook.SheetNames ?? []) {
+      const worksheet = workbook.Sheets[sheetName];
+      if (!worksheet) continue;
+      const csv = XLSX.utils.sheet_to_csv(worksheet, { blankrows: false });
+      const compact = csv.trim();
+      if (compact) parts.push(`# ${sheetName}\n${compact}`);
+    }
+    const text = parts.join('\n\n');
+    if (!text.trim()) {
+      throw new Error(`The spreadsheet "${filename}" does not contain any readable cells.`);
+    }
+    return text;
+  }
+
+  if (kind === 'text') {
+    const text = buffer.toString('utf8');
+    if (!text.trim()) {
+      throw new Error(`The document "${filename}" does not contain any readable text.`);
+    }
+    return text;
+  }
+
+  if (kind === 'email') {
+    const raw = buffer.toString('utf8');
+    const boundaryMatch = raw.match(/\r?\n\r?\n/);
+    const boundaryIndex = boundaryMatch?.index ?? -1;
+    const headerBlock = boundaryIndex >= 0 ? raw.slice(0, boundaryIndex) : '';
+    const body = boundaryIndex >= 0 ? raw.slice(boundaryIndex + boundaryMatch![0].length) : raw;
+    const subject = (headerBlock.match(/^Subject:\s*(.*)$/im)?.[1] ?? '').trim();
+    const from = (headerBlock.match(/^From:\s*(.*)$/im)?.[1] ?? '').trim();
+    const cleanedBody = body
+      .split(/\r?\n/)
+      .filter(line => !/^>/.test(line))
+      .join('\n')
+      .trim();
+    const parts = [subject ? `Subject: ${subject}` : '', from ? `From: ${from}` : '', cleanedBody].filter(Boolean);
+    const text = parts.join('\n\n');
+    if (!text.trim()) {
+      throw new Error(`The email "${filename}" does not contain any readable text.`);
+    }
+    return text;
+  }
+
+  throw new Error(
+    `Unsupported work instruction format for "${filename}". Supported formats are PDF, XLSX, XLS, CSV, TXT, Markdown, and EML.`,
+  );
+}
+
+function detectDocumentKind(filename: string): 'pdf' | 'xlsx' | 'text' | 'email' | 'unsupported' {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'pdf';
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return 'xlsx';
+  if (lower.endsWith('.eml')) return 'email';
+  if (lower.endsWith('.txt') || lower.endsWith('.csv') || lower.endsWith('.md')) return 'text';
+  return 'unsupported';
 }
 
 // ─── Retrieval ────────────────────────────────────────────────────────────────

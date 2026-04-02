@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
-  Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, 
-  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, ExternalLink, AlertCircle, Image
+  Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, BarChart3,
+  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, AlertCircle, Image
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
+import type { ConcreteModelFamily, LlmModelCatalogByVendor, LlmModelCatalogEntry, LlmProvider } from './types';
 import { REDACTED } from './types';
 
 interface GoldSource {
@@ -27,6 +28,10 @@ interface ProjectFieldMapping {
   summaryFieldId: string;
   descriptionFieldId: string;
   arFieldIds: string[];
+}
+interface RoleGuidanceRow {
+  role: string;
+  activities: string;
 }
 interface ProjectArMapping {
   projectKey: string;
@@ -92,13 +97,82 @@ const OPENAI_MODELS = [
   { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
   { id: 'o1-preview', label: 'o1 Preview' },
 ];
+const AZURE_OPENAI_MODELS = [
+  { id: 'latest-pro', label: 'Latest Pro deployment' },
+  { id: 'latest-flash', label: 'Latest Flash deployment' },
+  { id: 'latest-lite', label: 'Latest Lite deployment' },
+];
+const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
+const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 
-export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'billing'; initialProjectKey?: string }) {
-  const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialTab);
+function inferModelFamily(modelId: string): ConcreteModelFamily | undefined {
+  const normalized = modelId.trim().toLowerCase();
+  if (normalized.includes('flash')) return 'flash';
+  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4') || normalized.includes('sonnet')) return normalized.includes('mini') ? 'lite' : 'flash';
+  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano') || normalized.includes('haiku')) return 'lite';
+  if (normalized.includes('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
+  return undefined;
+}
+
+function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
+  if (provider === 'forge_llms') return CLAUDE_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
+  if (provider === 'gemini') return GEMINI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
+  if (provider === 'openai') return OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
+  return AZURE_OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
+}
+
+function supportsLatestSelector(entries: LlmModelCatalogEntry[], family: ConcreteModelFamily) {
+  return entries.some(entry => entry.family === family);
+}
+
+function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
+  const rows = rawRows
+    .map((row: any) => {
+      if (!row) return null;
+      if (typeof row === 'string') return { role: row.trim(), activities: '' };
+      const role = String(row.role ?? row.name ?? row.title ?? '').trim();
+      const activities = String(row.activities ?? row.activity ?? row.description ?? row.context ?? '').trim();
+      return { role, activities };
+    })
+    .filter((row: RoleGuidanceRow | null): row is RoleGuidanceRow => Boolean(row && (row.role || row.activities)));
+  return rows.length ? rows : [{ role: '', activities: '' }];
+}
+
+function splitGuidanceContext(rawContext = '') {
+  const markerIndex = rawContext.indexOf(ROLE_GUIDANCE_MARKER);
+  if (markerIndex === -1) {
+    return { context: rawContext.trim(), roleRows: [] as RoleGuidanceRow[] };
+  }
+  const context = rawContext.slice(0, markerIndex).trim();
+  const payload = rawContext.slice(markerIndex + ROLE_GUIDANCE_MARKER.length).trim();
+  if (!payload) {
+    return { context, roleRows: [] as RoleGuidanceRow[] };
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    return { context, roleRows: normalizeRoleGuidanceRows(Array.isArray(parsed) ? parsed : []) };
+  } catch {
+    return { context, roleRows: [] as RoleGuidanceRow[] };
+  }
+}
+
+function buildGuidanceContextPayload(baseContext: string, roleRows: RoleGuidanceRow[]) {
+  const trimmedBase = baseContext.trim();
+  const serializableRows = roleRows
+    .map(row => ({ role: row.role.trim(), activities: row.activities.trim() }))
+    .filter(row => row.role || row.activities);
+  if (!serializableRows.length) return trimmedBase;
+  return [trimmedBase, `${ROLE_GUIDANCE_MARKER}${JSON.stringify(serializableRows, null, 2)}`]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'stats' | 'billing'; initialProjectKey?: string }) {
+  const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'stats' | 'billing'>(initialTab);
   const [isSaving, setIsSaving] = useState(false);
 
   // Models State
-  const [provider, setProvider] = useState<'forge_llms' | 'gemini' | 'openai'>('forge_llms');
+  const [provider, setProvider] = useState<LlmProvider>('forge_llms');
   const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-6');
   const [arModel, setArModel] = useState('claude-opus-4-6');
   const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-5-20250929');
@@ -113,6 +187,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
   const [existingOpenaiApiKey, setExistingOpenaiApiKey] = useState('');
+
+  const [azureOpenAIApiKey, setAzureOpenAIApiKey] = useState('');
+  const [azureOpenAIBaseUrl, setAzureOpenAIBaseUrl] = useState('');
+  const [azureOpenAIApiVersion, setAzureOpenAIApiVersion] = useState('2024-06-01');
+  const [existingAzureOpenAIApiKey, setExistingAzureOpenAIApiKey] = useState('');
+  const [modelCatalogs, setModelCatalogs] = useState<LlmModelCatalogByVendor>({});
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+  const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
   
   const [isTestingLlm, setIsTestingLlm] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -136,7 +218,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // Domain State
   const [domainContext, setDomainContext] = useState('');
-  const [domainRoles, setDomainRoles] = useState('');
+  const [roleGuidanceRows, setRoleGuidanceRows] = useState<RoleGuidanceRow[]>([{ role: '', activities: '' }]);
   const [tier, setTier] = useState<'free' | 'standard' | 'premium' | 'enterprise'>('free');
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
@@ -158,6 +240,54 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [wiUploadState, setWiUploadState] = useState<{ filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null>(null);
   const [wiUploadError, setWiUploadError] = useState<string | null>(null);
   const wiFileInputRef = useRef<HTMLInputElement>(null);
+  const workspaceTokenUsage = useMemo(() => {
+    return transparencyReports.reduce((sum, report) => sum + (report.tokenUsage?.total ?? 0), 0);
+  }, [transparencyReports]);
+
+  const projectUsageBreakdown = useMemo(() => {
+    const byProject = new Map<string, { projectKey: string; tokenUsage: number; reportCount: number; latestAt?: string }>();
+    transparencyReports.forEach(report => {
+      const key = report.projectKey || 'Workspace-wide';
+      const current = byProject.get(key) ?? { projectKey: key, tokenUsage: 0, reportCount: 0, latestAt: undefined };
+      current.reportCount += 1;
+      current.tokenUsage += report.tokenUsage?.total ?? 0;
+      if (!current.latestAt || (report.createdAt && report.createdAt > current.latestAt)) {
+        current.latestAt = report.createdAt;
+      }
+      byProject.set(key, current);
+    });
+    return [...byProject.values()].sort((a, b) => b.tokenUsage - a.tokenUsage || b.reportCount - a.reportCount);
+  }, [transparencyReports]);
+
+  const loadBacklogCacheInfo = useCallback(async (projectKey: string) => {
+    try {
+      const res = await api.getBacklogCacheInfo(projectKey) as any;
+      if (res?.success) {
+        setBacklogCacheInfo({
+          projectKey: res.projectKey,
+          builtAt: res.builtAt,
+          issueCount: res.issueCount ?? 0,
+          stale: !!res.stale,
+        });
+      }
+    } catch (e) {
+      console.error('Could not load backlog cache info', e);
+    }
+  }, []);
+
+  const loadBacklogDiagnostics = useCallback(async (projectKey: string) => {
+    try {
+      const res = await api.diagnoseBacklogCache(projectKey) as any;
+      if (res?.success) {
+        setBacklogDiagnostics(res.diagnostics ?? null);
+      } else {
+        setBacklogDiagnostics(null);
+      }
+    } catch (e) {
+      console.error('Could not load backlog diagnostics', e);
+      setBacklogDiagnostics(null);
+    }
+  }, []);
 
   useEffect(() => {
     loadInitialConfig();
@@ -216,6 +346,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.geminiBaseUrl) setGeminiBaseUrl(gc.geminiBaseUrl);
         if (gc.openaiApiKey) setExistingOpenaiApiKey(gc.openaiApiKey);
         if (gc.openaiBaseUrl) setOpenaiBaseUrl(gc.openaiBaseUrl);
+        if (gc.azureOpenAIApiKey) setExistingAzureOpenAIApiKey(gc.azureOpenAIApiKey);
+        if (gc.azureOpenAIBaseUrl) setAzureOpenAIBaseUrl(gc.azureOpenAIBaseUrl);
+        if (gc.azureOpenAIApiVersion) setAzureOpenAIApiVersion(gc.azureOpenAIApiVersion);
+        if (gc.modelCatalogs) setModelCatalogs(gc.modelCatalogs);
 
         if (existingConfig.goldSources) {
           setGoldSources(existingConfig.goldSources.map((gs: any) => {
@@ -231,8 +365,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             };
           }));
         }
-        if (existingConfig.domainContext) setDomainContext(existingConfig.domainContext);
-        if (existingConfig.domainRoles) setDomainRoles((existingConfig.domainRoles as string[]).join(', '));
+        const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
+        setDomainContext(parsedContext.context);
+        if (parsedContext.roleRows.length) {
+          setRoleGuidanceRows(parsedContext.roleRows);
+        } else if (Array.isArray(existingConfig.domainRoles) && existingConfig.domainRoles.length) {
+          setRoleGuidanceRows(normalizeRoleGuidanceRows(existingConfig.domainRoles as any[]));
+        }
         if (existingConfig.tier) setTier(existingConfig.tier);
         setComplianceEnabled(Boolean(existingConfig.compliance?.enabled));
         setTransparencyEnabled(Boolean(existingConfig.compliance?.transparencyReportsEnabled));
@@ -289,13 +428,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   useEffect(() => {
     if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
-      loadBacklogCacheInfo(activeArProj);
-      loadBacklogDiagnostics(activeArProj);
+      void loadBacklogCacheInfo(activeArProj);
+      void loadBacklogDiagnostics(activeArProj);
     } else {
       setBacklogCacheInfo(null);
       setBacklogDiagnostics(null);
     }
-  }, [activeTab, activeArProj]);
+  }, [activeTab, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics]);
 
   useEffect(() => {
     if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
@@ -304,36 +443,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       setBacklogStatusOptions([]);
     }
   }, [activeTab, activeArProj]);
-
-  async function loadBacklogCacheInfo(projectKey: string) {
-    try {
-      const res = await api.getBacklogCacheInfo(projectKey) as any;
-      if (res?.success) {
-        setBacklogCacheInfo({
-          projectKey: res.projectKey,
-          builtAt: res.builtAt,
-          issueCount: res.issueCount ?? 0,
-          stale: !!res.stale,
-        });
-      }
-    } catch (e) {
-      console.error('Could not load backlog cache info', e);
-    }
-  }
-
-  async function loadBacklogDiagnostics(projectKey: string) {
-    try {
-      const res = await api.diagnoseBacklogCache(projectKey) as any;
-      if (res?.success) {
-        setBacklogDiagnostics(res.diagnostics ?? null);
-      } else {
-        setBacklogDiagnostics(null);
-      }
-    } catch (e) {
-      console.error('Could not load backlog diagnostics', e);
-      setBacklogDiagnostics(null);
-    }
-  }
 
   async function handleRefreshBacklogCache(projectKey = activeArProj) {
     if (!projectKey || projectKey === '*') return null;
@@ -372,15 +481,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }
 
   useEffect(() => {
-    if (activeTab === 'jira') loadWiDocs();
-  }, [activeTab, loadWiDocs]);
+    if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
+      void loadWiDocs();
+    } else {
+      setWiDocs([]);
+    }
+  }, [activeTab, activeArProj, loadWiDocs]);
 
-  async function handleWiPdfDrop(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleWiFileDrop(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (!files.length) return;
-    if (files.some(file => file.type !== 'application/pdf')) {
-      setWiUploadError('Only PDF documents are supported right now.');
+    const invalid = files.find(file => !['.pdf', '.xlsx', '.xls', '.csv', '.txt', '.md', '.eml'].some(ext => file.name.toLowerCase().endsWith(ext)));
+    if (invalid) {
+      setWiUploadError('Supported formats are PDF, Excel (.xlsx/.xls), CSV, TXT, Markdown, and EML.');
       return;
     }
     setWiUploadError(null);
@@ -429,20 +543,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         generatorConfig: {
           provider,
           decompositionModel,
-          arModel,
+          arModel: decompositionModel,
           clarifyModel,
-          refineModel: refineModel || arModel,
+          refineModel: clarifyModel,
           evaluateModel,
-          themeModel: themeModel || evaluateModel,
+          themeModel: evaluateModel,
           maxTokens: 8192,
           geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || "",
           geminiBaseUrl: geminiBaseUrl.trim() || undefined,
           openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || "",
           openaiBaseUrl: openaiBaseUrl.trim() || undefined,
+          azureOpenAIApiKey: azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || "",
+          azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
+          azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
+          modelCatalogs,
         },
-        domainContext: domainContext.trim(),
+        domainContext: buildGuidanceContextPayload(domainContext, roleGuidanceRows),
         domainContexts,
-        domainRoles: domainRoles.split(',').map((r: any) => r.trim()).filter(Boolean),
+        domainRoles: roleGuidanceRows.map(row => row.role.trim()).filter(Boolean),
         wiConfig: { enabled: wiEnabled, topKChunks: 8, maxChars: 100000 },
         compliance: {
           enabled: complianceEnabled,
@@ -460,32 +578,34 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       });
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
-      setGeminiApiKey(''); setOpenaiApiKey('');
+      if (azureOpenAIApiKey.trim()) setExistingAzureOpenAIApiKey(REDACTED);
+      setGeminiApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
   }
 
-  async function handleResetUsage() {
-    if (!window.confirm('Are you sure you want to reset the usage counter?')) return;
-    try {
-      const res = await api.resetUsage() as any;
-      if (res.success) {
-        const usageRes = await api.getUsage() as any;
-        if (usageRes.success && usageRes.usage) setUsage(usageRes.usage);
-        alert('Usage counter reset successfully.');
-      }
-    } catch (e: any) { alert(`Failed to reset usage: ${e.message}`); }
-  }
-
   async function testLlmConnection() {
     setIsTestingLlm(true); setLlmTestResult(null);
     try {
+      const resolvedTestModel = clarifyModel.startsWith('latest')
+        ? currentCatalogEntries.find(entry => {
+            if (clarifyModel === 'latest-pro') return entry.family === 'pro';
+            if (clarifyModel === 'latest-flash') return entry.family === 'flash';
+            if (clarifyModel === 'latest-lite') return entry.family === 'lite';
+            return true;
+          })?.deploymentName || currentCatalogEntries[0]?.deploymentName || currentCatalogEntries[0]?.id || clarifyModel
+        : clarifyModel;
       const res = await api.testLlmConnection({
         provider,
-        model: clarifyModel,
+        model: resolvedTestModel,
         geminiApiKey: provider === 'gemini' ? (geminiApiKey.trim() || existingGeminiApiKey || undefined) : undefined,
+        geminiBaseUrl: provider === 'gemini' ? (geminiBaseUrl.trim() || undefined) : undefined,
         openaiApiKey: provider === 'openai' ? (openaiApiKey.trim() || existingOpenaiApiKey || undefined) : undefined,
+        openaiBaseUrl: provider === 'openai' ? (openaiBaseUrl.trim() || undefined) : undefined,
+        azureOpenAIApiKey: provider === 'azure_openai' ? (azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || undefined) : undefined,
+        azureOpenAIBaseUrl: provider === 'azure_openai' ? (azureOpenAIBaseUrl.trim() || undefined) : undefined,
+        azureOpenAIApiVersion: provider === 'azure_openai' ? (azureOpenAIApiVersion.trim() || undefined) : undefined,
       }) as any;
       setLlmTestResult(res.success ? { ok: true, message: 'Connection successful.' } : { ok: false, message: res.error || 'Connection failed.' });
     } catch (err: any) { setLlmTestResult({ ok: false, message: err.message || 'Connection failed.' }); }
@@ -544,40 +664,108 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   useEffect(() => {
     if (provider === 'gemini') {
-      if (!decompositionModel.startsWith('gemini-')) setDecompositionModel('gemini-2.5-pro');
-      if (!arModel.startsWith('gemini-')) setArModel('gemini-2.5-pro');
-      if (!clarifyModel.startsWith('gemini-')) setClarifyModel('gemini-2.5-flash');
-      if (!evaluateModel.startsWith('gemini-')) setEvaluateModel('gemini-2.5-flash');
-      if (!refineModel.startsWith('gemini-')) setRefineModel('gemini-2.5-flash');
-      if (!themeModel.startsWith('gemini-')) setThemeModel('gemini-2.5-flash');
+      if (!decompositionModel.startsWith('gemini-') && !decompositionModel.startsWith('latest')) setDecompositionModel('latest-pro');
+      if (!arModel.startsWith('gemini-') && !arModel.startsWith('latest')) setArModel('latest-pro');
+      if (!clarifyModel.startsWith('gemini-') && !clarifyModel.startsWith('latest')) setClarifyModel('latest-flash');
+      if (!evaluateModel.startsWith('gemini-') && !evaluateModel.startsWith('latest')) setEvaluateModel('latest-lite');
+      if (!refineModel.startsWith('gemini-') && !refineModel.startsWith('latest')) setRefineModel('latest-flash');
+      if (!themeModel.startsWith('gemini-') && !themeModel.startsWith('latest')) setThemeModel('latest-lite');
     } else if (provider === 'openai') {
-      if (!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o1-')) setDecompositionModel('gpt-4o');
-      if (!arModel.startsWith('gpt-') && !arModel.startsWith('o1-')) setArModel('gpt-4o');
-      if (!clarifyModel.startsWith('gpt-')) setClarifyModel('gpt-4o-mini');
-      if (!evaluateModel.startsWith('gpt-')) setEvaluateModel('gpt-4o-mini');
-      if (!refineModel.startsWith('gpt-')) setRefineModel('gpt-4o-mini');
-      if (!themeModel.startsWith('gpt-')) setThemeModel('gpt-4o-mini');
+      if (!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o') && !decompositionModel.startsWith('latest')) setDecompositionModel('latest-pro');
+      if (!arModel.startsWith('gpt-') && !arModel.startsWith('o') && !arModel.startsWith('latest')) setArModel('latest-pro');
+      if (!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o') && !clarifyModel.startsWith('latest')) setClarifyModel('latest-flash');
+      if (!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o') && !evaluateModel.startsWith('latest')) setEvaluateModel('latest-lite');
+      if (!refineModel.startsWith('gpt-') && !refineModel.startsWith('o') && !refineModel.startsWith('latest')) setRefineModel('latest-flash');
+      if (!themeModel.startsWith('gpt-') && !themeModel.startsWith('o') && !themeModel.startsWith('latest')) setThemeModel('latest-lite');
+    } else if (provider === 'azure_openai') {
+      if (!decompositionModel.startsWith('latest') && !decompositionModel.trim()) setDecompositionModel('latest-pro');
+      if (!arModel.startsWith('latest') && !arModel.trim()) setArModel('latest-pro');
+      if (!clarifyModel.startsWith('latest') && !clarifyModel.trim()) setClarifyModel('latest-flash');
+      if (!evaluateModel.startsWith('latest') && !evaluateModel.trim()) setEvaluateModel('latest-lite');
+      if (!refineModel.startsWith('latest') && !refineModel.trim()) setRefineModel('latest-flash');
+      if (!themeModel.startsWith('latest') && !themeModel.trim()) setThemeModel('latest-lite');
     } else {
-      if (decompositionModel.startsWith('gemini-') || decompositionModel.startsWith('gpt-')) setDecompositionModel('claude-opus-4-6');
-      if (arModel.startsWith('gemini-') || arModel.startsWith('gpt-')) setArModel('claude-opus-4-6');
-      if (clarifyModel.startsWith('gemini-') || clarifyModel.startsWith('gpt-')) setClarifyModel('claude-sonnet-4-5-20250929');
-      if (evaluateModel.startsWith('gemini-') || evaluateModel.startsWith('gpt-')) setEvaluateModel('claude-haiku-4-5-20251001');
-      if (refineModel.startsWith('gemini-') || refineModel.startsWith('gpt-')) setRefineModel('claude-sonnet-4-5-20250929');
-      if (themeModel.startsWith('gemini-') || themeModel.startsWith('gpt-')) setThemeModel('claude-haiku-4-5-20251001');
+      if (decompositionModel.startsWith('gemini-') || decompositionModel.startsWith('gpt-') || decompositionModel.startsWith('o') || decompositionModel.startsWith('latest')) setDecompositionModel('latest-pro');
+      if (arModel.startsWith('gemini-') || arModel.startsWith('gpt-') || arModel.startsWith('o') || arModel.startsWith('latest')) setArModel('latest-pro');
+      if (clarifyModel.startsWith('gemini-') || clarifyModel.startsWith('gpt-') || clarifyModel.startsWith('o') || clarifyModel.startsWith('latest')) setClarifyModel('latest-flash');
+      if (evaluateModel.startsWith('gemini-') || evaluateModel.startsWith('gpt-') || evaluateModel.startsWith('o') || evaluateModel.startsWith('latest')) setEvaluateModel('latest-lite');
+      if (refineModel.startsWith('gemini-') || refineModel.startsWith('gpt-') || refineModel.startsWith('o') || refineModel.startsWith('latest')) setRefineModel('latest-flash');
+      if (themeModel.startsWith('gemini-') || themeModel.startsWith('gpt-') || themeModel.startsWith('o') || themeModel.startsWith('latest')) setThemeModel('latest-lite');
     }
   }, [provider]); // eslint-disable-line
 
+  const refreshModelCatalog = useCallback(async () => {
+    setIsRefreshingModels(true);
+    setModelCatalogError(null);
+    try {
+      const res = await api.discoverLlmModels({
+        provider,
+        geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || undefined,
+        geminiBaseUrl: geminiBaseUrl.trim() || undefined,
+        openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || undefined,
+        openaiBaseUrl: openaiBaseUrl.trim() || undefined,
+        azureOpenAIApiKey: azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || undefined,
+        azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
+        azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
+      }) as any;
+      if (res?.success && res.catalog) {
+        setModelCatalogs(prev => ({ ...prev, [provider]: res.catalog }));
+      } else if (res?.error) {
+        setModelCatalogError(res.error);
+      }
+    } catch (err: any) {
+      setModelCatalogError(err?.message || 'Could not refresh model list.');
+    } finally {
+      setIsRefreshingModels(false);
+    }
+  }, [provider, geminiApiKey, existingGeminiApiKey, geminiBaseUrl, openaiApiKey, existingOpenaiApiKey, openaiBaseUrl, azureOpenAIApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, azureOpenAIApiVersion]);
+
+  useEffect(() => {
+    if (provider === 'forge_llms') {
+      setModelCatalogs(prev => prev.forge_llms ? prev : { ...prev, forge_llms: { vendor: 'forge_llms', source: 'fallback', fetchedAt: new Date().toISOString(), models: buildStaticCatalog('forge_llms') } });
+      return;
+    }
+    const hasStoredCredential = provider === 'gemini'
+      ? Boolean(existingGeminiApiKey)
+      : provider === 'openai'
+        ? Boolean(existingOpenaiApiKey)
+        : Boolean(existingAzureOpenAIApiKey && azureOpenAIBaseUrl.trim());
+    if (hasStoredCredential && !modelCatalogs[provider]) {
+      void refreshModelCatalog();
+    }
+  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, modelCatalogs, refreshModelCatalog]);
+
+  const currentCatalogEntries = useMemo(() => {
+    return modelCatalogs[provider]?.models?.length ? modelCatalogs[provider]!.models : buildStaticCatalog(provider);
+  }, [modelCatalogs, provider]);
+
   const availableModels = useMemo(() => {
-    if (provider === 'forge_llms') return CLAUDE_MODELS;
-    if (provider === 'gemini' && (geminiApiKey || existingGeminiApiKey)) return GEMINI_MODELS;
-    if (provider === 'openai' && (openaiApiKey || existingOpenaiApiKey)) return OPENAI_MODELS;
-    return [];
-  }, [provider, geminiApiKey, existingGeminiApiKey, openaiApiKey, existingOpenaiApiKey]);
+    const options: Array<{ id: string; label: string }> = [];
+    if (supportsLatestSelector(currentCatalogEntries, 'pro')) options.push({ id: 'latest-pro', label: 'Latest Pro' });
+    if (supportsLatestSelector(currentCatalogEntries, 'flash')) options.push({ id: 'latest-flash', label: 'Latest Flash' });
+    if (supportsLatestSelector(currentCatalogEntries, 'lite')) options.push({ id: 'latest-lite', label: 'Latest Lite' });
+    currentCatalogEntries.forEach(entry => {
+      const id = entry.deploymentName || entry.id;
+      if (!options.some(option => option.id === id)) {
+        options.push({
+          id,
+          label: entry.displayName || entry.id,
+        });
+      }
+    });
+    [decompositionModel, clarifyModel, evaluateModel].forEach(modelId => {
+      if (modelId && !options.some(option => option.id === modelId)) {
+        options.push({ id: modelId, label: modelId });
+      }
+    });
+    return options;
+  }, [currentCatalogEntries, decompositionModel, clarifyModel, evaluateModel]);
 
   const settingsNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
     { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, examples' },
     { id: 'domain', label: 'Guidance', icon: Globe, sub: 'Roles and workspace rules' },
+    { id: 'stats', label: 'Stats', icon: BarChart3, sub: 'Usage and audit visibility' },
     { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
   ] as const;
 
@@ -686,9 +874,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <div className="space-y-3">
                     <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">LLM Provider</label>
                     <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
-                      {(['openai', 'gemini', 'forge_llms'] as const).map(p => (
+                      {(['openai', 'azure_openai', 'gemini', 'forge_llms'] as const).map(p => (
                         <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
-                          {p.replace('_', ' ')}
+                          {p === 'azure_openai' ? 'azure openai' : p.replace('_', ' ')}
                         </button>
                       ))}
                     </div>
@@ -701,6 +889,26 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
                       </div>
                       <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                    </motion.div>
+                  )}
+
+                  {provider === 'azure_openai' && (
+                    <motion.div className="space-y-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center px-1">
+                          <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Azure OpenAI API Key</label>
+                          {existingAzureOpenAIApiKey && <button onClick={() => { setExistingAzureOpenAIApiKey(''); setAzureOpenAIApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                        </div>
+                        <input type="password" value={azureOpenAIApiKey} onChange={e => setAzureOpenAIApiKey(e.target.value)} placeholder={existingAzureOpenAIApiKey ? '••••••••• (Stored)' : 'Azure key'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="px-1 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Endpoint</label>
+                        <input type="text" value={azureOpenAIBaseUrl} onChange={e => setAzureOpenAIBaseUrl(e.target.value)} placeholder="https://your-resource.openai.azure.com" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="px-1 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">API Version</label>
+                        <input type="text" value={azureOpenAIApiVersion} onChange={e => setAzureOpenAIApiVersion(e.target.value)} placeholder="2024-06-01" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
                     </motion.div>
                   )}
 
@@ -717,20 +925,71 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <div className="space-y-5 pt-6 border-t border-[var(--rf-border-subtle)]">
                     <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-xs text-[var(--rf-text-secondary)] flex items-start gap-3">
                       <Info className="w-4 h-4 text-[var(--rf-brand)] shrink-0 mt-0.5" />
-                      <p><span className="font-bold text-[var(--rf-text)]">Best practice:</span> use a stronger model for decomposition and a faster model for clarify and evaluation.</p>
+                      <p><span className="font-bold text-[var(--rf-text)]">How this works:</span> each phase can use a different model, but each phase does a different job. Use a stronger model where you want deeper structure, and a faster model where you want cheap, quick validation.</p>
                     </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Model catalog</div>
+                        <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                          {modelCatalogs[provider]?.models?.length
+                            ? `Loaded ${modelCatalogs[provider]?.models?.length ?? 0} model option(s) for ${provider === 'azure_openai' ? 'Azure OpenAI' : provider.replace('_', ' ')}.`
+                            : 'Using the bundled fallback catalog until a live vendor catalog is loaded.'}
+                        </p>
+                      </div>
+                      <motion.button
+                        onClick={refreshModelCatalog}
+                        disabled={isRefreshingModels || !isAdmin}
+                        className="bg-[var(--rf-surface-soft)] hover:bg-slate-200 disabled:opacity-50 text-[var(--rf-text-secondary)] text-[11px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 border border-[var(--rf-border)]"
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isRefreshingModels ? 'animate-spin' : ''}`} />
+                        Refresh models
+                      </motion.button>
+                    </div>
+                    {modelCatalogError && (
+                      <div className="rounded-xl border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)] px-4 py-3 text-xs font-semibold text-[var(--rf-danger)]">
+                        {modelCatalogError}
+                      </div>
+                    )}
                     
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {[
-                        { label: 'Decomposition Pass', val: decompositionModel, set: setDecompositionModel },
-                        { label: 'Reasoning & Clarify', val: clarifyModel, set: setClarifyModel },
-                        { label: 'Evaluation & Theme', val: evaluateModel, set: setEvaluateModel },
+                        {
+                          label: 'Decomposition Pass',
+                          hint: 'Breaks the request into the major feature ideas, user needs, and scope boundaries before drafting anything.',
+                          val: decompositionModel,
+                          set: (value: string) => {
+                            setDecompositionModel(value);
+                            setArModel(value);
+                          },
+                        },
+                        {
+                          label: 'Reasoning & Clarify',
+                          hint: 'Asks follow-up questions when the request is ambiguous or likely to change the solution direction.',
+                          val: clarifyModel,
+                          set: (value: string) => {
+                            setClarifyModel(value);
+                            setRefineModel(value);
+                          },
+                        },
+                        {
+                          label: 'Evaluation & Theme',
+                          hint: 'Checks whether the response has enough context, groups similar gaps, and decides if another round is needed.',
+                          val: evaluateModel,
+                          set: (value: string) => {
+                            setEvaluateModel(value);
+                            setThemeModel(value);
+                          },
+                        },
                       ].map((item, i) => (
-                        <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
-                          <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[240px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
-                            {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                          </select>
+                        <div key={i} className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3.5 space-y-2 shadow-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
+                            <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[240px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                              {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                            </select>
+                          </div>
+                          <p className="text-[11px] font-medium text-[var(--rf-text-tertiary)] leading-relaxed">{item.hint}</p>
                         </div>
                       ))}
                     </div>
@@ -842,7 +1101,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="space-y-1">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
                         <h4 className="text-lg font-bold text-[var(--rf-text)]">Project Work Instructions</h4>
-                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Attach PDFs to inform AI generation for this project.</p>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Attach documents to inform AI generation for this project. The picker accepts PDFs, spreadsheets, text files, and email exports.</p>
+                      </div>
+                      <div className="rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                        {wiDocs.length} linked
                       </div>
                       <motion.button
                         onClick={() => wiFileInputRef.current?.click()}
@@ -850,9 +1112,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         className="bg-[var(--rf-text)] hover:bg-black disabled:bg-slate-300 text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg shadow-sm transition-all"
                         whileTap={{ scale: 0.98 }}
                       >
-                        {wiUploadState ? 'Uploading…' : 'Add PDF'}
+                        {wiUploadState ? 'Uploading…' : 'Add docs'}
                       </motion.button>
-                      <input type="file" ref={wiFileInputRef} onChange={handleWiPdfDrop} accept=".pdf" multiple className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
+                      <input type="file" ref={wiFileInputRef} onChange={handleWiFileDrop} accept={WI_ACCEPT} multiple className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
                     </div>
 
                     {activeArProj === '*' ? (
@@ -892,7 +1154,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[420px] overflow-y-auto pr-1 custom-scrollbar">
                           {wiDocs.length === 0 ? (
                             <div className="col-span-2 p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)]">
                               <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -941,10 +1203,62 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-blue-100 shadow-sm"><Users className="w-6 h-6" /></div>
                       <div>
                         <h4 className="text-base font-bold text-[var(--rf-text)]">Core persona roles</h4>
-                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Key stakeholders to consider during generation.</p>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Enter the roles that matter and what each role actually does so the question flow stays grounded in real work.</p>
                       </div>
                     </div>
-                    <input value={domainRoles} onChange={e => setDomainRoles(e.target.value)} placeholder="e.g. Developer, QA Engineer, Product Manager" className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-5 py-3.5 text-sm font-bold text-[var(--rf-text)] focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition" />
+
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Role guidance table</div>
+                          <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Keep this brief and operational. Each row should describe a role and the activities that role performs.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRoleGuidanceRows(prev => [...prev, { role: '', activities: '' }])}
+                          className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition"
+                        >
+                          + Add row
+                        </button>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                          <div>Role</div>
+                          <div>Activities</div>
+                          <div />
+                        </div>
+                        {roleGuidanceRows.map((row, index) => (
+                          <div key={`workspace-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 items-start rounded-xl border border-[var(--rf-border)] bg-white p-3 shadow-sm">
+                            <div className="space-y-1">
+                              <div className="md:hidden text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
+                              <input
+                                value={row.role}
+                                onChange={e => setRoleGuidanceRows(prev => prev.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item))}
+                                placeholder="Field Service Engineer"
+                                className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2.5 text-sm font-semibold text-[var(--rf-text)] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="md:hidden text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Activities</div>
+                              <textarea
+                                value={row.activities}
+                                onChange={e => setRoleGuidanceRows(prev => prev.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item))}
+                                placeholder="Schedules visits, checks service windows, and confirms completion."
+                                className="w-full min-h-[72px] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setRoleGuidanceRows(prev => prev.length === 1 ? [{ role: '', activities: '' }] : prev.filter((_, idx) => idx !== index))}
+                              className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="space-y-4 pt-6 border-t border-[var(--rf-border-subtle)]">
@@ -955,6 +1269,119 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-4 py-3 rounded-xl text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none w-full max-w-sm transition">
                       {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
                     </select>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'stats' && (
+              <motion.div
+                className="max-w-5xl space-y-8"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="space-y-1">
+                  <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Usage & Compliance Stats</h3>
+                  <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">Workspace-wide activity, project breakdowns, and the compliance package signals currently captured by the app.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Generations this month', value: usage?.currentMonth ?? 0, helper: 'Workspace total' },
+                    { label: 'Tracked tokens', value: workspaceTokenUsage.toLocaleString(), helper: 'From transparency reports' },
+                    { label: 'Projects with activity', value: projectUsageBreakdown.length, helper: 'Approximate from reports' },
+                    { label: 'Compliance signals', value: complianceEvents.length + transparencyReports.length + jiraAuditRecords.length, helper: 'Audit + transparency + Jira records' },
+                  ].map((card) => (
+                    <div key={card.label} className="rounded-2xl border border-[var(--rf-border)] bg-white px-5 py-4 shadow-sm">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{card.label}</div>
+                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{card.value}</div>
+                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{card.helper}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-6 shadow-sm space-y-4">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Project usage</div>
+                    <h4 className="mt-1 text-lg font-bold text-[var(--rf-text)]">Activity across the workspace</h4>
+                    <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">Based on transparency reports currently stored in the workspace. This gives you a practical cross-project view even before a dedicated billing analytics backend exists.</p>
+                  </div>
+                  {projectUsageBreakdown.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-sm font-medium text-[var(--rf-text-tertiary)] text-center">
+                      No tracked project activity yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-xl border border-[var(--rf-border)]">
+                      <table className="w-full text-left">
+                        <thead className="bg-[var(--rf-surface-soft)]">
+                          <tr className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                            <th className="px-4 py-3">Project</th>
+                            <th className="px-4 py-3">Reports</th>
+                            <th className="px-4 py-3">Tokens</th>
+                            <th className="px-4 py-3">Latest activity</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {projectUsageBreakdown.map((project) => (
+                            <tr key={project.projectKey} className="border-t border-[var(--rf-border)]">
+                              <td className="px-4 py-3 text-sm font-bold text-[var(--rf-text)]">{project.projectKey}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-[var(--rf-text-secondary)]">{project.reportCount}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-[var(--rf-text-secondary)]">{project.tokenUsage.toLocaleString()}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-[var(--rf-text-tertiary)]">{project.latestAt ? new Date(project.latestAt).toLocaleString() : 'n/a'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                  <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Transparency reports</div>
+                    <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent model decisions and token usage.</div>
+                    <div className="space-y-2">
+                      {transparencyReports.slice(0, 6).map((report) => (
+                        <div key={report.reportId} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-bold text-[var(--rf-text)]">{report.projectKey || 'Workspace-wide'}</div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{report.turnType}</div>
+                          </div>
+                          <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{new Date(report.createdAt).toLocaleString()}</div>
+                          <div className="mt-2 text-xs text-[var(--rf-text-secondary)]">{report.decisionSummary?.[0] || 'No summary captured.'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Compliance audit trail</div>
+                    <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Configuration, security, prompt, and runtime events.</div>
+                    <div className="space-y-2">
+                      {complianceEvents.slice(0, 6).map((event) => (
+                        <div key={event.eventId} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-bold text-[var(--rf-text)]">{event.action}</div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{event.category}</div>
+                          </div>
+                          <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{new Date(event.timestamp).toLocaleString()}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Jira audit records</div>
+                    <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent issue creation and downstream writeback activity.</div>
+                    <div className="space-y-2">
+                      {jiraAuditRecords.slice(0, 6).map((record, index) => (
+                        <div key={`${String(record.issueKey ?? 'jira')}-${index}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3">
+                          <div className="text-xs font-bold text-[var(--rf-text)]">{String(record.issueKey ?? record.projectKey ?? 'Jira event')}</div>
+                          <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{String(record.action ?? record.status ?? 'No action')}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -987,6 +1414,79 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           className="h-full bg-[var(--rf-brand-muted)]0 transition-all duration-500"
                           style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
                         />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
+                  <div className="flex flex-col gap-2">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest text-[var(--rf-brand)] font-bold">Usage & stats</p>
+                      <h4 className="text-xl font-bold text-[var(--rf-text)]">Workspace and project activity</h4>
+                    </div>
+                    <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">
+                      Workspace usage is the billing source of truth. Project rows below are approximated from transparency reports already loaded in this screen.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workspace generations</div>
+                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{usage?.currentMonth ?? 0}</div>
+                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">of {limits?.generationsPerMonth === -1 ? 'Unlimited' : limits?.generationsPerMonth ?? 0}</div>
+                    </div>
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Approx. project tokens</div>
+                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{workspaceTokenUsage.toLocaleString()}</div>
+                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">From loaded transparency reports.</div>
+                    </div>
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Configured projects</div>
+                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{projects.length}</div>
+                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">Available for project-specific setup.</div>
+                    </div>
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Loaded records</div>
+                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{transparencyReports.length + complianceEvents.length + jiraAuditRecords.length}</div>
+                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">Transparency, compliance, and Jira audit trails.</div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Per-project usage</div>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Approximate usage is grouped from transparency reports already loaded in this screen.</p>
+                      </div>
+                      <span className="rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Approximate</span>
+                    </div>
+                    {projectUsageBreakdown.length ? (
+                      <div className="overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white">
+                        <div className="grid grid-cols-[minmax(0,1.2fr)_90px_90px_minmax(0,1fr)] gap-3 border-b border-[var(--rf-border)] px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                          <div>Project</div>
+                          <div className="text-right">Reports</div>
+                          <div className="text-right">Tokens</div>
+                          <div>Latest</div>
+                        </div>
+                        <div className="divide-y divide-[var(--rf-border)]">
+                          {projectUsageBreakdown.map(project => (
+                            <div key={project.projectKey} className="grid grid-cols-[minmax(0,1.2fr)_90px_90px_minmax(0,1fr)] gap-3 px-4 py-3 items-center">
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-[var(--rf-text)] truncate">{project.projectKey}</div>
+                              </div>
+                              <div className="text-sm font-bold text-[var(--rf-text-secondary)] text-right">{project.reportCount}</div>
+                              <div className="text-sm font-bold text-[var(--rf-text-secondary)] text-right">{project.tokenUsage.toLocaleString()}</div>
+                              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)] truncate">
+                                {project.latestAt ? new Date(project.latestAt).toLocaleString() : 'No timestamp'}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-white px-4 py-5 text-sm font-medium text-[var(--rf-text-tertiary)]">
+                        No transparency reports have been loaded yet, so project-level usage cannot be approximated.
                       </div>
                     )}
                   </div>
@@ -1113,6 +1613,87 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </label>
                     ))}
                   </div>
+
+                  <div className="rounded-2xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Loaded compliance records</div>
+                        <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">
+                          These are already available in settings and help surface the transparency trail behind the current workspace.
+                        </p>
+                      </div>
+                      <span className="rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                        {complianceEvents.length + transparencyReports.length + jiraAuditRecords.length} loaded
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Compliance audit events</div>
+                        <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                          {complianceEvents.length ? complianceEvents.slice(0, 6).map(event => (
+                            <div key={event.eventId} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-bold text-[var(--rf-text)]">{event.action}</div>
+                                <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{event.category}</div>
+                              </div>
+                              <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{new Date(event.timestamp).toLocaleString()}</div>
+                            </div>
+                          )) : (
+                            <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-4 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                              No compliance audit events loaded yet.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Transparency reports</div>
+                        <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                          {transparencyReports.length ? transparencyReports.slice(0, 6).map(report => (
+                            <div key={report.reportId} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-bold text-[var(--rf-text)] capitalize">{report.turnType}</div>
+                                <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{report.projectKey || 'workspace'}</div>
+                              </div>
+                              <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                                {report.model ? `${report.model} · ` : ''}{report.tokenUsage?.total ? `${report.tokenUsage.total.toLocaleString()} tokens · ` : ''}{new Date(report.createdAt).toLocaleString()}
+                              </div>
+                              <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-secondary)] line-clamp-2">
+                                {report.decisionSummary.join(' · ')}
+                              </div>
+                            </div>
+                          )) : (
+                            <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-4 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                              No transparency reports loaded yet.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Jira audit records</div>
+                        <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                          {jiraAuditRecords.length ? jiraAuditRecords.slice(0, 6).map((record, index) => {
+                            const label = String(record.action || record.event || record.type || record.change || `Record ${index + 1}`);
+                            const detailText = typeof record.details === 'string'
+                              ? record.details
+                              : (JSON.stringify(record.details ?? record ?? {}) || '').slice(0, 180);
+                            return (
+                              <div key={`${label}-${index}`} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
+                                <div className="text-xs font-bold text-[var(--rf-text)]">{label}</div>
+                                <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] line-clamp-2">{detailText}</div>
+                              </div>
+                            );
+                          }) : (
+                            <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-4 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                              No Jira audit records loaded yet.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1138,6 +1719,15 @@ function ProjectConfigurationManager({
   const effectiveBacklogStatuses = currentBacklogScope.statuses.length
     ? currentBacklogScope.statuses
     : detectDefaultStatuses(backlogStatusOptions);
+  const indexedCount = useMemo(() => {
+    if (backlogCacheInfo?.issueCount && backlogCacheInfo.issueCount > 0) return backlogCacheInfo.issueCount;
+    if (backlogDiagnostics?.matchingScopeIssues !== undefined && backlogDiagnostics.matchingScopeIssues > 0) return backlogDiagnostics.matchingScopeIssues;
+    if (backlogDiagnostics?.totalProjectIssues !== undefined && backlogDiagnostics.totalProjectIssues > 0) return backlogDiagnostics.totalProjectIssues;
+    if (backlogCacheInfo?.issueCount !== undefined) return backlogCacheInfo.issueCount;
+    if (backlogDiagnostics?.matchingScopeIssues !== undefined) return backlogDiagnostics.matchingScopeIssues;
+    if (backlogDiagnostics?.totalProjectIssues !== undefined) return backlogDiagnostics.totalProjectIssues;
+    return 0;
+  }, [backlogCacheInfo, backlogDiagnostics]);
 
   const updateMapping = (p: any) => {
     const idx = arMappings.findIndex((m: any) => m.projectKey === activeArProj);
@@ -1165,7 +1755,6 @@ function ProjectConfigurationManager({
   };
 
   const [isSavingProject, setIsSavingProject] = useState(false);
-  const selectedStatuses: string[] = Array.isArray(newSource.statuses) ? newSource.statuses : [];
   const [projectNotice, setProjectNotice] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState({
     backlog: true,
@@ -1176,14 +1765,6 @@ function ProjectConfigurationManager({
 
   const toggleSection = (section: 'backlog' | 'guidance' | 'mapping' | 'examples') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  };
-
-  const toggleStatus = (statusName: string) => {
-    const exists = selectedStatuses.includes(statusName);
-    const next = exists
-      ? selectedStatuses.filter(s => s !== statusName)
-      : [...selectedStatuses, statusName];
-    setNewSource((p: any) => ({ ...p, statuses: next, status: next[0] || '' }));
   };
 
   const handleSave = async () => {
@@ -1290,7 +1871,12 @@ function ProjectConfigurationManager({
              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
-                 <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{backlogCacheInfo?.issueCount ?? 0}</div>
+                 <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{indexedCount}</div>
+                 <div className="mt-1 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+                   {backlogCacheInfo?.issueCount !== undefined
+                     ? 'Cache count from the latest rebuild.'
+                     : 'Fallback from backlog diagnostics when cache metadata has not been refreshed yet.'}
+                 </div>
                </div>
                <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
@@ -1354,8 +1940,16 @@ function ProjectConfigurationManager({
               <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
             </button>
             {expandedSections.guidance && (
-              <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)]">
-                <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-32 bg-white border border-[var(--rf-border)] rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none" />
+              <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
+                <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Project guidance</div>
+                      <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Use this for rules, defaults, and phrasing that should apply to this project only.</p>
+                    </div>
+                  </div>
+                  <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-28 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none" />
+                </div>
               </div>
             )}
          </div>
@@ -1383,26 +1977,10 @@ function ProjectConfigurationManager({
                <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
                  <div className="flex items-start justify-between gap-4">
                    <div>
-                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Mapping mode</div>
+                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Mapping</div>
                      <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
-                       Preserve separate source and target fields when your Jira setup stores the same content in multiple places.
+                       Input and output mappings stay separate so admins can point generated content into the right fields without switching modes.
                      </p>
-                   </div>
-                   <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)] shadow-sm">
-                     <button
-                       type="button"
-                       onClick={() => updateMapping({ mode: 'consolidated' })}
-                       className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'consolidated' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
-                     >
-                       Consolidated
-                     </button>
-                     <button
-                       type="button"
-                       onClick={() => updateMapping({ mode: 'iterative' })}
-                       className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition ${currentMapping.mode === 'iterative' ? 'bg-[var(--rf-text)] text-white shadow-sm' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
-                     >
-                       Iterative
-                     </button>
                    </div>
                  </div>
                  <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1509,9 +2087,6 @@ function FieldMappingEditor({
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{title}</div>
           <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">{description}</p>
         </div>
-        <span className="rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-          Summary is standard
-        </span>
       </div>
 
       <div className="space-y-3">

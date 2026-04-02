@@ -1053,7 +1053,7 @@ export function MainContent({
                           </div>
                           {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
                             <div className="space-y-2">
-                              {generationContext.referencedWiSections!.slice(0, 4).map((section, i) => (
+                              {generationContext.referencedWiSections!.map((section, i) => (
                                 <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-3">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
