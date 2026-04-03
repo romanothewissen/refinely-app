@@ -838,7 +838,7 @@ export function MainContent({
             </div>
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <div className="rf-card p-4">
+              <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                     Pipeline
@@ -893,7 +893,7 @@ export function MainContent({
                 </div>
               </div>
 
-              <div className="rf-card p-4">
+              <div className="flex flex-col gap-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                   Context Signals
                 </div>
@@ -1040,7 +1040,7 @@ export function MainContent({
             <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
               Source highlights
             </div>
-            <div className="rf-card p-4">
+            <div className="flex flex-col gap-3">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
               {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
@@ -1075,7 +1075,7 @@ export function MainContent({
               )}
             </div>
 
-            <div className="rf-card p-4">
+            <div className="flex flex-col gap-3">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
               {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
@@ -1361,7 +1361,7 @@ export function MainContent({
                       exit={{ opacity: 0, height: 0 }}
                     >
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <div className="rf-card p-4">
+                        <div className="flex flex-col gap-3">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
@@ -1406,7 +1406,7 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="rf-card p-4">
+                        <div className="flex flex-col gap-3">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
@@ -1436,7 +1436,7 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="rf-card p-4">
+                        <div className="flex flex-col gap-3">
                           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
                           <div className="mt-3 space-y-2.5">
                             <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
