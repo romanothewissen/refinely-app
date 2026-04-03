@@ -257,7 +257,6 @@ function simplifyQuestionCopy(value: string): string {
   return cleanText(value)
     .replace(/\((?:as\s+per|per|see|from)\s+[^)]*(?:reference|references|doc|docs|story|stories|evidence|backlog|wi)[^)]*\)/gi, '')
     .replace(/\((?:backlog|reference|references|doc|docs|story|stories|wi)[^)]*\)/gi, '')
-    .replace(/["“”]([^"“”]{1,48})["“”]/g, '$1')
     .replace(/\bwhat exact\b/gi, 'what')
     .replace(/\bwhat other events or conditions should\b/gi, 'which policy should')
     .replace(/\bso the team knows this flow is solving the right problem\b/gi, 'first')
@@ -479,7 +478,6 @@ function normalizeSuggestionComparisonKey(value: string): string {
 
 function simplifySuggestionCopy(value: string): string {
   return cleanText(value)
-    .replace(/["“”]([^"“”]{1,48})["“”]/g, '$1')
     .replace(/\bmaterially\b/gi, 'really')
     .replace(/\bsubsequent\b/gi, 'later')
     .replace(/\butili[sz]e\b/gi, 'use')
@@ -861,22 +859,7 @@ export function normalizeQuestionIntent(value: unknown, categoryKey: ClarifyCate
 
 function splitGroupedQuestion(question: string): string[] {
   const normalized = ensureQuestionMark(question);
-  if (!normalized) return [];
-
-  const numberedParts = normalized.split(/\s*(?=\d+\.\s*)/).filter(Boolean);
-  if (numberedParts.length >= 3) {
-    const prefix = cleanText(numberedParts.shift() ?? '').replace(/[,:;]+$/g, '');
-    return numberedParts
-      .map((segment) => cleanText(segment.replace(/^\d+\.\s*/, ''))
-        .replace(/\b(and|or)\s*$/i, '')
-        .trim()
-        .replace(/[,:;\s]+$/g, '')
-        .trim())
-      .map((segment) => ensureQuestionMark(prefix ? `${prefix} ${segment}` : segment))
-      .filter(Boolean);
-  }
-
-  return [normalized];
+  return normalized ? [normalized] : [];
 }
 
 function normalizeQuestionText(question: string): string {

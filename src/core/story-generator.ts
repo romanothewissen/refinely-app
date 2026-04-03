@@ -177,8 +177,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
-const MAX_CLARIFY_QUESTION_CHARS = 170;
-const MAX_CLARIFY_SUGGESTION_CHARS = 95;
+const MAX_CLARIFY_QUESTION_CHARS = 250;
+const MAX_CLARIFY_SUGGESTION_CHARS = 130;
 const FOLLOWUP_GROUNDING_STOPWORDS = new Set([
   'a', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'by', 'can', 'do', 'does', 'first', 'for',
   'from', 'handling', 'how', 'if', 'improve', 'in', 'into', 'is', 'it', 'its', 'of', 'on', 'or',

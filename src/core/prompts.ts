@@ -366,10 +366,10 @@ DISCOVERY RULES:
 - ${questionPlanHint}
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
-- Prefer one visible question per main business decision.
-- A question may be longer than a terse chip-style prompt when extra context makes the ambiguity clearer, but do not bundle several numbered sub-questions into one card.
+- CRITICAL: Each question must cover exactly one business decision. Never bundle two questions using numbers (1. ... 2. ...), letters ((a)...(b)...), semicolons, bullets, or "and also" constructions. If you find yourself wanting to ask two related things, pick the more important one for this card — the other can be a separate question if it is genuinely distinct.
+- A question may be rich and specific when that makes the ambiguity clearer, but it must end with a single answerable prompt.
 - Questions should usually be rich, specific business prompts rather than clipped one-liners. Use enough wording to make the tradeoff or ambiguity concrete, while keeping the card focused on one main decision.
-- Avoid quotes, parenthetical evidence references, and stacked qualifiers unless they are essential to understand the decision.
+- Do not use quotation marks (" " ' ') around any terms, values, or phrases. Write the word directly without wrapping it in quotes. Do not include parenthetical evidence references or stacked qualifiers.
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
