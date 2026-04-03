@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X } from 'lucide-react';
+import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Sparkles, Database, FileText, Orbit } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UsageMeter } from './UsageMeter';
 
@@ -114,7 +114,7 @@ export function Sidebar({
     >
       {/* Header */}
       <motion.div
-        className="px-6 h-[88px] flex items-center justify-between shrink-0 border-b border-[var(--rf-sidebar-border)]"
+        className="relative z-[1] px-6 h-[96px] flex items-center justify-between shrink-0 border-b border-white/45 bg-[linear-gradient(180deg,rgba(255,255,255,0.52),rgba(255,255,255,0.22))] backdrop-blur-xl"
         variants={fadeUpVariant}
         initial="hidden"
         animate="visible"
@@ -140,7 +140,8 @@ export function Sidebar({
               >
                 Refinely
               </h1>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-muted)]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-white/80 text-[var(--rf-brand)] border border-[rgba(43,89,74,0.12)] shadow-sm">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)]" />
                 {tierName}
               </span>
             </div>
@@ -173,19 +174,27 @@ export function Sidebar({
         </div>
       </motion.div>
 
-      <div className="flex-1 min-h-0 flex flex-col w-full px-5 py-5 gap-4 overflow-y-auto no-scrollbar">
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-5 py-5 gap-4 overflow-y-auto no-scrollbar">
         {/* Project context card */}
         <motion.div
-          className="rf-sidebar-card px-4 py-3.5"
+          className="rf-sidebar-card overflow-hidden px-4 py-4"
           variants={fadeUpVariant}
           initial="hidden"
           animate="visible"
           custom={1}
         >
+          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.24),transparent)]" />
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Workspace</div>
-              <div className="text-sm font-semibold text-[var(--rf-text)] truncate">{projectTitle}</div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.1)] bg-white shadow-sm">
+                  <Orbit className="h-4 w-4 text-[var(--rf-brand)]" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Workspace</div>
+                  <div className="text-sm font-semibold text-[var(--rf-text)] truncate">{projectTitle}</div>
+                </div>
+              </div>
             </div>
             <select
               value={projectKey}
@@ -198,7 +207,7 @@ export function Sidebar({
                   setContextMode('project');
                 }
               }}
-              className="shrink-0 min-w-[132px] rounded-lg border border-[var(--rf-sidebar-border)] bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] transition-all hover:bg-[var(--rf-sidebar-card-hover)]"
+              className="shrink-0 min-w-[132px] rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/75 px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] transition-all shadow-sm"
             >
               <option value="*" className="text-[var(--rf-text)]">No project selected</option>
               {availableProjects.map(project => (
@@ -213,17 +222,17 @@ export function Sidebar({
               Select a project to unlock project-scoped backlog context and instructions.
             </div>
           )}
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => {
                 if (projectKey !== '*') setContextMode('project');
               }}
               disabled={projectKey === '*'}
-              className={`inline-flex items-center rounded-lg px-3 py-1.5 text-[11px] font-bold transition border ${
+              className={`inline-flex items-center rounded-xl px-3 py-1.5 text-[11px] font-bold transition border shadow-sm ${
                 contextMode === 'project'
-                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)]'
-                  : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-sidebar-border)] hover:border-[var(--rf-brand-subtle)]'
+                  ? 'bg-[linear-gradient(135deg,var(--rf-brand),#3b705f)] text-white border-[var(--rf-brand)]'
+                  : 'bg-white/85 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.12)] hover:border-[var(--rf-brand-subtle)]'
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               Use selected project
@@ -234,10 +243,10 @@ export function Sidebar({
                 setProjectKey('*');
                 setContextMode('global');
               }}
-              className={`inline-flex items-center rounded-lg px-3 py-1.5 text-[11px] font-bold transition border ${
+              className={`inline-flex items-center rounded-xl px-3 py-1.5 text-[11px] font-bold transition border shadow-sm ${
                 contextMode === 'global'
-                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)]'
-                  : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-sidebar-border)] hover:border-[var(--rf-brand-subtle)]'
+                  ? 'bg-[linear-gradient(135deg,var(--rf-brand),#3b705f)] text-white border-[var(--rf-brand)]'
+                  : 'bg-white/85 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.12)] hover:border-[var(--rf-brand-subtle)]'
               }`}
             >
               Run globally
@@ -260,11 +269,17 @@ export function Sidebar({
           <motion.button
             type="button"
             onClick={() => onOpenProjectSettings('jira', projectKey)}
-            className="rf-sidebar-card px-3.5 py-3 text-left focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/30"
+            className="rf-sidebar-card overflow-hidden px-3.5 py-3.5 text-left focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/30"
             whileTap={{ scale: 0.98 }}
           >
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.22),transparent)]" />
             <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Backlog Cache</div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.1)]">
+                  <Database className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+                </div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Backlog Cache</div>
+              </div>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${projectKey !== '*' ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success)]/20' : 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)] border-[var(--rf-warning)]/20'}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${projectKey !== '*' ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-warning)]'}`} />
                 {projectKey !== '*' ? 'Project' : 'Select'}
@@ -280,11 +295,17 @@ export function Sidebar({
           <motion.button
             type="button"
             onClick={() => onOpenProjectSettings('jira', projectKey)}
-            className="rf-sidebar-card px-3.5 py-3 text-left focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/30"
+            className="rf-sidebar-card overflow-hidden px-3.5 py-3.5 text-left focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/30"
             whileTap={{ scale: 0.98 }}
           >
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.22),transparent)]" />
             <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Project Docs</div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-2xl bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.1)]">
+                  <FileText className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+                </div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Project Docs</div>
+              </div>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${activeWiDocs.length > 0 ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-brand)]/20' : 'bg-[var(--rf-border-subtle)] text-[var(--rf-text-tertiary)] border-[var(--rf-border)]'}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${activeWiDocs.length > 0 ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
                 {activeWiDocs.length > 0 ? 'Ingested' : 'Empty'}
@@ -306,7 +327,7 @@ export function Sidebar({
         >
           <label className="text-[10px] font-bold text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">Input Message</label>
           {originIssueKey && (
-            <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-brand)]/20 px-2.5 py-0.5 text-[10px] font-bold text-[var(--rf-brand)]">
+            <span className="rounded-full bg-white/78 border border-[rgba(43,89,74,0.12)] px-2.5 py-1 text-[10px] font-bold text-[var(--rf-brand)] shadow-sm">
               Source: {originIssueKey}
             </span>
           )}
@@ -320,12 +341,16 @@ export function Sidebar({
           animate="visible"
           custom={4}
         >
-          <div className="border-b border-[var(--rf-sidebar-border)] bg-[linear-gradient(180deg,rgba(247,250,249,0.98),rgba(242,247,245,0.94))] px-4 py-3.5">
+          <div className="relative border-b border-white/45 bg-[radial-gradient(circle_at_top,rgba(43,89,74,0.14),transparent_58%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,239,230,0.92))] px-4 py-4">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.28),transparent)]" />
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.1)] bg-white shadow-sm">
+                    <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
+                  </div>
                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">One-time run input</div>
-                  <span className="rounded-full border border-[var(--rf-brand)]/15 bg-white/85 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)]">
+                  <span className="rounded-full border border-[var(--rf-brand)]/15 bg-white/85 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shadow-sm">
                     prompt + files
                   </span>
                 </div>
@@ -338,7 +363,7 @@ export function Sidebar({
                 onClick={() => runAttachmentInputRef.current?.click()}
                 disabled={isWorking}
                 title="Attach supporting files for this run only"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--rf-brand)]/15 bg-white px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] shadow-sm transition hover:border-[var(--rf-brand)]/35 hover:text-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--rf-brand)]/15 bg-white px-3.5 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] shadow-sm transition hover:border-[var(--rf-brand)]/35 hover:text-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                 whileTap={{ scale: 0.97 }}
               >
                 <Paperclip className="w-3.5 h-3.5" />
@@ -359,7 +384,7 @@ export function Sidebar({
                 {runAttachments.map((attachment) => (
                   <div
                     key={attachment.id}
-                    className="group flex items-center gap-2 rounded-2xl border border-[var(--rf-brand)]/15 bg-white px-3 py-2 shadow-[0_8px_24px_rgba(43,89,74,0.08)]"
+                    className="group flex items-center gap-2 rounded-2xl border border-[var(--rf-brand)]/15 bg-white/96 px-3 py-2 shadow-[0_12px_28px_rgba(43,89,74,0.08)]"
                   >
                     <div className="min-w-0">
                       <div className="max-w-[190px] truncate text-[11px] font-bold text-[var(--rf-text)]">{attachment.filename}</div>
@@ -383,21 +408,25 @@ export function Sidebar({
             onChange={(e) => setRequirement(e.target.value)}
             placeholder="Type your request here, or leave this blank and attach a file with the details. You can also do both."
             disabled={isWorking || !contextReady}
-            className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
+            className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-4 pb-3 custom-scrollbar"
           />
-          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-sidebar-border)] px-4 py-2.5 bg-[var(--rf-bg-sidebar)]">
+          <div className="flex items-center justify-between gap-3 border-t border-white/45 px-4 py-3 bg-[linear-gradient(180deg,rgba(247,250,249,0.88),rgba(238,244,241,0.88))]">
             <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">
               {runAttachments.length > 0 ? `${attachmentChipLabel} · ` : ''}{wordCount} words
             </div>
-            <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">
-              {hasPromptInput ? 'Ready to run' : 'Add text or files'}
+            <div className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+              hasPromptInput
+                ? 'bg-white/88 text-[var(--rf-brand)] border border-[rgba(43,89,74,0.12)] shadow-sm'
+                : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'
+            }`}>
+              {hasPromptInput ? 'Ready to run' : 'Add input'}
             </div>
           </div>
         </motion.div>
 
         {(runAttachmentParseState || runAttachmentError) && (
           <motion.div
-            className={`rf-sidebar-card px-4 py-3 ${runAttachmentError ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]' : ''}`}
+            className={`rf-sidebar-card px-4 py-3 ${runAttachmentError ? 'border-[var(--rf-danger-subtle)] bg-[linear-gradient(180deg,#fff7f8,#f8e9eb)]' : ''}`}
             variants={fadeUpVariant}
             initial="hidden"
             animate="visible"
@@ -432,8 +461,8 @@ export function Sidebar({
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Monthly generation limit reached.' : ''}
-            className="brainstorm-shimmer w-full bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-sm font-bold py-3.5 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-[var(--rf-brand)]/20 border border-[var(--rf-brand)]/50"
-            whileHover={!brainstormDisabled ? { scale: 1.01, boxShadow: '0 8px 20px rgba(43, 89, 74, 0.25)' } : {}}
+            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#21473b,#2b594a,#3d7867)] hover:brightness-[1.03] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-sm font-bold py-4 rounded-[20px] transition-colors flex items-center justify-center gap-2 shadow-[0_22px_42px_-22px_rgba(43,89,74,0.55)] border border-[rgba(255,255,255,0.16)]"
+            whileHover={!brainstormDisabled ? { scale: 1.01, boxShadow: '0 18px 34px -18px rgba(43, 89, 74, 0.5)' } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
             {isWorking ? (
@@ -452,7 +481,7 @@ export function Sidebar({
           <div className="grid grid-cols-2 gap-3">
             <motion.button
               onClick={onNewSession}
-              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-xs font-semibold flex items-center justify-center gap-1.5"
+              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-xs font-semibold flex items-center justify-center gap-1.5"
               whileTap={{ scale: 0.97 }}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -460,7 +489,7 @@ export function Sidebar({
             </motion.button>
             <motion.button
               onClick={onOpenHistory}
-              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-xs font-semibold flex items-center justify-center gap-1.5"
+              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-xs font-semibold flex items-center justify-center gap-1.5"
               whileTap={{ scale: 0.97 }}
             >
               <Clock className="w-3.5 h-3.5" />
@@ -478,10 +507,11 @@ export function Sidebar({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="rf-sidebar-card relative p-4">
+          <div className="rf-sidebar-card relative overflow-hidden p-4">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.22),transparent)]" />
             <button
               onClick={() => setShowUsage(false)}
-              className="absolute right-3 top-3 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/10 hover:text-white"
+              className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-xl text-[var(--rf-text-tertiary)] transition hover:bg-white/75 hover:text-[var(--rf-text)]"
             >
               <X className="w-3.5 h-3.5" />
             </button>
