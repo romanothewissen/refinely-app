@@ -252,7 +252,7 @@ async function runParallelArPass(input: {
     modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
     piiMaskingEnabled?: boolean;
   };
-  onArProgress?: (completed: number, total: number) => Promise<void>;
+  onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
 }): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
   const systemPrompt = buildArSystemPrompt({
     domainContext: input.domainContext,
@@ -321,7 +321,7 @@ async function runParallelArPass(input: {
         });
       }
       completed++;
-      if (input.onArProgress) await input.onArProgress(completed, tasks.length);
+      if (input.onArProgress) await input.onArProgress(completed, tasks.length, i + j);
     }
   }
 
@@ -810,7 +810,7 @@ export async function generateFeatures(opts: {
   precomputedTriage?: TriageResult | null;
   onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string }) => Promise<void>;
   onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
-  onArProgress?: (completed: number, total: number) => Promise<void>;
+  onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
   const { requirement, clarifyAnswers, attachmentText, similarStoriesText, wiContextText, config, precomputedTriage, onTriageComplete, onPass1Complete, onArProgress, shouldCancel } = opts;
@@ -940,6 +940,7 @@ export async function generateFeatures(opts: {
     };
   } else {
     // Monolithic path: single LLM call for all features (used for 1-feature results)
+    if (onArProgress) await onArProgress(0, pass1Features.length, 0);
     const pass2System = buildArSystemPrompt({
       domainContext: config.domainContext,
       arPlan: assessment.arPlan,
@@ -972,6 +973,7 @@ export async function generateFeatures(opts: {
       ? mergeFeatures(pass1Features, pass2Result.data.features)
       : pass1Features;
     pass2Usage = pass2Result.usage;
+    if (onArProgress) await onArProgress(pass1Features.length, pass1Features.length, pass1Features.length - 1);
   }
 
   const features = rawFeatures.map(normaliseFeature);

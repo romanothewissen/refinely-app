@@ -152,6 +152,7 @@ type GenerationProgressMeta = {
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: {
     projectKey: string;
     domainContextApplied?: boolean;
@@ -187,6 +188,17 @@ function buildFeatureExcerpt(text: string, maxChars = 150) {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
   if (compact.length <= maxChars) return compact;
   return `${compact.slice(0, maxChars).trimEnd()}...`;
+}
+
+function getTriageSupportCopy(triage?: GenerationProgressMeta['triage']) {
+  if (!triage) return 'Sizing the request so the pipeline knows how much depth to apply.';
+  if (triage.complexity === 'high' || triage.complexity === 'very high' || triage.shape === 'broad') {
+    return 'This looks like a broader, heavier request, so the system is spending extra time decomposing and tightening the output.';
+  }
+  if (triage.complexity === 'medium') {
+    return 'This looks moderately involved, so the system is balancing speed with a bit more reasoning before it writes the details.';
+  }
+  return 'This looks fairly contained, so the system should move through decomposition quickly.';
 }
 
 async function mapWithConcurrency<T, R>(
@@ -398,8 +410,11 @@ export function MainContent({
   const liveTriage = generationProgressMeta?.triage;
   const liveArProgress = generationProgressMeta?.arProgress;
   const liveDraftFeatures = generationProgressMeta?.draftFeatures ?? [];
+  const liveFeatureProgress = generationProgressMeta?.featureProgress ?? [];
   const liveSources = generationProgressMeta?.sources ?? generationContext ?? null;
   const liveArRatio = liveArProgress?.total ? Math.min(1, liveArProgress.completed / liveArProgress.total) : 0;
+  const liveFeatureProgressById = new Map(liveFeatureProgress.map(item => [item.id, item.status]));
+  const triageSupportCopy = getTriageSupportCopy(liveTriage);
 
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
@@ -758,7 +773,7 @@ export function MainContent({
   };
 
   // ── Generating skeleton ──────────────────────────────────────────────────
-  const GeneratingSkeleton = () => (
+  const renderGeneratingSkeleton = () => (
     <motion.div
       className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex-1 flex items-start justify-center"
       initial={{ opacity: 0 }}
@@ -787,6 +802,9 @@ export function MainContent({
                     </h2>
                     <p className="mt-1 max-w-2xl text-sm font-medium leading-relaxed text-[var(--rf-text-tertiary)]">
                       {progress || 'Processing your request…'}
+                    </p>
+                    <p className="mt-2 max-w-2xl text-xs font-medium leading-relaxed text-[var(--rf-text-tertiary)]">
+                      {triageSupportCopy}
                     </p>
                   </div>
                 </div>
@@ -902,6 +920,11 @@ export function MainContent({
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
+                  {liveTriage && (
+                    <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
+                      Early read: <span className="text-[var(--rf-brand)]">{liveTriage.shape} / {liveTriage.complexity}</span>
+                    </div>
+                  )}
                   <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
                     Project scope: <span className="text-[var(--rf-brand)]">{liveSources?.projectKey === '*' ? 'Global workspace' : liveSources?.projectKey || projectKey}</span>
                   </div>
@@ -933,6 +956,21 @@ export function MainContent({
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                 >
+                  {(() => {
+                    const featureStatus = liveFeatureProgressById.get(feature.id) ?? (liveArProgress?.completed === liveArProgress?.total && liveArProgress?.total ? 'complete' : i === 0 ? 'active' : 'pending');
+                    const featureWidth = featureStatus === 'complete' ? '100%' : featureStatus === 'active' ? '62%' : '16%';
+                    const featureTone = featureStatus === 'complete'
+                      ? 'from-emerald-500/80 to-emerald-400/95'
+                      : featureStatus === 'active'
+                        ? 'from-[rgba(35,74,61,0.55)] to-[rgba(53,113,95,0.95)]'
+                        : 'from-[rgba(35,74,61,0.12)] to-[rgba(35,74,61,0.24)]';
+                    const featureLabel = featureStatus === 'complete'
+                      ? 'Acceptance requirements complete'
+                      : featureStatus === 'active'
+                        ? 'Writing acceptance requirements'
+                        : 'Queued for acceptance requirements';
+
+                    return (
                   <div className="flex">
                     <div className="w-1.5 shrink-0 bg-[linear-gradient(180deg,rgba(53,113,95,0.9),rgba(126,211,158,0.6))]" />
                     <div className="flex-1 p-4 sm:p-5">
@@ -948,19 +986,32 @@ export function MainContent({
                         </div>
                       </div>
                       <div className="mt-4 rounded-2xl border border-dashed border-[rgba(35,74,61,0.18)] bg-[rgba(35,74,61,0.03)] px-3.5 py-3">
-                        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
                           <BrainCircuit className="h-4 w-4 text-[var(--rf-brand)]" />
-                          Acceptance requirements in progress
+                            {featureLabel}
+                          </div>
+                          <div className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
+                            featureStatus === 'complete'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : featureStatus === 'active'
+                                ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                                : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'
+                          }`}>
+                            {featureStatus}
+                          </div>
                         </div>
                         <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.08)]">
                           <div
-                            className="h-full rounded-full bg-[linear-gradient(90deg,rgba(35,74,61,0.3),rgba(35,74,61,0.78))] transition-all duration-700"
-                            style={{ width: `${liveArProgress?.total ? Math.max((liveArProgress.completed / liveArProgress.total) * 100, 10) : 18}%` }}
+                            className={`h-full rounded-full bg-gradient-to-r ${featureTone} transition-all duration-700 ${featureStatus === 'active' ? 'animate-pulse' : ''}`}
+                            style={{ width: featureWidth }}
                           />
                         </div>
                       </div>
                     </div>
                   </div>
+                    );
+                  })()}
                 </motion.div>
               ))
             ) : (
@@ -1225,7 +1276,7 @@ export function MainContent({
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         {isGenerating ? (
-          <GeneratingSkeleton />
+          renderGeneratingSkeleton()
         ) : !hasFeatures ? (
           <motion.div
             className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"

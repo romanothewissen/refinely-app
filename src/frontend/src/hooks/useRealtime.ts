@@ -15,6 +15,7 @@ export interface GenerationProgressPayload {
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: {
     projectKey: string;
     domainContextApplied?: boolean;
@@ -24,6 +25,57 @@ export interface GenerationProgressPayload {
     referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
+  };
+}
+
+const GENERATION_STAGE_ORDER: Array<NonNullable<GenerationProgressPayload['stage']>> = [
+  'context',
+  'triage',
+  'decomposition',
+  'acceptance_requirements',
+];
+
+function resolveStage(
+  previous?: GenerationProgressPayload['stage'],
+  next?: GenerationProgressPayload['stage'],
+): GenerationProgressPayload['stage'] {
+  if (!previous) return next;
+  if (!next) return previous;
+  const previousIndex = GENERATION_STAGE_ORDER.indexOf(previous);
+  const nextIndex = GENERATION_STAGE_ORDER.indexOf(next);
+  if (previousIndex < 0) return next;
+  if (nextIndex < 0) return previous;
+  return nextIndex >= previousIndex ? next : previous;
+}
+
+function mergeGenerationSources(
+  previous?: GenerationProgressPayload['sources'],
+  next?: GenerationProgressPayload['sources'],
+): GenerationProgressPayload['sources'] {
+  if (!previous) return next;
+  if (!next) return previous;
+  return {
+    ...previous,
+    ...next,
+    referencedWiDocs: next.referencedWiDocs?.length ? next.referencedWiDocs : previous.referencedWiDocs,
+    referencedWiSections: next.referencedWiSections?.length ? next.referencedWiSections : previous.referencedWiSections,
+    referencedSimilarStories: next.referencedSimilarStories?.length ? next.referencedSimilarStories : previous.referencedSimilarStories,
+  };
+}
+
+function mergeGenerationPayload(
+  previous: GenerationProgressPayload | null,
+  next: GenerationProgressPayload | null,
+): GenerationProgressPayload | null {
+  if (!previous) return next;
+  if (!next) return previous;
+  return {
+    stage: resolveStage(previous.stage, next.stage),
+    triage: next.triage ?? previous.triage,
+    arProgress: next.arProgress ?? previous.arProgress,
+    draftFeatures: next.draftFeatures?.length ? next.draftFeatures : previous.draftFeatures,
+    featureProgress: next.featureProgress?.length ? next.featureProgress : previous.featureProgress,
+    sources: mergeGenerationSources(previous.sources, next.sources),
   };
 }
 
@@ -270,7 +322,10 @@ export function useGenerationRealtime(
           if (event.message) {
             commitProgress(event.message, visibleProgressRef.current === '');
           }
-          setProgressPayload((event.payload as GenerationProgressPayload | undefined) ?? null);
+          setProgressPayload(previous => mergeGenerationPayload(
+            previous,
+            (event.payload as GenerationProgressPayload | undefined) ?? null,
+          ));
         } else if (event.type === 'cancelled') {
           clearInterval(timerRef.current!);
           timerRef.current = null;

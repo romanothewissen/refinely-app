@@ -452,7 +452,7 @@ export default function App() {
   };
 
   const handleStartBrainstorm = async () => {
-    if (!requirement.trim()) return;
+    if (!requirement.trim() && !runAttachments.length) return;
     const attachmentText = runAttachments
       .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
       .join('\n\n');
@@ -701,7 +701,6 @@ export default function App() {
               setContextMode={setContextMode}
               availableProjects={availableProjects}
               wiDocs={wiDocs}
-              onRefreshWiDocs={() => loadWiDocs(projectKey)}
               onOpenProjectSettings={openProjectSettings}
               runAttachments={runAttachments}
               runAttachmentParseState={runAttachmentParseState}

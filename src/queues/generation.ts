@@ -28,6 +28,7 @@ interface GenerationProgressPayload {
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
+  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
 }
 
@@ -71,6 +72,30 @@ function buildWiExcerpt(text: string, maxChars = 180): string {
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
+function buildTriagePayload(triageResult: Awaited<ReturnType<typeof assessRequirementWithLlm>>) {
+  if (!triageResult) return undefined;
+  return {
+    shape: triageResult.shape,
+    complexity: triageResult.complexity,
+    featureTarget: triageResult.estimatedFeatures,
+    arDepth: triageResult.arDepth,
+  };
+}
+
+function buildFeatureProgressState(
+  draftFeatures: Array<Pick<Feature, 'id'>>,
+  completed: number,
+): Array<{ id: string; status: 'pending' | 'active' | 'complete' }> {
+  return draftFeatures.map((feature, index) => ({
+    id: feature.id,
+    status: index < completed
+      ? 'complete'
+      : index === completed
+        ? 'active'
+        : 'pending',
+  }));
+}
+
 export async function handler(event: { body: GenerationEvent }) {
   const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
@@ -107,20 +132,13 @@ export async function handler(event: { body: GenerationEvent }) {
       },
     });
 
-    const [wiContext, similarStories, triageResult] = await Promise.all([
-      config.wiConfig.enabled
-        ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
-        : Promise.resolve({ text: '', docs: [], chunks: [] }),
-      config.tier !== 'free'
-        ? findSimilarStories({
-            requirement: maskedRequirement.text,
-            attachmentText: maskedAttachment.text,
-            clarifyAnswers: maskedAnswers.answers,
-            config,
-            projectKey,
-          })
-        : Promise.resolve([]),
-      assessRequirementWithLlm({
+    const baseSources: GenerationProgressPayload['sources'] = {
+      projectKey,
+      domainContextApplied: Boolean(config.domainContext?.trim()),
+      attachmentIncluded: Boolean(attachmentText?.trim()),
+    };
+
+    const triagePromise = assessRequirementWithLlm({
         requirement: maskedRequirement.text,
         clarifyAnswers: maskedAnswers.answers,
         generatorConfig: config.generatorConfig,
@@ -137,7 +155,36 @@ export async function handler(event: { body: GenerationEvent }) {
           modelCatalogs: config.generatorConfig.modelCatalogs,
           piiMaskingEnabled: piiEnabled,
         },
-      }),
+      }).then(async triageResult => {
+        const triage = buildTriagePayload(triageResult);
+        if (triage) {
+          await updateProgress(
+            `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ~${triage.featureTarget} features`,
+            1,
+            {
+              stage: 'triage',
+              triage,
+              sources: baseSources,
+            },
+          );
+        }
+        return triageResult;
+      });
+
+    const [wiContext, similarStories, triageResult] = await Promise.all([
+      config.wiConfig.enabled
+        ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
+        : Promise.resolve({ text: '', docs: [], chunks: [] }),
+      config.tier !== 'free'
+        ? findSimilarStories({
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            clarifyAnswers: maskedAnswers.answers,
+            config,
+            projectKey,
+          })
+        : Promise.resolve([]),
+      triagePromise,
     ]);
 
     if (await isWorkflowCancelled(sessionId)) {
@@ -146,9 +193,7 @@ export async function handler(event: { body: GenerationEvent }) {
     }
     const similarStoriesText = formatSimilarStoriesText(similarStories);
     const progressSources: GenerationProgressPayload['sources'] = {
-      projectKey,
-      domainContextApplied: Boolean(config.domainContext?.trim()),
-      attachmentIncluded: Boolean(attachmentText?.trim()),
+      ...baseSources,
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: similarStories.slice(0, 6).map(item => ({
         key: item.key,
@@ -174,8 +219,11 @@ export async function handler(event: { body: GenerationEvent }) {
     // Progress: pass 1
     await updateProgress('Planning feature structure from gathered context…', 1, {
       stage: 'decomposition',
+      triage: buildTriagePayload(triageResult),
       sources: progressSources,
     });
+
+    let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> = [];
 
     const result = await generateFeatures({
       requirement,
@@ -187,27 +235,26 @@ export async function handler(event: { body: GenerationEvent }) {
       precomputedTriage: triageResult,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
-        await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1, {
-          stage: 'triage',
-          triage,
-          sources: progressSources,
-        });
+        if (!triageResult) {
+          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1, {
+            stage: 'triage',
+            triage,
+            sources: progressSources,
+          });
+        }
       },
       onPass1Complete: async (draftFeatures) => {
+        liveDraftFeatures = draftFeatures.map(feature => ({
+          id: feature.id,
+          summary: feature.summary,
+          description: feature.description,
+          storyPoints: feature.storyPoints,
+        }));
         await updateProgress(`Writing acceptance requirements for ${draftFeatures.length} feature${draftFeatures.length !== 1 ? 's' : ''}…`, 2, {
           stage: 'acceptance_requirements',
-          triage: triageResult ? {
-            shape: triageResult.shape,
-            complexity: triageResult.complexity,
-            featureTarget: triageResult.estimatedFeatures,
-            arDepth: triageResult.arDepth,
-          } : undefined,
-          draftFeatures: draftFeatures.map(feature => ({
-            id: feature.id,
-            summary: feature.summary,
-            description: feature.description,
-            storyPoints: feature.storyPoints,
-          })),
+          triage: buildTriagePayload(triageResult),
+          draftFeatures: liveDraftFeatures,
+          featureProgress: buildFeatureProgressState(liveDraftFeatures, 0),
           arProgress: { completed: 0, total: draftFeatures.length },
           sources: progressSources,
         });
@@ -215,12 +262,9 @@ export async function handler(event: { body: GenerationEvent }) {
       onArProgress: async (completed, total) => {
         await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2, {
           stage: 'acceptance_requirements',
-          triage: triageResult ? {
-            shape: triageResult.shape,
-            complexity: triageResult.complexity,
-            featureTarget: triageResult.estimatedFeatures,
-            arDepth: triageResult.arDepth,
-          } : undefined,
+          triage: buildTriagePayload(triageResult),
+          draftFeatures: liveDraftFeatures,
+          featureProgress: buildFeatureProgressState(liveDraftFeatures, completed),
           arProgress: { completed, total },
           sources: progressSources,
         });
