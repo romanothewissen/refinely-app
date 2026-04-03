@@ -99,9 +99,10 @@ function buildCompatibilityAnswer(selectedSuggestions: string[], customAnswer: s
   const suggestions = selectedSuggestions.map((suggestion) => suggestion.trim()).filter(Boolean);
 
   if (!suggestions.length) return custom;
-  const selectedPreview = suggestions.join(', ');
-  if (!custom) return selectedPreview;
-  return `${selectedPreview}\n\nAdditional context:\n${custom}`;
+  const selectedLabel = suggestions.length === 1 ? 'Chosen answer' : 'Chosen answers';
+  const selectedBlock = `${selectedLabel}:\n${suggestions.map((suggestion) => `- ${suggestion}`).join('\n')}`;
+  if (!custom) return selectedBlock;
+  return `${selectedBlock}\n\nAdditional context:\n${custom}`;
 }
 
 export function ClarifyQuestionsView({
@@ -183,7 +184,7 @@ export function ClarifyQuestionsView({
     <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
       {/* Header */}
       <motion.header
-        className="shrink-0 bg-white/80 backdrop-blur-xl px-6 py-4 z-20 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)] flex items-center justify-between gap-4"
+        className="shrink-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl px-6 py-4 z-20 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)] flex items-center justify-between gap-4"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -201,26 +202,26 @@ export function ClarifyQuestionsView({
             </motion.button>
           )}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--rf-surface-soft)] flex items-center justify-center border border-[var(--rf-border)] shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm">
               <Sparkles className="w-5 h-5 text-[var(--rf-brand)]" />
             </div>
             <div>
               <h1 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Requirement Discovery</h1>
-              <p className="text-xs font-semibold text-[var(--rf-text-tertiary)] mt-0.5">
+              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">
                 Round {round} of 2 · {answeredCount} of {questions.length} questions explored
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-5 flex-1 max-w-sm hidden md:flex">
-          <div className="flex-1 h-1.5 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden">
+        <div className="flex items-center gap-4 flex-1 max-w-lg hidden md:flex">
+          <div className="flex-1 h-2 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
             <div
-              className="h-full bg-[var(--rf-brand)] rounded-full transition-all duration-700"
+              className="h-full bg-[var(--rf-brand)] rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(43,89,74,0.35)]"
               style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
             />
           </div>
-          <span className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-widest shrink-0">{answeredCount}/{questions.length}</span>
+          <span className="text-xs font-bold text-[var(--rf-text-tertiary)] shrink-0">{answeredCount}/{questions.length}</span>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
@@ -236,7 +237,7 @@ export function ClarifyQuestionsView({
             <motion.button
               onClick={onRetry}
               disabled={isSubmitting || !onRetry}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-sm shadow-[var(--rf-brand)]/20 disabled:opacity-60"
+              className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20 disabled:opacity-60"
               whileTap={{ scale: 0.98 }}
             >
               Retry discovery
@@ -246,7 +247,7 @@ export function ClarifyQuestionsView({
             <motion.button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-sm shadow-[var(--rf-brand)]/20"
+              className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
               whileTap={{ scale: 0.98 }}
             >
               {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
@@ -320,7 +321,7 @@ export function ClarifyQuestionsView({
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>
                       <div className="space-y-2">
                         {contextMeta.referencedSimilarStories!.map((story, i) => (
-                          <div key={`${story.key}-${i}`} className="bg-white border border-[var(--rf-border)] rounded-2xl p-4 transition hover:border-[var(--rf-brand-subtle)] hover:shadow-sm">
+                          <div key={`${story.key}-${i}`} className="rf-card p-3 ">
                             <div className="flex items-start justify-between gap-3">
                               {resolveStoryUrl(story) ? (
                                 <button
@@ -339,12 +340,12 @@ export function ClarifyQuestionsView({
                                 <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
                               )}
                               {typeof story.relevanceScore === 'number' && (
-                                <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-0.5">
+                                <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
                                   {(story.relevanceScore * 100).toFixed(0)}% match
                                 </div>
                               )}
                             </div>
-                            <div className="mt-2 text-[11px] text-[var(--rf-text-secondary)] leading-relaxed">
+                            <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
                               {buildExcerpt(story.summary, 180)}
                             </div>
                           </div>
@@ -367,18 +368,18 @@ export function ClarifyQuestionsView({
                     {(contextMeta.referencedWiSections?.length ?? 0) > 0 ? (
                       <div className="space-y-2">
                         {contextMeta.referencedWiSections!.map((section, i) => (
-                          <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="bg-white border border-[var(--rf-border)] rounded-2xl p-4 transition hover:border-[var(--rf-brand-subtle)] hover:shadow-sm">
+                          <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rf-card p-3 ">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-[11px] font-bold text-[var(--rf-text)] truncate">
                                   {section.filename}
                                 </div>
-                                <div className="mt-1 inline-flex items-center rounded-md border border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                                <div className="mt-1 inline-flex items-center rounded-md border border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
                                   Section {section.chunkIndex + 1}
                                 </div>
                               </div>
                             </div>
-                            <div className="mt-2 text-[11px] text-[var(--rf-text-secondary)] leading-relaxed">
+                            <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
                               {section.excerpt}
                             </div>
                           </div>
@@ -476,23 +477,23 @@ export function ClarifyQuestionsView({
                   return (
                     <div
                       key={idx}
-                      className={`rounded-[24px] border bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.08)] transition-all duration-300 overflow-hidden ${isAnswered ? 'border-[var(--rf-brand-subtle)]' : 'border-[var(--rf-border)]'}`}
+                      className={`rounded-2xl border bg-white shadow-sm transition-all duration-300 overflow-hidden ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-[var(--rf-brand)]/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
                     >
-                      <div className="p-6 flex items-start gap-5">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold ${isAnswered ? 'bg-[var(--rf-brand)] text-white shadow-sm shadow-[var(--rf-brand)]/20' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
-                          {isAnswered ? <Check className="w-5 h-5" /> : <span>{idx + 1}</span>}
+                      <div className="p-5 flex items-start gap-4">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
+                          {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
                         </div>
-                        <div className="flex-1 space-y-5">
-                          <p className="text-[16px] font-bold text-[var(--rf-text)] leading-snug pt-1.5">
+                        <div className="flex-1 space-y-4">
+                          <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug pt-1">
                             {renderQuestionWithStoryLinks(q.question, storyLookup)}
                           </p>
 
                           {suggestions.length > 0 && (
-                            <div className="space-y-3">
-                              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] opacity-60">
-                                Suggested Answers
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                                Pick the closest answer or combine the ones that truly need to go together.
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="flex flex-wrap gap-2">
                               {suggestions.map((sug, si) => {
                                 const sel = ans.selectedSuggestions.includes(sug);
                                 return (
@@ -500,19 +501,38 @@ export function ClarifyQuestionsView({
                                     key={si}
                                     onClick={() => toggleSuggestion(idx, sug)}
                                     disabled={isSubmitting}
-                                    className={`flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-xl border text-left transition-all ${
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
                                       sel
                                         ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border-[var(--rf-brand-subtle)] shadow-sm'
-                                        : 'border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] bg-[var(--rf-surface-soft)]/50 hover:bg-white'
+                                        : 'border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] bg-white hover:bg-[var(--rf-surface-soft)]'
                                     }`}
                                   >
-                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${sel ? 'bg-[var(--rf-brand)] border-[var(--rf-brand)]' : 'border-[var(--rf-border)] bg-white'}`}>
-                                      {sel && <Check className="w-3 h-3 text-white" strokeWidth={4} />}
+                                    <div className="flex items-center gap-1.5">
+                                      {sel && <Check className="w-3.5 h-3.5" />}
+                                      {sug}
                                     </div>
-                                    <span className="flex-1 leading-snug">{sug}</span>
                                   </button>
                                 );
                               })}
+                              </div>
+                            </div>
+                          )}
+
+                          {ans.selectedSuggestions.length > 0 && (
+                            <div className="rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]/60 px-4 py-3">
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)]">
+                                {ans.selectedSuggestions.length === 1 ? 'Chosen answer' : 'Chosen answers'}
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {ans.selectedSuggestions.map((suggestion) => (
+                                  <span
+                                    key={suggestion}
+                                    className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-brand-subtle)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-brand-hover)]"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    {suggestion}
+                                  </span>
+                                ))}
                               </div>
                             </div>
                           )}
