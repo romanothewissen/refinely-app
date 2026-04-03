@@ -10,6 +10,23 @@ export interface GenerationProgress {
   updatedAt?: number;
 }
 
+export interface GenerationProgressPayload {
+  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
+  arProgress?: { completed: number; total: number };
+  draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  sources?: {
+    projectKey: string;
+    domainContextApplied?: boolean;
+    attachmentIncluded?: boolean;
+    wiDocsCount?: number;
+    referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
+    similarStoriesCount?: number;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
+  };
+}
+
 const POLL_INTERVAL_MS = 2000;
 const NO_FIRST_EVENT_MS = 60000;
 const STALE_PROGRESS_MS = 90000;
@@ -151,6 +168,7 @@ export function useGenerationRealtime(
 ) {
   const [progress, setProgress] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progressPayload, setProgressPayload] = useState<GenerationProgressPayload | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
   const visibleProgressRef = useRef<string>('');
@@ -178,6 +196,7 @@ export function useGenerationRealtime(
     if (!next) {
       visibleProgressRef.current = '';
       setProgress('');
+      setProgressPayload(null);
       return;
     }
 
@@ -244,12 +263,14 @@ export function useGenerationRealtime(
             clearPendingProgressTimer();
             visibleProgressRef.current = '';
             setProgress('');
+            setProgressPayload(null);
             onErrorRef.current('Generation is taking unusually long. Please try again, or switch to a faster model in Settings.');
             return;
           }
           if (event.message) {
             commitProgress(event.message, visibleProgressRef.current === '');
           }
+          setProgressPayload((event.payload as GenerationProgressPayload | undefined) ?? null);
         } else if (event.type === 'cancelled') {
           clearInterval(timerRef.current!);
           timerRef.current = null;
@@ -257,6 +278,7 @@ export function useGenerationRealtime(
           clearPendingProgressTimer();
           visibleProgressRef.current = '';
           setProgress('');
+          setProgressPayload(null);
           onCancelRef.current?.(event.message ?? 'Generation stopped.');
         } else if (event.type === 'complete') {
           console.log('[useGenerationRealtime] session complete, payload keys', Object.keys(event.payload || {}));
@@ -269,6 +291,7 @@ export function useGenerationRealtime(
             clearPendingProgressTimer();
             visibleProgressRef.current = '';
             setProgress('');
+            setProgressPayload(null);
             onCompleteRef.current(payload);
           } else {
             console.error('[useGenerationRealtime] complete but no features found');
@@ -278,6 +301,7 @@ export function useGenerationRealtime(
             clearPendingProgressTimer();
             visibleProgressRef.current = '';
             setProgress('');
+            setProgressPayload(null);
             onErrorRef.current('Generation finished but no features were returned. Please try again.');
           }
         } else if (event.type === 'error') {
@@ -287,6 +311,7 @@ export function useGenerationRealtime(
           clearPendingProgressTimer();
           visibleProgressRef.current = '';
           setProgress('');
+          setProgressPayload(null);
           onErrorRef.current(event.message ?? 'Generation failed');
         }
       } catch {
@@ -304,8 +329,9 @@ export function useGenerationRealtime(
       setIsGenerating(false);
       visibleProgressRef.current = '';
       setProgress('');
+      setProgressPayload(null);
     };
   }, [sessionId, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { isGenerating, progress, cancelGeneration: stopGeneration };
+  return { isGenerating, progress, progressPayload, cancelGeneration: stopGeneration };
 }

@@ -7,7 +7,7 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
+import { Feature, GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
 import { assessRequirementWithLlm, GenerationCancelledError, generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { retrieveWiContext } from '../core/wi-ingestion';
@@ -23,21 +23,30 @@ interface RealtimeEvent {
   payload?: unknown;
 }
 
+interface GenerationProgressPayload {
+  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
+  arProgress?: { completed: number; total: number };
+  draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
+  sources?: Pick<GenerationContextMeta, 'projectKey' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
+}
+
 const PROGRESS_HEARTBEAT_MS = 15000;
 
-async function sendProgress(sessionId: string, message: string, pass?: 1 | 2) {
+async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
   await entitySet(KEYS.generationProgress(sessionId), {
     type: 'progress',
     sessionId,
     message,
     pass,
+    payload,
     updatedAt: Date.now(),
   } as RealtimeEvent);
 }
 
 function startProgressHeartbeat(
   sessionId: string,
-  getCurrentProgress: () => { message?: string; pass?: 1 | 2 },
+  getCurrentProgress: () => { message?: string; pass?: 1 | 2; payload?: GenerationProgressPayload },
 ) {
   let stopped = false;
   let inFlight = false;
@@ -45,7 +54,7 @@ function startProgressHeartbeat(
     const current = getCurrentProgress();
     if (stopped || inFlight || !current.message) return;
     inFlight = true;
-    void sendProgress(sessionId, current.message, current.pass).finally(() => {
+    void sendProgress(sessionId, current.message, current.pass, current.payload).finally(() => {
       inFlight = false;
     });
   }, PROGRESS_HEARTBEAT_MS);
@@ -78,10 +87,10 @@ export async function handler(event: { body: GenerationEvent }) {
   let stopHeartbeat: (() => void) | null = null;
 
   try {
-    let currentProgress: { message?: string; pass?: 1 | 2 } = {};
-    const updateProgress = async (message: string, pass?: 1 | 2) => {
-      currentProgress = { message, pass };
-      await sendProgress(sessionId, message, pass);
+    let currentProgress: { message?: string; pass?: 1 | 2; payload?: GenerationProgressPayload } = {};
+    const updateProgress = async (message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) => {
+      currentProgress = { message, pass, payload };
+      await sendProgress(sessionId, message, pass, payload);
     };
     stopHeartbeat = startProgressHeartbeat(sessionId, () => currentProgress);
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
@@ -89,7 +98,14 @@ export async function handler(event: { body: GenerationEvent }) {
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
-    await updateProgress(`Reading work instructions and related stories for ${projectLabel}…`);
+    await updateProgress(`Reading work instructions and related stories for ${projectLabel}…`, 1, {
+      stage: 'context',
+      sources: {
+        projectKey,
+        domainContextApplied: Boolean(config.domainContext?.trim()),
+        attachmentIncluded: Boolean(attachmentText?.trim()),
+      },
+    });
 
     const [wiContext, similarStories, triageResult] = await Promise.all([
       config.wiConfig.enabled
@@ -123,9 +139,37 @@ export async function handler(event: { body: GenerationEvent }) {
       return;
     }
     const similarStoriesText = formatSimilarStoriesText(similarStories);
+    const progressSources: GenerationProgressPayload['sources'] = {
+      projectKey,
+      domainContextApplied: Boolean(config.domainContext?.trim()),
+      attachmentIncluded: Boolean(attachmentText?.trim()),
+      similarStoriesCount: similarStories.length,
+      referencedSimilarStories: similarStories.slice(0, 6).map(item => ({
+        key: item.key,
+        summary: item.summary,
+        relevanceScore: item.relevanceScore,
+        url: item.url,
+        jiraIssueUrl: item.url,
+      })),
+      wiDocsCount: wiContext.docs.length,
+      referencedWiDocs: wiContext.docs.slice(0, 6).map(doc => ({
+        docId: doc.docId,
+        filename: doc.filename,
+        chunkCount: doc.chunkCount,
+      })),
+      referencedWiSections: wiContext.chunks.slice(0, 4).map(chunk => ({
+        docId: chunk.docId,
+        filename: chunk.filename,
+        chunkIndex: chunk.chunkIndex,
+        excerpt: buildWiExcerpt(chunk.text),
+      })),
+    };
 
     // Progress: pass 1
-    await updateProgress('Planning feature structure from gathered context…', 1);
+    await updateProgress('Planning feature structure from gathered context…', 1, {
+      stage: 'decomposition',
+      sources: progressSources,
+    });
 
     const result = await generateFeatures({
       requirement,
@@ -137,13 +181,43 @@ export async function handler(event: { body: GenerationEvent }) {
       precomputedTriage: triageResult,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
-        await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1);
+        await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1, {
+          stage: 'triage',
+          triage,
+          sources: progressSources,
+        });
       },
-      onPass1Complete: async (featureCount) => {
-        await updateProgress(`Writing acceptance requirements for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
+      onPass1Complete: async (draftFeatures) => {
+        await updateProgress(`Writing acceptance requirements for ${draftFeatures.length} feature${draftFeatures.length !== 1 ? 's' : ''}…`, 2, {
+          stage: 'acceptance_requirements',
+          triage: triageResult ? {
+            shape: triageResult.shape,
+            complexity: triageResult.complexity,
+            featureTarget: triageResult.estimatedFeatures,
+            arDepth: triageResult.arDepth,
+          } : undefined,
+          draftFeatures: draftFeatures.map(feature => ({
+            id: feature.id,
+            summary: feature.summary,
+            description: feature.description,
+            storyPoints: feature.storyPoints,
+          })),
+          arProgress: { completed: 0, total: draftFeatures.length },
+          sources: progressSources,
+        });
       },
       onArProgress: async (completed, total) => {
-        await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2);
+        await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2, {
+          stage: 'acceptance_requirements',
+          triage: triageResult ? {
+            shape: triageResult.shape,
+            complexity: triageResult.complexity,
+            featureTarget: triageResult.estimatedFeatures,
+            arDepth: triageResult.arDepth,
+          } : undefined,
+          arProgress: { completed, total },
+          sources: progressSources,
+        });
       },
     });
 

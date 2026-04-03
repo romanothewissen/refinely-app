@@ -809,7 +809,7 @@ export async function generateFeatures(opts: {
   config: TenantConfig;
   precomputedTriage?: TriageResult | null;
   onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string }) => Promise<void>;
-  onPass1Complete?: (featureCount: number) => Promise<void>;
+  onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
   onArProgress?: (completed: number, total: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
@@ -898,7 +898,7 @@ export async function generateFeatures(opts: {
   const pass1Features = clampFeatureCount(pass1Result.features, assessment.featurePlan.max);
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
-  if (onPass1Complete) await onPass1Complete(pass1Features.length);
+  if (onPass1Complete) await onPass1Complete(pass1Features.map(normaliseFeature));
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
   // ── Pass 2: Acceptance Requirements ──

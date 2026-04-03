@@ -6,7 +6,7 @@ import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
 import { SettingsView } from './SettingsView';
 import { api } from './hooks/useForge';
-import { useGenerationRealtime, useClarifyRealtime } from './hooks/useRealtime';
+import { useGenerationRealtime, useClarifyRealtime, type GenerationProgressPayload } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
 
@@ -123,6 +123,7 @@ export default function App() {
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [generationContext, setGenerationContext] = useState<GenerationContextMeta | null>(null);
+  const [generationProgressMeta, setGenerationProgressMeta] = useState<GenerationProgressPayload | null>(null);
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
   const [workflowTokenUsage, setWorkflowTokenUsage] = useState<WorkflowTokenUsage | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -334,6 +335,7 @@ export default function App() {
   const {
     isGenerating,
     progress: generationProgress,
+    progressPayload: liveGenerationPayload,
     cancelGeneration,
   } = useGenerationRealtime(
     pendingSessionId,
@@ -343,6 +345,7 @@ export default function App() {
         setFeatures(payload.features);
       }
       setGenerationContext(payload.generationContext ?? null);
+      setGenerationProgressMeta(null);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
       setIsWorking(false);
@@ -351,15 +354,21 @@ export default function App() {
     },
     (errMsg) => {
       setGenerationError(errMsg);
+      setGenerationProgressMeta(null);
       setPendingSessionId(null);
       setIsWorking(false);
     }
     ,
     () => {
       setPendingSessionId(null);
+      setGenerationProgressMeta(null);
       setIsWorking(false);
     }
   );
+
+  useEffect(() => {
+    setGenerationProgressMeta(liveGenerationPayload ?? null);
+  }, [liveGenerationPayload]);
 
   const {
     cancelClarify,
@@ -409,6 +418,7 @@ export default function App() {
     setIsWorking(false);
     setPendingClarifySessionId(null);
     setPendingSessionId(null);
+    setGenerationProgressMeta(null);
     setClarifyQuestions([]);
 
     if (clarifyActive) {
@@ -426,6 +436,7 @@ export default function App() {
     setGenerationError(null);
     setFeatures([]);
     setGenerationContext(null);
+    setGenerationProgressMeta(null);
     setClarifyContext(null);
     setWorkflowTokenUsage(null);
 
@@ -459,6 +470,7 @@ export default function App() {
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
     setClarifyQuestions([]);
+    setGenerationProgressMeta(null);
     // CRITICAL: Stop clarify polling if it was active
     setPendingClarifySessionId(null);
 
@@ -480,11 +492,13 @@ export default function App() {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setIsWorking(false);
         setPendingSessionId(null);
+        setGenerationProgressMeta(null);
       }
     } catch (err: any) {
       setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
       setIsWorking(false);
       setPendingSessionId(null);
+      setGenerationProgressMeta(null);
     }
   };
 
@@ -514,6 +528,7 @@ export default function App() {
         setWorkflowRunId(prev => prev + 1);
         setPendingSessionId(null);
         setPendingClarifySessionId(null);
+        setGenerationProgressMeta(null);
         setIsWorking(false);
         setClarifyQuestions([]);
         setSessionId(res.conversation.sessionId);
@@ -573,6 +588,7 @@ export default function App() {
                 setRequirement('');
                 setFeatures([]);
                 setGenerationContext(null);
+                setGenerationProgressMeta(null);
                 setClarifyContext(null);
                 setWorkflowTokenUsage(null);
                 setClarifyQuestions([]);
@@ -686,6 +702,7 @@ export default function App() {
               sessionId={sessionId}
               requirement={requirement}
               generationContext={generationContext}
+              generationProgressMeta={generationProgressMeta}
               projectKey={projectKey}
               workflowTokenUsage={workflowTokenUsage}
               onWorkflowTokenUsage={(usageDelta) => {

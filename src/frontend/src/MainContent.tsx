@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download, ExternalLink } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download, ExternalLink, BrainCircuit, Layers3, FileText, Clock3, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
@@ -145,6 +145,48 @@ function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: str
   if (story.url || story.jiraIssueUrl) return story.url || story.jiraIssueUrl || '';
   if (story.key && /^[A-Z][A-Z0-9]+-\d+$/.test(story.key)) return `/browse/${story.key}`;
   return '';
+}
+
+type GenerationProgressMeta = {
+  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
+  arProgress?: { completed: number; total: number };
+  draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  sources?: {
+    projectKey: string;
+    domainContextApplied?: boolean;
+    attachmentIncluded?: boolean;
+    wiDocsCount?: number;
+    referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
+    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
+    similarStoriesCount?: number;
+    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
+  };
+};
+
+const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: string; shortLabel: string }> = [
+  { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
+  { key: 'triage', label: 'Assessing scope', shortLabel: 'Triage' },
+  { key: 'decomposition', label: 'Sketching features', shortLabel: 'Features' },
+  { key: 'acceptance_requirements', label: 'Writing acceptance requirements', shortLabel: 'ARs' },
+];
+
+function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?: string) {
+  if (meta?.stage) {
+    const idx = GENERATION_STEPS.findIndex(step => step.key === meta.stage);
+    if (idx >= 0) return idx;
+  }
+  const text = (progress || '').toLowerCase();
+  if (text.includes('acceptance requirement')) return 3;
+  if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
+  if (text.includes('planning feature') || text.includes('feature structure')) return 2;
+  return 0;
+}
+
+function buildFeatureExcerpt(text: string, maxChars = 150) {
+  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -316,6 +358,7 @@ interface MainContentProps {
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
+  generationProgressMeta?: GenerationProgressMeta | null;
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
@@ -325,7 +368,7 @@ interface MainContentProps {
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  generationContext, projectKey, workflowTokenUsage, onWorkflowTokenUsage
+  generationContext, generationProgressMeta, projectKey, workflowTokenUsage, onWorkflowTokenUsage
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -351,6 +394,12 @@ export function MainContent({
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
   const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
+  const liveStageIndex = getGenerationStageIndex(generationProgressMeta ?? null, progress);
+  const liveTriage = generationProgressMeta?.triage;
+  const liveArProgress = generationProgressMeta?.arProgress;
+  const liveDraftFeatures = generationProgressMeta?.draftFeatures ?? [];
+  const liveSources = generationProgressMeta?.sources ?? generationContext ?? null;
+  const liveArRatio = liveArProgress?.total ? Math.min(1, liveArProgress.completed / liveArProgress.total) : 0;
 
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
@@ -716,58 +765,288 @@ export function MainContent({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-3xl rounded-[28px] border border-[var(--rf-border)] bg-white/95 shadow-xl shadow-slate-900/5 overflow-hidden">
-        <div className="px-6 sm:px-8 pt-7 sm:pt-8 pb-6 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/65">
-          <div className="flex flex-col items-center text-center gap-4">
-            <div className="w-16 h-16 rounded-[22px] bg-white border border-[var(--rf-border)] shadow-sm flex items-center justify-center">
-              <div className="w-12 h-12 rounded-2xl bg-[var(--rf-brand-muted)]/60 flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-[var(--rf-brand)] animate-pulse" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <h2 className="text-xl sm:text-2xl font-bold text-[var(--rf-text)] tracking-tight">
-                {loadingTitle || 'Crafting features'}
-              </h2>
-              <p className="text-sm font-medium text-[var(--rf-text-tertiary)] leading-relaxed max-w-xl">
-                {progress || 'Processing your request…'}
-              </p>
-            </div>
-            <div className="dot-bounce text-[var(--rf-brand)]"><span /><span /><span /></div>
-            {canCancelLoading && onCancelLoading && (
-              <motion.button
-                type="button"
-                onClick={onCancelLoading}
-                className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
-                whileTap={{ scale: 0.98 }}
-              >
-                <X className="w-3.5 h-3.5" />
-                Stop
-              </motion.button>
-            )}
-          </div>
-        </div>
-        <div className="px-5 sm:px-6 py-5 sm:py-6 space-y-4">
-          {[1, 2, 3].map(i => (
-            <motion.div
-              key={i}
-              className="w-full bg-white rounded-2xl border border-[var(--rf-border)] overflow-hidden"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="flex">
-                <div className="w-2 shrink-0 bg-[var(--rf-surface-soft)]" />
-                <div className="flex-1 p-5 sm:p-6 space-y-4">
-                  <div className="shimmer h-5 w-2/5 rounded-md" />
-                  <div className="shimmer h-4 w-full rounded-md" />
-                  <div className="shimmer h-4 w-4/5 rounded-md" />
-                  <div className="space-y-2 pt-3">
-                    {[1, 2, 3].map(j => <div key={j} className="shimmer h-3 rounded-md" style={{ width: `${60 + j * 10}%` }} />)}
+      <div className="w-full max-w-5xl overflow-hidden rounded-[30px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_30px_90px_-40px_rgba(15,23,42,0.35)]">
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-6 sm:px-8 pt-7 sm:pt-8 pb-7">
+          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
+          <div className="relative flex flex-col gap-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-16 w-16 items-center justify-center rounded-[22px] border border-[var(--rf-border)] bg-white shadow-lg shadow-slate-900/5">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(53,113,95,0.18),rgba(53,113,95,0.05))]">
+                    <Sparkles className="h-6 w-6 text-[var(--rf-brand)] animate-pulse" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm">
+                    Live Run
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold text-[var(--rf-text)] tracking-tight">
+                      {loadingTitle || 'Crafting features'}
+                    </h2>
+                    <p className="mt-1 max-w-2xl text-sm font-medium leading-relaxed text-[var(--rf-text-tertiary)]">
+                      {progress || 'Processing your request…'}
+                    </p>
                   </div>
                 </div>
               </div>
-            </motion.div>
-          ))}
+              <div className="flex flex-wrap items-center gap-2.5 lg:justify-end">
+                {liveTriage && (
+                  <>
+                    <span className="rounded-full border border-[rgba(35,74,61,0.12)] bg-white/80 px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)]">
+                      {liveTriage.shape} scope
+                    </span>
+                    <span className="rounded-full border border-[rgba(35,74,61,0.12)] bg-white/80 px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)]">
+                      {liveTriage.complexity} complexity
+                    </span>
+                    <span className="rounded-full border border-[rgba(35,74,61,0.12)] bg-white/80 px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)]">
+                      ~{liveTriage.featureTarget} features
+                    </span>
+                  </>
+                )}
+                {canCancelLoading && onCancelLoading && (
+                  <motion.button
+                    type="button"
+                    onClick={onCancelLoading}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Stop
+                  </motion.button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+              <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white/88 p-4 shadow-[0_14px_50px_-36px_rgba(15,23,42,0.25)]">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
+                    Pipeline
+                  </div>
+                  {liveArProgress?.total ? (
+                    <div className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">
+                      {liveArProgress.completed}/{liveArProgress.total} AR passes done
+                    </div>
+                  ) : (
+                    <div className="dot-bounce text-[var(--rf-brand)]"><span /><span /><span /></div>
+                  )}
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                  {GENERATION_STEPS.map((step, index) => {
+                    const isDone = index < liveStageIndex;
+                    const isCurrent = index === liveStageIndex;
+                    return (
+                      <div
+                        key={step.key}
+                        className={`rounded-2xl border px-3.5 py-3 transition-all ${
+                          isCurrent
+                            ? 'border-[rgba(35,74,61,0.2)] bg-[linear-gradient(135deg,rgba(53,113,95,0.14),rgba(255,255,255,0.92))] shadow-sm'
+                            : isDone
+                              ? 'border-[rgba(16,185,129,0.18)] bg-[rgba(16,185,129,0.08)]'
+                              : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                            {step.shortLabel}
+                          </span>
+                          {isDone ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                          ) : isCurrent ? (
+                            <Clock3 className="h-4 w-4 text-[var(--rf-brand)]" />
+                          ) : (
+                            <div className="h-2.5 w-2.5 rounded-full border border-[var(--rf-border)] bg-white" />
+                          )}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold leading-snug text-[var(--rf-text)]">
+                          {step.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[rgba(35,74,61,0.08)]">
+                  <div
+                    className="h-full rounded-full bg-[linear-gradient(90deg,rgba(35,74,61,0.72),rgba(53,113,95,0.95),rgba(126,211,158,0.95))] transition-all duration-700"
+                    style={{ width: `${liveArProgress?.total ? Math.max(((liveStageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8) : ((liveStageIndex + 1) / GENERATION_STEPS.length) * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(244,239,230,0.92))] p-4 shadow-[0_14px_50px_-36px_rgba(15,23,42,0.25)]">
+                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
+                  Context Signals
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 p-3">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
+                      <Layers3 className="h-4 w-4 text-[var(--rf-brand)]" />
+                      Backlog
+                    </div>
+                    <div className="mt-2 text-2xl font-black tracking-tight text-[var(--rf-text)]">
+                      {liveSources?.similarStoriesCount ?? 0}
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">reference stories</div>
+                  </div>
+                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 p-3">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
+                      <FileText className="h-4 w-4 text-[var(--rf-brand)]" />
+                      WI Docs
+                    </div>
+                    <div className="mt-2 text-2xl font-black tracking-tight text-[var(--rf-text)]">
+                      {liveSources?.wiDocsCount ?? 0}
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">docs informing the run</div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
+                    Project scope: <span className="text-[var(--rf-brand)]">{liveSources?.projectKey === '*' ? 'Global workspace' : liveSources?.projectKey || projectKey}</span>
+                  </div>
+                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
+                    Domain guidance: <span className={liveSources?.domainContextApplied ? 'text-emerald-700' : 'text-[var(--rf-text-tertiary)]'}>{liveSources?.domainContextApplied ? 'Applied' : 'Not configured'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 px-5 py-5 sm:px-6 sm:py-6 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
+                Draft feature canvas
+              </div>
+              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                {liveDraftFeatures.length > 0 ? `${liveDraftFeatures.length} draft feature${liveDraftFeatures.length !== 1 ? 's' : ''}` : 'Feature shapes appear after decomposition'}
+              </div>
+            </div>
+            {liveDraftFeatures.length > 0 ? (
+              liveDraftFeatures.map((feature, i) => (
+                <motion.div
+                  key={feature.id || `${feature.summary}-${i}`}
+                  className="overflow-hidden rounded-[24px] border border-[var(--rf-border)] bg-white shadow-[0_10px_40px_-32px_rgba(15,23,42,0.35)]"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <div className="flex">
+                    <div className="w-1.5 shrink-0 bg-[linear-gradient(180deg,rgba(53,113,95,0.9),rgba(126,211,158,0.6))]" />
+                    <div className="flex-1 p-4 sm:p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-base font-bold leading-snug text-[var(--rf-text)]">{feature.summary}</div>
+                          <div className="mt-2 text-sm leading-relaxed text-[var(--rf-text-secondary)]">
+                            {buildFeatureExcerpt(feature.description, 160)}
+                          </div>
+                        </div>
+                        <div className="shrink-0 rounded-full border border-[rgba(35,74,61,0.12)] bg-[var(--rf-surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-secondary)]">
+                          {feature.storyPoints ? `${feature.storyPoints} pts` : 'draft'}
+                        </div>
+                      </div>
+                      <div className="mt-4 rounded-2xl border border-dashed border-[rgba(35,74,61,0.18)] bg-[rgba(35,74,61,0.03)] px-3.5 py-3">
+                        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
+                          <BrainCircuit className="h-4 w-4 text-[var(--rf-brand)]" />
+                          Acceptance requirements in progress
+                        </div>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.08)]">
+                          <div
+                            className="h-full rounded-full bg-[linear-gradient(90deg,rgba(35,74,61,0.3),rgba(35,74,61,0.78))] transition-all duration-700"
+                            style={{ width: `${liveArProgress?.total ? Math.max((liveArProgress.completed / liveArProgress.total) * 100, 10) : 18}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ))
+            ) : (
+              [1, 2, 3].map(i => (
+                <motion.div
+                  key={i}
+                  className="overflow-hidden rounded-[24px] border border-[var(--rf-border)] bg-white"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <div className="flex">
+                    <div className="w-1.5 shrink-0 bg-[var(--rf-surface-soft)]" />
+                    <div className="flex-1 p-5 space-y-3.5">
+                      <div className="shimmer h-5 w-2/5 rounded-md" />
+                      <div className="shimmer h-4 w-full rounded-md" />
+                      <div className="shimmer h-4 w-4/5 rounded-md" />
+                    </div>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
+              Source highlights
+            </div>
+            <div className="rounded-[24px] border border-[var(--rf-border)] bg-white p-4 shadow-[0_10px_40px_-32px_rgba(15,23,42,0.35)]">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
+              {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
+                <div className="mt-3 space-y-2.5">
+                  {liveSources!.referencedSimilarStories!.slice(0, 3).map((story, index) => {
+                    const storyUrl = resolveStoryUrl(story);
+                    return (
+                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          {storyUrl ? (
+                            <button type="button" onClick={() => void router.navigate(storyUrl)} className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition">
+                              {story.key}
+                              <ExternalLink className="h-3 w-3" />
+                            </button>
+                          ) : (
+                            <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
+                          )}
+                          {typeof story.relevanceScore === 'number' && (
+                            <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+                              {(story.relevanceScore * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
+                          {buildExcerpt(story.summary, 140)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mt-3 text-xs italic text-[var(--rf-text-tertiary)]">No backlog references loaded yet.</div>
+              )}
+            </div>
+
+            <div className="rounded-[24px] border border-[var(--rf-border)] bg-white p-4 shadow-[0_10px_40px_-32px_rgba(15,23,42,0.35)]">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
+              {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
+                <div className="mt-3 space-y-2.5">
+                  {liveSources!.referencedWiSections!.slice(0, 3).map((section, index) => (
+                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
+                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+                          S{section.chunkIndex + 1}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
+                        {buildExcerpt(section.excerpt, 135)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 text-xs italic text-[var(--rf-text-tertiary)]">No WI snippets matched yet.</div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </motion.div>
@@ -969,57 +1248,67 @@ export function MainContent({
           >
             {generationContext && (
               <motion.div
-                className="bg-white/60 backdrop-blur-md rounded-2xl p-5 border border-[var(--rf-border)] shadow-sm"
+                className="overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,244,236,0.94))] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
-                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
-                      Project: <span className="font-bold text-[var(--rf-text)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
-                    </span>
-                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
-                      Reference stories: <span className="font-bold text-[var(--rf-text)]">{generationContext.similarStoriesCount ?? 0}</span>
-                    </span>
-                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
-                      WI sections: <span className="font-bold text-[var(--rf-text)]">{generationContext.referencedWiSections?.length ?? 0}</span>
-                    </span>
-                    <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
-                      Domain guidance: <span className="font-bold text-[var(--rf-text)]">{generationContext.domainContextApplied ? 'Included' : 'None'}</span>
-                    </span>
+                <div className="border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.12),transparent_40%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,239,230,0.88))] px-5 py-5 sm:px-6">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)]">Source stack</div>
+                      <div className="mt-1 text-lg font-bold tracking-tight text-[var(--rf-text)]">What informed this canvas</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowContextDetails(prev => !prev)}
+                      className="inline-flex items-center gap-1.5 self-start rounded-xl border border-[rgba(35,74,61,0.12)] bg-white/85 px-3.5 py-2 text-xs font-bold text-[var(--rf-brand)] shadow-sm transition hover:text-[var(--rf-brand-hover)]"
+                    >
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showContextDetails ? 'rotate-180' : ''}`} />
+                      {showContextDetails ? 'Hide sources' : 'Show sources'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowContextDetails(prev => !prev)}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)]"
-                  >
-                    <ChevronDown className={`w-4 h-4 transition-transform ${showContextDetails ? 'rotate-180' : ''}`} />
-                    {showContextDetails ? 'Hide sources' : 'Show sources'}
-                  </button>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Project</div>
+                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</div>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Backlog refs</div>
+                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.similarStoriesCount ?? 0}</div>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">WI sections</div>
+                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.referencedWiSections?.length ?? 0}</div>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Guidance</div>
+                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.domainContextApplied ? 'On' : 'Off'}</div>
+                    </div>
+                  </div>
                 </div>
                 <AnimatePresence initial={false}>
                   {showContextDetails && (
                     <motion.div
-                      className="mt-4 pt-4 border-t border-[var(--rf-border)]/60 space-y-4"
+                      className="space-y-4 px-5 py-5 sm:px-6"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                     >
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white p-4 shadow-[0_12px_40px_-34px_rgba(15,23,42,0.28)]">
                           <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
                               {generationContext.referencedSimilarStories?.length || 0}
                             </div>
                           </div>
                           {(generationContext.referencedSimilarStories?.length ?? 0) > 0 ? (
-                            <div className="space-y-2">
+                            <div className="space-y-2.5">
                               {generationContext.referencedSimilarStories!.slice(0, 4).map((story, i) => {
                                 const storyUrl = resolveStoryUrl(story);
                                 return (
-                                  <div key={`${story.key}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-3">
+                                  <div key={`${story.key}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                                     <div className="flex items-start justify-between gap-3">
                                       {storyUrl ? (
                                         <button
@@ -1035,7 +1324,7 @@ export function MainContent({
                                         <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
                                       )}
                                       {typeof story.relevanceScore === 'number' && (
-                                        <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-md px-2 py-1">
+                                        <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-full px-2 py-1">
                                           {(story.relevanceScore * 100).toFixed(0)}% match
                                         </div>
                                       )}
@@ -1052,21 +1341,21 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+                        <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white p-4 shadow-[0_12px_40px_-34px_rgba(15,23,42,0.28)]">
                           <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Matched WI sections</div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
                               {generationContext.referencedWiSections?.length || 0}
                             </div>
                           </div>
                           {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
-                            <div className="space-y-2">
+                            <div className="space-y-2.5">
                               {generationContext.referencedWiSections!.map((section, i) => (
-                                <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-3">
+                                <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                       <div className="text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
-                                      <div className="mt-1 inline-flex items-center rounded-md border border-[var(--rf-border-subtle)] bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                                      <div className="mt-1 inline-flex items-center rounded-full border border-[var(--rf-border-subtle)] bg-white px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
                                         Section {section.chunkIndex + 1}
                                       </div>
                                     </div>
@@ -1080,6 +1369,27 @@ export function MainContent({
                           ) : (
                             <div className="text-xs italic text-[var(--rf-text-tertiary)]">No matched WI sections were used.</div>
                           )}
+                        </div>
+
+                        <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white p-4 shadow-[0_12px_40px_-34px_rgba(15,23,42,0.28)]">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
+                          <div className="mt-3 space-y-2.5">
+                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Attachment context</div>
+                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.attachmentIncluded ? 'Included in reasoning' : 'No attachment used'}</div>
+                            </div>
+                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Work instruction docs</div>
+                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.wiDocsCount ?? 0} document{(generationContext.wiDocsCount ?? 0) !== 1 ? 's' : ''} scanned</div>
+                            </div>
+                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Token usage</div>
+                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{(generationContext.tokenUsage?.total ?? 0).toLocaleString()} tokens total</div>
+                              <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">
+                                {(generationContext.tokenUsage?.input ?? 0).toLocaleString()} in / {(generationContext.tokenUsage?.output ?? 0).toLocaleString()} out
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </motion.div>
