@@ -83,7 +83,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
       />
 
       <motion.div 
-        className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
+        className="relative rf-card w-full max-w-md flex flex-col overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}

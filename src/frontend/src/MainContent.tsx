@@ -265,7 +265,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
         transition={{ duration: 0.2 }}
       />
       <motion.div
-        className="relative bg-white w-full max-w-lg rounded-[22px] shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
+        className="relative rf-card w-full max-w-lg flex flex-col overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
@@ -838,7 +838,7 @@ export function MainContent({
             </div>
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white/88 p-4 shadow-[0_14px_50px_-36px_rgba(15,23,42,0.25)]">
+              <div className="rf-card p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                     Pipeline
@@ -893,7 +893,7 @@ export function MainContent({
                 </div>
               </div>
 
-              <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(244,239,230,0.92))] p-4 shadow-[0_14px_50px_-36px_rgba(15,23,42,0.25)]">
+              <div className="rf-card p-4">
                 <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                   Context Signals
                 </div>
@@ -951,7 +951,7 @@ export function MainContent({
               liveDraftFeatures.map((feature, i) => (
                 <motion.div
                   key={feature.id || `${feature.summary}-${i}`}
-                  className="overflow-hidden rounded-[24px] border border-[var(--rf-border)] bg-white shadow-[0_10px_40px_-32px_rgba(15,23,42,0.35)]"
+                  className="overflow-hidden rf-card"
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
@@ -1018,7 +1018,7 @@ export function MainContent({
               [1, 2, 3].map(i => (
                 <motion.div
                   key={i}
-                  className="overflow-hidden rounded-[24px] border border-[var(--rf-border)] bg-white"
+                  className="overflow-hidden rf-card"
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
@@ -1040,7 +1040,7 @@ export function MainContent({
             <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
               Source highlights
             </div>
-            <div className="rounded-[24px] border border-[var(--rf-border)] bg-white p-4 shadow-[0_10px_40px_-32px_rgba(15,23,42,0.35)]">
+            <div className="rf-card p-4">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
               {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
@@ -1075,7 +1075,7 @@ export function MainContent({
               )}
             </div>
 
-            <div className="rounded-[24px] border border-[var(--rf-border)] bg-white p-4 shadow-[0_10px_40px_-32px_rgba(15,23,42,0.35)]">
+            <div className="rf-card p-4">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
               {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
@@ -1107,7 +1107,7 @@ export function MainContent({
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header */}
       <motion.header
-        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm"
+        className="shrink-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl px-6 py-4 z-20 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)]"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -1149,7 +1149,7 @@ export function MainContent({
             <AnimatePresence>
               {showTokenDetails && (
                 <motion.div
-                  className="absolute right-0 top-full mt-3 w-[260px] rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-xl z-50"
+                  className="absolute right-0 top-full mt-3 w-[260px] rf-card p-4  z-50"
                   initial={{ opacity: 0, y: -8, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.96 }}
@@ -1347,7 +1347,7 @@ export function MainContent({
                       exit={{ opacity: 0, height: 0 }}
                     >
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white p-4 shadow-[0_12px_40px_-34px_rgba(15,23,42,0.28)]">
+                        <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
@@ -1392,7 +1392,7 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white p-4 shadow-[0_12px_40px_-34px_rgba(15,23,42,0.28)]">
+                        <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
@@ -1422,7 +1422,7 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="rounded-[24px] border border-[rgba(35,74,61,0.12)] bg-white p-4 shadow-[0_12px_40px_-34px_rgba(15,23,42,0.28)]">
+                        <div className="rf-card p-4">
                           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
                           <div className="mt-3 space-y-2.5">
                             <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">

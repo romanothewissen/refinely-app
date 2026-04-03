@@ -814,8 +814,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const canEditBranding = Boolean(isAdmin && tier === 'enterprise');
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[var(--rf-surface-soft)] relative overflow-hidden font-sans">
-      <header className="shrink-0 h-[88px] border-b border-[var(--rf-border)] bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-30 sticky top-0 shadow-sm">
+    <div className="flex-1 flex flex-col h-full bg-[linear-gradient(180deg,var(--rf-bg-main)_0%,var(--rf-bg-main-deep)_100%)] relative overflow-hidden font-sans">
+      <header className="shrink-0 h-[88px] border-b border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl flex items-center justify-between px-8 z-30 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)]">
         <div className="flex items-center gap-5">
           <motion.button 
             onClick={onClose} 
@@ -854,7 +854,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       </header>
 
       <div className="flex-1 overflow-hidden flex">
-          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/50 p-6 flex flex-col gap-2">
+          <div className="w-72 shrink-0 border-r border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.5),rgba(248,247,244,0.5))] backdrop-blur-md p-6 flex flex-col gap-2">
             {settingsNav.map((tab) => (
               <button
                 key={tab.id}
@@ -872,7 +872,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             ))}
             
             <div className="mt-auto pt-6 border-t border-[var(--rf-border)]">
-               <div className="bg-white rounded-xl p-4 border border-[var(--rf-border)] shadow-sm">
+               <div className="rf-card p-4 ">
                  <div>
                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Recommended Order</div>
                    <div className="text-xs font-semibold text-[var(--rf-text-secondary)] space-y-1.5">
@@ -892,7 +892,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-8 lg:p-10 custom-scrollbar bg-[var(--rf-surface-soft)]/50">
+          <div className="flex-1 overflow-y-auto p-8 lg:p-10 custom-scrollbar bg-transparent">
             {activeTab === 'models' && (
               <motion.div 
                 className="max-w-3xl space-y-6"
@@ -905,7 +905,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                    <p className="text-[var(--rf-text-tertiary)] text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
+                <div className="rf-card p-6 lg:p-8  space-y-8">
                   <div className="space-y-3">
                     <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">LLM Provider</label>
                     <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
@@ -962,7 +962,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <Info className="w-4 h-4 text-[var(--rf-brand)] shrink-0 mt-0.5" />
                       <p><span className="font-bold text-[var(--rf-text)]">How this works:</span> each phase can use a different model, but each phase does a different job. Use a stronger model where you want deeper structure, and a faster model where you want cheap, quick validation.</p>
                     </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rf-card px-4 py-3 ">
                       <div>
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Model catalog</div>
                         <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
@@ -1039,7 +1039,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           },
                         },
                       ].map((item, i) => (
-                        <div key={i} className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3.5 space-y-2 shadow-sm">
+                        <div key={i} className="rf-card px-4 py-3.5 space-y-2 ">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
                             <div className="relative sm:w-[240px]">
@@ -1088,7 +1088,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                 <div className="space-y-6">
                   {/* Step 1 */}
-                  <div className="bg-white rounded-2xl p-6 border border-[var(--rf-border)] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="rf-card p-6  flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="space-y-1">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 1</div>
                       <h4 className="text-lg font-bold text-[var(--rf-text)]">Workspace Jira Discovery</h4>
@@ -1118,7 +1118,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   {/* Step 2 Selection */}
-                  <div className="bg-white rounded-2xl p-6 border border-[var(--rf-border)] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="rf-card p-6  flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="space-y-1">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 2</div>
                       <h4 className="text-lg font-bold text-[var(--rf-text)]">Select Project</h4>
@@ -1160,7 +1160,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   )}
 
                   {/* Step 3 WIs */}
-                  <div className="bg-white rounded-2xl p-6 border border-[var(--rf-border)] shadow-sm space-y-6">
+                  <div className="rf-card p-6  space-y-6">
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-1">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 3</div>
@@ -1261,7 +1261,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Workspace Guidance</h3>
                   <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">Global defaults for the workspace. Project-specific rules live in Project Setup.</p>
                 </div>
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
+                <div className="rf-card p-6 lg:p-8  space-y-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm"><Users className="w-6 h-6" /></div>
@@ -1293,7 +1293,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <div />
                         </div>
                         {roleGuidanceRows.map((row, index) => (
-                          <div key={`workspace-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 items-start rounded-xl border border-[var(--rf-border)] bg-white p-3 shadow-sm">
+                          <div key={`workspace-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 items-start rf-card p-3 ">
                             <div className="space-y-1">
                               <div className="md:hidden text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
                               <input
@@ -1360,7 +1360,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     { label: 'Projects with activity', value: projectUsageBreakdown.length, helper: 'Approximate from reports' },
                     { label: 'Compliance signals', value: complianceEvents.length + transparencyReports.length + jiraAuditRecords.length, helper: 'Audit + transparency + Jira records' },
                   ].map((card) => (
-                    <div key={card.label} className="rounded-2xl border border-[var(--rf-border)] bg-white px-5 py-4 shadow-sm">
+                    <div key={card.label} className="rf-card px-5 py-4 ">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{card.label}</div>
                       <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{card.value}</div>
                       <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{card.helper}</div>
@@ -1368,7 +1368,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   ))}
                 </div>
 
-                <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-6 shadow-sm space-y-4">
+                <div className="rf-card p-6  space-y-4">
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Project usage</div>
                     <h4 className="mt-1 text-lg font-bold text-[var(--rf-text)]">Activity across the workspace</h4>
@@ -1405,7 +1405,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                  <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
+                  <div className="rf-card p-5  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Transparency reports</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent model decisions and token usage.</div>
                     <div className="space-y-2">
@@ -1422,7 +1422,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
+                  <div className="rf-card p-5  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Compliance audit trail</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Configuration, security, prompt, and runtime events.</div>
                     <div className="space-y-2">
@@ -1438,7 +1438,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
+                  <div className="rf-card p-5  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Jira audit records</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent issue creation and downstream writeback activity.</div>
                     <div className="space-y-2">
@@ -1465,7 +1465,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Billing & Compliance</h3>
                 </div>
 
-                <div className="bg-white rounded-2xl p-8 border border-[var(--rf-border)] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="rf-card p-8  flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
                     <p className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Current Plan</p>
                     <h4 className="text-3xl font-black text-[var(--rf-brand)] capitalize mt-1">{tier}</h4>
@@ -1486,7 +1486,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
+                <div className="rf-card p-6 lg:p-8  space-y-6">
                   <div className="flex flex-col gap-2">
                     <div>
                       <p className="text-[11px] uppercase tracking-widest text-[var(--rf-brand)] font-bold">Usage & stats</p>
@@ -1601,7 +1601,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   })}
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
+                <div className="rf-card p-6 lg:p-8  space-y-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -1649,7 +1649,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
+                <div className="rf-card p-6 lg:p-8  space-y-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)]" />
@@ -1944,7 +1944,7 @@ function ProjectConfigurationManager({
            {expandedSections.backlog && (
            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
              <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+               <div className="rf-card px-4 py-3 ">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
                  <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{indexedCount}</div>
                  <div className="mt-1 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
@@ -1953,33 +1953,33 @@ function ProjectConfigurationManager({
                      : 'Fallback from backlog diagnostics when cache metadata has not been refreshed yet.'}
                  </div>
                </div>
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+               <div className="rf-card px-4 py-3 ">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Shards</div>
                  <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{backlogCacheInfo?.shardCount ?? 0}</div>
                  <div className="mt-1 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
                    Lean cache slices sized for Forge storage.
                  </div>
                </div>
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+               <div className="rf-card px-4 py-3 ">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Themes</div>
                  <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{backlogCacheInfo?.themeCount ?? 0}</div>
                  <div className="mt-1 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
                    Adaptive shortlist index for retrieval.
                  </div>
                </div>
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+               <div className="rf-card px-4 py-3 ">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
                  <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)]">
                    {backlogCacheInfo?.builtAt ? new Date(backlogCacheInfo.builtAt).toLocaleString() : 'Not built yet'}
                  </div>
                </div>
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+               <div className="rf-card px-4 py-3 ">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Theme Index</div>
                  <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)]">
                    {backlogCacheInfo?.themeBuiltAt ? new Date(backlogCacheInfo.themeBuiltAt).toLocaleString() : 'Not built yet'}
                  </div>
                </div>
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+               <div className="rf-card px-4 py-3 ">
                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Status</div>
                  <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)] flex items-center gap-1.5">
                    {isRefreshingBacklogCache || backlogRefreshStatus?.status === 'queued' || backlogRefreshStatus?.status === 'running'
@@ -2004,7 +2004,7 @@ function ProjectConfigurationManager({
                </div>
              </div>
 
-             <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-4 shadow-sm">
+             <div className="rf-card px-4 py-4 ">
                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                  <div className="space-y-1">
                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Adaptive Theme Budget</div>
@@ -2082,7 +2082,7 @@ function ProjectConfigurationManager({
             </button>
             {expandedSections.guidance && (
               <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-                <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm space-y-3">
+                <div className="rf-card p-4  space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Project guidance</div>
@@ -2115,7 +2115,7 @@ function ProjectConfigurationManager({
             </button>
             {expandedSections.mapping && (
             <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-               <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
+               <div className="rf-card p-4 ">
                  <div className="flex items-start justify-between gap-4">
                    <div>
                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Mapping</div>
@@ -2222,7 +2222,7 @@ function FieldMappingEditor({
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-4">
+    <div className="rf-card p-5  space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{title}</div>

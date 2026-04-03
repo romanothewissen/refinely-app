@@ -75,7 +75,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
       />
 
       <motion.div 
-        className="relative bg-white w-full max-w-5xl h-[82vh] rounded-[22px] shadow-[var(--rf-shadow-lg)] flex flex-col overflow-hidden border border-[var(--rf-border)]"
+        className="relative rf-card w-full max-w-5xl h-[82vh] flex flex-col overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}

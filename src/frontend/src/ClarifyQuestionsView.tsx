@@ -178,7 +178,7 @@ export function ClarifyQuestionsView({
     <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
       {/* Header */}
       <motion.header
-        className="shrink-0 bg-white/80 backdrop-blur-md px-6 py-4 z-20 sticky top-0 border-b border-[var(--rf-border)] shadow-sm flex items-center justify-between gap-4"
+        className="shrink-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl px-6 py-4 z-20 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)] flex items-center justify-between gap-4"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -256,7 +256,7 @@ export function ClarifyQuestionsView({
         <div className="max-w-3xl mx-auto space-y-8 pb-12">
           {contextMeta && (
             <motion.div
-              className="rounded-2xl border border-[var(--rf-border)] bg-white/60 backdrop-blur-md p-5 shadow-sm"
+              className="rf-card p-5"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
@@ -315,7 +315,7 @@ export function ClarifyQuestionsView({
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>
                       <div className="space-y-2">
                         {contextMeta.referencedSimilarStories!.map((story, i) => (
-                          <div key={`${story.key}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white p-3 shadow-sm">
+                          <div key={`${story.key}-${i}`} className="rf-card p-3 ">
                             <div className="flex items-start justify-between gap-3">
                               {resolveStoryUrl(story) ? (
                                 <button
@@ -362,7 +362,7 @@ export function ClarifyQuestionsView({
                     {(contextMeta.referencedWiSections?.length ?? 0) > 0 ? (
                       <div className="space-y-2">
                         {contextMeta.referencedWiSections!.map((section, i) => (
-                          <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-xl border border-[var(--rf-border)] bg-white p-3 shadow-sm">
+                          <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rf-card p-3 ">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-[11px] font-bold text-[var(--rf-text)] truncate">
@@ -396,7 +396,7 @@ export function ClarifyQuestionsView({
 
           {inlineError && questions.length > 0 && (
             <motion.div
-              className="rounded-2xl border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35 px-5 py-4 text-sm text-[var(--rf-danger)] shadow-sm"
+              className="rounded-[22px] border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35 px-5 py-4 text-sm text-[var(--rf-danger)] shadow-sm"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
             >
@@ -407,7 +407,7 @@ export function ClarifyQuestionsView({
 
           {blockingState && questions.length === 0 && (
             <motion.div
-              className="rounded-3xl border border-[var(--rf-border)] bg-white/85 backdrop-blur-md p-8 shadow-sm"
+              className="rf-card p-8"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
             >
