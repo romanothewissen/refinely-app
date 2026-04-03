@@ -41,7 +41,6 @@ interface ClarifyProps {
 type LocalAnswerState = {
   selectedSuggestions: string[];
   customAnswer: string;
-  allowMultiple: boolean;
 };
 
 function buildExcerpt(text: string, maxChars = 180): string {
@@ -137,7 +136,7 @@ export function ClarifyQuestionsView({
   );
 
   function ensureAnswer(idx: number) {
-    return answers[idx] ?? { selectedSuggestions: [], customAnswer: '', allowMultiple: false };
+    return answers[idx] ?? { selectedSuggestions: [], customAnswer: '' };
   }
 
   function toggleSuggestion(qIdx: number, sug: string) {
@@ -145,15 +144,9 @@ export function ClarifyQuestionsView({
     const alreadySelected = existing.selectedSuggestions.includes(sug);
     const newSelected = alreadySelected
       ? existing.selectedSuggestions.filter(s => s !== sug)
-      : existing.allowMultiple
-        ? [...existing.selectedSuggestions, sug]
-        : [sug];
+      : [...existing.selectedSuggestions, sug];
 
     setAnswers(prev => ({ ...prev, [qIdx]: { ...existing, selectedSuggestions: newSelected } }));
-  }
-
-  function enableMultiSelect(qIdx: number) {
-    setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), allowMultiple: true } }));
   }
 
   function handleCustomChange(qIdx: number, val: string) {
@@ -480,7 +473,6 @@ export function ClarifyQuestionsView({
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
                   const suggestions = q.suggestions.slice(0, 4);
-                  const canEnableMultiSelect = suggestions.length > 1 && ans.selectedSuggestions.length > 0 && !ans.allowMultiple;
 
                   return (
                     <div
@@ -499,23 +491,8 @@ export function ClarifyQuestionsView({
                           {suggestions.length > 0 && (
                             <div className="space-y-2">
                               <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
-                                Choose one answer that is closest. Add another only if none of them fully covers it.
+                                Pick the closest answer or combine the ones that truly need to go together.
                               </div>
-                              {canEnableMultiSelect && (
-                                <button
-                                  type="button"
-                                  onClick={() => enableMultiSelect(idx)}
-                                  disabled={isSubmitting}
-                                  className="inline-flex items-center rounded-lg border border-[var(--rf-border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]"
-                                >
-                                  Add another answer if needed
-                                </button>
-                              )}
-                              {ans.allowMultiple && (
-                                <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
-                                  Multiple answers are on. Keep only the answers that truly need to be combined.
-                                </div>
-                              )}
                               <div className="flex flex-wrap gap-2">
                               {suggestions.map((sug, si) => {
                                 const sel = ans.selectedSuggestions.includes(sug);

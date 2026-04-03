@@ -421,7 +421,21 @@ test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when 
   assert.match(followups[0].question, /phone|whatsapp|case/i);
 });
 
-test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery contract', () => {
+test('finalizeFollowupDiscoveryQuestions does not invent a generic fallback question when follow-up candidates are empty', () => {
+  const followups = finalizeFollowupDiscoveryQuestions([], {
+    askedQuestions: [],
+    missingCategoryKeys: ['business_rules'],
+    followupCap: 1,
+    initialQuestionCount: 6,
+    fallbackInput: {
+      requirement: 'An FSE must be provided an optimal schedule for service based on criticality and due dates.',
+    },
+  });
+
+  assert.deepEqual(followups, []);
+});
+
+test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery contract', () => {
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
@@ -446,29 +460,30 @@ test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery
   assert.match(clarifyPrompt, /categoryKey/);
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Prefer one visible question per main business decision/i);
-  assert.match(clarifyPrompt, /plain-language answer options/i);
-  assert.match(clarifyPrompt, /Provide 2-3 suggestions by default/i);
-  assert.match(clarifyPrompt, /Avoid quotes, parenthetical evidence references/i);
-  assert.match(clarifyPrompt, /Ask for a business choice or policy direction/i);
+  assert.match(clarifyPrompt, /principal business analyst running a structured discovery session/i);
+  assert.match(clarifyPrompt, /Questions should usually be rich, specific business prompts/i);
+  assert.match(clarifyPrompt, /A question may be longer than a terse chip-style prompt/i);
+  assert.match(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
+  assert.match(clarifyPrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
   assert.match(clarifyPrompt, /Keep the suggestions aligned to the actual question being asked/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
-  assert.match(clarifyPrompt, /Important domain signals/i);
+  assert.match(clarifyPrompt, /Important domain signals from the requirement and supporting evidence/i);
   assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
   assert.match(clarifyPrompt, /company-specific internal terms/i);
   assert.doesNotMatch(clarifyPrompt, /one short sentence/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
-  assert.doesNotMatch(clarifyPrompt, /Provide exactly 4 suggestions/i);
+  assert.doesNotMatch(clarifyPrompt, /Provide 2-3 suggestions by default/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
   assert.match(evaluatePrompt, /1-4 follow-up questions/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Prefer one visible follow-up question per remaining business gap/i);
-  assert.match(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
-  assert.match(evaluatePrompt, /Avoid quotes, parenthetical evidence references/i);
-  assert.match(evaluatePrompt, /tightly aligned to the exact follow-up question being asked/i);
+  assert.match(evaluatePrompt, /Provide exactly 4 suggestions per follow-up question/i);
+  assert.match(evaluatePrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
+  assert.match(evaluatePrompt, /medium-length starter answers/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);
-  assert.doesNotMatch(evaluatePrompt, /Provide exactly 4 suggestions/i);
+  assert.doesNotMatch(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
 });

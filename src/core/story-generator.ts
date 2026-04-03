@@ -179,12 +179,71 @@ const PASS2_CONTEXT_LIMITS = {
 const MAX_EXECUTABLE_FEATURES = 8;
 const MAX_CLARIFY_QUESTION_CHARS = 170;
 const MAX_CLARIFY_SUGGESTION_CHARS = 95;
+const FOLLOWUP_GROUNDING_STOPWORDS = new Set([
+  'a', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'by', 'can', 'do', 'does', 'first', 'for',
+  'from', 'handling', 'how', 'if', 'improve', 'in', 'into', 'is', 'it', 'its', 'of', 'on', 'or',
+  'process', 'request', 'requests', 'should', 'system', 'team', 'that', 'the', 'their', 'this',
+  'those', 'to', 'what', 'when', 'which', 'who', 'workflow',
+]);
+const GENERIC_FOLLOWUP_PATTERNS = [
+  /\bwhat should automatic .* handling improve first\?/i,
+  /\bwhat business outcome should .* improve first\?/i,
+  /\bwhat should count as a successful .* outcome\?/i,
+];
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
   if (!normalized) return '';
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars).trimEnd()}\n...[truncated for speed]`;
+}
+
+function collectDiscoveryGroundingTerms(parts: string[]): Set<string> {
+  const terms = new Set<string>();
+  const rawSignals = extractDiscoverySignals(parts);
+
+  [...parts, ...rawSignals].forEach((part) => {
+    const matches = String(part ?? '').match(/\b[A-Za-z][A-Za-z0-9/-]{2,}\b/g) ?? [];
+    matches.forEach((token) => {
+      const normalized = token.toLowerCase().replace(/[^a-z0-9/-]/g, '').trim();
+      if (!normalized || normalized.length < 4 || FOLLOWUP_GROUNDING_STOPWORDS.has(normalized)) return;
+      terms.add(normalized);
+    });
+  });
+
+  return terms;
+}
+
+function countGroundingHits(text: string, groundingTerms: Set<string>): number {
+  const seen = new Set<string>();
+  let hits = 0;
+  const tokens = String(text ?? '').match(/\b[A-Za-z][A-Za-z0-9/-]{2,}\b/g) ?? [];
+
+  tokens.forEach((token) => {
+    const normalized = token.toLowerCase().replace(/[^a-z0-9/-]/g, '').trim();
+    if (!normalized || normalized.length < 4 || seen.has(normalized)) return;
+    seen.add(normalized);
+    if (groundingTerms.has(normalized)) hits += 1;
+  });
+
+  return hits;
+}
+
+function followupQuestionsLookWeak(
+  questions: ClarifyQuestion[],
+  groundingTerms: Set<string>,
+): boolean {
+  if (!questions.length) return true;
+
+  return questions.some((question) => {
+    const normalizedQuestion = question.question.trim();
+    if (!normalizedQuestion) return true;
+    if (GENERIC_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(normalizedQuestion))) return true;
+
+    const hits = countGroundingHits(normalizedQuestion, groundingTerms);
+    const questionLooksGeneric = /\b(capability|process|system|workflow|handling|business outcome)\b/i.test(normalizedQuestion);
+    return hits === 0 || (questionLooksGeneric && hits < 2);
+  });
 }
 
 function pushPromptSection(parts: string[], heading: string, text: string, maxChars: number) {
@@ -1281,7 +1340,14 @@ export async function evaluateSufficiency(opts: {
     ...(opts.config.domainRoles ?? []),
   ]);
 
-  const userMessage = [
+  const groundingTerms = collectDiscoveryGroundingTerms([
+    opts.requirement,
+    qaText,
+    ...askedQuestionDetails.map((entry) => entry.question),
+    ...(opts.config.domainRoles ?? []),
+  ]);
+
+  const baseUserMessage = [
     `REQUIREMENT: ${opts.requirement}`,
     askedQuestionDetails.length
       ? `DISCOVERY QUESTIONS ALREADY ASKED:\n${askedQuestionDetails.map((entry, index) => {
@@ -1296,70 +1362,115 @@ export async function evaluateSufficiency(opts: {
     `DISCOVERY ANSWERS:\n${qaText}`,
   ].filter(Boolean).join('\n\n');
 
-  const startedAt = Date.now();
-  const result = await callLlmJsonWithUsage<Record<string, unknown>>({
-    model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
-    systemPrompt: buildEvaluateSystemPrompt({
-      domainContext: opts.config.domainContext,
-      domainRoles: opts.config.domainRoles,
-      domainSignals,
-      minQuestions: Math.max(1, followupMin),
-      maxQuestions: Math.max(1, followupCap),
-    }),
-    userMessage,
+  const runEvaluationPass = async (
+    userMessage: string,
+    stageKey: 'clarifyEvaluate' | 'clarifyEvaluateRetry',
+  ) => {
+    const startedAt = Date.now();
+    const result = await callLlmJsonWithUsage<Record<string, unknown>>({
+      model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
+      systemPrompt: buildEvaluateSystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+        domainSignals,
+        minQuestions: Math.max(1, followupMin),
+        maxQuestions: Math.max(1, followupCap),
+      }),
+      userMessage,
       maxTokens: 2048,
       reasoningEffort: 'medium',
-    ...buildLlmProviderOpts(opts.config),
-  });
-  const durationMs = Date.now() - startedAt;
+      ...buildLlmProviderOpts(opts.config),
+    });
+    const durationMs = Date.now() - startedAt;
 
-  const sufficient = Boolean((result.data as Record<string, unknown>).sufficient);
-  const parsedQuestions = parseQuestionCandidates(result.data);
-  const missingCategoryKeys = (() => {
-    const explicit = parseCategoryKeyList(result.data);
-    if (explicit.length) return explicit;
+    const sufficient = Boolean((result.data as Record<string, unknown>).sufficient);
+    const parsedQuestions = parseQuestionCandidates(result.data);
+    const missingCategoryKeys = (() => {
+      const explicit = parseCategoryKeyList(result.data);
+      if (explicit.length) return explicit;
 
-    const inferred = parsedQuestions
-      .map((question) => question.categoryKey)
-      .filter((value, index, values) => values.indexOf(value) === index);
-    return inferred;
-  })();
-  const reasonCodes = parseStringList(result.data, 'reasonCodes')
-    .map((code) => code.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase())
-    .filter(Boolean);
+      const inferred = parsedQuestions
+        .map((question) => question.categoryKey)
+        .filter((value, index, values) => values.indexOf(value) === index);
+      return inferred;
+    })();
+    const reasonCodes = parseStringList(result.data, 'reasonCodes')
+      .map((code) => code.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase())
+      .filter(Boolean);
 
-  const questions = !sufficient && followupCap > 0
-    ? finalizeFollowupDiscoveryQuestions(parsedQuestions, {
-        askedQuestions: askedQuestionDetails.map((entry) => entry.question),
-        missingCategoryKeys,
-        followupCap,
-        initialQuestionCount,
-        fallbackInput: {
-          requirement: opts.requirement,
-          attachmentText: qaText,
-          domainSignals,
-          domainRoles: opts.config.domainRoles,
-        },
-      })
+    const questions = !sufficient && followupCap > 0
+      ? finalizeFollowupDiscoveryQuestions(parsedQuestions, {
+          askedQuestions: askedQuestionDetails.map((entry) => entry.question),
+          missingCategoryKeys,
+          followupCap,
+          initialQuestionCount,
+          fallbackInput: {
+            requirement: opts.requirement,
+            attachmentText: qaText,
+            domainSignals,
+            domainRoles: opts.config.domainRoles,
+          },
+        })
+      : [];
+
+    return {
+      sufficient,
+      questions,
+      missingCategoryKeys,
+      reasonCodes,
+      durationMs,
+      usage: result.usage,
+      stageKey,
+    };
+  };
+
+  const evaluationPasses = [await runEvaluationPass(baseUserMessage, 'clarifyEvaluate')];
+  const firstPass = evaluationPasses[0];
+  const shouldRetryFollowup = !firstPass.sufficient
+    && followupCap > 0
+    && followupQuestionsLookWeak(firstPass.questions, groundingTerms);
+
+  if (shouldRetryFollowup) {
+    const retryMessage = [
+      baseUserMessage,
+      'FOLLOW-UP RETRY INSTRUCTION: Your previous follow-up set was too generic, too weakly grounded, or empty.',
+      'Retry only if you can ask requirement-specific DELTA questions that clearly depend on the actual requirement and answered Q&A.',
+      'Do not ask broad context or business-outcome questions unless the requirement itself is explicitly asking for that.',
+      'If there is no clearly grounded follow-up question left, return {"sufficient": true, "missingCategoryKeys": [], "reasonCodes": []}.',
+    ].join('\n\n');
+    evaluationPasses.push(await runEvaluationPass(retryMessage, 'clarifyEvaluateRetry'));
+  }
+
+  const finalPass = evaluationPasses[evaluationPasses.length - 1];
+  const finalQuestions = !finalPass.sufficient && !followupQuestionsLookWeak(finalPass.questions, groundingTerms)
+    ? finalPass.questions
     : [];
+  const effectiveSufficient = finalPass.sufficient || finalQuestions.length === 0;
+  const totalDurationMs = evaluationPasses.reduce((sum, pass) => sum + pass.durationMs, 0);
+  const totalInputTokens = evaluationPasses.reduce((sum, pass) => sum + pass.usage.input, 0);
+  const totalOutputTokens = evaluationPasses.reduce((sum, pass) => sum + pass.usage.output, 0);
+  const byStage = Object.fromEntries(
+    evaluationPasses.map((pass) => [
+      pass.stageKey,
+      {
+        input: pass.usage.input,
+        output: pass.usage.output,
+        total: pass.usage.input + pass.usage.output,
+      },
+    ]),
+  );
 
   return {
-    sufficient,
-    questions: sufficient ? undefined : questions,
-    missingCategoryKeys,
-    reasonCodes,
-    durationMs,
+    sufficient: effectiveSufficient,
+    questions: effectiveSufficient ? undefined : finalQuestions,
+    missingCategoryKeys: effectiveSufficient ? [] : finalPass.missingCategoryKeys,
+    reasonCodes: effectiveSufficient ? [] : finalPass.reasonCodes,
+    durationMs: totalDurationMs,
     tokenUsage: {
-      input: result.usage.input,
-      output: result.usage.output,
-      total: result.usage.input + result.usage.output,
-      byStage: {
-        clarifyEvaluate: {
-          input: result.usage.input,
-          output: result.usage.output,
-          total: result.usage.input + result.usage.output,
-        },
-      },
+      input: totalInputTokens,
+      output: totalOutputTokens,
+      total: totalInputTokens + totalOutputTokens,
+      byStage,
     },
   };
 }

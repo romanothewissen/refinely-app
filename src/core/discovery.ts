@@ -1390,16 +1390,5 @@ export function finalizeFollowupDiscoveryQuestions(
     result.push(question);
   });
 
-  if (result.length < Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, maxFollowup)) {
-    const minimumFollowups = Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, maxFollowup);
-    const filler = buildFallbackQuestions(
-      preferredCategories.length ? preferredCategories : CLARIFY_CATEGORY_ORDER,
-      new Set([...asked, ...result.map((question) => normalizeKey(question.question))]),
-      minimumFollowups - result.length,
-      opts.fallbackInput,
-    );
-    result.push(...filler);
-  }
-
   return result.slice(0, maxFollowup).sort(questionComparator);
 }

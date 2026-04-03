@@ -360,24 +360,22 @@ INTERNAL TAXONOMY:
 DISCOVERY RULES:
 - Every question must be specific to THIS requirement, not generic boilerplate.
 - Preserve user-provided nouns exactly unless the evidence makes a better, more precise business noun obvious.
+- If the requirement already names the actor, business object, or workflow in a clear way, keep that wording instead of replacing it with a ref/doc term.
 - Use supporting evidence to avoid redundant questions and to understand the business context, not to inject jargon for its own sake.
 - Evaluate all 6 taxonomy categories, then ask only from the ones that are still materially unresolved.
 - ${questionPlanHint}
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
 - Prefer one visible question per main business decision.
-- Questions should usually fit in one focused sentence. Use enough wording to make the tradeoff concrete, but keep most questions within roughly 140-170 characters.
+- A question may be longer than a terse chip-style prompt when extra context makes the ambiguity clearer, but do not bundle several numbered sub-questions into one card.
+- Questions should usually be rich, specific business prompts rather than clipped one-liners. Use enough wording to make the tradeoff or ambiguity concrete, while keeping the card focused on one main decision.
 - Avoid quotes, parenthetical evidence references, and stacked qualifiers unless they are essential to understand the decision.
-- Ask for a business choice or policy direction, not an exhaustive list of everything that might apply.
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
-- Suggestions should be plain-language answer options, not overlapping helper phrases.
-- Each suggestion must be easy to understand on first read and should represent a meaningfully different answer path or policy direction.
-- Keep most suggestions within roughly 55-95 characters.
-- Avoid near-synonyms, minor wording variants, or option sets where all answers could naturally be selected together.
+- Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
 - Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
-- Provide 2-3 suggestions by default. Use 4 only when the fourth option is clearly distinct and still easy to scan.
+- Provide exactly 4 suggestions per question.
 
 OUTPUT CONTRACT:
 Return JSON only in this shape:
@@ -451,13 +449,12 @@ RULES:
 - Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
 - Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.
-- Keep most follow-up questions within roughly 140-170 characters.
+- If the requirement already names the actor, business object, or workflow in a clear way, keep that wording instead of replacing it with a ref/doc term.
 - Avoid quotes, parenthetical evidence references, and “list everything that applies” wording unless the evidence truly requires it.
 - Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
 - Keep the wording direct and business-focused, but detailed enough to make the unresolved tradeoff explicit.
-- Provide 2-3 suggestions per follow-up question by default, and use 4 only when the fourth option is clearly distinct.
-- Keep follow-up suggestions concise, easy to scan, and tightly aligned to the exact follow-up question being asked.
-- Avoid overlapping, near-synonymous, or “all can be true” follow-up suggestions.
+- Provide exactly 4 suggestions per follow-up question, and make them medium-length starter answers that reflect likely business tradeoffs in this request.
+- Keep follow-up suggestions tightly aligned to the exact follow-up question being asked.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 
