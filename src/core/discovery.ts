@@ -471,27 +471,27 @@ function contextualizeDiscoveryTemplate(
     case 'business_outcome':
       return {
         ...template,
-        question: `To scope this properly, 1. what business outcome should automatic ${ctx.businessObject} handling${channelScope} improve, 2. what should count as the true start of the flow, and 3. what result should make the first pass feel complete to the business?`,
+        question: `What business outcome should automatic ${ctx.businessObject} handling${channelScope} improve first so the team knows this flow is solving the right problem?`,
         suggestions: uniqueStrings([
           `Reduce manual handling${channelScope} while still creating the right ${ctx.businessObject} on the first pass`,
-          `Speed up ${ctx.businessObject} creation and make ownership clear immediately`,
-          `Improve first-touch visibility so follow-up teams can act without rechecking the source interaction`,
-          `Prevent duplicate ${ctx.businessObjectPlural} and keep the downstream record accurate`,
+          `Speed up ${ctx.businessObject} creation so ownership becomes clear as soon as the interaction is captured`,
+          'Improve first-touch visibility so follow-up teams can act without rechecking the original interaction',
+          `Prevent duplicate ${ctx.businessObjectPlural} while keeping the downstream record accurate and usable`,
         ]).slice(0, 4),
       };
     case 'trigger_event':
       return {
         ...template,
         question: ctx.channels.length
-          ? `For ${ctx.businessObject} creation${channelScope}, 1. which ${ctx.channelList} events should trigger the flow, 2. what must already be true before it starts, and 3. are any channels intentionally excluded from the automatic path?`
-          : `For the ${ctx.interactionLabel}, 1. what exact event should trigger ${businessObjectPhrase} creation, 2. what must already be true before it starts, and 3. when should the flow hold back for review instead?`,
+          ? `Which ${ctx.channelList} events should trigger ${ctx.businessObject} creation automatically, rather than leaving the interaction for manual triage?`
+          : `What exact point in the ${ctx.interactionLabel} should trigger ${businessObjectPhrase} creation automatically?`,
         suggestions: uniqueStrings([
           ctx.channels.length >= 2
-            ? `Start automatically for every listed channel once the interaction reaches a usable handoff point`
+            ? 'Start automatically for every listed channel once the interaction reaches a usable handoff point'
             : `Start when the ${ctx.interactionLabel} reaches the point where the team can act on it`,
           ctx.channels.length >= 2
             ? `${ctx.channels.slice(0, 2).join(' and ')} should start the flow automatically, while the others stay manual for now`
-            : `Start only after identity or enough context has been confirmed`,
+            : 'Start only after identity or enough context has been confirmed',
           `Start only when there is enough detail to create or update the ${ctx.businessObject} confidently`,
           'Do not start automatically when the interaction is ambiguous and a person needs to triage it first',
         ]).slice(0, 4),
@@ -499,21 +499,21 @@ function contextualizeDiscoveryTemplate(
     case 'success_signal':
       return {
         ...template,
-        question: `Once the ${ctx.interactionLabel} is handled, 1. what should count as a successful ${ctx.businessObject} outcome, 2. what must be visible or updated immediately, and 3. what would tell the business that the first pass was incomplete?`,
+        question: `What should count as a successful ${ctx.businessObject} outcome once the ${ctx.interactionLabel} has been handled?`,
         suggestions: uniqueStrings([
-          `Success means the right ${ctx.businessObject} is created or updated with clear ownership straight away`,
-          `Success means the core context is copied once and the next team can work without revisiting the source interaction`,
-          `Success means downstream visibility is in place and no duplicate ${ctx.businessObjectPlural} are created`,
-          `Success means the interaction is captured, but the flow should still flag when a human follow-up is required`,
+          `The right ${ctx.businessObject} is created or updated and ownership is clear straight away`,
+          'The core context is copied once so the next team can work without revisiting the original interaction',
+          `Downstream visibility is in place and no duplicate ${ctx.businessObjectPlural} are created by mistake`,
+          'The interaction is captured correctly, but the flow still flags when a human follow-up is required',
         ]).slice(0, 4),
       };
     case 'primary_actor':
       return {
         ...template,
-        question: `Within this flow, 1. who should own ${ctx.businessObject} handling from the ${ctx.interactionLabel}, 2. where should responsibility hand off if that person is unavailable, and 3. who can override the default ownership when needed?`,
+        question: `Who should own ${ctx.businessObject} handling when the ${ctx.interactionLabel} first enters this flow?`,
         suggestions: uniqueStrings([
           `${ctx.actor} should own the default path, with exceptions routed to a supervisor when they cannot act`,
-          'A shared operations queue should own the intake, then assign the work once the interaction is understood',
+          'A shared operations queue should own intake first, then assign the work once the interaction is understood',
           'A supervisor or manager should decide ownership whenever the normal assignee is unclear',
           'Manual triage should own the first pass before responsibility moves to the final working team',
         ]).slice(0, 4),
@@ -521,9 +521,9 @@ function contextualizeDiscoveryTemplate(
     case 'downstream_actors':
       return {
         ...template,
-        question: `After ${businessObjectPhrase} is created from the ${ctx.interactionLabel}, 1. who needs visibility, 2. who needs to be notified or asked to act, and 3. who should stay out of the flow unless there is an exception?`,
+        question: `Who else needs visibility or notification after ${businessObjectPhrase} is created from the ${ctx.interactionLabel}?`,
         suggestions: uniqueStrings([
-          'Related internal teams should be able to see the outcome, but only the owning team should act by default',
+          'Related internal teams should see the outcome, but only the owning team should act by default',
           'A supervisor or approver should only be brought in when the flow hits an exception or conflict',
           'The original requester or contact should receive visibility when the outcome affects their next step',
           'No extra visibility is needed beyond the owning team unless the case is escalated',
@@ -532,55 +532,55 @@ function contextualizeDiscoveryTemplate(
     case 'permissions_scope':
       return {
         ...template,
-        question: `For exceptions to the default flow, 1. who should be allowed to override ${ctx.businessObject} handling, 2. what kind of override should they be able to make, and 3. when should that override still require approval or auditability?`,
+        question: `Who should be allowed to override the default ${ctx.businessObject} handling path when an exception appears?`,
         suggestions: uniqueStrings([
-          'Only admins or supervisors should be able to override the default path and the reason should be visible afterward',
+          'Only admins or supervisors should be able to override the default path and the reason should remain visible afterward',
           `${ctx.actor} can make routine overrides, but higher-risk exceptions should still go to a manager`,
           'Managers should approve overrides whenever the decision changes ownership, priority, or duplicate handling',
-          'No special override path is needed because the standard flow should cover all normal cases',
+          'No special override path is needed because the standard flow should cover normal cases',
         ]).slice(0, 4),
       };
     case 'required_inputs':
       return {
         ...template,
-        question: `To create or update the ${ctx.businessObject} correctly, 1. what details from the ${ctx.interactionLabel}${channelScope} must be captured, 2. which identifier should link it to the right customer or prior record, and 3. what information is helpful but not mandatory on day one?`,
+        question: `What minimum details from the ${ctx.interactionLabel}${channelScope} must be captured before the ${ctx.businessObject} can be created or updated correctly?`,
         suggestions: uniqueStrings([
           `${ctx.identifier}, the reason for contact, and the core summary should be captured before the ${ctx.businessObject} is created`,
-          'Capture the minimum usable context first, then let the owning team add the deeper detail during follow-up',
+          'Capture the minimum usable context first, then let the owning team add deeper detail during follow-up',
           ctx.channels.includes('Email')
             ? 'Capture the sender, subject, and a short summary, while leaving the full email body as reference material'
             : 'Capture the source details and short summary first, without requiring every interaction detail up front',
-          `Store the full interaction context when it materially helps the next team work the ${ctx.businessObject} without recontacting the customer`,
+          `Store the full interaction context only when it materially helps the next team work the ${ctx.businessObject}`,
         ]).slice(0, 4),
       };
     case 'outputs_displays':
       return {
         ...template,
-        question: `Besides creating or updating the ${ctx.businessObject}, 1. what other record, summary, or notification should be updated, 2. what needs to stay visible for follow-up teams, and 3. what should be left untouched to avoid noise?`,
+        question: `Besides the ${ctx.businessObject} itself, what downstream record, summary, or notification should this flow also update?`,
         suggestions: uniqueStrings([
           `Create or update the ${ctx.businessObject} and also surface a concise summary for the owning team`,
-          `Update the existing ${ctx.businessObject} only, and avoid creating extra downstream records unless the workflow truly changes`,
-          'Notify the owning team and make the source interaction visible so they can understand the context quickly',
-          'Keep the downstream footprint light and only expose what later teams need for follow-up',
+          `Update the existing ${ctx.businessObject} only, and avoid extra downstream records unless the workflow truly changes`,
+          'Notify the owning team and keep the source interaction visible so they can understand the context quickly',
+          'Keep the downstream footprint light and only expose what later teams truly need for follow-up',
         ]).slice(0, 4),
       };
     case 'entity_linkage':
       return {
         ...template,
-        question: `When the flow links the ${ctx.businessObject} to the right customer, contact, or prior conversation, 1. which identifier has priority, 2. how should conflicting matches be handled, and 3. when should the flow stop and ask for manual review?`,
+        question: `Which identifier should the flow trust first when linking the ${ctx.businessObject} to the right customer, contact, or prior conversation?`,
         suggestions: uniqueStrings([
           `${ctx.identifier} should be the primary match, with manual review if it points to more than one plausible record`,
           ctx.channels.length >= 2
             ? 'Use the conversation or email thread first, then fall back to the customer identifier when the thread is unclear'
             : `Use the existing open ${ctx.businessObject} reference first, then fall back to the customer identifier`,
           'Use the customer or account identifier as the main linkage unless a stronger case-level reference already exists',
-          `Use a related ${ctx.businessObject} reference when one exists, and queue uncertain matches for human review`,
+          `Use a related ${ctx.businessObject} reference when it exists, and queue uncertain matches for human review`,
         ]).slice(0, 4),
       };
     case 'core_constraints':
       return {
         ...template,
-        question: `Before ${businessObjectPhrase} is created or updated from the ${ctx.interactionLabel}, 1. what rule must always be enforced, 2. what condition should block the default path, and 3. who can approve an exception when that rule cannot be met?`,
+        question: `What business rule must always be enforced before ${businessObjectPhrase} is created or updated from the ${ctx.interactionLabel}?`,
         suggestions: uniqueStrings([
           'Only proceed when the mandatory context is present; otherwise stop the automatic path and route for review',
           ctx.channels.length
@@ -593,7 +593,7 @@ function contextualizeDiscoveryTemplate(
     case 'timing_dependencies':
       return {
         ...template,
-        question: `For this flow, 1. when should the ${ctx.businessObject} be created, 2. what sequencing, SLA, or dependency rule matters, and 3. what should wait for a prior step or confirmation before the flow continues?`,
+        question: `What timing or sequencing rule affects when the ${ctx.businessObject} should be created, rather than waiting for another step?`,
         suggestions: uniqueStrings([
           'Create it immediately once the interaction is usable, without waiting for extra downstream activity',
           'Create it only after triage confirms the interaction belongs in this workflow',
@@ -604,7 +604,7 @@ function contextualizeDiscoveryTemplate(
     case 'decision_logic':
       return {
         ...template,
-        question: `When ${ctx.interactionPlural} could lead to different outcomes, 1. what rule decides between creating a new ${ctx.businessObject} or updating an existing one, 2. which factor outranks the others, and 3. when should the flow stop and ask for review instead of guessing?`,
+        question: `What rule should decide whether the ${ctx.interactionLabel} creates a new ${ctx.businessObject} or updates an existing one when both outcomes seem possible?`,
         suggestions: uniqueStrings([
           `Always create a new ${ctx.businessObject} because each interaction should stand on its own`,
           `Reuse the existing open ${ctx.businessObject} when the identifier and context clearly match`,
@@ -615,18 +615,18 @@ function contextualizeDiscoveryTemplate(
     case 'lifecycle_states':
       return {
         ...template,
-        question: `After the ${ctx.businessObject} is created, 1. what statuses should it move through, 2. where does ownership or responsibility typically change, and 3. which lifecycle states matter for reporting or operational control?`,
+        question: `What lifecycle states should the ${ctx.businessObject} move through after it is created so ownership and progress stay clear?`,
         suggestions: uniqueStrings([
           'Use a simple new, assigned, and resolved lifecycle with clear ownership at each step',
           'Start in triage, then move to assigned and resolved once the owning team accepts the work',
           'Keep a single active state because extra lifecycle detail would not change how the team works',
-          'Use new, pending, and closed so waiting work is visible before final resolution',
+          'Use new, pending, and closed so waiting work remains visible before final resolution',
         ]).slice(0, 4),
       };
     case 'transition_triggers':
       return {
         ...template,
-        question: `For the early lifecycle, 1. what event should move the ${ctx.businessObject} out of its initial status, 2. which transitions should happen automatically, and 3. when should a person confirm the change before the flow advances?`,
+        question: `What event should move the ${ctx.businessObject} out of its initial state and into the next working stage?`,
         suggestions: uniqueStrings([
           'Manual triage should move it forward because the next step depends on a human judgment call',
           'Automatic routing should move it forward once the business rules identify the correct owner',
@@ -639,7 +639,7 @@ function contextualizeDiscoveryTemplate(
     case 'reopen_retry':
       return {
         ...template,
-        question: `If the same ${ctx.interactionLabel} needs to reopen or update a closed ${ctx.businessObject}, 1. when should the old item be reopened, 2. when should a linked new one be created instead, and 3. what history should remain visible either way?`,
+        question: `When should a later ${ctx.interactionLabel} reopen a closed ${ctx.businessObject} instead of creating a linked new one?`,
         suggestions: uniqueStrings([
           `Reopen the existing ${ctx.businessObject} when the new interaction is clearly part of the same unresolved issue`,
           `Create a linked new ${ctx.businessObject} when the prior one is closed for a reason that should stay intact`,
@@ -650,10 +650,10 @@ function contextualizeDiscoveryTemplate(
     case 'missing_data_fallback':
       return {
         ...template,
-        question: `When the ${ctx.interactionLabel} does not contain enough detail to create or update the ${ctx.businessObject}, 1. what should happen immediately, 2. who should fill the gap, and 3. what should remain visible so the work is not lost?`,
+        question: `What should happen when the ${ctx.interactionLabel} does not contain enough detail to create or update the ${ctx.businessObject} confidently?`,
         suggestions: uniqueStrings([
           'Queue it for manual review so someone can decide the next step without losing the interaction',
-          `Create a partial ${ctx.businessObject} so the work is visible, then let the owning team complete the missing detail`,
+          `Create a partial ${ctx.businessObject} so the work stays visible, then let the owning team complete the missing detail`,
           'Hold the automatic path until the missing details are added, while keeping the pending item visible to the team',
           `Notify ${ctx.actor} or the owning queue that more information is needed before the case can move forward`,
         ]).slice(0, 4),
@@ -661,7 +661,7 @@ function contextualizeDiscoveryTemplate(
     case 'conflicts_duplicates':
       return {
         ...template,
-        question: `When ${ctx.interactionPlural} would create duplicate ${ctx.businessObjectPlural}, 1. which record should win, 2. when should the flow merge or reuse an existing item, and 3. when should a person review the conflict instead of the system deciding alone?`,
+        question: `What should happen when the ${ctx.interactionLabel} appears to match an existing ${ctx.businessObject} and could create a duplicate?`,
         suggestions: uniqueStrings([
           `Reuse the open ${ctx.businessObject} when the interaction clearly belongs to the same unresolved issue`,
           `Update the existing ${ctx.businessObject} and preserve the latest interaction as part of the record history`,
@@ -672,7 +672,7 @@ function contextualizeDiscoveryTemplate(
     case 'offline_failure_behavior':
       return {
         ...template,
-        question: `If the source channel or integration is unavailable during ${ctx.businessObject} creation, 1. what should happen immediately, 2. how long should the flow retry or hold, and 3. when should the team fall back to a manual path?`,
+        question: `What should the business expect if the source channel or integration is unavailable during ${ctx.businessObject} creation?`,
         suggestions: uniqueStrings([
           'Retry automatically for a short period, then surface the item for manual recovery if the outage continues',
           'Queue the work for recovery so the interaction is not lost while the channel is unavailable',
@@ -740,6 +740,26 @@ function fallbackSuggestionsForIntent(
 
   const contextual = contextualizeDiscoveryTemplate(template, input).suggestions;
   return uniqueStrings([...contextual, ...template.suggestions]).slice(0, 4);
+}
+
+function splitGroupedQuestion(question: string): string[] {
+  const normalized = ensureQuestionMark(question);
+  if (!normalized) return [];
+
+  const numberedParts = normalized.split(/\s*(?=\d+\.\s*)/).filter(Boolean);
+  if (numberedParts.length >= 3) {
+    const prefix = cleanText(numberedParts.shift() ?? '').replace(/[,:;]+$/g, '');
+    return numberedParts
+      .map((segment) => cleanText(segment.replace(/^\d+\.\s*/, ''))
+        .replace(/\b(and|or)\s*$/i, '')
+        .trim()
+        .replace(/[,:;\s]+$/g, '')
+        .trim())
+      .map((segment) => ensureQuestionMark(prefix ? `${prefix} ${segment}` : segment))
+      .filter(Boolean);
+  }
+
+  return [normalized];
 }
 
 function normalizeQuestionText(question: string): string {
@@ -937,14 +957,14 @@ export function calibrateDiscoveryProfile(
     scope = raiseScope(scope, 'broad');
     complexity = raiseComplexity(complexity, 'high');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 5);
+    recommendedInitialCount = Math.max(recommendedInitialCount, 6);
   }
 
-  if (breadth >= 6 || repairedQuestionCount >= 8) {
+  if (breadth >= 6 || repairedQuestionCount >= 9) {
     scope = raiseScope(scope, 'very_broad');
     complexity = raiseComplexity(complexity, 'very_high');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 6);
+    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
   }
 
   if (repairApplied) {
@@ -953,7 +973,7 @@ export function calibrateDiscoveryProfile(
     ambiguity = raiseAmbiguity(ambiguity, 'high');
     recommendedInitialCount = Math.max(
       recommendedInitialCount,
-      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(MIN_INITIAL_DISCOVERY_QUESTIONS, breadth)),
+      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(6, breadth + 1)),
     );
   }
 
@@ -1006,7 +1026,7 @@ export function normalizeDiscoveryProfile(
     ),
     recommendedInitialCount,
     followupCap: clampCount(
-      Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 3,
+      Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4,
       MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
       MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
     ),
@@ -1104,7 +1124,7 @@ export function validateAndRepairInitialDiscovery(
       ...calibratedProfile,
       recommendedInitialCount: Math.max(
         calibratedProfile.recommendedInitialCount,
-        Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(MIN_INITIAL_DISCOVERY_QUESTIONS, finalizedValidation.requiredCategoryKeys.length)),
+        Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(6, finalizedValidation.requiredCategoryKeys.length + 1)),
       ),
     },
     {
@@ -1145,16 +1165,23 @@ export function expandRawQuestionCandidate(raw: {
   const baseSuggestions = Array.isArray(raw.suggestions)
     ? uniqueStrings(raw.suggestions).slice(0, 4)
     : [];
-  const normalizedQuestion = normalizeQuestionText(rawQuestion);
-  if (!normalizedQuestion) return [];
+  const splitQuestions = splitGroupedQuestion(rawQuestion);
 
-  return [{
-    categoryKey,
-    category: labelForCategoryKey(categoryKey),
-    intent: normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion),
-    question: normalizedQuestion,
-    suggestions: baseSuggestions.length ? baseSuggestions : [],
-  }];
+  return splitQuestions
+    .map((question, index) => {
+      const normalizedQuestion = normalizeQuestionText(question);
+      if (!normalizedQuestion) return null;
+      return {
+        categoryKey,
+        category: labelForCategoryKey(categoryKey),
+        intent: index === 0
+          ? normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)
+          : `${normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)}_part_${index + 1}`,
+        question: normalizedQuestion,
+        suggestions: baseSuggestions.length ? baseSuggestions : [],
+      };
+    })
+    .filter((question): question is ClarifyQuestion => Boolean(question));
 }
 
 export function finalizeInitialDiscoveryQuestions(

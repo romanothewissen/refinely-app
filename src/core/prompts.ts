@@ -365,14 +365,13 @@ DISCOVERY RULES:
 - ${questionPlanHint}
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
-- One visible question may bundle 2-4 tightly related sub-prompts when they belong to the same primary categoryKey and a stakeholder would naturally answer them together.
-- When you group related sub-prompts, keep them inside one coherent question string and prefer inline numbering like "1." "2." "3." so the parts stay readable.
-- Do not mix multiple categoryKeys inside one visible question. Group only within a single primary category.
-- Questions should usually be rich, specific business prompts rather than clipped one-liners. Use as much wording as needed to make the tradeoff or ambiguity concrete.
+- Prefer one visible question per main business decision.
+- A question may be longer than a terse chip-style prompt when extra context makes the ambiguity clearer, but do not bundle several numbered sub-questions into one card.
+- Questions should usually be rich, specific business prompts rather than clipped one-liners. Use enough wording to make the tradeoff or ambiguity concrete, while keeping the card focused on one main decision.
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
-- Suggestions should be longer starter answers or fuller phrase fragments, not terse chips. They should help the user answer quickly while still exposing the likely tradeoffs.
+- Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
 - Provide exactly 4 suggestions per question.
 
 OUTPUT CONTRACT:
@@ -402,7 +401,7 @@ OUTPUT RULES:
 - The number of questions returned must exactly match "recommendedInitialCount".
 - "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
-- Grouped questions are allowed, but they must still map to exactly one "categoryKey" and one "intent".
+- Every question should be a single focused prompt even when the wording is richer than a short atomic sentence.
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".`;
 }
 
@@ -443,13 +442,12 @@ RULES:
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
 - Never repeat or lightly rephrase a question that was already asked.
-- Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed, and prefer 1-3 grouped follow-up questions when one grouped prompt can close a single category gap cleanly.
+- Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
-- One visible follow-up question may bundle 2-4 tightly related sub-prompts when they belong to the same primary categoryKey and the user would naturally answer them together.
-- Do not mix multiple categoryKeys inside one visible follow-up question.
+- Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.
 - Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
 - Keep the wording direct and business-focused, but detailed enough to make the unresolved tradeoff explicit.
-- Provide exactly 4 suggestions per follow-up question, and make them longer starter answers that reflect likely business tradeoffs in this request.
+- Provide exactly 4 suggestions per follow-up question, and make them medium-length starter answers that reflect likely business tradeoffs in this request.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 
