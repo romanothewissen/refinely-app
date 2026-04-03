@@ -133,8 +133,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
-const MAX_CLARIFY_QUESTION_CHARS = 190;
-const MAX_CLARIFY_SUGGESTION_CHARS = 90;
+const MAX_CLARIFY_QUESTION_CHARS = 240;
+const MAX_CLARIFY_SUGGESTION_CHARS = 140;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -168,7 +168,7 @@ function buildGenerationUserMessage(input: {
 
   pushPromptSection(parts, 'ATTACHMENT CONTEXT', input.attachmentText, input.limits.attachment);
   pushPromptSection(parts, 'WORK INSTRUCTIONS', input.wiContextText, input.limits.wi);
-  pushPromptSection(parts, 'SIMILAR STORIES FROM BACKLOG (use these for business context and phrasing patterns only)', input.similarStoriesText, input.limits.similar);
+  pushPromptSection(parts, 'SIMILAR STORIES FROM BACKLOG (use these for business context only; never copy actor labels or scope when the requirement already specifies them)', input.similarStoriesText, input.limits.similar);
 
   return parts.join('\n\n---\n\n');
 }
@@ -566,10 +566,10 @@ export function assessRequirement(input: {
   // ── Question plan (unchanged thresholds) ──
   const questionPlan: ClarifyQuestionPlan =
     clarityScore >= 4
-      ? { min: 3, max: 4, target: 3, clarity: 'clear' }
+      ? { min: 4, max: 6, target: 5, clarity: 'clear' }
       : clarityScore <= 1
-        ? { min: 5, max: 8, target: 6, clarity: 'vague' }
-        : { min: 4, max: 6, target: 5, clarity: 'medium' };
+        ? { min: 6, max: 9, target: 7, clarity: 'vague' }
+        : { min: 5, max: 7, target: 6, clarity: 'medium' };
 
   // ── Shape tier (5 buckets) ──
   // Floor: short underspecified requirements with any broad concept should not
@@ -1030,11 +1030,12 @@ export async function refineFeatures(opts: {
 // ─── Single Feature Refinement ────────────────────────────────────────────────
 
 export async function refineSingleFeature(opts: {
+  requirement?: string;
   feature: Feature;
   feedback: string;
   config: TenantConfig;
 }): Promise<{ feature: Feature; tokenUsage: TokenUsageSummary }> {
-  const { feature, feedback, config } = opts;
+  const { requirement, feature, feedback, config } = opts;
 
   const system = buildSingleFeatureRefineSystemPrompt({
     domainContext: config.domainContext,
@@ -1042,7 +1043,11 @@ export async function refineSingleFeature(opts: {
     processTaxonomyEnabled: config.processTaxonomyEnabled,
   });
 
-  const userMessage = `FEATURE:\n${JSON.stringify(feature, null, 2)}\n\nFEEDBACK: ${feedback}`;
+  const userMessage = [
+    requirement ? `ORIGINAL REQUIREMENT:\n${requirement}` : '',
+    `FEATURE:\n${JSON.stringify(feature, null, 2)}`,
+    `FEEDBACK: ${feedback}`,
+  ].filter(Boolean).join('\n\n');
 
   const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
@@ -1054,22 +1059,17 @@ export async function refineSingleFeature(opts: {
   });
 
   const refined = result.data.features?.[0];
-  const feedbackLower = feedback.toLowerCase();
-  const touchesSummary = /(summary|title|name|rename)/i.test(feedbackLower);
-  const touchesDescription = /(description|as a|so that|reword|rewrite)/i.test(feedbackLower);
-  const touchesStoryPoints = /(story point|story points|estimate|estimation|sizing|size)/i.test(feedbackLower);
-  const touchesProcessCode = /(process code|process_code|taxonomy|code)/i.test(feedbackLower);
   const candidate = refined ? normaliseFeature(refined) : feature;
   const stableResult: Feature = {
-    ...feature,
+    ...candidate,
     id: feature.id,
-    summary: touchesSummary ? candidate.summary : feature.summary,
-    description: touchesDescription ? candidate.description : feature.description,
+    summary: candidate.summary || feature.summary,
+    description: candidate.description || feature.description,
     acceptanceRequirements: candidate.acceptanceRequirements?.length
       ? candidate.acceptanceRequirements
       : feature.acceptanceRequirements,
-    storyPoints: touchesStoryPoints ? (candidate.storyPoints ?? feature.storyPoints) : feature.storyPoints,
-    processCode: touchesProcessCode ? (candidate.processCode ?? feature.processCode) : feature.processCode,
+    storyPoints: candidate.storyPoints ?? feature.storyPoints,
+    processCode: candidate.processCode ?? feature.processCode,
   };
 
   return {

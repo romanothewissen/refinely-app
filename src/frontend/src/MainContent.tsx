@@ -148,8 +148,9 @@ function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: str
 }
 
 // ─── AI Refine Popup ──────────────────────────────────────────────────────────
-function RefinePopup({ feature, sessionId, onClose, onResult }: {
+function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
   feature: Feature;
+  requirement: string;
   sessionId: string;
   onClose: () => void;
   onResult: (refined: Feature, tokenUsage?: { input: number; output: number; total: number }) => void;
@@ -164,7 +165,7 @@ function RefinePopup({ feature, sessionId, onClose, onResult }: {
     setLoading(true);
     setError('');
     try {
-      const res = await api.refineSingleFeature(feature, feedback, sessionId) as any;
+      const res = await api.refineSingleFeature(feature, feedback, requirement, sessionId) as any;
       if (res.success && res.feature) {
         onResult(res.feature, res.tokenUsage);
       } else {
@@ -1320,6 +1321,7 @@ export function MainContent({
       {refinePopupIdx !== null && (
         <RefinePopup
           feature={features[refinePopupIdx]}
+          requirement={requirement}
           sessionId={sessionId}
           onClose={() => setRefinePopupIdx(null)}
           onResult={(refined, tokenUsage) => {

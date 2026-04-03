@@ -470,7 +470,9 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
+  const maskedRequirement = maskPiiText(payload.requirement ?? '', piiEnabled);
   const result = await refineSingleFeature({
+    requirement: maskedRequirement.text,
     feature: payload.feature as Feature,
     feedback: maskedFeedback.text,
     config,

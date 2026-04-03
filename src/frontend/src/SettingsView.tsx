@@ -905,11 +905,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       {[
                         {
                           label: 'Clarifying Questions',
-                          hint: 'Asks follow-up questions when the request is ambiguous and powers the follow-on refine step.',
+                          hint: 'Asks follow-up questions when the request is ambiguous and gathers the missing business context before generation.',
                           val: clarifyModel,
                           set: (value: string) => {
                             setClarifyModel(value);
-                            setRefineModel(value);
                           },
                         },
                         {
@@ -934,6 +933,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           val: triageModel,
                           set: (value: string) => {
                             setTriageModel(value);
+                          },
+                        },
+                        {
+                          label: 'Refinement',
+                          hint: 'Handles both single-feature and bulk rewrite requests after generation, including tone changes like making copy less technical.',
+                          val: refineModel,
+                          set: (value: string) => {
+                            setRefineModel(value);
                           },
                         },
                         {

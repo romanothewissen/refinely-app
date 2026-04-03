@@ -148,6 +148,8 @@ Each dimension that represents a distinct, deliverable capability should become 
 RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - Use business roles appropriate to the domain (from the list above if provided)
+- Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
+- If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
@@ -327,10 +329,13 @@ CLARITY ASSESSMENT:
 - If the requirement is vague or underspecified, stay near the upper bound.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
 - Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
-- Keep every question concise: maximum 24 words, one uncertainty per question.
-- Avoid stacked or double-barreled questions.
-- Keep answer suggestions short: maximum 12 words each.
+- Keep every question concise but context-rich: usually 18-35 words.
+- Avoid rambling, but do include enough context that the user immediately understands why the question matters.
+- Keep answer suggestions short and scannable: usually 4-12 words each.
 - If you reference a backlog story, mention at most one story key and keep the reference brief.
+- If the requirement already names actor groups, preserve those exact labels in the questions and suggestions.
+- Do NOT translate requirement-stated actors into domain-specific personas unless the requirement explicitly asks for a mapping.
+- Do NOT ask generic role-mapping questions when the real uncertainty is about permissions, scope, saved-vs-unsaved state, approval, logging, or exceptions.
 
 TASK: Generate targeted clarifying questions categorized into the areas below. Prioritize brevity, clarity, and coverage of the most important unknowns.
 1. Roles & Personas — who does this, who is affected
@@ -376,6 +381,8 @@ FEATURE RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms
+- Let the feedback determine the scope of change. If the user asks for a tone or audience shift like "less technical" or "more business-friendly", rewrite the affected descriptions and ARs accordingly.
+- Requirement-stated actors outrank domain context and reference stories. If the requirement uses labels like "standard users" and "admins", preserve those labels unless the feedback explicitly asks to rename them.
 ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
 ACCEPTANCE REQUIREMENT RULES:
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
@@ -385,6 +392,7 @@ ACCEPTANCE REQUIREMENT RULES:
 - The GIVEN must describe a real-world business situation, not a system configuration state
 - Each AR tests one distinct thing; include happy path, key business rules, relevant edge cases
 - Keep role naming consistent with each feature description; when an AR refers to the same actor, reuse the exact role label from "As a [role]"
+- Requirement-stated actors outrank domain context and reference stories. Do not rename them into domain personas unless the requirement explicitly does so.
 
 ${taxonomySection}
 
@@ -402,22 +410,25 @@ export function buildSingleFeatureRefineSystemPrompt(opts: {
     ? processTaxonomyBlock(opts.processTaxonomy)
     : '';
 
-  return `You are a principal business analyst making a surgical, targeted edit to ONE Jira feature.
+  return `You are a principal business analyst refining ONE Jira feature based on user feedback.
 ${platformContextBlock(opts.domainContext)}
-YOUR JOB: Apply the user's feedback precisely while keeping everything else identical.
+YOUR JOB: Decide what needs to change to satisfy the user's feedback, then rewrite only the necessary parts while preserving the feature's intent, scope, and business meaning.
+If an ORIGINAL REQUIREMENT is provided in the user message, treat that as the source of truth for actor labels, scope, and business intent.
 
 PRESERVATION RULES — do NOT change any of the following unless the feedback explicitly mentions them:
 - process_code: preserve exactly as-is
 - suggested_story_points: preserve exactly as-is
 - summary: preserve unless feedback is about the title or name
-- acceptance_requirements: only add, remove, or edit the specific ARs the feedback refers to — leave all others word-for-word identical
-- description: only rewrite if feedback is explicitly about the description
+- acceptance_requirements: preserve meaning unless the feedback requires them to be clearer, less technical, more business-friendly, more complete, or otherwise rewritten
+- description: rewrite whenever needed to satisfy the feedback, even if the feedback does not literally say "description"
 - Keep acceptance_requirements order stable; when splitting one AR, place the new AR(s) directly next to that original AR and keep all unrelated ARs in the same relative order
-- For untouched ARs, copy the text verbatim (no paraphrasing)
+- For untouched ARs, keep meaning stable; exact wording may change when the feedback is about tone, clarity, technicality, or audience
 
 CHANGE RULES:
-- Make the smallest possible edit that satisfies the feedback
-- Never restructure or rewrite sections that weren't mentioned
+- Let the feedback determine the scope of change. Do not rely on keyword matching like "summary" or "description" to decide what to edit.
+- If the feedback is stylistic or audience-oriented (for example: "less technical", "clearer", "simpler", "more business-friendly"), you may rewrite the description and all affected acceptance requirements substantially.
+- Preserve semantics and scope, but do not be timid when the current wording clearly conflicts with the requested tone.
+- Requirement-stated actors outrank domain context and reference stories. If the requirement uses labels like "standard users" and "admins", preserve those labels unless the feedback explicitly asks to rename them.
 
 QUALITY RULES:
 - Feature description MUST be: "As a [role], I need to [action] so that [benefit]"
