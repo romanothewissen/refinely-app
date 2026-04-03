@@ -1,11 +1,11 @@
 import { ClarifyCategoryKey, ClarifyFailureReasonCode, ClarifyQuestion, DiscoveryProfile } from '../types';
 
-export const MIN_INITIAL_DISCOVERY_QUESTIONS = 6;
+export const MIN_INITIAL_DISCOVERY_QUESTIONS = 4;
 export const MAX_INITIAL_DISCOVERY_QUESTIONS = 12;
-export const MIN_FOLLOWUP_DISCOVERY_QUESTIONS = 2;
+export const MIN_FOLLOWUP_DISCOVERY_QUESTIONS = 1;
 export const MAX_FOLLOWUP_DISCOVERY_QUESTIONS = 8;
 export const MAX_TOTAL_DISCOVERY_QUESTIONS = 20;
-export const MAX_ATOMIC_QUESTION_WORDS = 28;
+export const MAX_ATOMIC_QUESTION_WORDS = 36;
 
 export const CLARIFY_CATEGORY_ORDER: ClarifyCategoryKey[] = [
   'context_trigger',
@@ -31,6 +31,56 @@ type DiscoveryTemplate = {
   question: string;
   suggestions: string[];
 };
+
+type DiscoveryFallbackInput = {
+  requirement?: string;
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
+  domainSignals?: string[];
+  domainRoles?: string[];
+};
+
+type DiscoverySignalContext = {
+  actor: string;
+  businessObject: string;
+  businessObjectPlural: string;
+  decisionFactor: string;
+  identifier: string;
+  interactionLabel: string;
+  interactionPlural: string;
+  channelList: string;
+  channels: string[];
+  outcome: string;
+};
+
+const DOMAIN_SIGNAL_STOPWORDS = new Set([
+  'about', 'after', 'again', 'against', 'also', 'among', 'and', 'any', 'are', 'around', 'because',
+  'been', 'before', 'being', 'between', 'both', 'business', 'but', 'capability', 'can', 'could',
+  'does', 'each', 'from', 'have', 'into', 'must', 'need', 'needs', 'only', 'other', 'over',
+  'process', 'request', 'requests', 'requirement', 'requirements', 'same', 'should', 'software',
+  'system', 'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those',
+  'through', 'under', 'using', 'when', 'where', 'which', 'while', 'with', 'would',
+]);
+
+const CHANNEL_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  { label: 'WhatsApp', pattern: /\bwhats?app\b/i },
+  { label: 'Phone', pattern: /\b(phone|call|voice)\b/i },
+  { label: 'Text', pattern: /\b(text|sms)\b/i },
+  { label: 'Email', pattern: /\bemail|e-mail\b/i },
+  { label: 'Chat', pattern: /\bchat\b/i },
+];
+
+const BUSINESS_OBJECT_CANDIDATES: Array<{ singular: string; plural: string; pattern: RegExp }> = [
+  { singular: 'case', plural: 'cases', pattern: /\bcases?\b/i },
+  { singular: 'ticket', plural: 'tickets', pattern: /\btickets?\b/i },
+  { singular: 'request', plural: 'requests', pattern: /\brequests?\b/i },
+  { singular: 'work order', plural: 'work orders', pattern: /\bwork orders?\b/i },
+  { singular: 'incident', plural: 'incidents', pattern: /\bincidents?\b/i },
+  { singular: 'task', plural: 'tasks', pattern: /\btasks?\b/i },
+  { singular: 'conversation', plural: 'conversations', pattern: /\bconversations?\b/i },
+  { singular: 'record', plural: 'records', pattern: /\brecords?\b/i },
+];
 
 const DISCOVERY_TEMPLATES: DiscoveryTemplate[] = [
   {
@@ -216,21 +266,176 @@ function toSnakeCase(value: string): string {
     .slice(0, 48);
 }
 
-function combinedContextText(input: {
-  requirement?: string;
-  attachmentText?: string;
-  wiContextText?: string;
-  similarStoriesText?: string;
-}): string {
+function articleFor(word: string): 'a' | 'an' {
+  return /^[aeiou]/i.test(word.trim()) ? 'an' : 'a';
+}
+
+function withArticle(word: string): string {
+  return `${articleFor(word)} ${word}`;
+}
+
+function formatChoiceList(values: string[], conjunction = 'or'): string {
+  const unique = uniqueStrings(values);
+  if (!unique.length) return '';
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} ${conjunction} ${unique[1]}`;
+  return `${unique.slice(0, -1).join(', ')}, ${conjunction} ${unique[unique.length - 1]}`;
+}
+
+function combinedContextParts(input: DiscoveryFallbackInput): string[] {
   return [
     input.requirement,
     input.attachmentText,
     input.wiContextText,
     input.similarStoriesText,
+    ...(input.domainSignals ?? []),
+    ...(input.domainRoles ?? []),
+  ].filter(Boolean) as string[];
+}
+
+function combinedContextText(input: DiscoveryFallbackInput): string {
+  return [
+    ...combinedContextParts(input),
   ]
     .filter(Boolean)
     .join('\n')
     .toLowerCase();
+}
+
+export function extractDiscoverySignals(parts: string[]): string[] {
+  const counts = new Map<string, number>();
+
+  for (const part of parts) {
+    const matches = part.match(/\b[A-Za-z][A-Za-z0-9/-]{2,}\b/g) ?? [];
+    for (const raw of matches) {
+      const normalized = raw.trim();
+      const lower = normalized.toLowerCase();
+      if (DOMAIN_SIGNAL_STOPWORDS.has(lower)) continue;
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => {
+      const frequencyDelta = right[1] - left[1];
+      return frequencyDelta !== 0 ? frequencyDelta : right[0].length - left[0].length;
+    })
+    .map(([signal]) => signal)
+    .slice(0, 14);
+}
+
+function extractCanonicalChannels(text: string): string[] {
+  const channels: string[] = [];
+  CHANNEL_PATTERNS.forEach(({ label, pattern }) => {
+    if (pattern.test(text)) channels.push(label);
+  });
+  return channels;
+}
+
+function pickPrimaryActor(text: string, roles: string[], signals: string[]): string {
+  const explicit = text.match(/\bAs\s+an?\s+([^,.\n]{2,80})/i)?.[1]?.trim();
+  if (explicit) return explicit;
+
+  const roleCandidates = uniqueStrings([
+    ...roles,
+    ...signals.filter((signal) => /\b(agent|manager|owner|reviewer|approver|supervisor|dispatcher|planner|operator|coordinator|admin|tss|customer|caller|sender|requester|assignee)\b/i.test(signal)),
+  ]);
+
+  return roleCandidates[0] ?? 'the primary user';
+}
+
+function pickBusinessObject(text: string, signals: string[]): { singular: string; plural: string } {
+  const matched = BUSINESS_OBJECT_CANDIDATES.find((candidate) => candidate.pattern.test(text));
+  if (matched) {
+    return { singular: matched.singular, plural: matched.plural };
+  }
+
+  const signalObject = signals.find((signal) => /\b(case|ticket|request|incident|task|conversation|record|work order)\b/i.test(signal));
+  if (signalObject) {
+    const normalized = signalObject.toLowerCase();
+    const matchedSignal = BUSINESS_OBJECT_CANDIDATES.find((candidate) => normalized.includes(candidate.singular));
+    if (matchedSignal) {
+      return { singular: matchedSignal.singular, plural: matchedSignal.plural };
+    }
+  }
+
+  return { singular: 'record', plural: 'records' };
+}
+
+function pickInteractionLabels(text: string, channels: string[]): { singular: string; plural: string } {
+  if (channels.length) {
+    return {
+      singular: 'incoming interaction',
+      plural: `incoming interactions across ${formatChoiceList(channels)}`,
+    };
+  }
+
+  if (/\bcalls?\b/i.test(text)) return { singular: 'call', plural: 'calls' };
+  if (/\bmessages?\b/i.test(text)) return { singular: 'message', plural: 'messages' };
+  if (/\bemails?\b/i.test(text)) return { singular: 'email', plural: 'emails' };
+  if (/\bconversations?\b/i.test(text)) return { singular: 'conversation', plural: 'conversations' };
+  return { singular: 'incoming request', plural: 'incoming requests' };
+}
+
+function pickIdentifierSignal(text: string, businessObject: string): string {
+  const patterns: Array<{ label: string; pattern: RegExp }> = [
+    { label: 'phone number or caller identity', pattern: /\b(phone number|caller id|caller identity|caller details)\b/i },
+    { label: 'message or email thread', pattern: /\b(message thread|email thread|conversation thread|thread)\b/i },
+    { label: 'customer identifier', pattern: /\b(customer id|customer identifier|account id|account number|customer number)\b/i },
+    { label: `${businessObject} reference`, pattern: /\b(case reference|ticket number|request id|reference)\b/i },
+    { label: 'contact identifier', pattern: /\b(contact|sender|recipient)\b/i },
+  ];
+  return patterns.find((entry) => entry.pattern.test(text))?.label ?? 'customer identifier';
+}
+
+function pickDecisionFactor(text: string, channels: string[]): string {
+  const patterns: Array<{ label: string; pattern: RegExp }> = [
+    { label: 'caller identity', pattern: /\b(caller identity|caller details|identified caller)\b/i },
+    { label: 'duplicate detection', pattern: /\bduplicate|conflict|existing open\b/i },
+    { label: 'channel type', pattern: /\bchannel|phone|whats?app|text|sms|email|chat\b/i },
+    { label: 'priority or SLA', pattern: /\bpriority|sla|deadline|due date|urgency\b/i },
+    { label: 'ownership or permissions', pattern: /\bowner|ownership|permission|access|role|approv/i },
+  ];
+  if (channels.length >= 2) return 'channel type';
+  return patterns.find((entry) => entry.pattern.test(text))?.label ?? 'business context';
+}
+
+function pickOutcome(text: string, businessObjectPlural: string): string {
+  if (/\bduplicate|duplicates\b/i.test(text)) {
+    return `avoid duplicate ${businessObjectPlural}`;
+  }
+  if (/\bautomatic|automatically|automation\b/i.test(text)) {
+    return `create ${businessObjectPlural} consistently`;
+  }
+  if (/\bvisibility|visible|overview\b/i.test(text)) {
+    return `improve visibility into ${businessObjectPlural}`;
+  }
+  return `handle ${businessObjectPlural} correctly`;
+}
+
+function buildDiscoveryContext(input?: DiscoveryFallbackInput): DiscoverySignalContext {
+  const parts = input ? combinedContextParts(input) : [];
+  const rawText = parts.join('\n');
+  const signals = uniqueStrings([
+    ...(input?.domainSignals ?? []),
+    ...extractDiscoverySignals(parts),
+  ]);
+  const channels = extractCanonicalChannels(rawText);
+  const { singular: businessObject, plural: businessObjectPlural } = pickBusinessObject(rawText, signals);
+  const { singular: interactionLabel, plural: interactionPlural } = pickInteractionLabels(rawText, channels);
+
+  return {
+    actor: pickPrimaryActor(rawText, input?.domainRoles ?? [], signals),
+    businessObject,
+    businessObjectPlural,
+    decisionFactor: pickDecisionFactor(rawText, channels),
+    identifier: pickIdentifierSignal(rawText, businessObject),
+    interactionLabel,
+    interactionPlural,
+    channelList: formatChoiceList(channels),
+    channels,
+    outcome: pickOutcome(rawText, businessObjectPlural),
+  };
 }
 
 function uniqueCategoryKeys(values: ClarifyCategoryKey[]): ClarifyCategoryKey[] {
@@ -257,6 +462,222 @@ function categoryTemplates(categoryKey: ClarifyCategoryKey): DiscoveryTemplate[]
 
 export function labelForCategoryKey(categoryKey: ClarifyCategoryKey): string {
   return CLARIFY_CATEGORY_LABELS[categoryKey];
+}
+
+function contextualizeDiscoveryTemplate(
+  template: DiscoveryTemplate,
+  input?: DiscoveryFallbackInput,
+): DiscoveryTemplate {
+  if (!input) return template;
+
+  const ctx = buildDiscoveryContext(input);
+  const businessObjectPhrase = withArticle(ctx.businessObject);
+  const channelScope = ctx.channelList ? ` across ${ctx.channelList}` : '';
+
+  switch (template.intent) {
+    case 'business_outcome':
+      return {
+        ...template,
+        question: `What business outcome should automatic ${ctx.businessObject} handling${channelScope} directly improve?`,
+        suggestions: uniqueStrings([
+          `Reduce manual handling${channelScope}`,
+          `Create ${ctx.businessObjectPlural} faster`,
+          `Improve first-touch visibility`,
+          `Avoid duplicate ${ctx.businessObjectPlural}`,
+        ]).slice(0, 4),
+      };
+    case 'trigger_event':
+      return {
+        ...template,
+        question: ctx.channels.length
+          ? `Which ${ctx.channelList} channels should trigger ${ctx.businessObject} creation automatically?`
+          : `What exact event in the ${ctx.interactionLabel} should trigger ${businessObjectPhrase} creation?`,
+        suggestions: uniqueStrings([
+          ctx.channels.length >= 2 ? `All listed channels` : `When the ${ctx.interactionLabel} ends`,
+          ctx.channels.length >= 2 ? `${ctx.channels.slice(0, 2).join(' and ')} only` : `Only after identity is confirmed`,
+          `Only when enough detail exists to open the ${ctx.businessObject}`,
+          'After manual review',
+        ]).slice(0, 4),
+      };
+    case 'success_signal':
+      return {
+        ...template,
+        question: `What should count as a successful ${ctx.businessObject} outcome once the ${ctx.interactionLabel} is handled?`,
+        suggestions: uniqueStrings([
+          `The right ${ctx.businessObject} is created`,
+          'Ownership is clear immediately',
+          'Required context is copied once',
+          `No duplicate ${ctx.businessObjectPlural} are created`,
+        ]).slice(0, 4),
+      };
+    case 'primary_actor':
+      return {
+        ...template,
+        question: `Who should initiate or own ${ctx.businessObject} handling from the ${ctx.interactionLabel}?`,
+        suggestions: uniqueStrings([
+          ctx.actor,
+          'A shared operations queue',
+          'A supervisor or manager',
+          'Manual triage ownership',
+        ]).slice(0, 4),
+      };
+    case 'downstream_actors':
+      return {
+        ...template,
+        question: `Who else needs visibility when ${businessObjectPhrase} is created from the ${ctx.interactionLabel}?`,
+        suggestions: uniqueStrings([
+          'Related internal teams',
+          'A supervisor or approver',
+          'The original requester',
+          'No extra visibility needed',
+        ]).slice(0, 4),
+      };
+    case 'permissions_scope':
+      return {
+        ...template,
+        question: `Which users should be allowed to override the default ${ctx.businessObject} handling flow?`,
+        suggestions: uniqueStrings([
+          'Only admins can override',
+          `${ctx.actor} can override`,
+          'Managers approve exceptions',
+          'No special permissions',
+        ]).slice(0, 4),
+      };
+    case 'required_inputs':
+      return {
+        ...template,
+        question: `What details from the ${ctx.interactionLabel}${channelScope} must be copied onto the ${ctx.businessObject}?`,
+        suggestions: uniqueStrings([
+          `${ctx.identifier} plus the reason`,
+          'Conversation summary plus next action',
+          ctx.channels.includes('Email') ? 'Sender plus email subject' : 'Source details plus summary',
+          'Full interaction content',
+        ]).slice(0, 4),
+      };
+    case 'outputs_displays':
+      return {
+        ...template,
+        question: `Besides the ${ctx.businessObject}, what output or downstream record should this flow update?`,
+        suggestions: uniqueStrings([
+          `Create the ${ctx.businessObject} only`,
+          `Update an existing ${ctx.businessObject}`,
+          'Notify the owning team',
+          'Show a summary for follow-up',
+        ]).slice(0, 4),
+      };
+    case 'entity_linkage':
+      return {
+        ...template,
+        question: `What identifier should link the ${ctx.businessObject} to the right customer, contact, or prior conversation?`,
+        suggestions: uniqueStrings([
+          ctx.identifier,
+          ctx.channels.length >= 2 ? 'Conversation or email thread' : 'Existing open case reference',
+          'Customer or account identifier',
+          `A related ${ctx.businessObject} reference`,
+        ]).slice(0, 4),
+      };
+    case 'core_constraints':
+      return {
+        ...template,
+        question: `What rule must always be enforced before ${businessObjectPhrase} is created from the ${ctx.interactionLabel}?`,
+        suggestions: uniqueStrings([
+          'Only when mandatory data is present',
+          ctx.channels.length ? `Only for eligible ${ctx.channelList} channels` : 'Only for eligible requests',
+          `Never create duplicate ${ctx.businessObjectPlural}`,
+          'Require manual review for exceptions',
+        ]).slice(0, 4),
+      };
+    case 'timing_dependencies':
+      return {
+        ...template,
+        question: `What timing or sequencing rule affects when the ${ctx.businessObject} can be created?`,
+        suggestions: uniqueStrings([
+          'Immediately when received',
+          'Only after triage',
+          'Only within supported hours',
+          'After another step completes',
+        ]).slice(0, 4),
+      };
+    case 'decision_logic':
+      return {
+        ...template,
+        question: `What rule decides whether the ${ctx.interactionLabel} creates a new ${ctx.businessObject} or updates an existing one?`,
+        suggestions: uniqueStrings([
+          `Always create a new ${ctx.businessObject}`,
+          `Reuse an existing open ${ctx.businessObject}`,
+          'Route uncertain matches for review',
+          `Apply different rules by ${ctx.decisionFactor}`,
+        ]).slice(0, 4),
+      };
+    case 'lifecycle_states':
+      return {
+        ...template,
+        question: `What statuses should the ${ctx.businessObject} move through after it is created?`,
+        suggestions: uniqueStrings([
+          'New to assigned to resolved',
+          'New to triage to resolved',
+          'Single open state only',
+          'New to pending to closed',
+        ]).slice(0, 4),
+      };
+    case 'transition_triggers':
+      return {
+        ...template,
+        question: `What event should move the ${ctx.businessObject} out of its initial status?`,
+        suggestions: uniqueStrings([
+          'Manual triage',
+          'Automatic routing',
+          'Owner acceptance',
+          ctx.channels.length ? `An update from ${ctx.channelList}` : `A new ${ctx.interactionLabel}`,
+        ]).slice(0, 4),
+      };
+    case 'reopen_retry':
+      return {
+        ...template,
+        question: `What should happen if the same ${ctx.interactionLabel} needs to reopen or update a closed ${ctx.businessObject}?`,
+        suggestions: uniqueStrings([
+          `Reopen the existing ${ctx.businessObject}`,
+          `Create a linked ${ctx.businessObject}`,
+          'Allow retry without reopening',
+          'No reopen path is needed',
+        ]).slice(0, 4),
+      };
+    case 'missing_data_fallback':
+      return {
+        ...template,
+        question: `What should happen when the ${ctx.interactionLabel} does not contain enough detail to create the ${ctx.businessObject}?`,
+        suggestions: uniqueStrings([
+          'Queue for manual review',
+          `Create a partial ${ctx.businessObject}`,
+          'Hold until missing details are added',
+          `Notify ${ctx.actor}`,
+        ]).slice(0, 4),
+      };
+    case 'conflicts_duplicates':
+      return {
+        ...template,
+        question: `What should happen when ${ctx.interactionPlural} would create duplicate ${ctx.businessObjectPlural}?`,
+        suggestions: uniqueStrings([
+          `Reuse the open ${ctx.businessObject}`,
+          `Update the existing ${ctx.businessObject}`,
+          'Route duplicates for review',
+          `Allow duplicate ${ctx.businessObjectPlural} only for approved cases`,
+        ]).slice(0, 4),
+      };
+    case 'offline_failure_behavior':
+      return {
+        ...template,
+        question: `What should happen if the source channel or integration is unavailable during ${ctx.businessObject} creation?`,
+        suggestions: uniqueStrings([
+          'Retry when the channel returns',
+          'Queue for recovery',
+          'Switch to manual handling',
+          'Fail and alert the team',
+        ]).slice(0, 4),
+      };
+    default:
+      return template;
+  }
 }
 
 export function normalizeCategoryKey(value: unknown): ClarifyCategoryKey | null {
@@ -303,15 +724,23 @@ export function normalizeQuestionIntent(value: unknown, categoryKey: ClarifyCate
   return template?.intent ?? `clarify_${categoryKey}`;
 }
 
-function defaultSuggestionsForCategory(categoryKey: ClarifyCategoryKey): string[] {
-  const templates = categoryTemplates(categoryKey);
-  return templates[0]?.suggestions.slice(0, 4) ?? [];
+function fallbackSuggestionsForIntent(
+  categoryKey: ClarifyCategoryKey,
+  intent: string,
+  input?: DiscoveryFallbackInput,
+): string[] {
+  const template = categoryTemplates(categoryKey).find((candidate) => candidate.intent === intent)
+    ?? categoryTemplates(categoryKey)[0];
+  if (!template) return [];
+
+  const contextual = contextualizeDiscoveryTemplate(template, input).suggestions;
+  return uniqueStrings([...contextual, ...template.suggestions]).slice(0, 4);
 }
 
 function looksCompoundQuestion(question: string): boolean {
   const normalized = cleanText(question).toLowerCase();
   if (!normalized) return false;
-  if (questionWordCount(normalized) > MAX_ATOMIC_QUESTION_WORDS) return true;
+  if (questionWordCount(normalized) > MAX_ATOMIC_QUESTION_WORDS && /\b(and|also|plus|along with)\b/.test(normalized)) return true;
   if ((normalized.match(/\b(and|as well as)\s+(what|which|who|when|where|why|how|whether)\b/g) ?? []).length > 0) return true;
   if ((normalized.match(/\bwhat\b|\bwhich\b|\bwho\b|\bwhen\b|\bwhere\b|\bwhy\b|\bhow\b|\bwhether\b/g) ?? []).length > 1) return true;
   if (normalized.includes(';')) return true;
@@ -344,6 +773,7 @@ function normalizeQuestionText(question: string): string {
 function normalizeQuestions(
   questions: ClarifyQuestion[],
   alreadyAsked: Set<string>,
+  input?: DiscoveryFallbackInput,
 ): ClarifyQuestion[] {
   const seen = new Set(alreadyAsked);
   const result: ClarifyQuestion[] = [];
@@ -354,12 +784,17 @@ function normalizeQuestions(
     const key = normalizeKey(normalizedQuestion);
     if (!key || seen.has(key)) return;
     seen.add(key);
+    const normalizedIntent = normalizeQuestionIntent(question.intent, question.categoryKey, normalizedQuestion);
+    const providedSuggestions = uniqueStrings(question.suggestions).slice(0, 4);
     result.push({
       categoryKey: question.categoryKey,
       category: labelForCategoryKey(question.categoryKey),
-      intent: normalizeQuestionIntent(question.intent, question.categoryKey, normalizedQuestion),
+      intent: normalizedIntent,
       question: normalizedQuestion,
-      suggestions: uniqueStrings(question.suggestions).slice(0, 4),
+      suggestions: uniqueStrings([
+        ...providedSuggestions,
+        ...fallbackSuggestionsForIntent(question.categoryKey, normalizedIntent, input),
+      ]).slice(0, 4),
     });
   });
 
@@ -377,6 +812,7 @@ function buildFallbackQuestions(
   categoryKeys: ClarifyCategoryKey[],
   alreadyAsked: Set<string>,
   needed: number,
+  input?: DiscoveryFallbackInput,
 ): ClarifyQuestion[] {
   if (needed <= 0) return [];
 
@@ -398,16 +834,17 @@ function buildFallbackQuestions(
 
   const questions: ClarifyQuestion[] = [];
   for (const template of templates) {
-    const normalizedQuestion = normalizeQuestionText(template.question);
+    const contextualTemplate = contextualizeDiscoveryTemplate(template, input);
+    const normalizedQuestion = normalizeQuestionText(contextualTemplate.question);
     const key = normalizeKey(normalizedQuestion);
     if (!key || alreadyAsked.has(key)) continue;
     alreadyAsked.add(key);
     questions.push({
-      categoryKey: template.categoryKey,
-      category: labelForCategoryKey(template.categoryKey),
-      intent: template.intent,
+      categoryKey: contextualTemplate.categoryKey,
+      category: labelForCategoryKey(contextualTemplate.categoryKey),
+      intent: contextualTemplate.intent,
       question: normalizedQuestion,
-      suggestions: template.suggestions.slice(0, 4),
+      suggestions: uniqueStrings(contextualTemplate.suggestions).slice(0, 4),
     });
     if (questions.length >= needed) break;
   }
@@ -524,14 +961,14 @@ export function calibrateDiscoveryProfile(
     scope = raiseScope(scope, 'broad');
     complexity = raiseComplexity(complexity, 'high');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
+    recommendedInitialCount = Math.max(recommendedInitialCount, 6);
   }
 
-  if (breadth >= 6 || repairedQuestionCount >= 10) {
+  if (breadth >= 6 || repairedQuestionCount >= 9) {
     scope = raiseScope(scope, 'very_broad');
     complexity = raiseComplexity(complexity, 'very_high');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 10);
+    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
   }
 
   if (repairApplied) {
@@ -540,7 +977,7 @@ export function calibrateDiscoveryProfile(
     ambiguity = raiseAmbiguity(ambiguity, 'high');
     recommendedInitialCount = Math.max(
       recommendedInitialCount,
-      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(8, breadth + 2)),
+      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(6, breadth + 1)),
     );
   }
 
@@ -609,12 +1046,7 @@ type InitialDiscoveryValidation = {
 function validateInitialDiscoveryQuestions(
   questions: ClarifyQuestion[],
   profile: DiscoveryProfile,
-  input?: {
-    requirement?: string;
-    attachmentText?: string;
-    wiContextText?: string;
-    similarStoriesText?: string;
-  },
+  input?: DiscoveryFallbackInput,
 ): InitialDiscoveryValidation {
   const requiredCategoryKeys = categoryCoverageKeys(profile, input);
   if (!questions.length) {
@@ -653,12 +1085,7 @@ function validateInitialDiscoveryQuestions(
 export function validateAndRepairInitialDiscovery(
   questions: ClarifyQuestion[],
   profile: DiscoveryProfile,
-  input?: {
-    requirement?: string;
-    attachmentText?: string;
-    wiContextText?: string;
-    similarStoriesText?: string;
-  },
+  input?: DiscoveryFallbackInput,
 ): {
   questions: ClarifyQuestion[];
   discoveryProfile: DiscoveryProfile;
@@ -701,7 +1128,7 @@ export function validateAndRepairInitialDiscovery(
       ...calibratedProfile,
       recommendedInitialCount: Math.max(
         calibratedProfile.recommendedInitialCount,
-        Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(8, finalizedValidation.requiredCategoryKeys.length + 2)),
+        Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(6, finalizedValidation.requiredCategoryKeys.length + 1)),
       ),
     },
     {
@@ -750,16 +1177,15 @@ export function expandRawQuestionCandidate(raw: {
       const normalizedQuestion = normalizeQuestionText(variant);
       if (!normalizedQuestion) return null;
       if (looksCompoundQuestion(normalizedQuestion)) return null;
+      const normalizedIntent = index === 0
+        ? normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)
+        : `${normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)}_part_${index + 1}`;
       const question: ClarifyQuestion = {
         categoryKey,
         category: labelForCategoryKey(categoryKey),
-        intent: index === 0
-          ? normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)
-          : `${normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)}_part_${index + 1}`,
+        intent: normalizedIntent,
         question: normalizedQuestion,
-        suggestions: splitQuestions.length > 1
-          ? defaultSuggestionsForCategory(categoryKey)
-          : (baseSuggestions.length ? baseSuggestions : defaultSuggestionsForCategory(categoryKey)),
+        suggestions: baseSuggestions.length ? baseSuggestions : [],
       };
       return question;
     })
@@ -769,12 +1195,7 @@ export function expandRawQuestionCandidate(raw: {
 export function finalizeInitialDiscoveryQuestions(
   questions: ClarifyQuestion[],
   profile: DiscoveryProfile,
-  input?: {
-    requirement?: string;
-    attachmentText?: string;
-    wiContextText?: string;
-    similarStoriesText?: string;
-  },
+  input?: DiscoveryFallbackInput,
 ): ClarifyQuestion[] {
   const targetCount = clampCount(
     profile.recommendedInitialCount,
@@ -782,7 +1203,7 @@ export function finalizeInitialDiscoveryQuestions(
     MAX_INITIAL_DISCOVERY_QUESTIONS,
   );
   const preferredCategories = categoryCoverageKeys(profile, input);
-  const deduped = normalizeQuestions(questions, new Set<string>()).sort(questionComparator);
+  const deduped = normalizeQuestions(questions, new Set<string>(), input).sort(questionComparator);
   const result: ClarifyQuestion[] = [];
   const addedQuestions = new Set<string>();
 
@@ -808,6 +1229,7 @@ export function finalizeInitialDiscoveryQuestions(
       uncoveredPreferredCategories.length ? uncoveredPreferredCategories : preferredCategories,
       addedQuestions,
       targetCount - result.length,
+      input,
     );
     result.push(...filler);
   }
@@ -822,6 +1244,7 @@ export function finalizeFollowupDiscoveryQuestions(
     missingCategoryKeys: ClarifyCategoryKey[];
     followupCap: number;
     initialQuestionCount: number;
+    fallbackInput?: DiscoveryFallbackInput;
   },
 ): ClarifyQuestion[] {
   const remainingBudget = Math.max(0, MAX_TOTAL_DISCOVERY_QUESTIONS - opts.initialQuestionCount);
@@ -834,7 +1257,7 @@ export function finalizeFollowupDiscoveryQuestions(
   if (maxFollowup <= 0) return [];
 
   const asked = new Set(opts.askedQuestions.map(normalizeKey).filter(Boolean));
-  const deduped = normalizeQuestions(questions, asked).sort(questionComparator);
+  const deduped = normalizeQuestions(questions, asked, opts.fallbackInput).sort(questionComparator);
   const result: ClarifyQuestion[] = [];
   const preferredCategories = uniqueCategoryKeys(opts.missingCategoryKeys);
   const addedQuestions = new Set<string>();
@@ -856,10 +1279,12 @@ export function finalizeFollowupDiscoveryQuestions(
   });
 
   if (result.length < Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, maxFollowup)) {
+    const minimumFollowups = Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, maxFollowup);
     const filler = buildFallbackQuestions(
       preferredCategories.length ? preferredCategories : CLARIFY_CATEGORY_ORDER,
       new Set([...asked, ...result.map((question) => normalizeKey(question.question))]),
-      maxFollowup - result.length,
+      minimumFollowups - result.length,
+      opts.fallbackInput,
     );
     result.push(...filler);
   }

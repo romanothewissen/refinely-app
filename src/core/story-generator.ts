@@ -40,6 +40,7 @@ import {
   MAX_TOTAL_DISCOVERY_QUESTIONS,
   MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
   MIN_INITIAL_DISCOVERY_QUESTIONS,
+  extractDiscoverySignals,
   expandRawQuestionCandidate,
   calibrateDiscoveryProfile,
   finalizeFollowupDiscoveryQuestions,
@@ -879,6 +880,7 @@ function parseCategoryKeyList(rawData: unknown): ClarifyCategoryKey[] {
 function ambiguityAssessmentFromDiscoveryProfile(
   profile: DiscoveryProfile,
   generatedQuestions: number,
+  questionPlan?: ClarifyQuestionPlan,
 ): ClarifyAmbiguityAssessment {
   const level: ClarifyAmbiguityAssessment['level'] =
     profile.ambiguity === 'high'
@@ -901,8 +903,8 @@ function ambiguityAssessmentFromDiscoveryProfile(
       ? profile.missingCategoryKeys.map((categoryKey) => `${labelForCategoryKey(categoryKey)} still needs clarification.`)
       : ['Discovery is focused on confirming the remaining implementation details.'],
     questionPlan: {
-      min: MIN_INITIAL_DISCOVERY_QUESTIONS,
-      max: MAX_INITIAL_DISCOVERY_QUESTIONS,
+      min: questionPlan?.min ?? MIN_INITIAL_DISCOVERY_QUESTIONS,
+      max: questionPlan?.max ?? MAX_INITIAL_DISCOVERY_QUESTIONS,
       target: profile.recommendedInitialCount,
     },
     generatedQuestions,
@@ -1131,34 +1133,69 @@ export async function generateClarifyingQuestions(opts: {
 }): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config } = opts;
 
-  const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
-  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
-  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
-  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
+  const assessment = assessRequirement({
+    requirement,
+    attachmentText,
+    wiContextText,
+    similarStoriesText,
+  });
+  const questionPlan = assessment.questionPlan;
+  const desiredQuestionCount = Math.min(questionPlan.max, Math.max(questionPlan.min, questionPlan.target));
+  const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 6144), 4096);
+  const domainSignals = extractDiscoverySignals([
+    requirement,
+    attachmentText.slice(0, 2200),
+    wiContextText.slice(0, 6000),
+    similarStoriesText.slice(0, 5000),
+    ...(config.domainRoles ?? []),
+  ]);
+
+  const contextParts: string[] = [
+    `REQUIREMENT: ${requirement}`,
+    `DISCOVERY RANGE: produce between ${questionPlan.min} and ${questionPlan.max} clarifying questions. Ideal target: ${desiredQuestionCount}. If ambiguity is still material, lean toward the upper half of the range. If the requirement and context are unusually explicit, you may go lower, but do not exceed the maximum.`,
+  ];
+  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 3500)}`);
+  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 12000)}`);
+  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 6000)}`);
+  if (domainSignals.length) {
+    contextParts.push(`DOMAIN SIGNALS TO REUSE: ${domainSignals.join(', ')}`);
+  }
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
+    domainRoles: config.domainRoles,
+    domainSignals,
+    questionPlan,
   });
 
   const raw = await callLlmJsonWithUsage<Record<string, unknown>>({
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
-    maxTokens: 4096,
+    maxTokens: clarifyMaxTokens,
     reasoningEffort: 'medium',
     ...buildLlmProviderOpts(config),
   });
 
   const parsedQuestions = parseQuestionCandidates(raw.data);
-  const normalizedProfile = normalizeDiscoveryProfile(
+  const normalizedProfileCandidate = normalizeDiscoveryProfile(
     parseDiscoveryProfileCandidate(raw.data),
-    parsedQuestions.length || 8,
+    desiredQuestionCount,
   );
+  const normalizedProfile = {
+    ...normalizedProfileCandidate,
+    recommendedInitialCount: Math.min(
+      questionPlan.max,
+      Math.max(questionPlan.min, normalizedProfileCandidate.recommendedInitialCount),
+    ),
+  };
   const repairedDiscovery = validateAndRepairInitialDiscovery(parsedQuestions, normalizedProfile, {
     requirement,
     attachmentText,
     wiContextText,
     similarStoriesText,
+    domainSignals,
+    domainRoles: config.domainRoles,
   });
   if (!repairedDiscovery.questions.length || repairedDiscovery.failureReasonCode) {
     throw new ClarifyDiscoveryError(
@@ -1191,7 +1228,7 @@ export async function generateClarifyingQuestions(opts: {
       total: totalTokens,
       byStage: { clarify: { input: totalInputTokens, output: totalOutputTokens, total: totalTokens } },
     },
-    ambiguityAssessment: ambiguityAssessmentFromDiscoveryProfile(discoveryProfile, filteredQuestions.length),
+    ambiguityAssessment: ambiguityAssessmentFromDiscoveryProfile(discoveryProfile, filteredQuestions.length, questionPlan),
   };
 }
 
@@ -1237,6 +1274,12 @@ export async function evaluateSufficiency(opts: {
       };
     })
     .filter((entry) => entry.question);
+  const domainSignals = extractDiscoverySignals([
+    opts.requirement,
+    qaText,
+    ...askedQuestionDetails.map((entry) => entry.question),
+    ...(opts.config.domainRoles ?? []),
+  ]);
 
   const userMessage = [
     `REQUIREMENT: ${opts.requirement}`,
@@ -1257,6 +1300,9 @@ export async function evaluateSufficiency(opts: {
   const result = await callLlmJsonWithUsage<Record<string, unknown>>({
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildEvaluateSystemPrompt({
+      domainContext: opts.config.domainContext,
+      domainRoles: opts.config.domainRoles,
+      domainSignals,
       minQuestions: Math.max(1, followupMin),
       maxQuestions: Math.max(1, followupCap),
     }),
@@ -1288,6 +1334,12 @@ export async function evaluateSufficiency(opts: {
         missingCategoryKeys,
         followupCap,
         initialQuestionCount,
+        fallbackInput: {
+          requirement: opts.requirement,
+          attachmentText: qaText,
+          domainSignals,
+          domainRoles: opts.config.domainRoles,
+        },
       })
     : [];
 

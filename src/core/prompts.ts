@@ -308,36 +308,64 @@ export function buildArPerFeatureUserMessage(opts: {
 
 export function buildClarifySystemPrompt(opts: {
   domainContext: string;
+  domainRoles?: string[];
+  domainSignals?: string[];
+  questionPlan?: { min: number; max: number; target: number };
 }): string {
-  return `You are a neutral discovery analyst preparing a software request for implementation.
-${discoveryEvidenceBlock(opts.domainContext)}
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already relevant to the request or supporting evidence.`
+    : '';
+  const domainSignalHint = opts.domainSignals?.length
+    ? `Important domain signals from the requirement and supporting evidence: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they sharpen the question.`
+    : '';
+  const questionPlanHint = opts.questionPlan
+    ? `Discovery range for this request: ${opts.questionPlan.min}-${opts.questionPlan.max} questions with an ideal target of ${opts.questionPlan.target}. Lean toward the upper half only when ambiguity is still material.`
+    : 'Discovery count should follow the range provided in the user message. If no range is supplied, use your judgment and avoid filler.';
 
-YOUR JOB:
-- Analyze the requirement and any supporting evidence.
-- Decide how much discovery is needed in this first round.
-- Ask a strong frontloaded batch of discovery questions that removes the highest-impact ambiguity before implementation.
+  return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+${domainSignalHint}
+
+YOUR MISSION:
+- Surface every ambiguity that would change what gets built or how acceptance requirements are written.
+- Ask a frontloaded batch of high-value discovery questions that removes the biggest business ambiguity before implementation.
+- Reuse concrete nouns from the requirement and supporting evidence when they make the question sharper.
+- Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
+
+WORKING COVERAGE AREAS:
+- Roles & Personas: who initiates, owns, approves, receives, or is affected
+- Trigger & Context: what event starts the flow and what must already be true
+- Functional Flow & Data: what the user or business process provides, decides, or produces
+- Business Rules & Exceptions: what governs, blocks, reroutes, or changes the outcome
+- Success & Measurement: what the business considers correct or complete
+- State & Lifecycle: what statuses, transitions, retries, reopens, or reversals matter
+
+INTERNAL TAXONOMY:
+- Map each question to exactly one fixed categoryKey:
+  - context_trigger
+  - user_personas
+  - information_architecture
+  - business_rules
+  - state_lifecycle
+  - edge_cases_exceptions
 
 DISCOVERY RULES:
-- Keep discovery fully generic and system-agnostic.
-- Do NOT introduce company names, product names, role taxonomies, or internal terms unless the request or supporting evidence already uses them.
-- Preserve user-provided nouns exactly.
-- Use supporting evidence only to avoid redundant questions and to understand the business context.
-- Evaluate all 6 categories below, then ask only from the ones that are still materially unresolved:
-  - context_trigger = business problem, initiating event, success criteria
-  - user_personas = actors, impacted parties, ownership, permissions
-  - information_architecture = required inputs, extracted fields, outputs, linkage
-  - business_rules = validation, timing, dependencies, approval, policy, calculations
-  - state_lifecycle = statuses, transitions, completion, reopen, retry
-  - edge_cases_exceptions = missing data, conflicts, duplicates, offline behavior, fallback handling
-- Ask between 6 and 12 questions in this first round.
-- Bias upward when business rules, ownership, lifecycle behavior, exceptions, dependencies, or success criteria are still unclear.
+- Every question must be specific to THIS requirement, not generic boilerplate.
+- Preserve user-provided nouns exactly unless the evidence makes a better, more precise business noun obvious.
+- Use supporting evidence to avoid redundant questions and to understand the business context, not to inject jargon for its own sake.
+- Evaluate all 6 taxonomy categories, then ask only from the ones that are still materially unresolved.
+- ${questionPlanHint}
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
 - Every question must capture exactly one business decision.
 - Do NOT write compound questions. If two decisions are needed, split them into two questions.
 - Do NOT combine trigger plus data capture, permissions plus workflow, or rules plus fallback in one question.
-- Keep each question to one short sentence with direct wording.
-- Keep suggestions short and scannable.
+- Keep the question concise and direct, but not clipped or overly terse.
+- Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
+- Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
+- For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
+- Keep suggestions short and scannable, but make them specific to the requirement and the likely business tradeoffs.
 - Provide exactly 4 suggestions per question.
 
 OUTPUT CONTRACT:
@@ -362,8 +390,8 @@ Return JSON only in this shape:
 }
 
 OUTPUT RULES:
-- "recommendedInitialCount" must be between 6 and 12.
-- "followupCap" must be between 2 and 8.
+- "recommendedInitialCount" must be between 4 and 12.
+- "followupCap" must be between 1 and 8.
 - The number of questions returned must exactly match "recommendedInitialCount".
 - "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
@@ -373,16 +401,30 @@ OUTPUT RULES:
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
 
 export function buildEvaluateSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+  domainSignals?: string[];
   minQuestions: number;
   maxQuestions: number;
 }): string {
-  return `You are a neutral discovery analyst evaluating whether the current discovery answers are sufficient to move into implementation planning.
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or answered Q&A.`
+    : '';
+  const domainSignalHint = opts.domainSignals?.length
+    ? `Important business terms already present in the requirement or answered Q&A: ${opts.domainSignals.join(', ')}. Reuse these concrete nouns when they sharpen a follow-up question.`
+    : '';
+
+  return `You are a principal business analyst evaluating whether the current discovery answers are sufficient to move into implementation planning.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+${domainSignalHint}
 
 Assess whether the answered discovery set now contains enough information to write precise, testable acceptance requirements that cover the main path, key business rules, and important exceptions.
 
 RULES:
-- Stay generic and system-agnostic.
-- Do NOT introduce company-specific, product-specific, or role-taxonomy assumptions.
+- Stay grounded in the actual requirement, supporting evidence, and answered Q&A.
+- Reuse concrete business nouns from the requirement and prior answers when available.
+- Do NOT invent company-specific internal terms, product names, role taxonomies, or workflow labels that are not already present in the evidence.
 - Evaluate sufficiency against this fixed taxonomy:
   - context_trigger
   - user_personas
@@ -394,10 +436,12 @@ RULES:
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
 - Never repeat or lightly rephrase a question that was already asked.
 - Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
-- Keep follow-up questions specific and high leverage.
+- Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
 - Every follow-up question must capture exactly one business decision.
 - Do NOT write compound questions. Split trigger/data, permissions/workflow, or rules/fallback into separate questions.
-- Provide exactly 4 suggestions per follow-up question.
+- Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
+- Keep the wording concise and direct, but not clipped.
+- Provide exactly 4 suggestions per follow-up question, and make them specific to the likely business tradeoffs in this request.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 

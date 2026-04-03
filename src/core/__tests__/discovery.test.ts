@@ -27,6 +27,16 @@ test('normalizeDiscoveryProfile clamps counts into the supported range', () => {
   assert.deepEqual(profile.missingCategoryKeys, ['context_trigger', 'business_rules']);
 });
 
+test('normalizeDiscoveryProfile respects the lower discovery floors for clear asks', () => {
+  const profile = normalizeDiscoveryProfile({
+    recommendedInitialCount: 2,
+    followupCap: 0,
+  });
+
+  assert.equal(profile.recommendedInitialCount, 4);
+  assert.equal(profile.followupCap, 1);
+});
+
 test('expandRawQuestionCandidate splits compound questions into atomic fixed-category questions', () => {
   const questions = expandRawQuestionCandidate({
     category: 'Context & Trigger',
@@ -48,6 +58,13 @@ test('expandRawQuestionCandidate splits compound questions into atomic fixed-cat
     ],
   );
   assert.ok(questions.every((question) => question.intent.startsWith('trigger_and_inputs')));
+  assert.deepEqual(
+    questions.map((question) => question.suggestions),
+    [
+      ['Call completed', 'New message', 'Caller identified', 'Case reason captured'],
+      ['Call completed', 'New message', 'Caller identified', 'Case reason captured'],
+    ],
+  );
 });
 
 test('finalizeInitialDiscoveryQuestions fills required BA taxonomy categories when unresolved', () => {
@@ -138,7 +155,7 @@ test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonom
   assert.equal(calibrated.scope, 'very_broad');
   assert.equal(calibrated.complexity, 'very_high');
   assert.equal(calibrated.ambiguity, 'high');
-  assert.ok(calibrated.recommendedInitialCount >= 10);
+  assert.ok(calibrated.recommendedInitialCount >= 8);
 });
 
 test('broad multi-input automation asks infer a non-trivial unresolved-category set', () => {
@@ -159,7 +176,29 @@ test('broad multi-input automation asks infer a non-trivial unresolved-category 
   assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
   assert.ok(['broad', 'very_broad'].includes(repaired.discoveryProfile.scope));
   assert.equal(repaired.discoveryProfile.ambiguity, 'high');
-  assert.ok(repaired.questions.length >= 8);
+  assert.ok(repaired.questions.length >= 6);
+});
+
+test('validateAndRepairInitialDiscovery uses contextual fallback questions and suggestions for multichannel case creation', () => {
+  const profile = normalizeDiscoveryProfile({
+    scope: 'moderate',
+    complexity: 'medium',
+    ambiguity: 'medium',
+    missingCategoryKeys: [],
+    recommendedInitialCount: 6,
+    followupCap: 4,
+  });
+
+  const repaired = validateAndRepairInitialDiscovery([], profile, {
+    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email interactions and have cases created automatically while avoiding duplicates.',
+  });
+
+  const renderedQuestions = repaired.questions.map((question) => question.question).join(' | ');
+  const renderedSuggestions = repaired.questions.flatMap((question) => question.suggestions).join(' | ');
+
+  assert.match(renderedQuestions, /phone|whatsapp|text|email/i);
+  assert.match(renderedQuestions, /case/i);
+  assert.match(renderedSuggestions, /phone|whatsapp|text|email|case/i);
 });
 
 test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total question cap', () => {
@@ -202,13 +241,45 @@ test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total
   );
 });
 
+test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when only one gap remains', () => {
+  const followups = finalizeFollowupDiscoveryQuestions([
+    {
+      categoryKey: 'business_rules',
+      category: 'Business Rules',
+      intent: 'decision_logic',
+      question: 'What rule decides whether a phone or WhatsApp interaction creates a new case or updates an existing one?',
+      suggestions: ['Always create a new case', 'Reuse the open case', 'Review uncertain matches', 'Different rules by channel'],
+    },
+  ], {
+    askedQuestions: [],
+    missingCategoryKeys: ['business_rules'],
+    followupCap: 1,
+    initialQuestionCount: 18,
+    fallbackInput: {
+      requirement: 'Automatically create support cases from phone and WhatsApp interactions.',
+    },
+  });
+
+  assert.equal(followups.length, 1);
+  assert.match(followups[0].question, /phone|whatsapp|case/i);
+});
+
 test('discovery prompts enforce the fixed taxonomy and atomic question contract', () => {
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
+    domainRoles: ['TSS', 'Supervisor'],
+    domainSignals: ['phone', 'WhatsApp', 'case creation'],
+    questionPlan: { min: 4, max: 6, target: 5 },
   });
-  const evaluatePrompt = buildEvaluateSystemPrompt({ minQuestions: 2, maxQuestions: 8 });
+  const evaluatePrompt = buildEvaluateSystemPrompt({
+    domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
+    domainRoles: ['TSS', 'Supervisor'],
+    domainSignals: ['phone', 'WhatsApp', 'case creation'],
+    minQuestions: 1,
+    maxQuestions: 4,
+  });
 
-  assert.match(clarifyPrompt, /system-agnostic/i);
+  assert.doesNotMatch(clarifyPrompt, /system-agnostic/i);
   assert.match(clarifyPrompt, /context_trigger/);
   assert.match(clarifyPrompt, /user_personas/);
   assert.match(clarifyPrompt, /information_architecture/);
@@ -219,10 +290,16 @@ test('discovery prompts enforce the fixed taxonomy and atomic question contract'
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Do NOT write compound questions/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
-  assert.doesNotMatch(clarifyPrompt, /Known roles in this domain/i);
+  assert.match(clarifyPrompt, /Known roles in this domain/i);
+  assert.match(clarifyPrompt, /Important domain signals/i);
+  assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
+  assert.match(clarifyPrompt, /company-specific internal terms/i);
+  assert.doesNotMatch(clarifyPrompt, /one short sentence/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
-  assert.match(evaluatePrompt, /2-8 follow-up questions/i);
+  assert.match(evaluatePrompt, /1-4 follow-up questions/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Do NOT write compound questions/i);
+  assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
+  assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
 });
