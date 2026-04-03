@@ -251,7 +251,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [auditTrailEnabled, setAuditTrailEnabled] = useState(false);
   const [complianceEvents, setComplianceEvents] = useState<ComplianceAuditEvent[]>([]);
   const [transparencyReports, setTransparencyReports] = useState<TransparencyReportRow[]>([]);
-  const [jiraAuditRecords, setJiraAuditRecords] = useState<Array<Record<string, unknown>>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('');
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
@@ -423,14 +422,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         setProjects(jiraRes.projects ?? []);
         setCustomFields(jiraRes.fields ?? []);
       }
-      const [auditRes, reportRes, jiraAuditRes] = await Promise.all([
+      const [auditRes, reportRes] = await Promise.all([
         api.listComplianceAuditEvents(30) as Promise<any>,
         api.listTransparencyReports({ limit: 30 }) as Promise<any>,
-        api.getJiraAuditRecords(20) as Promise<any>,
       ]);
       setComplianceEvents(Array.isArray(auditRes?.events) ? auditRes.events : []);
       setTransparencyReports(Array.isArray(reportRes?.reports) ? reportRes.reports : []);
-      setJiraAuditRecords(Array.isArray(jiraAuditRes?.records) ? jiraAuditRes.records : []);
     } catch (e) { console.error('Error loading config', e); }
   }
 
@@ -905,7 +902,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                    <p className="text-[var(--rf-text-tertiary)] text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
                 </div>
 
-                <div className="rf-card p-6 lg:p-8  space-y-8">
+                <div className="rf-card p-6  space-y-8">
                   <div className="space-y-3">
                     <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">LLM Provider</label>
                     <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
@@ -1261,7 +1258,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Workspace Guidance</h3>
                   <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">Global defaults for the workspace. Project-specific rules live in Project Setup.</p>
                 </div>
-                <div className="rf-card p-6 lg:p-8  space-y-8">
+                <div className="rf-card p-6  space-y-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm"><Users className="w-6 h-6" /></div>
@@ -1358,7 +1355,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     { label: 'Generations this month', value: usage?.currentMonth ?? 0, helper: 'Workspace total' },
                     { label: 'Tracked tokens', value: workspaceTokenUsage.toLocaleString(), helper: 'From transparency reports' },
                     { label: 'Projects with activity', value: projectUsageBreakdown.length, helper: 'Approximate from reports' },
-                    { label: 'Compliance signals', value: complianceEvents.length + transparencyReports.length + jiraAuditRecords.length, helper: 'Audit + transparency + Jira records' },
+                    { label: 'Compliance signals', value: complianceEvents.length + transparencyReports.length, helper: 'Audit + transparency records' },
                   ].map((card) => (
                     <div key={card.label} className="rf-card px-5 py-4 ">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{card.label}</div>
@@ -1404,8 +1401,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                  <div className="rf-card p-5  space-y-3">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rf-card p-6  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Transparency reports</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent model decisions and token usage.</div>
                     <div className="space-y-2">
@@ -1422,7 +1419,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="rf-card p-5  space-y-3">
+                  <div className="rf-card p-6  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Compliance audit trail</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Configuration, security, prompt, and runtime events.</div>
                     <div className="space-y-2">
@@ -1433,19 +1430,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                             <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{event.category}</div>
                           </div>
                           <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{new Date(event.timestamp).toLocaleString()}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rf-card p-5  space-y-3">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Jira audit records</div>
-                    <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent issue creation and downstream writeback activity.</div>
-                    <div className="space-y-2">
-                      {jiraAuditRecords.slice(0, 6).map((record, index) => (
-                        <div key={`${String(record.issueKey ?? 'jira')}-${index}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3">
-                          <div className="text-xs font-bold text-[var(--rf-text)]">{String(record.issueKey ?? record.projectKey ?? 'Jira event')}</div>
-                          <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{String(record.action ?? record.status ?? 'No action')}</div>
                         </div>
                       ))}
                     </div>
@@ -1465,7 +1449,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Billing & Compliance</h3>
                 </div>
 
-                <div className="rf-card p-8  flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="rf-card p-6  flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
                     <p className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Current Plan</p>
                     <h4 className="text-3xl font-black text-[var(--rf-brand)] capitalize mt-1">{tier}</h4>
@@ -1486,7 +1470,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="rf-card p-6 lg:p-8  space-y-6">
+                <div className="rf-card p-6  space-y-6">
                   <div className="flex flex-col gap-2">
                     <div>
                       <p className="text-[11px] uppercase tracking-widest text-[var(--rf-brand)] font-bold">Usage & stats</p>
@@ -1515,8 +1499,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                     <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Loaded records</div>
-                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{transparencyReports.length + complianceEvents.length + jiraAuditRecords.length}</div>
-                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">Transparency, compliance, and Jira audit trails.</div>
+                      <div className="mt-2 text-2xl font-black text-[var(--rf-text)]">{transparencyReports.length + complianceEvents.length}</div>
+                      <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">Transparency and compliance audit trails.</div>
                     </div>
                   </div>
 
@@ -1601,7 +1585,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   })}
                 </div>
 
-                <div className="rf-card p-6 lg:p-8  space-y-6">
+                <div className="rf-card p-6  space-y-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -1649,7 +1633,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="rf-card p-6 lg:p-8  space-y-6">
+                <div className="rf-card p-6  space-y-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)]" />
@@ -1690,11 +1674,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         </p>
                       </div>
                       <span className="rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                        {complianceEvents.length + transparencyReports.length + jiraAuditRecords.length} loaded
+                        {complianceEvents.length + transparencyReports.length} loaded
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                       <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4">
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Compliance audit events</div>
                         <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
@@ -1733,28 +1717,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           )) : (
                             <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-4 text-xs font-medium text-[var(--rf-text-tertiary)]">
                               No transparency reports loaded yet.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-white p-4">
-                        <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Jira audit records</div>
-                        <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                          {jiraAuditRecords.length ? jiraAuditRecords.slice(0, 6).map((record, index) => {
-                            const label = String(record.action || record.event || record.type || record.change || `Record ${index + 1}`);
-                            const detailText = typeof record.details === 'string'
-                              ? record.details
-                              : (JSON.stringify(record.details ?? record ?? {}) || '').slice(0, 180);
-                            return (
-                              <div key={`${label}-${index}`} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
-                                <div className="text-xs font-bold text-[var(--rf-text)]">{label}</div>
-                                <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)] line-clamp-2">{detailText}</div>
-                              </div>
-                            );
-                          }) : (
-                            <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-4 text-xs font-medium text-[var(--rf-text-tertiary)]">
-                              No Jira audit records loaded yet.
                             </div>
                           )}
                         </div>
@@ -2222,7 +2184,7 @@ function FieldMappingEditor({
   };
 
   return (
-    <div className="rf-card p-5  space-y-4">
+    <div className="rf-card p-6  space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{title}</div>

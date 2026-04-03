@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './Sidebar';
@@ -123,6 +123,24 @@ function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
   return total;
 }
 
+function buildDiscoveryInputSignature(params: {
+  requirement: string;
+  projectKey: string;
+  contextMode: 'undecided' | 'project' | 'global';
+  attachments: RunAttachment[];
+}): string {
+  return JSON.stringify({
+    requirement: params.requirement.trim(),
+    projectKey: params.projectKey,
+    contextMode: params.contextMode,
+    attachments: params.attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      text: attachment.text,
+    })),
+  });
+}
+
 function getDefaultSidebarWidth(viewportWidth?: number): number {
   const width =
     typeof viewportWidth === 'number'
@@ -223,6 +241,7 @@ export default function App() {
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
   const [runAttachmentError, setRunAttachmentError] = useState<string | null>(null);
+  const activeDiscoveryInputSignatureRef = useRef<string | null>(null);
 
   // History
   const [conversations, setConversations] = useState<any[]>([]);
@@ -314,6 +333,50 @@ export default function App() {
   useEffect(() => {
     loadWiDocs(projectKey);
   }, [projectKey]); // eslint-disable-line
+
+  const discoveryInputSignature = useMemo(
+    () => buildDiscoveryInputSignature({
+      requirement,
+      projectKey,
+      contextMode,
+      attachments: runAttachments,
+    }),
+    [requirement, projectKey, contextMode, runAttachments],
+  );
+
+  useEffect(() => {
+    const activeSignature = activeDiscoveryInputSignatureRef.current;
+    if (!activeSignature || activeSignature === discoveryInputSignature) return;
+
+    const hasDiscoveryState =
+      clarifyQuestions.length > 0
+      || clarifyAnswers.length > 0
+      || Boolean(clarifyContext)
+      || Boolean(clarifyBlockingError)
+      || Boolean(clarifyEvaluationError)
+      || clarifyRound !== 1;
+
+    activeDiscoveryInputSignatureRef.current = null;
+
+    if (!hasDiscoveryState) return;
+
+    setPendingClarifySessionId(null);
+    setClarifyQuestions([]);
+    setClarifyAnswers([]);
+    setClarifyRound(1);
+    setClarifyContext(null);
+    setClarifyBlockingError(null);
+    setClarifyEvaluationError(null);
+    setIsEvaluatingDiscovery(false);
+  }, [
+    discoveryInputSignature,
+    clarifyQuestions.length,
+    clarifyAnswers.length,
+    clarifyContext,
+    clarifyBlockingError,
+    clarifyEvaluationError,
+    clarifyRound,
+  ]);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
@@ -566,6 +629,7 @@ export default function App() {
   };
 
   const handleClarifySkip = async () => {
+    activeDiscoveryInputSignatureRef.current = null;
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     if (clarifyRound === 2) {
@@ -589,6 +653,7 @@ export default function App() {
     setPendingClarifySessionId(null);
     setPendingSessionId(null);
     setGenerationProgressMeta(null);
+    activeDiscoveryInputSignatureRef.current = null;
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
@@ -623,6 +688,7 @@ export default function App() {
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
+    activeDiscoveryInputSignatureRef.current = discoveryInputSignature;
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -674,6 +740,7 @@ export default function App() {
     setClarifyQuestions([]);
     setClarifyRound(1);
     setClarifyAnswers([]);
+    activeDiscoveryInputSignatureRef.current = discoveryInputSignature;
 
     try {
       const res = await api.retryClarify(sessionId, requirement, attachmentText, projectKey) as any;
@@ -722,6 +789,7 @@ export default function App() {
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
+    activeDiscoveryInputSignatureRef.current = null;
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
@@ -784,6 +852,7 @@ export default function App() {
     try {
       const res = await api.getConversation(sid) as any;
       if (res.success && res.conversation) {
+        activeDiscoveryInputSignatureRef.current = null;
         setWorkflowRunId(prev => prev + 1);
         setPendingSessionId(null);
         setPendingClarifySessionId(null);
@@ -896,6 +965,7 @@ export default function App() {
                 try { newSid = crypto.randomUUID(); }
                 catch(e) { newSid = `sid_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
                 
+                activeDiscoveryInputSignatureRef.current = null;
                 setRequirement('');
                 setFeatures([]);
                 setGenerationContext(null);

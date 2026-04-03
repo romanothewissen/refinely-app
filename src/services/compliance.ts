@@ -150,13 +150,3 @@ export async function listTransparencyReports(filters?: {
   return [...filtered].reverse().slice(0, Math.max(1, Math.min(filters?.limit ?? 100, 1000)));
 }
 
-export async function fetchRecentJiraAuditRecords(limit = 50): Promise<Array<Record<string, unknown>>> {
-  try {
-    const res = await asUser().requestJira(route`/rest/api/3/auditing/record?maxResults=${limit}`);
-    if (!res.ok) return [];
-    const payload = await res.json() as { records?: Array<Record<string, unknown>> };
-    return payload.records ?? [];
-  } catch {
-    return [];
-  }
-}

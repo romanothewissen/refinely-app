@@ -177,8 +177,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
-const MAX_CLARIFY_QUESTION_CHARS = 240;
-const MAX_CLARIFY_SUGGESTION_CHARS = 140;
+const MAX_CLARIFY_QUESTION_CHARS = 170;
+const MAX_CLARIFY_SUGGESTION_CHARS = 95;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();

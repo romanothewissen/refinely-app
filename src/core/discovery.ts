@@ -253,8 +253,21 @@ function ensureQuestionMark(value: string): string {
   return trimmed ? `${trimmed}?` : '';
 }
 
+function simplifyQuestionCopy(value: string): string {
+  return cleanText(value)
+    .replace(/\((?:as\s+per|per|see|from)\s+[^)]*(?:reference|references|doc|docs|story|stories|evidence|backlog|wi)[^)]*\)/gi, '')
+    .replace(/\((?:backlog|reference|references|doc|docs|story|stories|wi)[^)]*\)/gi, '')
+    .replace(/["“”'‘’]([^"“”'‘’]{1,48})["“”'‘’]/g, '$1')
+    .replace(/\bwhat exact\b/gi, 'what')
+    .replace(/\bwhat other events or conditions should\b/gi, 'which policy should')
+    .replace(/\bso the team knows this flow is solving the right problem\b/gi, 'first')
+    .replace(/\bthat is already present in the supporting evidence\b/gi, 'already in the evidence')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function sentenceCaseQuestion(value: string): string {
-  const normalized = ensureQuestionMark(value);
+  const normalized = ensureQuestionMark(simplifyQuestionCopy(value));
   if (!normalized) return '';
   return normalized.replace(/^[a-z]/, (letter) => letter.toUpperCase());
 }
@@ -466,12 +479,23 @@ function normalizeSuggestionComparisonKey(value: string): string {
 
 function simplifySuggestionCopy(value: string): string {
   return cleanText(value)
+    .replace(/["“”'‘’]([^"“”'‘’]{1,48})["“”'‘’]/g, '$1')
     .replace(/\bmaterially\b/gi, 'really')
     .replace(/\bsubsequent\b/gi, 'later')
     .replace(/\butili[sz]e\b/gi, 'use')
     .replace(/\bprior to\b/gi, 'before')
     .replace(/\bdownstream\b/gi, 'follow-up')
     .replace(/\bthere is enough detail to\b/gi, 'there is enough detail to')
+    .replace(/\bas soon as\b/gi, 'when')
+    .replace(/\bdo not\b/gi, "don't")
+    .replace(/\bwhenever\b/gi, 'when')
+    .replace(/\bthe owning team\b/gi, 'the team')
+    .replace(/\bthe interaction\b/gi, 'the request')
+    .replace(/\bthe automatic path\b/gi, 'automation')
+    .replace(/\bmanual triage\b/gi, 'manual review')
+    .replace(/\bfor follow-up\b/gi, 'for next steps')
+    .replace(/\bstraight away\b/gi, 'right away')
+    .replace(/\bno extra\b/gi, 'no additional')
     .replace(/\s+/g, ' ')
     .replace(/[.]+$/g, '')
     .trim();
@@ -513,6 +537,50 @@ function inferSuggestionArchetype(intent: string, value: string): string | null 
   return null;
 }
 
+function countUniqueSuggestionArchetypes(intent: string, values: string[]): number {
+  const archetypes = new Set(
+    values
+      .map((value) => inferSuggestionArchetype(intent, value))
+      .filter((value): value is string => Boolean(value)),
+  );
+  return archetypes.size;
+}
+
+function averageSuggestionOverlap(values: string[]): number {
+  if (values.length < 2) return 0;
+  let pairs = 0;
+  let total = 0;
+
+  for (let index = 0; index < values.length; index += 1) {
+    for (let next = index + 1; next < values.length; next += 1) {
+      total += overlapRatio(values[index], values[next]);
+      pairs += 1;
+    }
+  }
+
+  return pairs > 0 ? total / pairs : 0;
+}
+
+function shouldPreferFallbackSuggestions(intent: string, providedSuggestions: string[]): boolean {
+  if (providedSuggestions.length < 2) return false;
+
+  const simplified = uniqueStrings(providedSuggestions.map(simplifySuggestionCopy));
+  const averageLength = simplified.reduce((sum, value) => sum + value.length, 0) / Math.max(simplified.length, 1);
+  const archetypeCount = countUniqueSuggestionArchetypes(intent, simplified);
+  const overlap = averageSuggestionOverlap(simplified);
+  const additiveWordingCount = simplified.filter((value) => /\b(also|and|as well as|plus|along with)\b/i.test(value)).length;
+
+  return averageLength > 90 || archetypeCount < Math.min(2, simplified.length) || overlap >= 0.42 || additiveWordingCount >= Math.max(2, simplified.length - 1);
+}
+
+function shouldKeepFourSuggestions(intent: string, suggestions: string[]): boolean {
+  if (suggestions.length < 4) return false;
+  if (suggestions.some((suggestion) => suggestion.length > 95)) return false;
+  if (averageSuggestionOverlap(suggestions.slice(0, 4)) >= 0.32) return false;
+  if (suggestions.slice(0, 4).filter((suggestion) => /\b(also|and|plus|along with)\b/i.test(suggestion)).length >= 2) return false;
+  return countUniqueSuggestionArchetypes(intent, suggestions.slice(0, 4)) >= 4;
+}
+
 function normalizeSuggestionChoices(
   categoryKey: ClarifyCategoryKey,
   intent: string,
@@ -527,9 +595,11 @@ function normalizeSuggestionChoices(
         ...template.suggestions,
       ])
     : [];
+  const normalizedProvidedSuggestions = uniqueStrings(suggestions.map(simplifySuggestionCopy));
+  const preferFallback = shouldPreferFallbackSuggestions(intent, normalizedProvidedSuggestions);
   const candidates = uniqueStrings([
-    ...suggestions.map(simplifySuggestionCopy),
-    ...fallbackSuggestions.map(simplifySuggestionCopy),
+    ...(preferFallback ? fallbackSuggestions : normalizedProvidedSuggestions).map(simplifySuggestionCopy),
+    ...(preferFallback ? normalizedProvidedSuggestions : fallbackSuggestions).map(simplifySuggestionCopy),
   ]);
 
   const result: string[] = [];
@@ -550,6 +620,10 @@ function normalizeSuggestionChoices(
     result.push(normalizedCandidate);
     if (archetype) archetypes.add(archetype);
     if (result.length >= 4) break;
+  }
+
+  if (result.length >= 4 && !shouldKeepFourSuggestions(intent, result)) {
+    return result.slice(0, 3);
   }
 
   if (result.length >= 2) return result;
@@ -576,40 +650,40 @@ function contextualizeDiscoveryTemplate(
     case 'business_outcome':
       return {
         ...template,
-        question: `What business outcome should automatic ${ctx.businessObject} handling${channelScope} improve first so the team knows this flow is solving the right problem?`,
+        question: `What should automatic ${ctx.businessObject} handling${channelScope} improve first?`,
         suggestions: uniqueStrings([
-          `Reduce manual handling${channelScope} while still creating the right ${ctx.businessObject} on the first pass`,
-          `Speed up ${ctx.businessObject} creation so ownership becomes clear as soon as the interaction is captured`,
-          'Improve first-touch visibility so follow-up teams can act without rechecking the original interaction',
-          `Prevent duplicate ${ctx.businessObjectPlural} while keeping the downstream record accurate and usable`,
+          `Reduce manual work${channelScope} while still creating the right ${ctx.businessObject}`,
+          `Make ${ctx.businessObject} ownership clear as soon as the request is captured`,
+          `Prevent duplicate ${ctx.businessObjectPlural} without losing key context`,
+          `Improve visibility so the next team can act without rechecking the request`,
         ]).slice(0, 4),
       };
     case 'trigger_event':
       return {
         ...template,
         question: ctx.channels.length
-          ? `Which ${ctx.channelList} events should trigger ${ctx.businessObject} creation automatically, rather than leaving the interaction for manual triage?`
-          : `What exact point in the ${ctx.interactionLabel} should trigger ${businessObjectPhrase} creation automatically?`,
+          ? `Which trigger policy should start ${ctx.businessObject} creation across ${ctx.channelList}?`
+          : `When should ${businessObjectPhrase} be created automatically?`,
         suggestions: uniqueStrings([
           ctx.channels.length >= 2
-            ? 'Start automatically for every listed channel once the interaction reaches a usable handoff point'
-            : `Start when the ${ctx.interactionLabel} reaches the point where the team can act on it`,
+            ? 'Start automatically for every listed channel once the request is usable'
+            : `Start as soon as the ${ctx.interactionLabel} is usable`,
+          'Start only after the key context has been confirmed',
+          'Send unclear requests to manual review instead of starting automatically',
           ctx.channels.length >= 2
-            ? `${ctx.channels.slice(0, 2).join(' and ')} should start the flow automatically, while the others stay manual for now`
-            : 'Start only after identity or enough context has been confirmed',
-          `Start only when there is enough detail to create or update the ${ctx.businessObject} confidently`,
-          'Do not start automatically when the interaction is ambiguous and a person needs to triage it first',
+            ? `Start automatically for selected channels only, and keep the rest manual`
+            : `Wait for a quick review when the trigger is still uncertain`,
         ]).slice(0, 4),
       };
     case 'success_signal':
       return {
         ...template,
-        question: `What should count as a successful ${ctx.businessObject} outcome once the ${ctx.interactionLabel} has been handled?`,
+        question: `What should count as a successful ${ctx.businessObject} outcome?`,
         suggestions: uniqueStrings([
-          `The right ${ctx.businessObject} is created or updated and ownership is clear straight away`,
-          'The core context is copied once so the next team can work without revisiting the original interaction',
-          `Downstream visibility is in place and no duplicate ${ctx.businessObjectPlural} are created by mistake`,
-          'The interaction is captured correctly, but the flow still flags when a human follow-up is required',
+          `The right ${ctx.businessObject} is created or updated and ownership is clear`,
+          'The next team has enough context without reopening the original request',
+          `No duplicate ${ctx.businessObjectPlural} are created and the record stays accurate`,
+          'The flow succeeds but still flags cases that need a person to review them',
         ]).slice(0, 4),
       };
     case 'primary_actor':
@@ -648,25 +722,25 @@ function contextualizeDiscoveryTemplate(
     case 'required_inputs':
       return {
         ...template,
-        question: `What minimum details from the ${ctx.interactionLabel}${channelScope} must be captured before the ${ctx.businessObject} can be created or updated correctly?`,
+        question: `What is the minimum information needed before the ${ctx.businessObject} can be created or updated?`,
         suggestions: uniqueStrings([
-          `Require ${ctx.identifier} before the ${ctx.businessObject} can be created`,
-          `Require ${ctx.identifier} and the reason for contact before the ${ctx.businessObject} can be created`,
+          `Require ${ctx.identifier} only before creating the ${ctx.businessObject}`,
+          `Require ${ctx.identifier} plus the reason for contact`,
           ctx.channels.includes('Email')
-            ? 'For email, require the sender, subject, and short summary before creating the case'
-            : `Require ${ctx.identifier}, the reason for contact, and a short summary before creating the ${ctx.businessObject}`,
-          `Require the full interaction details before the ${ctx.businessObject} can be created automatically`,
+            ? 'For email, require the sender, subject, and a short summary'
+            : `Require ${ctx.identifier}, the reason, and a short summary`,
+          `Require the full request details before creating the ${ctx.businessObject}`,
         ]).slice(0, 4),
       };
     case 'outputs_displays':
       return {
         ...template,
-        question: `Besides the ${ctx.businessObject} itself, what downstream record, summary, or notification should this flow also update?`,
+        question: `What else should this flow produce besides the ${ctx.businessObject} itself?`,
         suggestions: uniqueStrings([
-          `Only create or update the ${ctx.businessObject}; do not create any extra downstream output`,
-          `Also show a short summary so the owning team can understand the ${ctx.interactionLabel} quickly`,
-          'Also notify the owning team when the record is ready for follow-up',
-          'Also update a follow-up queue or record that downstream teams already work from',
+          `Only create or update the ${ctx.businessObject}`,
+          'Also show a short summary for the team',
+          'Also notify the team when the record is ready',
+          'Also update the follow-up queue the team already uses',
         ]).slice(0, 4),
       };
     case 'entity_linkage':
@@ -709,12 +783,12 @@ function contextualizeDiscoveryTemplate(
     case 'decision_logic':
       return {
         ...template,
-        question: `What rule should decide whether the ${ctx.interactionLabel} creates a new ${ctx.businessObject} or updates an existing one when both outcomes seem possible?`,
+        question: `How should the flow choose between a new ${ctx.businessObject} and an existing one?`,
         suggestions: uniqueStrings([
           `Always create a new ${ctx.businessObject} because each interaction should stand on its own`,
           `Reuse the existing open ${ctx.businessObject} when the identifier and context clearly match`,
-          'Send uncertain matches for review rather than letting the automatic path make the final call',
-          `Apply different rules depending on ${ctx.decisionFactor}, with a clear tie-breaker when signals conflict`,
+          'Send uncertain matches for review instead of deciding automatically',
+          `Use ${ctx.decisionFactor} as the tie-breaker when both paths look possible`,
         ]).slice(0, 4),
       };
     case 'lifecycle_states':

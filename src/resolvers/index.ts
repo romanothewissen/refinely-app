@@ -17,7 +17,6 @@ import {
   appendComplianceAuditEvent,
   listComplianceAuditEvents,
   listTransparencyReports,
-  fetchRecentJiraAuditRecords,
   maskPiiText,
   maskPiiInAnswers,
   saveTransparencyReport,
@@ -877,11 +876,6 @@ resolver.define('listTransparencyReports', async ({ payload, context }) => {
   return { success: true, reports };
 });
 
-resolver.define('getJiraAuditRecords', async ({ payload, context }) => {
-  await ensureAdmin(context);
-  const records = await fetchRecentJiraAuditRecords(payload?.limit ?? 50);
-  return { success: true, records };
-});
 
 resolver.define('removeWiDoc', async ({ payload, context }) => {
   await ensureAdmin(context);

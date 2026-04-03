@@ -58,7 +58,7 @@ test('expandRawQuestionCandidate splits numbered grouped prompts into single-foc
   assert.deepEqual(
     questions.map((question) => question.question),
     [
-      'For case creation what exact event should trigger the flow?',
+      'For case creation what event should trigger the flow?',
       'For case creation what data must already be present?',
       'For case creation when should the interaction wait for manual review instead?',
     ],
@@ -225,7 +225,7 @@ test('validateAndRepairInitialDiscovery uses contextual fallback questions and s
   assert.match(renderedSuggestions, /phone|whatsapp|text|email|case/i);
   assert.ok(repaired.questions.every((question) => !question.question.includes('1.')));
   assert.ok(repaired.questions.every((question) => question.suggestions.length >= 2 && question.suggestions.length <= 4));
-  assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 30 && suggestion.length < 120)));
+  assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 30 && suggestion.length < 96)));
 });
 
 test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into distinct alternatives', () => {
@@ -255,9 +255,44 @@ test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into d
 
   const target = questions.find((question) => question.intent === 'outputs_displays');
   assert.ok(target);
-  assert.ok(target.suggestions.length >= 2 && target.suggestions.length <= 4);
+  assert.ok(target.suggestions.length >= 2 && target.suggestions.length <= 3);
   assert.equal(target.suggestions.filter((suggestion) => /summary/i.test(suggestion)).length, 1);
   assert.equal(target.suggestions.filter((suggestion) => /notify/i.test(suggestion)).length, 1);
+  assert.ok(target.suggestions.every((suggestion) => suggestion.length <= 95));
+});
+
+test('finalizeInitialDiscoveryQuestions sanitizes evidence references and favors concise contrasting trigger options', () => {
+  const profile = normalizeDiscoveryProfile({
+    ambiguity: 'high',
+    missingCategoryKeys: ['context_trigger'],
+    recommendedInitialCount: 4,
+    followupCap: 4,
+  });
+
+  const questions = finalizeInitialDiscoveryQuestions([
+    {
+      categoryKey: 'context_trigger',
+      category: 'Context & Trigger',
+      intent: 'trigger_event',
+      question: 'Beyond "each time a new Work Order is assigned" (as per Backlog Reference 3), what other events or conditions should trigger the automatic generation or recalculation of an "optimal schedule for service" for an FSE?',
+      suggestions: [
+        "Changes to a Work Order's 'criticality of service' or 'due dates'",
+        "Changes to an FSE's availability, skills, or 'preferred work areas'",
+        'A manual request initiated by the FSE, a dispatcher, or a supervisor',
+        "At a fixed interval, such as daily, at the start of an FSE's shift, or hourly",
+      ],
+    },
+  ], profile, {
+    requirement: 'An FSE must be provided an optimal schedule for service based on the criticality of service and due dates.',
+  });
+
+  const target = questions.find((question) => question.intent === 'trigger_event');
+  assert.ok(target);
+  assert.doesNotMatch(target.question, /Backlog Reference/i);
+  assert.doesNotMatch(target.question, /["“”'‘’]/);
+  assert.ok(target.suggestions.length >= 2 && target.suggestions.length <= 3);
+  assert.ok(target.suggestions.every((suggestion) => suggestion.length <= 95));
+  assert.ok(target.suggestions.some((suggestion) => /manual review|key context|selected channels|usable/i.test(suggestion)));
 });
 
 test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total question cap', () => {
@@ -349,8 +384,9 @@ test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Prefer one visible question per main business decision/i);
   assert.match(clarifyPrompt, /plain-language answer options/i);
-  assert.match(clarifyPrompt, /Provide 2-4 suggestions per question/i);
-  assert.match(clarifyPrompt, /Avoid near-synonyms/i);
+  assert.match(clarifyPrompt, /Provide 2-3 suggestions by default/i);
+  assert.match(clarifyPrompt, /Avoid quotes, parenthetical evidence references/i);
+  assert.match(clarifyPrompt, /Ask for a business choice or policy direction/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
   assert.match(clarifyPrompt, /Important domain signals/i);
@@ -364,8 +400,9 @@ test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery
   assert.match(evaluatePrompt, /1-4 follow-up questions/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Prefer one visible follow-up question per remaining business gap/i);
-  assert.match(evaluatePrompt, /plain-language alternatives/i);
-  assert.match(evaluatePrompt, /Provide 2-4 suggestions per follow-up question/i);
+  assert.match(evaluatePrompt, /contrasting business paths/i);
+  assert.match(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
+  assert.match(evaluatePrompt, /Avoid quotes, parenthetical evidence references/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);

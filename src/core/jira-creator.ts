@@ -5,6 +5,8 @@
 
 import { asUser, assumeTrustedRoute } from '@forge/api';
 import { Feature, ProjectArMapping, ProjectFieldMapping } from '../types';
+import { appendComplianceAuditEvent } from '../services/compliance';
+import { getConfig } from '../services/tenant-config';
 
 export interface CreateIssueResult {
   issueKey: string;
@@ -73,9 +75,26 @@ export async function createFeatureIssue(opts: {
   }
 
   const baseUrl = await getBaseUrl();
+  const issueUrl = `${baseUrl}/browse/${data.key}`;
+
+  try {
+    const config = await getConfig();
+    if (config.compliance?.enabled && config.compliance?.auditTrailEnabled) {
+      await appendComplianceAuditEvent({
+        actorAccountId: reporterAccountId,
+        category: 'runtime',
+        action: 'JIRA_ISSUE_CREATED',
+        details: { issueKey: data.key, projectKey, issueType },
+        enabled: true,
+      });
+    }
+  } catch (err) {
+    console.warn('[createFeatureIssue] Failed to log compliance event', err);
+  }
+
   return {
     issueKey: data.key,
-    issueUrl: `${baseUrl}/browse/${data.key}`,
+    issueUrl,
   };
 }
 
