@@ -856,11 +856,9 @@ export function MainContent({
             {/* Header / Loading State */}
             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-6">
-                <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--rf-border)] bg-white shadow-2xl relative">
+                <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--rf-border)] bg-white shadow-sm relative overflow-hidden p-3.5">
                    <div className="absolute inset-0 bg-[var(--rf-brand)]/5 rounded-[28px] animate-pulse" />
-                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(53,113,95,0.2),rgba(53,113,95,0.06))] border border-[var(--rf-brand)]/10">
-                    <Sparkles className="h-7 w-7 text-[var(--rf-brand)] animate-shimmer" />
-                  </div>
+                   <img src="/logo.png" alt="Refinely" className="w-full h-full object-contain relative z-10" style={{ mixBlendMode: 'multiply' }} />
                 </div>
                 <div>
                   <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm mb-3">
@@ -927,10 +925,10 @@ export function MainContent({
                           key={step.key}
                           className={`rounded-2xl border px-4 py-3.5 transition-all ${
                             isCurrent
-                              ? 'border-[var(--rf-brand-subtle)] bg-[linear-gradient(135deg,rgba(53,113,95,0.12),rgba(255,255,255,0.92))] shadow-lg'
+                              ? 'border-[var(--rf-brand)] bg-[rgba(53,113,95,0.04)] shadow-sm'
                               : isDone
-                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/20'
-                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55'
+                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/10'
+                                : 'border-[var(--rf-border)] bg-transparent opacity-60'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -1027,11 +1025,11 @@ export function MainContent({
                   {(() => {
                     const featureStatus = liveFeatureProgressById.get(feature.id) ?? (liveArProgress?.completed === liveArProgress?.total && liveArProgress?.total ? 'complete' : i === 0 ? 'active' : 'pending');
                     const featureWidth = featureStatus === 'complete' ? '100%' : featureStatus === 'active' ? '62%' : '16%';
-                    const featureTone = featureStatus === 'complete'
-                      ? 'from-[var(--rf-success)] to-[rgba(58,107,83,0.9)]'
+                    const featureColor = featureStatus === 'complete'
+                      ? 'bg-[var(--rf-success)]'
                       : featureStatus === 'active'
-                        ? 'from-[rgba(35,74,61,0.55)] to-[rgba(53,113,95,0.95)]'
-                        : 'from-[rgba(35,74,61,0.12)] to-[rgba(35,74,61,0.24)]';
+                        ? 'bg-[var(--rf-brand)]'
+                        : 'bg-[var(--rf-border)]';
                     const featureLabel = featureStatus === 'complete'
                       ? 'Acceptance requirements complete'
                       : featureStatus === 'active'
@@ -1040,7 +1038,7 @@ export function MainContent({
 
                     return (
                   <div className="flex">
-                    <div className="w-1.5 shrink-0 bg-[linear-gradient(180deg,rgba(53,113,95,0.9),rgba(126,211,158,0.6))]" />
+                    <div className={`w-1.5 shrink-0 transition-colors ${featureStatus === 'active' ? 'bg-[var(--rf-brand)] opacity-60' : featureStatus === 'complete' ? 'bg-[var(--rf-success)] opacity-40' : 'bg-transparent'}`} />
                     <div className="flex-1 p-4 sm:p-5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -1053,7 +1051,7 @@ export function MainContent({
                           {feature.storyPoints ? `${feature.storyPoints} pts` : 'draft'}
                         </div>
                       </div>
-                      <div className="mt-4 rounded-2xl border border-dashed border-[rgba(35,74,61,0.18)] bg-[rgba(35,74,61,0.03)] px-3.5 py-3">
+                      <div className="mt-4 rounded-2xl border border-[rgba(0,0,0,0.06)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
                           <BrainCircuit className="h-4 w-4 text-[var(--rf-brand)]" />
@@ -1069,9 +1067,9 @@ export function MainContent({
                             {featureStatus}
                           </div>
                         </div>
-                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.08)]">
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(0,0,0,0.04)]">
                           <div
-                            className={`h-full rounded-full bg-gradient-to-r ${featureTone} transition-all duration-700 ${featureStatus === 'active' ? 'animate-pulse' : ''}`}
+                            className={`h-full rounded-full ${featureColor} transition-all duration-700 ${featureStatus === 'active' ? 'animate-pulse' : ''}`}
                             style={{ width: featureWidth }}
                           />
                         </div>
@@ -1112,10 +1110,10 @@ export function MainContent({
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
               {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
-                  {liveSources!.referencedSimilarStories!.slice(0, 3).map((story, index) => {
+                  {liveSources!.referencedSimilarStories!.slice(0, 5).map((story, index) => {
                     const storyUrl = resolveStoryUrl(story);
                     return (
-                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
+                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[var(--rf-border)] bg-[rgba(0,0,0,0.01)] p-3">
                         <div className="flex items-start justify-between gap-3">
                           {storyUrl ? (
                             <button type="button" onClick={() => void router.navigate(storyUrl)} className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition">
@@ -1127,7 +1125,7 @@ export function MainContent({
                           )}
                           {typeof story.relevanceScore === 'number' && (
                             <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
-                              {(story.relevanceScore * 100).toFixed(0)}%
+                              {Math.min(100, Math.round(story.relevanceScore * 100))}%
                             </span>
                           )}
                         </div>
@@ -1147,8 +1145,8 @@ export function MainContent({
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
               {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
-                  {liveSources!.referencedWiSections!.slice(0, 3).map((section, index) => (
-                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
+                  {liveSources!.referencedWiSections!.slice(0, 5).map((section, index) => (
+                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[var(--rf-border)] bg-[rgba(0,0,0,0.01)] p-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
                         <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
