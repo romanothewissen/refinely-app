@@ -23,6 +23,7 @@ modules:
   function:
     - key: resolver
       handler: resolvers/index.handler
+      timeoutSeconds: 90
     - key: generation-consumer
       handler: queues/generation.handler
       timeoutSeconds: 900

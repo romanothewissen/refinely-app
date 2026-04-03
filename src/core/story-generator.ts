@@ -333,6 +333,83 @@ async function runParallelArPass(input: {
   return { features: results.map(r => r.feature), usage: totalUsage };
 }
 
+async function backfillMissingAcceptanceRequirements(input: {
+  features: RawFeature[];
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  domainContext: string;
+  arPlan: ArPlan;
+  generatorConfig: TenantConfig['generatorConfig'];
+  tier: TenantConfig['tier'];
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
+  const missingIndexes = input.features
+    .map((feature, index) => ({ feature, index }))
+    .filter(({ feature }) => getRawAcceptanceArray(feature).length === 0);
+
+  if (!missingIndexes.length) {
+    return { features: input.features, usage: { input: 0, output: 0 } };
+  }
+
+  const systemPrompt = buildArSystemPrompt({
+    domainContext: input.domainContext,
+    arPlan: input.arPlan,
+  });
+  const model = getTierModel(input.generatorConfig.arModel, input.tier);
+  const nextFeatures = [...input.features];
+  let usage = { input: 0, output: 0 };
+
+  for (const { feature, index } of missingIndexes) {
+    const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+      model,
+      systemPrompt,
+      userMessage: buildArPerFeatureUserMessage({
+        requirement: input.requirement,
+        clarifyAnswers: input.clarifyAnswers?.map(a => ({
+          question: a.question,
+          answer: a.answer,
+        })),
+        feature: {
+          summary: feature.summary ?? '',
+          description: feature.description ?? '',
+          suggested_story_points: feature.suggested_story_points,
+          process_code: feature.process_code,
+        },
+      }),
+      maxTokens: 2048,
+      reasoningEffort: 'medium',
+      ...input.providerOpts,
+    });
+
+    usage = {
+      input: usage.input + result.usage.input,
+      output: usage.output + result.usage.output,
+    };
+
+    const arFeature = result.data.features?.[0];
+    const ars = arFeature ? getRawAcceptanceArray(arFeature) : [];
+    if (ars.length) {
+      nextFeatures[index] = {
+        ...feature,
+        acceptance_requirements: ars,
+      };
+    }
+  }
+
+  return { features: nextFeatures, usage };
+}
+
 // ─── LLM-based Requirement Triage ────────────────────────────────────────────
 
 export interface TriageResult {
@@ -845,8 +922,22 @@ export async function generateFeatures(opts: {
       onArProgress,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-    rawFeatures = parallelResult.features;
-    pass2Usage = parallelResult.usage;
+    const backfillResult = await backfillMissingAcceptanceRequirements({
+      features: parallelResult.features,
+      requirement,
+      clarifyAnswers,
+      domainContext: config.domainContext,
+      arPlan: assessment.arPlan,
+      generatorConfig,
+      tier: config.tier,
+      providerOpts,
+    });
+    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    rawFeatures = backfillResult.features;
+    pass2Usage = {
+      input: parallelResult.usage.input + backfillResult.usage.input,
+      output: parallelResult.usage.output + backfillResult.usage.output,
+    };
   } else {
     // Monolithic path: single LLM call for all features (used for 1-feature results)
     const pass2System = buildArSystemPrompt({
