@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, LayoutDashboard, Type, Activity, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { X, LayoutDashboard, Type, Activity, CheckCircle, AlertCircle, ExternalLink, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { view, router } from '@forge/bridge';
@@ -92,7 +92,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
         {/* Header */}
         <div className="px-6 py-5 border-b border-[var(--rf-border-subtle)] flex items-center justify-between bg-[var(--rf-surface-soft)]/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] border border-blue-100 shadow-sm flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.12)] shadow-sm flex items-center justify-center">
               <Activity className="w-5 h-5 text-[var(--rf-brand)]" />
             </div>
             <div>
@@ -102,7 +102,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
           {state !== 'creating' && (
             <motion.button 
               onClick={onClose} 
-              className="p-2 hover:bg-slate-200 text-[var(--rf-text-tertiary)] rounded-xl transition"
+              className="p-2 hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] rounded-xl transition"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -130,13 +130,16 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                     <LayoutDashboard className="w-4 h-4 text-[var(--rf-brand)]" /> Project
                   </label>
                   {projects.length > 0 ? (
-                    <select
-                      value={projectKey}
-                      onChange={e => setProjectKey(e.target.value)}
-                      className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
-                    >
-                      {projects.map(p => <option key={p.key} value={p.key}>{p.key} — {p.name}</option>)}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={projectKey}
+                        onChange={e => setProjectKey(e.target.value)}
+                        className="appearance-none pr-7 w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+                      >
+                        {projects.map(p => <option key={p.key} value={p.key}>{p.key} — {p.name}</option>)}
+                      </select>
+                      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+                    </div>
                   ) : (
                     <input
                       value={projectKey}
@@ -152,16 +155,19 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                   <label className="text-xs font-bold text-[var(--rf-text-secondary)] flex items-center gap-2">
                     <Type className="w-4 h-4 text-[var(--rf-brand)]" /> Issue Type
                   </label>
-                  <select
-                    value={issueType}
-                    onChange={e => setIssueType(e.target.value)}
-                    className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
-                  >
-                    <option>Story</option>
-                    <option>Task</option>
-                    <option>Bug</option>
-                    <option>Epic</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={issueType}
+                      onChange={e => setIssueType(e.target.value)}
+                      className="appearance-none pr-7 w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+                    >
+                      <option>Story</option>
+                      <option>Task</option>
+                      <option>Bug</option>
+                      <option>Epic</option>
+                    </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+                  </div>
                 </div>
               </div>
 
@@ -176,10 +182,10 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               animate={{ opacity: 1, scale: 1 }}
             >
               <div className="relative">
-                <div className="w-16 h-16 rounded-2xl bg-[var(--rf-brand-muted)] border border-blue-100 flex items-center justify-center shadow-inner">
-                  <div className="w-8 h-8 border-[3px] border-[var(--rf-brand-subtle)] border-t-blue-600 rounded-full spin-slow" />
+                <div className="w-16 h-16 rounded-2xl bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.12)] flex items-center justify-center shadow-inner">
+                  <div className="w-8 h-8 border-[3px] border-[rgba(43,89,74,0.12)] border-t-[var(--rf-brand)] rounded-full spin-slow" />
                 </div>
-                <div className="absolute -inset-2 bg-[var(--rf-brand-muted)]0/10 rounded-3xl animate-pulse" />
+                <div className="absolute -inset-2 bg-[var(--rf-brand-muted)]/10 rounded-3xl animate-pulse" />
               </div>
               <div className="text-center space-y-1">
                 <p className="font-bold text-[var(--rf-text)] text-lg tracking-tight">Creating in Jira…</p>
@@ -195,7 +201,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
             >
-              <div className="w-16 h-16 rounded-2xl bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] flex items-center justify-center shadow-inner shadow-emerald-500/10">
+              <div className="w-16 h-16 rounded-2xl bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] flex items-center justify-center shadow-inner shadow-[var(--rf-success)]/10">
                 <CheckCircle className="w-8 h-8 text-[var(--rf-success)]" />
               </div>
               <div className="text-center">
@@ -208,7 +214,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                   <span className="text-[var(--rf-text-tertiary)] font-semibold">Issue Key</span>
                   <button
                     onClick={() => result.url ? router.navigate(result.url) : null}
-                    className="font-mono font-bold text-[var(--rf-brand-hover)] hover:text-blue-800 transition"
+                    className="font-mono font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition"
                   >
                     {result.key}
                   </button>
@@ -226,10 +232,10 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                     {result?.linkedTo ? (
                       <div className="flex justify-between items-center">
                         <span className="text-[var(--rf-text-tertiary)] font-semibold">Linked to</span>
-                        <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">{result.linkedTo}</span>
+                        <span className="font-mono font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded-lg border border-[rgba(43,89,74,0.12)]">{result.linkedTo}</span>
                       </div>
                     ) : (
-                      <div className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                      <div className="text-xs font-medium text-[var(--rf-warning)] bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.18)] rounded-xl px-4 py-3">
                         <span className="font-bold block mb-1">Link not created.</span>
                         {result?.linkError
                           ? result.linkError.replace(/^Issue link creation failed \(\d+\): /, '')
@@ -243,7 +249,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               {result.url && (
                 <button
                   onClick={() => router.navigate(result.url!)}
-                  className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--rf-brand-muted)] hover:bg-blue-100 text-[var(--rf-brand-hover)] rounded-xl text-sm font-bold transition border border-[var(--rf-brand-subtle)]"
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] text-[var(--rf-brand-hover)] rounded-xl text-sm font-bold transition border border-[var(--rf-brand-subtle)]"
                 >
                   Open in Jira <ExternalLink className="w-4 h-4" />
                 </button>
@@ -263,7 +269,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               </div>
               <div className="text-center space-y-2">
                 <p className="font-black text-[var(--rf-text)] text-lg">Creation Failed</p>
-                <div className="bg-[var(--rf-danger-subtle)] border border-rose-100 rounded-xl p-3 max-w-sm">
+                <div className="bg-[var(--rf-danger-subtle)] border border-[rgba(158,62,71,0.12)] rounded-xl p-3 max-w-sm">
                   <p className="text-xs font-medium text-[var(--rf-danger)] leading-relaxed">{error}</p>
                 </div>
               </div>
@@ -286,7 +292,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
             <motion.button
               onClick={handleCreate}
               disabled={!projectKey}
-              className="px-6 py-2.5 text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:bg-slate-400 rounded-xl transition shadow-md shadow-[var(--rf-brand)]/20"
+              className="px-6 py-2.5 text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:bg-[var(--rf-border-strong)] rounded-xl transition shadow-md shadow-[var(--rf-brand)]/20"
               whileTap={{ scale: 0.98 }}
             >
               Create in Jira

@@ -75,7 +75,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
       />
 
       <motion.div 
-        className="relative bg-white w-full max-w-5xl h-[82vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
+        className="relative bg-white w-full max-w-5xl h-[82vh] rounded-[22px] shadow-[var(--rf-shadow-lg)] flex flex-col overflow-hidden border border-[var(--rf-border)]"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -121,7 +121,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
           {filtered.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-[var(--rf-text-tertiary)] gap-4">
               <div className="w-16 h-16 rounded-2xl bg-white border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
-                <MessageSquare className="w-8 h-8 text-slate-300" />
+                <MessageSquare className="w-8 h-8 text-[var(--rf-border-strong)]" />
               </div>
               <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">No conversations found.</p>
             </div>
@@ -132,7 +132,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               {pinned.length > 0 && (
                 <div className="space-y-4 fade-in">
                   <h3 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2">
-                    <Pin className="w-3.5 h-3.5 text-[var(--rf-brand)] fill-blue-500" /> Pinned
+                    <Pin className="w-3.5 h-3.5 text-[var(--rf-brand)] fill-[var(--rf-brand)]" /> Pinned
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {pinned.map((conv, idx) => (
@@ -209,7 +209,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
     <motion.div 
       onClick={isEditing ? undefined : onRestore}
       className={`group relative bg-white border rounded-xl p-4 flex flex-col gap-3 h-full transition-all ${
-        isCurrent ? 'border-blue-400 shadow-md shadow-blue-500/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
+        isCurrent ? 'border-[var(--rf-brand)] shadow-md shadow-[var(--rf-brand)]/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
       }`}
       whileHover={!isCurrent && !isEditing ? { y: -2, scale: 1.01 } : {}}
       transition={{ duration: 0.2 }}
@@ -222,13 +222,13 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
                 autoFocus
                 value={editTitle}
                 onChange={e => setEditTitle(e.target.value)}
-                className="flex-1 bg-white border border-blue-400 rounded-lg outline-none px-3 py-1.5 text-sm font-bold text-[var(--rf-text)] w-full focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                className="flex-1 bg-white border border-[var(--rf-brand)] rounded-lg outline-none px-3 py-1.5 text-sm font-bold text-[var(--rf-text)] w-full focus:ring-2 focus:ring-[var(--rf-brand)]/20"
               />
-              <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 px-2 py-1.5 rounded-md transition">Cancel</button>
+              <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] px-2 py-1.5 rounded-lg transition">Cancel</button>
               <button type="submit" className="text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] px-2 py-1.5 rounded-md transition">Save</button>
             </form>
           ) : (
-            <h4 className={`text-sm font-semibold leading-snug tracking-tight line-clamp-2 ${isCurrent ? 'text-blue-900' : 'text-[var(--rf-text)]'}`}>
+            <h4 className={`text-sm font-semibold leading-snug tracking-tight line-clamp-2 ${isCurrent ? 'text-[var(--rf-brand-hover)]' : 'text-[var(--rf-text)]'}`}>
               {conv.title || 'Untitled session'}
             </h4>
           )}
@@ -259,7 +259,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
         <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </span>
-        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-blue-100 text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
+        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
           {isCurrent ? 'Active Now' : <><Play className="w-3 h-3" /> Resume</>}
         </div>
       </div>

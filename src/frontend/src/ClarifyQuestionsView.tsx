@@ -152,7 +152,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
             </motion.button>
           )}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center border border-blue-100 shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm">
               <Sparkles className="w-5 h-5 text-[var(--rf-brand)]" />
             </div>
             <div>
@@ -165,7 +165,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
         <div className="flex items-center gap-4 flex-1 max-w-lg hidden md:flex">
           <div className="flex-1 h-2 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
             <div
-              className="h-full bg-[var(--rf-brand-muted)]0 rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+              className="h-full bg-[var(--rf-brand)] rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(43,89,74,0.35)]"
               style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
             />
           </div>
@@ -182,7 +182,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
           </motion.button>
           <motion.button
             onClick={handleSubmit}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-sm shadow-[var(--rf-brand)]/20"
+            className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
             whileTap={{ scale: 0.98 }}
           >
             Generate Features <ArrowRight className="w-4 h-4" />
@@ -228,8 +228,8 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                   animate={{ opacity: 1, height: 'auto' }}
                 >
                   {contextMeta.ambiguityAssessment?.reasons?.length ? (
-                    <div className="text-[var(--rf-text-secondary)] bg-[var(--rf-brand-muted)]/50 p-3 rounded-xl border border-blue-100 leading-relaxed">
-                      <strong className="text-blue-900 mb-1 block">Analysis:</strong>
+                    <div className="text-[var(--rf-text-secondary)] bg-[var(--rf-brand-muted)]/50 p-3 rounded-xl border border-[rgba(43,89,74,0.12)] leading-relaxed">
+                      <strong className="text-[var(--rf-brand-hover)] mb-1 block">Analysis:</strong>
                       {contextMeta.ambiguityAssessment.reasons.join(' ')}
                     </div>
                   ) : null}
@@ -263,7 +263,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                                     const url = resolveStoryUrl(story);
                                     if (url) void router.navigate(url);
                                   }}
-                                  className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-blue-900 transition"
+                                  className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition"
                                   title="Open referenced story"
                                 >
                                   {story.key}
@@ -345,7 +345,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                 <span className="inline-flex items-center rounded-lg px-3 py-1 text-[11px] font-bold uppercase tracking-widest bg-[var(--rf-text)] text-white shadow-sm">
                   {category}
                 </span>
-                <div className="flex-1 h-px bg-slate-200" />
+                <div className="flex-1 h-px bg-[var(--rf-border)]" />
               </div>
 
               <div className="space-y-4">
@@ -357,7 +357,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                   return (
                     <div
                       key={idx}
-                      className={`rounded-2xl border bg-white shadow-sm transition-all duration-300 overflow-hidden ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-blue-500/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
+                      className={`rounded-2xl border bg-white shadow-sm transition-all duration-300 overflow-hidden ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-[var(--rf-brand)]/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
                     >
                       <div className="p-5 flex items-start gap-4">
                         <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
@@ -397,7 +397,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                             onChange={e => handleCustomChange(idx, e.target.value)}
                             placeholder={suggestions.length > 0 ? 'Click a suggestion or type your own answer\u2026' : 'Type your detailed answer here\u2026'}
                             rows={3}
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-slate-400"
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
                           />
                         </div>
                       </div>
@@ -416,7 +416,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
           >
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
+              className="brainstorm-shimmer flex items-center gap-2 px-6 py-3 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
             >
               Generate Features <ArrowRight className="w-4 h-4" />
             </button>

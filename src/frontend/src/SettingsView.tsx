@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { 
+import {
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, ShieldCheck, BarChart3,
-  Users, FileText, ChevronRight, Check, Trash, Layers, Zap, Info, AlertCircle, Image
+  Users, FileText, ChevronRight, ChevronDown, Check, Trash, Layers, Zap, Info, AlertCircle, Image
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
@@ -832,7 +832,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${isAdmin ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
                 {isAdmin ? 'Administrator' : 'Read-Only'}
               </span>
-              <span className="text-[10px] text-[var(--rf-brand)] font-bold uppercase tracking-wider flex items-center gap-1 bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded-md border border-blue-100">
+              <span className="text-[10px] text-[var(--rf-brand)] font-bold uppercase tracking-wider flex items-center gap-1 bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded-md border border-[rgba(43,89,74,0.12)]">
                 <ShieldCheck className="w-3 h-3" /> {tier} plan
               </span>
             </div>
@@ -843,7 +843,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             <motion.button 
               onClick={handleSave} 
               disabled={isSaving} 
-              className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:bg-slate-400 text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-[var(--rf-brand)]/20 transition-all flex items-center gap-2"
+              className="bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:bg-[var(--rf-border-strong)] text-white text-sm font-bold px-6 py-2.5 rounded-xl shadow-md shadow-[var(--rf-brand)]/20 transition-all flex items-center gap-2"
               whileTap={{ scale: 0.98 }}
             >
               {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -921,7 +921,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                       <div className="flex justify-between items-center px-1">
                         <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">OpenAI API Key</label>
-                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                        {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[10px] font-bold text-[var(--rf-danger)] hover:text-[var(--rf-danger)]">Clear Stored</button>}
                       </div>
                       <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (Stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                     </motion.div>
@@ -932,7 +932,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="space-y-2">
                         <div className="flex justify-between items-center px-1">
                           <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Azure OpenAI API Key</label>
-                          {existingAzureOpenAIApiKey && <button onClick={() => { setExistingAzureOpenAIApiKey(''); setAzureOpenAIApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                          {existingAzureOpenAIApiKey && <button onClick={() => { setExistingAzureOpenAIApiKey(''); setAzureOpenAIApiKey(''); }} className="text-[10px] font-bold text-[var(--rf-danger)] hover:text-[var(--rf-danger)]">Clear Stored</button>}
                         </div>
                         <input type="password" value={azureOpenAIApiKey} onChange={e => setAzureOpenAIApiKey(e.target.value)} placeholder={existingAzureOpenAIApiKey ? '••••••••• (Stored)' : 'Azure key'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                       </div>
@@ -951,7 +951,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <motion.div className="space-y-2" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
                       <div className="flex justify-between items-center px-1">
                         <label className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Gemini API Key</label>
-                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-rose-500 hover:text-[var(--rf-danger)]">Clear Stored</button>}
+                        {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[10px] font-bold text-[var(--rf-danger)] hover:text-[var(--rf-danger)]">Clear Stored</button>}
                       </div>
                       <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (Stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                     </motion.div>
@@ -974,7 +974,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <motion.button
                         onClick={refreshModelCatalog}
                         disabled={isRefreshingModels || !isAdmin}
-                        className="bg-[var(--rf-surface-soft)] hover:bg-slate-200 disabled:opacity-50 text-[var(--rf-text-secondary)] text-[11px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 border border-[var(--rf-border)]"
+                        className="bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] disabled:opacity-50 text-[var(--rf-text-secondary)] text-[11px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 border border-[var(--rf-border)]"
                         whileTap={{ scale: 0.98 }}
                       >
                         <RefreshCw className={`w-4 h-4 ${isRefreshingModels ? 'animate-spin' : ''}`} />
@@ -1042,9 +1042,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         <div key={i} className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3.5 space-y-2 shadow-sm">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <span className="text-sm font-bold text-[var(--rf-text-secondary)]">{item.label}</span>
-                            <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] sm:w-[240px] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
-                              {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                            </select>
+                            <div className="relative sm:w-[240px]">
+                              <select value={item.val} disabled={availableModels.length === 0} onChange={e => item.set(e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-xs font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                                {availableModels.length === 0 ? <option>Provider required...</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                              </select>
+                              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+                            </div>
                           </div>
                           <p className="text-[11px] font-medium text-[var(--rf-text-tertiary)] leading-relaxed">{item.hint}</p>
                         </div>
@@ -1097,7 +1100,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <div className="text-2xl font-black text-[var(--rf-text)]">{projects.length}</div>
                           <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Projects</div>
                         </div>
-                        <div className="w-px bg-slate-200"></div>
+                        <div className="w-px bg-[var(--rf-border)]"></div>
                         <div className="text-center">
                           <div className="text-2xl font-black text-[var(--rf-text)]">{customFields.length}</div>
                           <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Fields</div>
@@ -1106,7 +1109,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <motion.button 
                         onClick={discoverJira} 
                         disabled={isDiscovering} 
-                        className="bg-[var(--rf-surface-soft)] hover:bg-slate-200 text-[var(--rf-text-secondary)] text-[11px] font-bold uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2 border border-[var(--rf-border)]"
+                        className="bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[11px] font-bold uppercase tracking-widest px-5 py-3 rounded-xl transition-all flex items-center gap-2 border border-[var(--rf-border)]"
                         whileTap={{ scale: 0.98 }}
                       >
                         <RefreshCw className={`w-4 h-4 ${isDiscovering ? 'animate-spin' : ''}`} /> Sync
@@ -1120,14 +1123,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step 2</div>
                       <h4 className="text-lg font-bold text-[var(--rf-text)]">Select Project</h4>
                     </div>
-                    <select 
-                      value={activeArProj} 
-                      onChange={e => setActiveArProj(e.target.value)} 
-                      className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none sm:w-64 transition"
+                    <div className="relative sm:w-64">
+                    <select
+                      value={activeArProj}
+                      onChange={e => setActiveArProj(e.target.value)}
+                      className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
                     >
                       <option value="*">Select a project...</option>
                       {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
                     </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+                    </div>
                   </div>
 
                   {activeArProj !== '*' ? (
@@ -1147,7 +1153,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     />
                   ) : (
                     <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-[var(--rf-border)]">
-                      <Database className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                      <Database className="w-12 h-12 text-[var(--rf-border-strong)] mx-auto mb-4" />
                       <h4 className="text-lg font-bold text-[var(--rf-text)]">Select a project to configure</h4>
                       <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and project-specific guidance for the selected project.</p>
                     </div>
@@ -1167,7 +1173,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <motion.button
                         onClick={() => wiFileInputRef.current?.click()}
                         disabled={activeArProj === '*' || !!wiUploadState}
-                        className="bg-[var(--rf-text)] hover:bg-black disabled:bg-slate-300 text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg shadow-sm transition-all"
+                        className="bg-[var(--rf-text)] hover:bg-black disabled:bg-[var(--rf-border-strong)] text-white text-[11px] font-bold uppercase tracking-widest px-5 py-2.5 rounded-lg shadow-sm transition-all"
                         whileTap={{ scale: 0.98 }}
                       >
                         {wiUploadState ? 'Uploading…' : 'Add docs'}
@@ -1195,15 +1201,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                     {wiUploadCopy}
                                   </div>
                                 </div>
-                                <div className="h-1.5 overflow-hidden rounded-full bg-blue-100">
-                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand-muted)]0 animate-pulse" />
+                                <div className="h-1.5 overflow-hidden rounded-full bg-[rgba(43,89,74,0.12)]">
+                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
                                 </div>
                               </div>
                             )}
                             {wiUploadError && (
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <div className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Upload Failed</div>
+                                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-danger)]">Upload Failed</div>
                                   <p className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadError}</p>
                                 </div>
                                 <button type="button" onClick={() => setWiUploadError(null)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[var(--rf-danger)] border border-[var(--rf-danger-subtle)]">Dismiss</button>
@@ -1215,7 +1221,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {wiDocs.length === 0 ? (
                             <div className="col-span-2 p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)]">
-                              <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                              <FileText className="w-8 h-8 text-[var(--rf-border-strong)] mx-auto mb-2" />
                               <p className="text-sm font-semibold text-[var(--rf-text-tertiary)]">No work instructions linked to {activeArProj}.</p>
                             </div>
                           ) : (
@@ -1230,7 +1236,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                     <p className="text-[10px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-widest mt-0.5">{doc.chunkCount} chunks</p>
                                   </div>
                                 </div>
-                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-rose-500 p-2 rounded-lg hover:bg-[var(--rf-danger-subtle)] transition-colors">
+                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] p-2 rounded-lg hover:bg-[var(--rf-danger-subtle)] transition-colors">
                                   <Trash className="w-4 h-4" />
                                 </button>
                               </div>
@@ -1258,7 +1264,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-blue-100 shadow-sm"><Users className="w-6 h-6" /></div>
+                      <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm"><Users className="w-6 h-6" /></div>
                       <div>
                         <h4 className="text-base font-bold text-[var(--rf-text)]">Core persona roles</h4>
                         <p className="text-xs font-medium text-[var(--rf-text-tertiary)]">Enter the roles that matter and what each role actually does so the question flow stays grounded in real work.</p>
@@ -1274,7 +1280,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         <button
                           type="button"
                           onClick={() => setRoleGuidanceRows(prev => [...prev, { role: '', activities: '' }])}
-                          className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition"
+                          className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-3 py-1.5 rounded-lg transition"
                         >
                           + Add row
                         </button>
@@ -1324,9 +1330,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <h4 className="text-base font-bold text-[var(--rf-text)]">Issue linking default</h4>
                       <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Used when a project does not override its Jira issue link type.</p>
                     </div>
-                    <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-4 py-3 rounded-xl text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none w-full max-w-sm transition">
-                      {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
+                    <div className="relative w-full max-w-sm">
+                      <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-4 py-3 rounded-xl text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
+                        {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -1397,7 +1406,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                   <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Transparency reports</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Transparency reports</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent model decisions and token usage.</div>
                     <div className="space-y-2">
                       {transparencyReports.slice(0, 6).map((report) => (
@@ -1414,7 +1423,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Compliance audit trail</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Compliance audit trail</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Configuration, security, prompt, and runtime events.</div>
                     <div className="space-y-2">
                       {complianceEvents.slice(0, 6).map((event) => (
@@ -1430,7 +1439,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 shadow-sm space-y-3">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Jira audit records</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Jira audit records</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent issue creation and downstream writeback activity.</div>
                     <div className="space-y-2">
                       {jiraAuditRecords.slice(0, 6).map((record, index) => (
@@ -1469,7 +1478,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     {limits?.generationsPerMonth !== -1 && (
                       <div className="w-full h-2.5 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
                         <div
-                          className="h-full bg-[var(--rf-brand-muted)]0 transition-all duration-500"
+                          className="h-full bg-[var(--rf-brand)] transition-all duration-500"
                           style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
                         />
                       </div>
@@ -1559,18 +1568,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   ].map(plan => {
                     const isCurrent = tier === plan.key;
                     return (
-                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-[var(--rf-brand)] shadow-md shadow-blue-500/10' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}>
+                      <div key={plan.key} className={`rounded-2xl border bg-white p-5 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-[var(--rf-brand)] shadow-md shadow-[var(--rf-brand)]/10' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}>
                         <div className="mb-4">
                           <div className="flex items-center justify-between">
                             <div className={`text-lg font-black ${isCurrent ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text)]'}`}>{plan.name}</div>
-                            {isCurrent && <span className="bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md border border-blue-100">Current</span>}
+                            {isCurrent && <span className="bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md border border-[rgba(43,89,74,0.12)]">Current</span>}
                           </div>
                           <div className="text-xs font-semibold text-[var(--rf-text-tertiary)] mt-1">{plan.price}</div>
                         </div>
                         <ul className="space-y-2.5 mb-6 flex-1">
                           {plan.highlights.map(item => (
                             <li key={item} className="text-xs font-medium text-[var(--rf-text-secondary)] flex items-start gap-2">
-                              <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                              <Check className="w-3.5 h-3.5 text-[var(--rf-success)] shrink-0 mt-0.5" />
                               {item}
                             </li>
                           ))}
@@ -1643,8 +1652,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="bg-white rounded-2xl p-6 lg:p-8 border border-[var(--rf-border)] shadow-sm space-y-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <ShieldCheck className="w-5 h-5 text-indigo-600" />
-                      <p className="text-[11px] uppercase tracking-widest text-indigo-600 font-bold">Compliance Pack</p>
+                      <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)]" />
+                      <p className="text-[11px] uppercase tracking-widest text-[var(--rf-brand)] font-bold">Compliance Pack</p>
                     </div>
                     <h4 className="text-xl font-bold text-[var(--rf-text)]">GDPR + EU AI Act readiness</h4>
                     <p className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">
@@ -1920,7 +1929,7 @@ function ProjectConfigurationManager({
              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
            >
              <div className="flex items-center gap-3">
-               <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-blue-100"><Database className="w-4 h-4 text-[var(--rf-brand)]" /></div>
+               <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)]"><Database className="w-4 h-4 text-[var(--rf-brand)]" /></div>
                <div>
                  <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
                    Backlog Context
@@ -1976,8 +1985,8 @@ function ProjectConfigurationManager({
                    {isRefreshingBacklogCache || backlogRefreshStatus?.status === 'queued' || backlogRefreshStatus?.status === 'running'
                      ? <><RefreshCw className="w-4 h-4 animate-spin text-[var(--rf-brand)]"/> Rebuilding</>
                      : backlogCacheInfo?.stale
-                       ? <><AlertCircle className="w-4 h-4 text-amber-500"/> Needs refresh</>
-                       : <><Check className="w-4 h-4 text-emerald-500"/> Fresh</>}
+                       ? <><AlertCircle className="w-4 h-4 text-[var(--rf-warning)]"/> Needs refresh</>
+                       : <><Check className="w-4 h-4 text-[var(--rf-success)]"/> Fresh</>}
                  </div>
                  {(backlogRefreshStatus?.status === 'queued' || backlogRefreshStatus?.status === 'running') && (
                    <div className="mt-2 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
@@ -2030,8 +2039,8 @@ function ProjectConfigurationManager({
                    {effectiveBacklogStatuses.length} status{effectiveBacklogStatuses.length === 1 ? '' : 'es'} in scope
                  </div>
                  <div className="flex gap-2">
-                   <button onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))} className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] hover:text-blue-800 bg-[var(--rf-brand-muted)] px-2 py-1 rounded">Default</button>
-                   <button onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))} className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] hover:text-blue-800 bg-[var(--rf-brand-muted)] px-2 py-1 rounded">All</button>
+                   <button onClick={() => updateBacklogStatuses(detectDefaultStatuses(backlogStatusOptions))} className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] px-2 py-1 rounded">Default</button>
+                   <button onClick={() => updateBacklogStatuses(backlogStatusOptions.map((status: any) => status.name))} className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] px-2 py-1 rounded">All</button>
                  </div>
                </div>
                <div className="flex flex-wrap gap-2">
@@ -2041,7 +2050,7 @@ function ProjectConfigurationManager({
                      <button
                        key={status.name}
                        onClick={() => updateBacklogStatuses(selected ? effectiveBacklogStatuses.filter((item: string) => item !== status.name) : [...effectiveBacklogStatuses, status.name])}
-                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selected ? 'bg-[var(--rf-brand)] text-white border-blue-600 shadow-md shadow-[var(--rf-brand)]/20' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)]'}`}
+                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selected ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-md shadow-[var(--rf-brand)]/20' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)]'}`}
                      >
                        {status.name}
                      </button>
@@ -2060,7 +2069,7 @@ function ProjectConfigurationManager({
               className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center border border-indigo-100"><Globe className="w-4 h-4 text-indigo-600" /></div>
+                <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)]"><Globe className="w-4 h-4 text-[var(--rf-brand)]" /></div>
                 <div>
                   <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
                     Project Guidance
@@ -2251,7 +2260,7 @@ function FieldMappingEditor({
               type="button"
               onClick={addArField}
               disabled={selectableFieldIds.every(fieldId => mapping.arFieldIds.includes(fieldId))}
-              className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition"
+              className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-3 py-1.5 rounded-lg transition"
             >
               + Add field
             </button>
@@ -2271,7 +2280,7 @@ function FieldMappingEditor({
                   <button
                     type="button"
                     onClick={() => removeArField(i)}
-                    className="p-1.5 text-[var(--rf-text-tertiary)] hover:text-rose-500 hover:bg-[var(--rf-danger-subtle)] rounded-md transition"
+                    className="p-1.5 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-md transition"
                   >
                     <X className="w-4 h-4" />
                   </button>

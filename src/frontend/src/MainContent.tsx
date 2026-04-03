@@ -34,13 +34,13 @@ function wordDiff(oldText: string, newText: string): DiffToken[] {
 
 function DiffText({ oldText, newText, fullHighlight = false, mode = 'redline' }: { oldText: string; newText: string; fullHighlight?: boolean; mode?: 'redline' | 'blackline' }) {
   if (mode === 'blackline') return <span>{newText}</span>;
-  if (fullHighlight) return <span className="bg-emerald-100 text-emerald-900 rounded px-0.5">{newText}</span>;
+  if (fullHighlight) return <span className="bg-[var(--rf-success-subtle)] text-[var(--rf-success)] rounded px-0.5">{newText}</span>;
   const tokens = wordDiff(oldText, newText);
   return (
     <span>
       {tokens.map((tok, i) => {
         if (tok.type === 'same') return <span key={i}>{tok.text}</span>;
-        if (tok.type === 'added') return <mark key={i} className="bg-blue-100 text-blue-900 rounded px-0.5 not-italic">{tok.text}</mark>;
+        if (tok.type === 'added') return <mark key={i} className="bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] rounded px-0.5 not-italic">{tok.text}</mark>;
         return <del key={i} className="text-[var(--rf-text-tertiary)] line-through bg-[var(--rf-danger-subtle)] rounded px-0.5">{tok.text}</del>;
       })}
     </span>
@@ -265,7 +265,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
         transition={{ duration: 0.2 }}
       />
       <motion.div
-        className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
+        className="relative bg-white w-full max-w-lg rounded-[22px] shadow-2xl flex flex-col overflow-hidden border border-[var(--rf-border)]"
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
@@ -277,7 +277,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
             <span className="text-[var(--rf-text-tertiary)] text-xs ml-1 line-clamp-1 max-w-[200px]">\u2014 {feature.title || feature.summary}</span>
           </div>
           {!loading && (
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 text-[var(--rf-text-tertiary)] rounded-lg transition"><X className="w-4 h-4" /></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] rounded-lg transition"><X className="w-4 h-4" /></button>
           )}
         </div>
 
@@ -285,7 +285,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
           {loading ? (
             <div className="flex flex-col items-center py-8 gap-4">
               <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center">
-                <div className="w-5 h-5 border-[2.5px] border-[var(--rf-brand-subtle)] border-t-blue-600 rounded-full spin-slow" />
+                <div className="w-5 h-5 border-[2.5px] border-[rgba(43,89,74,0.12)] border-t-[var(--rf-brand)] rounded-full spin-slow" />
               </div>
               <div className="text-center">
                 <p className="font-bold text-[var(--rf-text)] text-sm">Refining feature\u2026</p>
@@ -786,7 +786,7 @@ export function MainContent({
           <div className="relative flex flex-col gap-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex items-start gap-4">
-                <div className="flex h-16 w-16 items-center justify-center rounded-[22px] border border-[var(--rf-border)] bg-white shadow-lg shadow-slate-900/5">
+                <div className="flex h-16 w-16 items-center justify-center rounded-[22px] border border-[var(--rf-border)] bg-white shadow-lg shadow-[var(--rf-shadow-sm)]">
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(53,113,95,0.18),rgba(53,113,95,0.05))]">
                     <Sparkles className="h-6 w-6 text-[var(--rf-brand)] animate-pulse" />
                   </div>
@@ -871,7 +871,7 @@ export function MainContent({
                             {step.shortLabel}
                           </span>
                           {isDone ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            <CheckCircle2 className="h-4 w-4 text-[var(--rf-success)]" />
                           ) : isCurrent ? (
                             <Clock3 className="h-4 w-4 text-[var(--rf-brand)]" />
                           ) : (
@@ -929,7 +929,7 @@ export function MainContent({
                     Project scope: <span className="text-[var(--rf-brand)]">{liveSources?.projectKey === '*' ? 'Global workspace' : liveSources?.projectKey || projectKey}</span>
                   </div>
                   <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
-                    Domain guidance: <span className={liveSources?.domainContextApplied ? 'text-emerald-700' : 'text-[var(--rf-text-tertiary)]'}>{liveSources?.domainContextApplied ? 'Applied' : 'Not configured'}</span>
+                    Domain guidance: <span className={liveSources?.domainContextApplied ? 'text-[var(--rf-success)]' : 'text-[var(--rf-text-tertiary)]'}>{liveSources?.domainContextApplied ? 'Applied' : 'Not configured'}</span>
                   </div>
                 </div>
               </div>
@@ -960,7 +960,7 @@ export function MainContent({
                     const featureStatus = liveFeatureProgressById.get(feature.id) ?? (liveArProgress?.completed === liveArProgress?.total && liveArProgress?.total ? 'complete' : i === 0 ? 'active' : 'pending');
                     const featureWidth = featureStatus === 'complete' ? '100%' : featureStatus === 'active' ? '62%' : '16%';
                     const featureTone = featureStatus === 'complete'
-                      ? 'from-emerald-500/80 to-emerald-400/95'
+                      ? 'from-[var(--rf-success)] to-[rgba(58,107,83,0.9)]'
                       : featureStatus === 'active'
                         ? 'from-[rgba(35,74,61,0.55)] to-[rgba(53,113,95,0.95)]'
                         : 'from-[rgba(35,74,61,0.12)] to-[rgba(35,74,61,0.24)]';
@@ -993,7 +993,7 @@ export function MainContent({
                           </div>
                           <div className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
                             featureStatus === 'complete'
-                              ? 'bg-emerald-50 text-emerald-700'
+                              ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]'
                               : featureStatus === 'active'
                                 ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
                                 : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'
@@ -1193,7 +1193,7 @@ export function MainContent({
               {features.some(f => f.pendingRefinement) && (
                 <>
                   <motion.button onClick={discardAllProposed} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-lg hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
-                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-emerald-600 hover:bg-[var(--rf-success-subtle)]0 text-white text-xs font-bold rounded-lg transition shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
+                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-[var(--rf-success)] hover:bg-[var(--rf-success)] text-white text-xs font-bold rounded-lg transition shadow-sm shadow-[var(--rf-success)]/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
                 </>
               )}
 
@@ -1210,7 +1210,7 @@ export function MainContent({
               <div className="relative">
                 <motion.button
                   onClick={() => setShowBulkRefine(!showBulkRefine)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition shadow-sm ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-slate-900' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'}`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition shadow-sm ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'}`}
                   whileTap={{ scale: 0.97 }}
                 >
                   <Sparkles className="w-4 h-4" />
@@ -1284,7 +1284,7 @@ export function MainContent({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-blue-900/5 border border-[var(--rf-border)]">
+            <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-[var(--rf-shadow-sm)] border border-[var(--rf-border)]">
               <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
             </div>
             <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
@@ -1365,7 +1365,7 @@ export function MainContent({
                                         <button
                                           type="button"
                                           onClick={() => void router.navigate(storyUrl)}
-                                          className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-blue-900 transition"
+                                          className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition"
                                           title="Open referenced story"
                                         >
                                           {story.key}
@@ -1465,7 +1465,7 @@ export function MainContent({
                 >
                   <div className="flex flex-col sm:flex-row">
                     {/* Left Accent Strip */}
-                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]0' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]0' : 'bg-[var(--rf-brand-muted)]0'}`} />
+                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]' : 'bg-[var(--rf-brand-muted)]'}`} />
 
                     <div className="flex-1 p-5 sm:p-6">
                       {/* Header Row */}
@@ -1494,8 +1494,8 @@ export function MainContent({
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {isEditing ? (
                             <>
-                              <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-slate-200 rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
-                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-[var(--rf-success-subtle)]0 rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
+                              <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
+                              <motion.button onClick={saveEditing} className="px-3 py-1.5 text-xs font-bold text-white bg-[var(--rf-success)] hover:bg-[var(--rf-success)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-success)]/20" whileTap={{ scale: 0.97 }}><Check className="w-3.5 h-3.5" /> Save</motion.button>
                             </>
                           ) : (
                             <>
@@ -1509,7 +1509,7 @@ export function MainContent({
                                 <div className="flex items-center gap-1">
                                   <motion.button
                                     onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
-                                    className="px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-blue-100 shadow-sm"
+                                    className="px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-[var(--rf-brand-subtle)] shadow-sm"
                                     whileTap={{ scale: 0.97 }}
                                   >
                                     <Check className="w-3.5 h-3.5" /> {feature.jiraIssueKey}
@@ -1532,7 +1532,7 @@ export function MainContent({
                                   onClick={() => onPushFeature(idx)}
                                   disabled={!feature.isAccepted}
                                   title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
-                                  className="px-3 py-1.5 text-[11px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-slate-300 disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
+                                  className="px-3 py-1.5 text-[11px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
                                   whileTap={{ scale: 0.97 }}
                                 >
                                   <Upload className="w-3.5 h-3.5" /> Push
@@ -1550,7 +1550,7 @@ export function MainContent({
                            </div>
                            <div className="flex items-center gap-2">
                              <motion.button onClick={() => clearPendingRemoval(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Keep Instead</motion.button>
-                             <motion.button onClick={() => removeFeatureAt(idx)} className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm shadow-rose-600/20" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
+                             <motion.button onClick={() => removeFeatureAt(idx)} className="px-4 py-2 text-xs font-bold text-white bg-[var(--rf-danger)] hover:bg-[var(--rf-danger)] rounded-lg shadow-sm shadow-[var(--rf-danger)]/20" whileTap={{ scale: 0.97 }}>Confirm Removal</motion.button>
                            </div>
                         </div>
                       )}
@@ -1567,21 +1567,21 @@ export function MainContent({
                           proposed.acceptanceRequirements || [],
                         );
                         return (
-                          <div className="mb-5 p-4 rounded-2xl bg-amber-50/50 border border-amber-200">
+                          <div className="mb-5 p-4 rounded-2xl bg-[var(--rf-warning-subtle)]/40 border border-[rgba(179,94,48,0.18)]">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                              <h4 className="text-amber-700 font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> AI Suggested Refinements</h4>
+                              <h4 className="text-[var(--rf-warning)] font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> AI Suggested Refinements</h4>
 
                               <div className="flex flex-wrap items-center gap-3">
-                                <div className="flex items-center bg-white p-1 rounded-lg border border-amber-200 shadow-sm">
+                                <div className="flex items-center bg-white p-1 rounded-lg border border-[rgba(179,94,48,0.18)] shadow-sm">
                                   <button
                                     onClick={() => setDiffMode('redline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
                                   >
                                     Redline
                                   </button>
                                   <button
                                     onClick={() => setDiffMode('blackline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-amber-100 text-amber-900' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
                                   >
                                     Blackline
                                   </button>
@@ -1618,7 +1618,7 @@ export function MainContent({
                                     const oldAr = row.oldAr;
                                     const isNew = row.isNew;
                                     return (
-                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-blue-100'}`}>
+                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-[rgba(43,89,74,0.12)]'}`}>
                                         {isNew && <div className="text-[10px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
                                         {ar.given && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
                                         {ar.when && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
@@ -1654,7 +1654,7 @@ export function MainContent({
                               <div className="flex items-center justify-between mb-4 pb-2">
                                 <h4 className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Acceptance Criteria</h4>
                                 {isEditing && (
-                                  <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
+                                  <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
                                 )}
                               </div>
                               <div className="space-y-2.5">

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Sparkles, Database, FileText, Orbit } from 'lucide-react';
+import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { UsageMeter } from './UsageMeter';
 
@@ -37,12 +37,12 @@ interface SidebarProps {
   onRemoveRunAttachment: (attachmentId: string) => void;
 }
 
-const fadeUpVariant = {
-  hidden: { opacity: 0, y: 12 },
+const fadeUp = {
+  hidden: { opacity: 0, y: 10 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.05, duration: 0.4, ease: [0.16, 1, 0.3, 1] as const },
+    transition: { delay: i * 0.05, duration: 0.38, ease: [0.16, 1, 0.3, 1] as const },
   }),
 };
 
@@ -90,11 +90,10 @@ export function Sidebar({
   const availableProject = availableProjects.find(p => p.key === projectKey);
   const projectTitle = projectKey === '*'
     ? 'Global Workspace'
-    : `${projectKey}${availableProject?.name ? ` \u00b7 ${availableProject.name}` : ''}`;
+    : `${projectKey}${availableProject?.name ? ` · ${availableProject.name}` : ''}`;
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
-  const attachmentChipLabel = runAttachments.length === 1 ? '1 file attached' : `${runAttachments.length} files attached`;
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -112,158 +111,155 @@ export function Sidebar({
       className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden text-[var(--rf-sidebar-text)]"
       style={{ width: width ?? 380 }}
     >
-      {/* Header */}
-      <motion.div
-        className="relative z-[1] px-6 h-[96px] flex items-center justify-between shrink-0 border-b border-white/45 bg-[linear-gradient(180deg,rgba(255,255,255,0.52),rgba(255,255,255,0.22))] backdrop-blur-xl"
-        variants={fadeUpVariant}
+      {/* ── Header ── */}
+      <motion.header
+        className="relative z-[1] px-5 h-[68px] flex items-center justify-between shrink-0 border-b border-[rgba(43,89,74,0.08)] bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl"
+        variants={fadeUp}
         initial="hidden"
         animate="visible"
         custom={0}
       >
-        <div className="min-w-0 flex items-center gap-3">
+        {/* Brand */}
+        <div className="flex items-center gap-3 min-w-0">
           {brandingLogoUrl && !logoLoadFailed ? (
-            <div className="shrink-0 min-h-[48px] max-w-[144px] rounded-2xl border border-[var(--rf-sidebar-border)] bg-gradient-to-br from-white/95 via-[var(--rf-sidebar-card)] to-[var(--rf-sidebar-card)] px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-black/5 backdrop-blur-sm flex items-center justify-center">
-              <img
-                src={brandingLogoUrl}
-                alt="Workspace logo"
-                loading="lazy"
-                onError={() => setLogoLoadFailed(true)}
-                className="h-8 w-auto max-w-[116px] object-contain"
-              />
-            </div>
+            <img
+              src={brandingLogoUrl}
+              alt="Workspace logo"
+              loading="lazy"
+              onError={() => setLogoLoadFailed(true)}
+              className="h-7 w-auto max-w-[100px] object-contain rounded-lg"
+            />
           ) : null}
-          <div className="min-w-0">
-            <div className="flex items-center gap-2.5">
-              <h1
-                className="font-bold text-[var(--rf-text)] text-lg tracking-tight cursor-pointer hover:text-[var(--rf-brand)] transition-colors"
-                onClick={() => setViewMode('generate')}
-              >
-                Refinely
-              </h1>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-white/80 text-[var(--rf-brand)] border border-[rgba(43,89,74,0.12)] shadow-sm">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)]" />
-                {tierName}
-              </span>
-            </div>
-            <p className="mt-1 text-[11px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">
-              Requirement to Backlog
-            </p>
-          </div>
+          <button
+            onClick={() => setViewMode('generate')}
+            className="font-semibold text-[15px] text-[var(--rf-text)] tracking-tight hover:text-[var(--rf-brand)] transition-colors leading-none"
+            style={{ fontFamily: 'Fraunces, serif' }}
+          >
+            Refinely
+          </button>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.12em] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.14)]">
+            <span className="h-1 w-1 rounded-full bg-[var(--rf-brand)]" />
+            {tierName}
+          </span>
         </div>
-        <div className="flex items-center gap-1">
+
+        {/* Actions */}
+        <div className="flex items-center gap-0.5">
           {isAdmin && (
-            <motion.button
+            <button
               onClick={() => setViewMode('settings')}
-              className={`p-2 rounded-lg transition-colors ${viewMode === 'settings' ? 'bg-[var(--rf-sidebar-card)] text-[var(--rf-text)] shadow-sm' : 'text-[var(--rf-sidebar-text-muted)] hover:bg-[var(--rf-sidebar-card)] hover:text-[var(--rf-text)]'}`}
+              className={`p-2 rounded-lg transition-colors ${viewMode === 'settings' ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'text-[var(--rf-sidebar-text-muted)] hover:bg-white/70 hover:text-[var(--rf-text)]'}`}
               title="Settings"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
             >
               <Settings className="w-4 h-4" />
-            </motion.button>
+            </button>
           )}
-          <motion.button
+          <button
             onClick={onToggleSidebar}
-            className="p-2 rounded-lg transition-colors text-[var(--rf-sidebar-text-muted)] hover:bg-[var(--rf-sidebar-card)] hover:text-[var(--rf-text)]"
-            title="Collapse Sidebar"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            className="p-2 rounded-lg transition-colors text-[var(--rf-sidebar-text-muted)] hover:bg-white/70 hover:text-[var(--rf-text)]"
+            title="Collapse sidebar"
           >
             <PanelLeftClose className="w-4 h-4" />
-          </motion.button>
+          </button>
         </div>
-      </motion.div>
+      </motion.header>
 
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-5 py-5 gap-4 overflow-y-auto no-scrollbar">
-        {/* Project context card */}
+      {/* ── Scrollable body ── */}
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-3 overflow-y-auto no-scrollbar">
+
+        {/* ── Workspace card ── */}
         <motion.div
-          className="rf-sidebar-card overflow-hidden px-4 py-3.5"
-          variants={fadeUpVariant}
+          className="rf-sidebar-card overflow-hidden"
+          variants={fadeUp}
           initial="hidden"
           animate="visible"
           custom={1}
         >
-          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.24),transparent)]" />
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.1)] bg-white shadow-sm">
-                  <Orbit className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Workspace</div>
-                  <div className="text-sm font-semibold text-[var(--rf-text)] truncate">{projectTitle}</div>
-                </div>
+          {/* Top shine */}
+          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.2),transparent)]" />
+
+          {/* Project row */}
+          <div className="px-4 pt-4 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[rgba(43,89,74,0.1)] bg-[var(--rf-brand-subtle)] shadow-sm">
+                <Orbit className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)] mb-0.5">Workspace</div>
+                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate leading-tight">{projectTitle}</div>
+              </div>
+              {/* Native select styled as a chip */}
+              <div className="relative shrink-0">
+                <select
+                  value={projectKey}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setProjectKey(nextValue);
+                    if (nextValue === '*') {
+                      if (contextMode === 'project') setContextMode('undecided');
+                    } else {
+                      setContextMode('project');
+                    }
+                  }}
+                  className="appearance-none pr-6 pl-2.5 py-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white/80 text-[11px] font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand)]/20 transition-all shadow-sm cursor-pointer max-w-[130px]"
+                >
+                  <option value="*">No project</option>
+                  {availableProjects.map(project => (
+                    <option key={project.key} value={project.key}>
+                      {project.key} – {project.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
               </div>
             </div>
-            <select
-              value={projectKey}
-              onChange={(e) => {
-                const nextValue = e.target.value;
-                setProjectKey(nextValue);
-                if (nextValue === '*') {
-                  if (contextMode === 'project') setContextMode('undecided');
-                } else {
-                  setContextMode('project');
-                }
-              }}
-              className="shrink-0 min-w-[124px] max-w-[138px] rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/75 px-2 py-1.5 text-[11px] font-medium text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] transition-all shadow-sm"
-            >
-              <option value="*" className="text-[var(--rf-text)]">No project selected</option>
-              {availableProjects.map(project => (
-                <option key={project.key} value={project.key} className="text-[var(--rf-text)]">
-                  {project.key} - {project.name}
-                </option>
-              ))}
-            </select>
+
+            {/* Hint text */}
+            {projectKey === '*' && availableProjects.length > 0 && (
+              <p className="mt-2 text-[11px] text-[var(--rf-sidebar-text-muted)] leading-relaxed">
+                Select a project to unlock project-scoped backlog context and instructions.
+              </p>
+            )}
           </div>
-          {projectKey === '*' && availableProjects.length > 0 && (
-            <div className="mt-2 text-[11px] text-[var(--rf-sidebar-text-muted)]">
-              Select a project to unlock project-scoped backlog context and instructions.
-            </div>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
+
+          {/* Context mode toggles */}
+          <div className="px-4 pb-3 flex gap-2">
             <button
               type="button"
-              onClick={() => {
-                if (projectKey !== '*') setContextMode('project');
-              }}
+              onClick={() => { if (projectKey !== '*') setContextMode('project'); }}
               disabled={projectKey === '*'}
-              className={`inline-flex items-center rounded-xl px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition border shadow-sm ${
+              className={`flex-1 rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
                 contextMode === 'project'
-                  ? 'bg-[linear-gradient(135deg,var(--rf-brand),#3b705f)] text-white border-[var(--rf-brand)]'
-                  : 'bg-white/85 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.12)] hover:border-[var(--rf-brand-subtle)]'
+                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
+                  : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               Use project
             </button>
             <button
               type="button"
-              onClick={() => {
-                setProjectKey('*');
-                setContextMode('global');
-              }}
-              className={`inline-flex items-center rounded-xl px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition border shadow-sm ${
+              onClick={() => { setProjectKey('*'); setContextMode('global'); }}
+              className={`flex-1 rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
                 contextMode === 'global'
-                  ? 'bg-[linear-gradient(135deg,var(--rf-brand),#3b705f)] text-white border-[var(--rf-brand)]'
-                  : 'bg-white/85 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.12)] hover:border-[var(--rf-brand-subtle)]'
+                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
+                  : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
               }`}
             >
               Global
             </button>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+
+          {/* Cache + Docs stats row */}
+          <div className="mx-4 mb-4 flex gap-2">
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-[rgba(43,89,74,0.1)] bg-white/78 px-2.5 py-2 text-left shadow-sm transition hover:border-[rgba(43,89,74,0.16)]"
+              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
-              <div className="flex h-6 w-6 items-center justify-center rounded-xl bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.08)]">
-                <Database className="h-3 w-3 text-[var(--rf-brand)]" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
-                <div className="text-[11px] font-semibold text-[var(--rf-text)]">
+              <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <div className="min-w-0 text-left">
+                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
+                <div className="text-[11px] font-semibold text-[var(--rf-text)] truncate">
                   {projectKey !== '*' ? 'Project cache' : 'Select project'}
                 </div>
               </div>
@@ -271,81 +267,58 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="inline-flex min-w-0 items-center gap-2 rounded-2xl border border-[rgba(43,89,74,0.1)] bg-white/78 px-2.5 py-2 text-left shadow-sm transition hover:border-[rgba(43,89,74,0.16)]"
+              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
-              <div className="flex h-6 w-6 items-center justify-center rounded-xl bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.08)]">
-                <FileText className="h-3 w-3 text-[var(--rf-brand)]" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--rf-sidebar-text-muted)]">Docs</div>
-                <div className="text-[11px] font-semibold text-[var(--rf-text)]">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <div className="min-w-0 text-left">
+                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Docs</div>
+                <div className="text-[11px] font-semibold text-[var(--rf-text)] truncate">
                   {activeWiDocs.length > 0 ? `${activeWiDocs.length} stored` : 'None stored'}
                 </div>
               </div>
             </button>
           </div>
+
+          {/* Context not ready warning */}
           {!contextReady && (
-            <div className="mt-2.5 text-[11px] text-[var(--rf-warning)] font-medium">
-              Choose either a project-specific run or a global run before entering requirements.
+            <div className="mx-4 mb-4 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.14)] px-3 py-2 text-[11px] font-medium text-[var(--rf-warning)]">
+              Choose project-specific or global context before entering your requirement.
             </div>
           )}
         </motion.div>
 
-        {/* Requirement scope label */}
+        {/* ── Input card ── */}
         <motion.div
-          className="flex items-center justify-between gap-3 px-1 mt-1"
-          variants={fadeUpVariant}
+          className="rf-sidebar-card flex flex-col overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/20 transition-shadow"
+          variants={fadeUp}
           initial="hidden"
           animate="visible"
           custom={2}
         >
-          <label className="text-[10px] font-bold text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest">Input Message</label>
-          {originIssueKey && (
-            <span className="rounded-full bg-white/78 border border-[rgba(43,89,74,0.12)] px-2.5 py-1 text-[10px] font-bold text-[var(--rf-brand)] shadow-sm">
-              Source: {originIssueKey}
-            </span>
-          )}
-        </motion.div>
-
-        {/* Textarea */}
-        <motion.div
-          className="rf-sidebar-card flex flex-col overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/30 transition-shadow bg-white"
-          variants={fadeUpVariant}
-          initial="hidden"
-          animate="visible"
-          custom={3}
-        >
-          <div className="relative border-b border-white/45 bg-[radial-gradient(circle_at_top,rgba(43,89,74,0.14),transparent_58%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,239,230,0.92))] px-4 py-2.5">
-            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.28),transparent)]" />
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.1)] bg-white shadow-sm">
-                  <Sparkles className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Run input</div>
-                    <span className="rounded-full border border-[var(--rf-brand)]/15 bg-white/85 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shadow-sm">
-                      text + files
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-[11px] font-medium leading-snug text-[var(--rf-text-tertiary)]">
-                    Add a short prompt, files, or both.
-                  </div>
-                </div>
-              </div>
-              <motion.button
-                type="button"
-                onClick={() => runAttachmentInputRef.current?.click()}
-                disabled={isWorking}
-                title="Attach supporting files for this run only"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--rf-brand)]/15 bg-white px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-brand)] shadow-sm transition hover:border-[var(--rf-brand)]/35 hover:text-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-40"
-                whileTap={{ scale: 0.97 }}
-              >
-                <Paperclip className="w-3.5 h-3.5" />
-                <span>{runAttachmentParseState ? 'Parsing' : runAttachments.length ? 'Add more' : 'Add files'}</span>
-              </motion.button>
+          {/* Card header */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[rgba(43,89,74,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,247,244,0.7))]">
+            <div className="flex items-center gap-2">
+              {originIssueKey ? (
+                <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.14)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                  {originIssueKey}
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">
+                  Requirement
+                </span>
+              )}
             </div>
+            <motion.button
+              type="button"
+              onClick={() => runAttachmentInputRef.current?.click()}
+              disabled={isWorking}
+              title="Attach supporting files for this run only"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)] shadow-sm transition-all hover:border-[rgba(43,89,74,0.28)] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
+              whileTap={{ scale: 0.97 }}
+            >
+              <Paperclip className="w-3 h-3" />
+              <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
+            </motion.button>
             <input
               ref={runAttachmentInputRef}
               type="file"
@@ -355,109 +328,118 @@ export function Sidebar({
               className="hidden"
               disabled={isWorking}
             />
-            {runAttachments.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {runAttachments.map((attachment) => (
-                  <div
-                    key={attachment.id}
-                    className="group flex items-center gap-2 rounded-2xl border border-[var(--rf-brand)]/15 bg-white/96 px-2.5 py-1.5 shadow-[0_12px_28px_rgba(43,89,74,0.08)]"
-                  >
-                    <div className="min-w-0">
-                      <div className="max-w-[160px] truncate text-[11px] font-bold text-[var(--rf-text)]">{attachment.filename}</div>
-                      <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveRunAttachment(attachment.id)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-transparent text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)]"
-                      title={`Remove ${attachment.filename}`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
+
+          {/* Attached files */}
+          {runAttachments.length > 0 && (
+            <div className="px-4 pt-3 flex flex-wrap gap-1.5">
+              {runAttachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="flex items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5"
+                >
+                  <div className="min-w-0">
+                    <div className="max-w-[140px] truncate text-[11px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
+                    <div className="text-[9px] font-medium text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveRunAttachment(attachment.id)}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[var(--rf-text-tertiary)] transition hover:bg-white hover:text-[var(--rf-text)]"
+                    title={`Remove ${attachment.filename}`}
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Textarea */}
           <textarea
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
-            placeholder="Type your request here, or leave this blank and attach a file with the details. You can also do both."
+            placeholder="Type your requirement here, or leave blank and attach a file. You can also do both."
             disabled={isWorking || !contextReady}
-            className="min-h-[220px] h-[clamp(220px,36vh,400px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
+            className="min-h-[200px] h-[clamp(200px,32vh,380px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
           />
-          <div className="flex items-center justify-between gap-3 border-t border-white/45 px-4 py-3 bg-[linear-gradient(180deg,rgba(247,250,249,0.88),rgba(238,244,241,0.88))]">
-            <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">
-              {runAttachments.length > 0 ? `${attachmentChipLabel} · ` : ''}{wordCount} words
-            </div>
-            <div className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+
+          {/* Card footer */}
+          <div className="flex items-center justify-between gap-3 border-t border-[rgba(43,89,74,0.06)] px-4 py-2.5 bg-[linear-gradient(180deg,rgba(248,247,244,0.7),rgba(236,231,220,0.5))]">
+            <span className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+              {wordCount > 0 ? `${wordCount} word${wordCount !== 1 ? 's' : ''}` : 'No input yet'}
+            </span>
+            <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] border transition-all ${
               hasPromptInput
-                ? 'bg-white/88 text-[var(--rf-brand)] border border-[rgba(43,89,74,0.12)] shadow-sm'
-                : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'
+                ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[rgba(43,89,74,0.14)]'
+                : 'bg-white/60 text-[var(--rf-text-tertiary)] border-[rgba(0,0,0,0.06)]'
             }`}>
-              {hasPromptInput ? 'Ready to run' : 'Add input'}
-            </div>
+              {hasPromptInput ? 'Ready' : 'Add input'}
+            </span>
           </div>
         </motion.div>
 
+        {/* ── Attachment parse state / error ── */}
         {(runAttachmentParseState || runAttachmentError) && (
           <motion.div
-            className={`rf-sidebar-card px-4 py-3 ${runAttachmentError ? 'border-[var(--rf-danger-subtle)] bg-[linear-gradient(180deg,#fff7f8,#f8e9eb)]' : ''}`}
-            variants={fadeUpVariant}
+            className={`rf-sidebar-card px-4 py-3 ${runAttachmentError ? 'border-[rgba(158,62,71,0.2)] bg-[var(--rf-danger-subtle)]' : ''}`}
+            variants={fadeUp}
             initial="hidden"
             animate="visible"
-            custom={3.5}
+            custom={2.5}
           >
             {runAttachmentParseState && (
-              <div className="space-y-2 mb-3 last:mb-0">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">
-                  {runAttachmentParseState.stage === 'reading' ? 'Reading attachment' : 'Parsing attachment'}
+              <div className="space-y-1">
+                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                  {runAttachmentParseState.stage === 'reading' ? 'Reading file' : 'Parsing file'}
                 </div>
-                <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{runAttachmentParseState.filename}</div>
+                <div className="text-[12px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentParseState.filename}</div>
               </div>
             )}
             {runAttachmentError && (
-              <div className="space-y-2 mb-3 last:mb-0">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-danger)]">Attachment failed</div>
-                <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{runAttachmentError}</div>
+              <div className="space-y-1">
+                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-danger)]">Attachment failed</div>
+                <div className="text-[12px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentError}</div>
               </div>
             )}
           </motion.div>
         )}
 
-        {/* Actions */}
+        {/* ── Actions ── */}
         <motion.div
-          className="shrink-0 space-y-3 mt-1"
-          variants={fadeUpVariant}
+          className="shrink-0 space-y-2.5 mt-0.5"
+          variants={fadeUp}
           initial="hidden"
           animate="visible"
-          custom={4}
+          custom={3}
         >
+          {/* Primary CTA */}
           <motion.button
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Monthly generation limit reached.' : ''}
-            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#21473b,#2b594a,#3d7867)] hover:brightness-[1.03] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-sm font-bold py-4 rounded-[20px] transition-colors flex items-center justify-center gap-2 shadow-[0_22px_42px_-22px_rgba(43,89,74,0.55)] border border-[rgba(255,255,255,0.16)]"
-            whileHover={!brainstormDisabled ? { scale: 1.01, boxShadow: '0 18px 34px -18px rgba(43, 89, 74, 0.5)' } : {}}
+            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[14px] rounded-[18px] transition-all flex items-center justify-center gap-2 shadow-[0_16px_36px_-20px_rgba(43,89,74,0.6)] border border-white/10"
+            whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
             {isWorking ? (
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Working...</span>
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Working…</span>
               </div>
             ) : (
               <>
-                <Zap className={`w-4 h-4 ${requirement.trim() ? 'fill-white' : ''}`} />
+                <Zap className={`w-3.5 h-3.5 ${requirement.trim() ? 'fill-white' : ''}`} />
                 <span>{isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
               </>
             )}
           </motion.button>
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* Secondary actions */}
+          <div className="grid grid-cols-2 gap-2">
             <motion.button
               onClick={onNewSession}
-              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-xs font-semibold flex items-center justify-center gap-1.5"
+              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[11px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
               whileTap={{ scale: 0.97 }}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -465,7 +447,7 @@ export function Sidebar({
             </motion.button>
             <motion.button
               onClick={onOpenHistory}
-              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-xs font-semibold flex items-center justify-center gap-1.5"
+              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[11px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
               whileTap={{ scale: 0.97 }}
             >
               <Clock className="w-3.5 h-3.5" />
@@ -475,23 +457,23 @@ export function Sidebar({
         </motion.div>
       </div>
 
-      {/* Footer / Usage Meter */}
+      {/* ── Usage footer ── */}
       {!hasUnlimitedUsage && showUsage && (
         <motion.div
-          className="px-5 pb-5 pt-2 shrink-0"
-          initial={{ opacity: 0, y: 10 }}
+          className="px-4 pb-4 pt-1 shrink-0"
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="rf-sidebar-card relative overflow-hidden p-4">
-            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.22),transparent)]" />
+          <div className="rf-sidebar-card relative overflow-hidden px-4 py-3.5">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.18),transparent)]" />
             <button
               onClick={() => setShowUsage(false)}
-              className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-xl text-[var(--rf-text-tertiary)] transition hover:bg-white/75 hover:text-[var(--rf-text)]"
+              className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/80 hover:text-[var(--rf-text)]"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-3 h-3" />
             </button>
-            <UsageMeter usage={usage} limits={limits} tier={tier} className="pr-8" />
+            <UsageMeter usage={usage} limits={limits} tier={tier} className="pr-7" />
           </div>
         </motion.div>
       )}
