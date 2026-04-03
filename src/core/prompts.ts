@@ -371,8 +371,10 @@ DISCOVERY RULES:
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
-- Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
-- Provide exactly 4 suggestions per question.
+- Suggestions should be plain-language answer options, not overlapping helper phrases.
+- Each suggestion must be easy to understand on first read and should represent a meaningfully different answer path or policy direction.
+- Avoid near-synonyms, minor wording variants, or options that can all be true at the same time unless the distinction is explicit and useful.
+- Provide 2-4 suggestions per question, and only include an additional option when it is genuinely distinct.
 
 OUTPUT CONTRACT:
 Return JSON only in this shape:
@@ -447,7 +449,8 @@ RULES:
 - Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.
 - Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
 - Keep the wording direct and business-focused, but detailed enough to make the unresolved tradeoff explicit.
-- Provide exactly 4 suggestions per follow-up question, and make them medium-length starter answers that reflect likely business tradeoffs in this request.
+- Provide 2-4 suggestions per follow-up question, and make them plain-language alternatives that reflect genuinely different business tradeoffs.
+- Avoid overlapping or near-synonymous follow-up suggestions.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 

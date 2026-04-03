@@ -62,6 +62,12 @@ const DOMAIN_SIGNAL_STOPWORDS = new Set([
   'through', 'under', 'using', 'when', 'where', 'which', 'while', 'with', 'would',
 ]);
 
+const SUGGESTION_STOPWORDS = new Set([
+  'a', 'an', 'and', 'also', 'as', 'at', 'be', 'by', 'for', 'from', 'if', 'in', 'into', 'is',
+  'it', 'its', 'of', 'on', 'or', 'so', 'that', 'the', 'their', 'then', 'this', 'to', 'when',
+  'while', 'with',
+]);
+
 const CHANNEL_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   { label: 'WhatsApp', pattern: /\bwhats?app\b/i },
   { label: 'Phone', pattern: /\b(phone|call|voice)\b/i },
@@ -122,13 +128,13 @@ const DISCOVERY_TEMPLATES: DiscoveryTemplate[] = [
     categoryKey: 'information_architecture',
     intent: 'required_inputs',
     question: 'What minimum information must be captured or available for this to work correctly?',
-    suggestions: ['Identifiers only', 'Context plus reason', 'Full request details', 'Still undefined'],
+    suggestions: ['Identifier only', 'Identifier plus short reason', 'Identifier plus summary', 'Full interaction details'],
   },
   {
     categoryKey: 'information_architecture',
     intent: 'outputs_displays',
     question: 'What output, record, or display should this produce or update?',
-    suggestions: ['Create a record', 'Update existing record', 'Show a summary', 'Send a notification'],
+    suggestions: ['Only create or update the record', 'Also show a short summary', 'Also notify the owning team', 'Also update a follow-up queue or record'],
   },
   {
     categoryKey: 'information_architecture',
@@ -152,7 +158,7 @@ const DISCOVERY_TEMPLATES: DiscoveryTemplate[] = [
     categoryKey: 'business_rules',
     intent: 'decision_logic',
     question: 'What decision logic, threshold, or policy should change the outcome here?',
-    suggestions: ['Keyword based', 'Priority based', 'Role based', 'Threshold based'],
+    suggestions: ['Always create a new item', 'Reuse the existing item when it matches', 'Send uncertain cases for review', 'Apply different rules by channel or context'],
   },
   {
     categoryKey: 'state_lifecycle',
@@ -182,7 +188,7 @@ const DISCOVERY_TEMPLATES: DiscoveryTemplate[] = [
     categoryKey: 'edge_cases_exceptions',
     intent: 'conflicts_duplicates',
     question: 'What should happen if this conflicts with an existing item or would create a duplicate?',
-    suggestions: ['Update existing item', 'Create a new item', 'Ask for review', 'Ignore duplicate'],
+    suggestions: ['Reuse the existing item', 'Create a new separate item', 'Send the match for review', 'Block the duplicate path'],
   },
   {
     categoryKey: 'edge_cases_exceptions',
@@ -451,6 +457,105 @@ function uniqueStrings(values: unknown[]): string[] {
   return result;
 }
 
+function normalizeSuggestionComparisonKey(value: string): string {
+  return normalizeKey(value)
+    .split(' ')
+    .filter((token) => token && !SUGGESTION_STOPWORDS.has(token))
+    .join(' ');
+}
+
+function simplifySuggestionCopy(value: string): string {
+  return cleanText(value)
+    .replace(/\bmaterially\b/gi, 'really')
+    .replace(/\bsubsequent\b/gi, 'later')
+    .replace(/\butili[sz]e\b/gi, 'use')
+    .replace(/\bprior to\b/gi, 'before')
+    .replace(/\bdownstream\b/gi, 'follow-up')
+    .replace(/\bthere is enough detail to\b/gi, 'there is enough detail to')
+    .replace(/\s+/g, ' ')
+    .replace(/[.]+$/g, '')
+    .trim();
+}
+
+function overlapRatio(left: string, right: string): number {
+  const leftTokens = new Set(normalizeSuggestionComparisonKey(left).split(' ').filter(Boolean));
+  const rightTokens = new Set(normalizeSuggestionComparisonKey(right).split(' ').filter(Boolean));
+  if (!leftTokens.size || !rightTokens.size) return 0;
+
+  let shared = 0;
+  leftTokens.forEach((token) => {
+    if (rightTokens.has(token)) shared += 1;
+  });
+
+  const denominator = Math.max(leftTokens.size, rightTokens.size);
+  return denominator > 0 ? shared / denominator : 0;
+}
+
+function inferSuggestionArchetype(intent: string, value: string): string | null {
+  const normalized = normalizeKey(value);
+  const prefix = `${intent}:`;
+
+  if (/\b(no extra|no special|single active|only create|case only|create or update the case only)\b/.test(normalized)) return `${prefix}minimal_only`;
+  if (/\b(summary|short summary)\b/.test(normalized)) return `${prefix}summary`;
+  if (/\b(notify|notification|visible|visibility)\b/.test(normalized)) return `${prefix}notify_visibility`;
+  if (/\b(manual|review|triage)\b/.test(normalized)) return `${prefix}manual_review`;
+  if (/\b(existing|reuse|reopen|update the existing)\b/.test(normalized)) return `${prefix}existing_item`;
+  if (/\b(new|linked new|fresh item)\b/.test(normalized)) return `${prefix}new_item`;
+  if (/\b(admin|manager|supervisor|approv)\b/.test(normalized)) return `${prefix}approval`;
+  if (/\b(full|full email body|full interaction)\b/.test(normalized)) return `${prefix}full_detail`;
+  if (/\b(minimum|minimum usable|core summary|identifier|short summary)\b/.test(normalized)) return `${prefix}minimum_detail`;
+  if (/\b(retry|recovery|queue)\b/.test(normalized)) return `${prefix}retry_queue`;
+  if (/\b(alert|fail)\b/.test(normalized)) return `${prefix}fail_alert`;
+  if (/\b(all listed|every listed|all eligible)\b/.test(normalized)) return `${prefix}broad_path`;
+  if (/\bonly after|only allow|only when|while the others stay manual\b/.test(normalized)) return `${prefix}restricted_path`;
+  if (/\b(simple new assigned and resolved|single active state|new pending and closed)\b/.test(normalized)) return `${prefix}lifecycle_path`;
+
+  return null;
+}
+
+function normalizeSuggestionChoices(
+  categoryKey: ClarifyCategoryKey,
+  intent: string,
+  suggestions: string[],
+  input?: DiscoveryFallbackInput,
+): string[] {
+  const template = categoryTemplates(categoryKey).find((candidate) => candidate.intent === intent)
+    ?? categoryTemplates(categoryKey)[0];
+  const fallbackSuggestions = template
+    ? uniqueStrings([
+        ...contextualizeDiscoveryTemplate(template, input).suggestions,
+        ...template.suggestions,
+      ])
+    : [];
+  const candidates = uniqueStrings([
+    ...suggestions.map(simplifySuggestionCopy),
+    ...fallbackSuggestions.map(simplifySuggestionCopy),
+  ]);
+
+  const result: string[] = [];
+  const archetypes = new Set<string>();
+
+  for (const candidate of candidates) {
+    const normalizedCandidate = simplifySuggestionCopy(candidate);
+    if (!normalizedCandidate) continue;
+
+    const archetype = inferSuggestionArchetype(intent, normalizedCandidate);
+    if (archetype && archetypes.has(archetype)) continue;
+    if (result.some((existing) => {
+      const left = normalizeSuggestionComparisonKey(existing);
+      const right = normalizeSuggestionComparisonKey(normalizedCandidate);
+      return left === right || left.includes(right) || right.includes(left) || overlapRatio(existing, normalizedCandidate) >= 0.72;
+    })) continue;
+
+    result.push(normalizedCandidate);
+    if (archetype) archetypes.add(archetype);
+    if (result.length >= 4) break;
+  }
+
+  if (result.length >= 2) return result;
+  return result.length ? result : candidates.slice(0, 2);
+}
+
 function categoryTemplates(categoryKey: ClarifyCategoryKey): DiscoveryTemplate[] {
   return DISCOVERY_TEMPLATES.filter((template) => template.categoryKey === categoryKey);
 }
@@ -545,12 +650,12 @@ function contextualizeDiscoveryTemplate(
         ...template,
         question: `What minimum details from the ${ctx.interactionLabel}${channelScope} must be captured before the ${ctx.businessObject} can be created or updated correctly?`,
         suggestions: uniqueStrings([
-          `${ctx.identifier}, the reason for contact, and the core summary should be captured before the ${ctx.businessObject} is created`,
-          'Capture the minimum usable context first, then let the owning team add deeper detail during follow-up',
+          `Require ${ctx.identifier} before the ${ctx.businessObject} can be created`,
+          `Require ${ctx.identifier} and the reason for contact before the ${ctx.businessObject} can be created`,
           ctx.channels.includes('Email')
-            ? 'Capture the sender, subject, and a short summary, while leaving the full email body as reference material'
-            : 'Capture the source details and short summary first, without requiring every interaction detail up front',
-          `Store the full interaction context only when it materially helps the next team work the ${ctx.businessObject}`,
+            ? 'For email, require the sender, subject, and short summary before creating the case'
+            : `Require ${ctx.identifier}, the reason for contact, and a short summary before creating the ${ctx.businessObject}`,
+          `Require the full interaction details before the ${ctx.businessObject} can be created automatically`,
         ]).slice(0, 4),
       };
     case 'outputs_displays':
@@ -558,10 +663,10 @@ function contextualizeDiscoveryTemplate(
         ...template,
         question: `Besides the ${ctx.businessObject} itself, what downstream record, summary, or notification should this flow also update?`,
         suggestions: uniqueStrings([
-          `Create or update the ${ctx.businessObject} and also surface a concise summary for the owning team`,
-          `Update the existing ${ctx.businessObject} only, and avoid extra downstream records unless the workflow truly changes`,
-          'Notify the owning team and keep the source interaction visible so they can understand the context quickly',
-          'Keep the downstream footprint light and only expose what later teams truly need for follow-up',
+          `Only create or update the ${ctx.businessObject}; do not create any extra downstream output`,
+          `Also show a short summary so the owning team can understand the ${ctx.interactionLabel} quickly`,
+          'Also notify the owning team when the record is ready for follow-up',
+          'Also update a follow-up queue or record that downstream teams already work from',
         ]).slice(0, 4),
       };
     case 'entity_linkage':
@@ -608,7 +713,7 @@ function contextualizeDiscoveryTemplate(
         suggestions: uniqueStrings([
           `Always create a new ${ctx.businessObject} because each interaction should stand on its own`,
           `Reuse the existing open ${ctx.businessObject} when the identifier and context clearly match`,
-          'Route uncertain matches for review rather than letting the automatic path make the final call',
+          'Send uncertain matches for review rather than letting the automatic path make the final call',
           `Apply different rules depending on ${ctx.decisionFactor}, with a clear tie-breaker when signals conflict`,
         ]).slice(0, 4),
       };
@@ -664,9 +769,9 @@ function contextualizeDiscoveryTemplate(
         question: `What should happen when the ${ctx.interactionLabel} appears to match an existing ${ctx.businessObject} and could create a duplicate?`,
         suggestions: uniqueStrings([
           `Reuse the open ${ctx.businessObject} when the interaction clearly belongs to the same unresolved issue`,
-          `Update the existing ${ctx.businessObject} and preserve the latest interaction as part of the record history`,
-          'Route duplicate conflicts for review whenever the match is plausible but not certain',
-          `Allow duplicate ${ctx.businessObjectPlural} only when an approved business reason justifies keeping them separate`,
+          `Create a new ${ctx.businessObject} when each interaction should stay separate even if the match looks close`,
+          'Send the possible duplicate for review whenever the match is plausible but not certain',
+          `Block duplicate ${ctx.businessObjectPlural} unless an approved business reason justifies keeping them separate`,
         ]).slice(0, 4),
       };
     case 'offline_failure_behavior':
@@ -734,12 +839,7 @@ function fallbackSuggestionsForIntent(
   intent: string,
   input?: DiscoveryFallbackInput,
 ): string[] {
-  const template = categoryTemplates(categoryKey).find((candidate) => candidate.intent === intent)
-    ?? categoryTemplates(categoryKey)[0];
-  if (!template) return [];
-
-  const contextual = contextualizeDiscoveryTemplate(template, input).suggestions;
-  return uniqueStrings([...contextual, ...template.suggestions]).slice(0, 4);
+  return normalizeSuggestionChoices(categoryKey, intent, [], input);
 }
 
 function splitGroupedQuestion(question: string): string[] {
@@ -787,10 +887,7 @@ function normalizeQuestions(
       category: labelForCategoryKey(question.categoryKey),
       intent: normalizedIntent,
       question: normalizedQuestion,
-      suggestions: uniqueStrings([
-        ...providedSuggestions,
-        ...fallbackSuggestionsForIntent(question.categoryKey, normalizedIntent, input),
-      ]).slice(0, 4),
+      suggestions: normalizeSuggestionChoices(question.categoryKey, normalizedIntent, providedSuggestions, input),
     });
   });
 
@@ -840,7 +937,12 @@ function buildFallbackQuestions(
       category: labelForCategoryKey(contextualTemplate.categoryKey),
       intent: contextualTemplate.intent,
       question: normalizedQuestion,
-      suggestions: uniqueStrings(contextualTemplate.suggestions).slice(0, 4),
+      suggestions: normalizeSuggestionChoices(
+        contextualTemplate.categoryKey,
+        contextualTemplate.intent,
+        contextualTemplate.suggestions,
+        input,
+      ),
     });
     if (questions.length >= needed) break;
   }

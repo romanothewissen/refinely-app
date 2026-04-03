@@ -224,8 +224,40 @@ test('validateAndRepairInitialDiscovery uses contextual fallback questions and s
   assert.match(renderedQuestions, /case/i);
   assert.match(renderedSuggestions, /phone|whatsapp|text|email|case/i);
   assert.ok(repaired.questions.every((question) => !question.question.includes('1.')));
-  assert.ok(repaired.questions.every((question) => question.suggestions.length === 4));
-  assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 40 && suggestion.length < 150)));
+  assert.ok(repaired.questions.every((question) => question.suggestions.length >= 2 && question.suggestions.length <= 4));
+  assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 30 && suggestion.length < 120)));
+});
+
+test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into distinct alternatives', () => {
+  const profile = normalizeDiscoveryProfile({
+    ambiguity: 'medium',
+    missingCategoryKeys: ['information_architecture'],
+    recommendedInitialCount: 4,
+    followupCap: 4,
+  });
+
+  const questions = finalizeInitialDiscoveryQuestions([
+    {
+      categoryKey: 'information_architecture',
+      category: 'Information Architecture',
+      intent: 'outputs_displays',
+      question: 'What output, record, or display should this produce or update?',
+      suggestions: [
+        'Also show a short summary so the owning team can understand the interaction quickly',
+        'Also surface a concise summary for the owning team',
+        'Also notify the owning team when the record is ready for follow-up',
+        'Notify the owning team as soon as the record is ready',
+      ],
+    },
+  ], profile, {
+    requirement: 'Create or update support cases from phone, WhatsApp, text, and email interactions.',
+  });
+
+  const target = questions.find((question) => question.intent === 'outputs_displays');
+  assert.ok(target);
+  assert.ok(target.suggestions.length >= 2 && target.suggestions.length <= 4);
+  assert.equal(target.suggestions.filter((suggestion) => /summary/i.test(suggestion)).length, 1);
+  assert.equal(target.suggestions.filter((suggestion) => /notify/i.test(suggestion)).length, 1);
 });
 
 test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total question cap', () => {
@@ -291,7 +323,7 @@ test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when 
   assert.match(followups[0].question, /phone|whatsapp|case/i);
 });
 
-test('discovery prompts enforce the fixed taxonomy and single-focus BA-style discovery contract', () => {
+test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery contract', () => {
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
@@ -316,7 +348,9 @@ test('discovery prompts enforce the fixed taxonomy and single-focus BA-style dis
   assert.match(clarifyPrompt, /categoryKey/);
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Prefer one visible question per main business decision/i);
-  assert.match(clarifyPrompt, /medium-length starter answers/i);
+  assert.match(clarifyPrompt, /plain-language answer options/i);
+  assert.match(clarifyPrompt, /Provide 2-4 suggestions per question/i);
+  assert.match(clarifyPrompt, /Avoid near-synonyms/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
   assert.match(clarifyPrompt, /Important domain signals/i);
@@ -324,13 +358,16 @@ test('discovery prompts enforce the fixed taxonomy and single-focus BA-style dis
   assert.match(clarifyPrompt, /company-specific internal terms/i);
   assert.doesNotMatch(clarifyPrompt, /one short sentence/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
+  assert.doesNotMatch(clarifyPrompt, /Provide exactly 4 suggestions/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
   assert.match(evaluatePrompt, /1-4 follow-up questions/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Prefer one visible follow-up question per remaining business gap/i);
-  assert.match(evaluatePrompt, /medium-length starter answers/i);
+  assert.match(evaluatePrompt, /plain-language alternatives/i);
+  assert.match(evaluatePrompt, /Provide 2-4 suggestions per follow-up question/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);
+  assert.doesNotMatch(evaluatePrompt, /Provide exactly 4 suggestions/i);
 });

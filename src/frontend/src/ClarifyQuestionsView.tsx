@@ -94,7 +94,8 @@ function buildCompatibilityAnswer(selectedSuggestions: string[], customAnswer: s
   const suggestions = selectedSuggestions.map((suggestion) => suggestion.trim()).filter(Boolean);
 
   if (!suggestions.length) return custom;
-  const selectedBlock = `Selected considerations:\n${suggestions.map((suggestion) => `- ${suggestion}`).join('\n')}`;
+  const selectedLabel = suggestions.length === 1 ? 'Chosen answer' : 'Chosen answers';
+  const selectedBlock = `${selectedLabel}:\n${suggestions.map((suggestion) => `- ${suggestion}`).join('\n')}`;
   if (!custom) return selectedBlock;
   return `${selectedBlock}\n\nAdditional context:\n${custom}`;
 }
@@ -483,7 +484,11 @@ export function ClarifyQuestionsView({
                           </p>
 
                           {suggestions.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                                Choose the closest answer. If more than one genuinely applies, you can select several and add nuance below.
+                              </div>
+                              <div className="flex flex-wrap gap-2">
                               {suggestions.map((sug, si) => {
                                 const sel = ans.selectedSuggestions.includes(sug);
                                 return (
@@ -504,13 +509,14 @@ export function ClarifyQuestionsView({
                                   </button>
                                 );
                               })}
+                              </div>
                             </div>
                           )}
 
                           {ans.selectedSuggestions.length > 0 && (
                             <div className="rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]/60 px-4 py-3">
                               <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)]">
-                                Selected Considerations
+                                {ans.selectedSuggestions.length === 1 ? 'Chosen Answer' : 'Chosen Answers'}
                               </div>
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {ans.selectedSuggestions.map((suggestion) => (
@@ -530,7 +536,7 @@ export function ClarifyQuestionsView({
                             value={ans.customAnswer}
                             onChange={e => handleCustomChange(idx, e.target.value)}
                             disabled={isSubmitting}
-                            placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything the chips miss…' : 'Type your answer here…'}
+                            placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything your chosen answer does not capture…' : 'Type your answer here…'}
                             rows={3}
                             className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
                           />
