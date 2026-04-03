@@ -37,32 +37,40 @@ test('normalizeDiscoveryProfile respects the lower discovery floors for clear as
   assert.equal(profile.followupCap, 1);
 });
 
-test('expandRawQuestionCandidate splits compound questions into atomic fixed-category questions', () => {
+test('expandRawQuestionCandidate preserves grouped multi-part questions under one primary category', () => {
   const questions = expandRawQuestionCandidate({
     category: 'Context & Trigger',
     intent: 'trigger_and_inputs',
-    question: 'What exact event should trigger case creation and what data should be captured?',
-    suggestions: ['Call completed', 'New message', 'Caller identified', 'Case reason captured'],
+    question: 'For case creation, 1. what exact event should trigger the flow, 2. what data must already be present, and 3. when should the interaction wait for manual review instead?',
+    suggestions: [
+      'Start automatically once the interaction reaches a usable handoff point and the core details are present',
+      'Start only after identity or enough context has been confirmed by the team',
+      'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
+      'Apply different trigger rules by channel, but make the exclusion path explicit',
+    ],
   });
 
-  assert.equal(questions.length, 2);
+  assert.equal(questions.length, 1);
   assert.deepEqual(
     questions.map((question) => question.categoryKey),
-    ['context_trigger', 'context_trigger'],
+    ['context_trigger'],
   );
   assert.deepEqual(
     questions.map((question) => question.question),
     [
-      'What exact event should trigger case creation?',
-      'What data should be captured?',
+      'For case creation, 1. what exact event should trigger the flow, 2. what data must already be present, and 3. when should the interaction wait for manual review instead?',
     ],
   );
-  assert.ok(questions.every((question) => question.intent.startsWith('trigger_and_inputs')));
+  assert.ok(questions.every((question) => question.intent === 'trigger_and_inputs'));
   assert.deepEqual(
     questions.map((question) => question.suggestions),
     [
-      ['Call completed', 'New message', 'Caller identified', 'Case reason captured'],
-      ['Call completed', 'New message', 'Caller identified', 'Case reason captured'],
+      [
+        'Start automatically once the interaction reaches a usable handoff point and the core details are present',
+        'Start only after identity or enough context has been confirmed by the team',
+        'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
+        'Apply different trigger rules by channel, but make the exclusion path explicit',
+      ],
     ],
   );
 });
@@ -117,7 +125,7 @@ test('validateAndRepairInitialDiscovery repairs an empty model output into a val
   });
 
   assert.equal(repaired.failureReasonCode, null);
-  assert.ok(repaired.questions.length >= 6);
+  assert.ok(repaired.questions.length >= 4);
   assert.ok(repaired.questions.some((question) => question.categoryKey === 'context_trigger'));
   assert.ok(repaired.questions.some((question) => question.categoryKey === 'user_personas'));
   assert.ok(repaired.questions.some((question) => question.categoryKey === 'business_rules'));
@@ -155,7 +163,7 @@ test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonom
   assert.equal(calibrated.scope, 'very_broad');
   assert.equal(calibrated.complexity, 'very_high');
   assert.equal(calibrated.ambiguity, 'high');
-  assert.ok(calibrated.recommendedInitialCount >= 8);
+  assert.ok(calibrated.recommendedInitialCount >= 6);
 });
 
 test('broad multi-input automation asks infer a non-trivial unresolved-category set', () => {
@@ -176,7 +184,7 @@ test('broad multi-input automation asks infer a non-trivial unresolved-category 
   assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
   assert.ok(['broad', 'very_broad'].includes(repaired.discoveryProfile.scope));
   assert.equal(repaired.discoveryProfile.ambiguity, 'high');
-  assert.ok(repaired.questions.length >= 6);
+  assert.ok(repaired.questions.length >= 5);
 });
 
 test('validateAndRepairInitialDiscovery uses contextual fallback questions and suggestions for multichannel case creation', () => {
@@ -199,6 +207,9 @@ test('validateAndRepairInitialDiscovery uses contextual fallback questions and s
   assert.match(renderedQuestions, /phone|whatsapp|text|email/i);
   assert.match(renderedQuestions, /case/i);
   assert.match(renderedSuggestions, /phone|whatsapp|text|email|case/i);
+  assert.ok(repaired.questions.some((question) => question.question.includes('1.')));
+  assert.ok(repaired.questions.every((question) => question.suggestions.length === 4));
+  assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 60)));
 });
 
 test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total question cap', () => {
@@ -264,7 +275,7 @@ test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when 
   assert.match(followups[0].question, /phone|whatsapp|case/i);
 });
 
-test('discovery prompts enforce the fixed taxonomy and atomic question contract', () => {
+test('discovery prompts enforce the fixed taxonomy and grouped BA-style discovery contract', () => {
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
@@ -288,18 +299,22 @@ test('discovery prompts enforce the fixed taxonomy and atomic question contract'
   assert.match(clarifyPrompt, /edge_cases_exceptions/);
   assert.match(clarifyPrompt, /categoryKey/);
   assert.match(clarifyPrompt, /intent/);
-  assert.match(clarifyPrompt, /Do NOT write compound questions/i);
+  assert.match(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
+  assert.match(clarifyPrompt, /longer starter answers/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
   assert.match(clarifyPrompt, /Important domain signals/i);
   assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
   assert.match(clarifyPrompt, /company-specific internal terms/i);
   assert.doesNotMatch(clarifyPrompt, /one short sentence/i);
+  assert.doesNotMatch(clarifyPrompt, /Do NOT write compound questions/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
   assert.match(evaluatePrompt, /1-4 follow-up questions/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
-  assert.match(evaluatePrompt, /Do NOT write compound questions/i);
+  assert.match(evaluatePrompt, /prefer 1-3 grouped follow-up questions/i);
+  assert.match(evaluatePrompt, /longer starter answers/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
+  assert.doesNotMatch(evaluatePrompt, /Do NOT write compound questions/i);
 });

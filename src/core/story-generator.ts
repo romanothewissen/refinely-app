@@ -177,8 +177,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
-const MAX_CLARIFY_QUESTION_CHARS = 180;
-const MAX_CLARIFY_SUGGESTION_CHARS = 96;
+const MAX_CLARIFY_QUESTION_CHARS = 360;
+const MAX_CLARIFY_SUGGESTION_CHARS = 220;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -1251,7 +1251,7 @@ export async function evaluateSufficiency(opts: {
   const remainingBudget = Math.max(0, totalQuestionBudget - initialQuestionCount);
   const followupCap = Math.min(
     remainingBudget,
-    Math.max(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, Math.min(MAX_FOLLOWUP_DISCOVERY_QUESTIONS, Math.round(opts.followupCap ?? 4))),
+    Math.max(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, Math.min(3, Math.min(MAX_FOLLOWUP_DISCOVERY_QUESTIONS, Math.round(opts.followupCap ?? 3)))),
   );
   const followupMin = followupCap > 0 ? Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, followupCap) : 0;
   const qaText = opts.answers
@@ -1307,8 +1307,8 @@ export async function evaluateSufficiency(opts: {
       maxQuestions: Math.max(1, followupCap),
     }),
     userMessage,
-    maxTokens: 1536,
-    reasoningEffort: 'none',
+      maxTokens: 2048,
+      reasoningEffort: 'medium',
     ...buildLlmProviderOpts(opts.config),
   });
   const durationMs = Date.now() - startedAt;

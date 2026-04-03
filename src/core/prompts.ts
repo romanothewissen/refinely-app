@@ -332,14 +332,21 @@ YOUR MISSION:
 - Ask a frontloaded batch of high-value discovery questions that removes the biggest business ambiguity before implementation.
 - Reuse concrete nouns from the requirement and supporting evidence when they make the question sharper.
 - Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
+- Think like an experienced BA who is trying to prevent rework: probe for ownership, preconditions, decision logic, downstream impact, lifecycle, and exceptions before anyone writes requirements.
 
 WORKING COVERAGE AREAS:
-- Roles & Personas: who initiates, owns, approves, receives, or is affected
-- Trigger & Context: what event starts the flow and what must already be true
-- Functional Flow & Data: what the user or business process provides, decides, or produces
-- Business Rules & Exceptions: what governs, blocks, reroutes, or changes the outcome
-- Success & Measurement: what the business considers correct or complete
+- Roles & Personas: who initiates, owns, approves, receives, overrides, or is affected
+  Probe for primary actor, downstream visibility, approvals, escalation, and exceptions to the default role model.
+- Trigger & Context: what event starts the flow, what must already be true, and what business outcome defines a successful first pass
+  Probe for initiation points, qualifying conditions, channel or entry-point differences, and what "done correctly" means.
+- Information Architecture: what information, identifiers, records, outputs, or linkages the process needs
+  Probe for required captured data, reuse of existing records, identifiers, downstream updates, and what must stay visible.
+- Business Rules: what decisions, constraints, prioritisation, sequencing, thresholds, or override policies govern the flow
+  Probe for eligibility, routing logic, tie-breakers, approvals, timing rules, and anything that changes the outcome.
 - State & Lifecycle: what statuses, transitions, retries, reopens, or reversals matter
+  Probe for lifecycle milestones, handoffs, reopening behaviour, and what event advances or reverses the work.
+- Edge Cases & Exceptions: what happens when the happy path breaks
+  Probe for missing data, duplicates, conflicting signals, unavailable channels, and fallback handling.
 
 INTERNAL TAXONOMY:
 - Map each question to exactly one fixed categoryKey:
@@ -358,14 +365,14 @@ DISCOVERY RULES:
 - ${questionPlanHint}
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
-- Every question must capture exactly one business decision.
-- Do NOT write compound questions. If two decisions are needed, split them into two questions.
-- Do NOT combine trigger plus data capture, permissions plus workflow, or rules plus fallback in one question.
-- Keep the question concise and direct, but not clipped or overly terse.
+- One visible question may bundle 2-4 tightly related sub-prompts when they belong to the same primary categoryKey and a stakeholder would naturally answer them together.
+- When you group related sub-prompts, keep them inside one coherent question string and prefer inline numbering like "1." "2." "3." so the parts stay readable.
+- Do not mix multiple categoryKeys inside one visible question. Group only within a single primary category.
+- Questions should usually be rich, specific business prompts rather than clipped one-liners. Use as much wording as needed to make the tradeoff or ambiguity concrete.
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
-- Keep suggestions short and scannable, but make them specific to the requirement and the likely business tradeoffs.
+- Suggestions should be longer starter answers or fuller phrase fragments, not terse chips. They should help the user answer quickly while still exposing the likely tradeoffs.
 - Provide exactly 4 suggestions per question.
 
 OUTPUT CONTRACT:
@@ -395,6 +402,7 @@ OUTPUT RULES:
 - The number of questions returned must exactly match "recommendedInitialCount".
 - "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
+- Grouped questions are allowed, but they must still map to exactly one "categoryKey" and one "intent".
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".`;
 }
 
@@ -435,13 +443,13 @@ RULES:
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
 - Never repeat or lightly rephrase a question that was already asked.
-- Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
+- Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed, and prefer 1-3 grouped follow-up questions when one grouped prompt can close a single category gap cleanly.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
-- Every follow-up question must capture exactly one business decision.
-- Do NOT write compound questions. Split trigger/data, permissions/workflow, or rules/fallback into separate questions.
+- One visible follow-up question may bundle 2-4 tightly related sub-prompts when they belong to the same primary categoryKey and the user would naturally answer them together.
+- Do not mix multiple categoryKeys inside one visible follow-up question.
 - Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
-- Keep the wording concise and direct, but not clipped.
-- Provide exactly 4 suggestions per follow-up question, and make them specific to the likely business tradeoffs in this request.
+- Keep the wording direct and business-focused, but detailed enough to make the unresolved tradeoff explicit.
+- Provide exactly 4 suggestions per follow-up question, and make them longer starter answers that reflect likely business tradeoffs in this request.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 
