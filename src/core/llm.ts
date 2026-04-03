@@ -16,6 +16,7 @@ import type {
   PiiMaskingStats,
 } from '../types';
 import { maskPiiText } from '../services/compliance';
+import { extractJson } from './json';
 
 export interface LlmResponse {
   text: string;
@@ -62,6 +63,23 @@ function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number
 }
 
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
+
+function summarizeJsonParseInput(text: string): Record<string, string | number | boolean> {
+  const trimmed = text.trim();
+  const firstNonWhitespace = trimmed[0] ?? '';
+
+  return {
+    length: text.length,
+    trimmedLength: trimmed.length,
+    startsWithFence: /^```(?:json)?/i.test(trimmed),
+    containsFence: /```/.test(trimmed),
+    startsWithJsonToken: firstNonWhitespace === '{' || firstNonWhitespace === '[',
+    startsWith: firstNonWhitespace || '(empty)',
+    endsWithFence: /```$/.test(trimmed),
+    containsDiscoveryProfile: trimmed.includes('"discoveryProfile"'),
+    containsQuestionsKey: trimmed.includes('"questions"'),
+  };
+}
 
 function buildTimeoutError(label: string, timeoutMs: number): Error {
   return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s.`);
@@ -658,34 +676,6 @@ async function callAzureOpenAI(opts: {
 }
 
 /**
- * Parse JSON from LLM output, tolerating leading/trailing prose.
- * Tries: direct parse → extract first {...} or [...] block.
- */
-export function extractJson<T = unknown>(text: string): T {
-  // 1. Direct parse
-  try {
-    return JSON.parse(text) as T;
-  } catch { /* continue */ }
-
-  // 2. Find first { or [ and scan for balanced close
-  const objStart = text.indexOf('{');
-  const arrStart = text.indexOf('[');
-  const start = objStart === -1 ? arrStart : arrStart === -1 ? objStart : Math.min(objStart, arrStart);
-
-  if (start !== -1) {
-    const closer = text[start] === '{' ? '}' : ']';
-    const end = text.lastIndexOf(closer);
-    if (end > start) {
-      try {
-        return JSON.parse(text.slice(start, end + 1)) as T;
-      } catch { /* continue */ }
-    }
-  }
-
-  throw new Error(`Could not parse JSON from LLM response. Raw text: ${text.slice(0, 300)}`);
-}
-
-/**
  * Call LLM and extract JSON, with one retry on JSON parse failure.
  */
 export async function callLlmJson<T>(opts: {
@@ -734,6 +724,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
   let totalInput = 0;
   let totalOutput = 0;
   const piiMaskingTotals: PiiMaskingStats = { enabled: !!opts.piiMaskingEnabled, totalRedactions: 0, byType: {} };
+  const provider = opts.provider ?? 'forge_llms';
+  const requestedModel = opts.model;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await callLlm(opts);
@@ -754,6 +746,28 @@ export async function callLlmJsonWithUsage<T>(opts: {
       };
     } catch (err) {
       lastError = err as Error;
+      const parseShape = summarizeJsonParseInput(res.text);
+      if (attempt === 0) {
+        console.warn('[llm-json] Failed to parse model response as JSON; retrying with stricter instruction.', {
+          provider,
+          model: requestedModel,
+          attempt: attempt + 1,
+          inputTokens: res.inputTokens ?? 0,
+          outputTokens: res.outputTokens ?? 0,
+          parseShape,
+          error: lastError.message,
+        });
+      } else {
+        console.error('[llm-json] Failed to parse model response as JSON after retry.', {
+          provider,
+          model: requestedModel,
+          attempt: attempt + 1,
+          inputTokens: res.inputTokens ?? 0,
+          outputTokens: res.outputTokens ?? 0,
+          parseShape,
+          error: lastError.message,
+        });
+      }
       if (attempt === 0) {
         opts = {
           ...opts,

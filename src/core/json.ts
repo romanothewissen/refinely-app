@@ -1,0 +1,112 @@
+function tryParseJson<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+function extractBalancedJsonCandidate(text: string): string | null {
+  for (let start = 0; start < text.length; start++) {
+    const open = text[start];
+    if (open !== '{' && open !== '[') {
+      continue;
+    }
+
+    const stack: string[] = [open];
+    let inString = false;
+    let escaping = false;
+
+    for (let index = start + 1; index < text.length; index++) {
+      const char = text[index];
+
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaping = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (char === '{' || char === '[') {
+        stack.push(char);
+        continue;
+      }
+
+      if (char === '}' || char === ']') {
+        const expected = char === '}' ? '{' : '[';
+        if (stack.at(-1) !== expected) {
+          break;
+        }
+        stack.pop();
+        if (!stack.length) {
+          return text.slice(start, index + 1);
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse JSON from LLM output, tolerating Markdown fences and leading/trailing prose.
+ */
+export function extractJson<T = unknown>(text: string): T {
+  const normalized = text.trim().replace(/^\uFEFF/, '');
+
+  const direct = tryParseJson<T>(normalized);
+  if (direct !== null) {
+    return direct;
+  }
+
+  const strippedFence = normalized
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  const strippedFenceParsed = tryParseJson<T>(strippedFence);
+  if (strippedFenceParsed !== null) {
+    return strippedFenceParsed;
+  }
+
+  const fencedBlockPattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+  for (const match of normalized.matchAll(fencedBlockPattern)) {
+    const block = match[1]?.trim();
+    if (!block) {
+      continue;
+    }
+    const parsedBlock = tryParseJson<T>(block);
+    if (parsedBlock !== null) {
+      return parsedBlock;
+    }
+    const balancedBlock = extractBalancedJsonCandidate(block);
+    if (balancedBlock) {
+      const parsedBalancedBlock = tryParseJson<T>(balancedBlock);
+      if (parsedBalancedBlock !== null) {
+        return parsedBalancedBlock;
+      }
+    }
+  }
+
+  const balanced = extractBalancedJsonCandidate(normalized);
+  if (balanced) {
+    const parsedBalanced = tryParseJson<T>(balanced);
+    if (parsedBalanced !== null) {
+      return parsedBalanced;
+    }
+  }
+
+  throw new Error(`Could not parse JSON from LLM response. Raw text: ${text.slice(0, 300)}`);
+}
