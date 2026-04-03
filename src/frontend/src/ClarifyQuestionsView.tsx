@@ -45,11 +45,55 @@ function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: str
   return '';
 }
 
+function renderQuestionWithStoryLinks(
+  question: string,
+  storyLookup: Map<string, string>,
+) {
+  const storyKeyRegex = /\b[A-Z][A-Z0-9]+-\d+\b/g;
+  const matches = Array.from(question.matchAll(storyKeyRegex));
+  if (!matches.length) return question;
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  matches.forEach((match, index) => {
+    const key = match[0];
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      parts.push(<React.Fragment key={`text-${index}`}>{question.slice(cursor, start)}</React.Fragment>);
+    }
+
+    const url = storyLookup.get(key) || `/browse/${key}`;
+    parts.push(
+      <button
+        key={`story-${key}-${index}`}
+        type="button"
+        onClick={() => void router.navigate(url)}
+        className="inline text-[var(--rf-brand)] underline decoration-[var(--rf-brand-subtle)] underline-offset-2 hover:text-[var(--rf-brand-hover)] transition-colors"
+        title={`Open ${key}`}
+      >
+        {key}
+      </button>,
+    );
+    cursor = start + key.length;
+  });
+
+  if (cursor < question.length) {
+    parts.push(<React.Fragment key="text-final">{question.slice(cursor)}</React.Fragment>);
+  }
+
+  return parts;
+}
+
 export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMeta, sidebarOpen, setSidebarOpen }: ClarifyProps) {
   const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
   const [showContextDetails, setShowContextDetails] = useState(false);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
+  const storyLookup = new Map(
+    (contextMeta?.referencedSimilarStories ?? [])
+      .map(story => [story.key, resolveStoryUrl(story)] as const)
+      .filter(([key, url]) => Boolean(key && url)),
+  );
 
   function ensureAnswer(idx: number) {
     return answers[idx] ?? { selected: [], custom: '' };
@@ -320,7 +364,9 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                           {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
                         </div>
                         <div className="flex-1 space-y-4">
-                          <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug pt-1">{q.question}</p>
+                          <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug pt-1">
+                            {renderQuestionWithStoryLinks(q.question, storyLookup)}
+                          </p>
 
                           {suggestions.length > 0 && (
                             <div className="flex flex-wrap gap-2">

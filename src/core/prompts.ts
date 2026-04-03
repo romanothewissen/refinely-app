@@ -317,7 +317,7 @@ export function buildClarifySystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build feature set. Even if the requirement seems clear, there are always nuances regarding error handling, user permissions, data edge cases, or business workflows that need exploration.
+YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build feature set. Ask only the highest-leverage questions that materially improve scoping and acceptance requirements.
 
 CLARITY ASSESSMENT:
 - The input appears: ${opts.questionPlan.clarity.toUpperCase()}
@@ -327,8 +327,12 @@ CLARITY ASSESSMENT:
 - If the requirement is vague or underspecified, stay near the upper bound.
 - Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
 - Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
+- Keep every question concise: maximum 24 words, one uncertainty per question.
+- Avoid stacked or double-barreled questions.
+- Keep answer suggestions short: maximum 12 words each.
+- If you reference a backlog story, mention at most one story key and keep the reference brief.
 
-TASK: Generate targeted clarifying questions total, categorized into the areas below. These should help you write bulletproof acceptance requirements later. Be thorough, but avoid unnecessary repetition.
+TASK: Generate targeted clarifying questions categorized into the areas below. Prioritize brevity, clarity, and coverage of the most important unknowns.
 1. Roles & Personas — who does this, who is affected
 2. Trigger & Context — when/why does this happen
 3. Functional Flow — what are the key steps and decisions

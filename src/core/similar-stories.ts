@@ -18,11 +18,6 @@ interface BacklogDoc {
   description: string;
   acceptanceCriteria: string;
   updated: string;
-  combinedText: string;
-  scoreHints: {
-    summaryTerms: string[];
-    arTerms: string[];
-  };
 }
 
 interface BacklogIndexCache {
@@ -50,7 +45,10 @@ interface SearchJqlResponse {
 }
 
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_INDEX_ITEMS = 1000;
+const MAX_INDEX_ITEMS = 100;
+const MAX_SUMMARY_CHARS = 180;
+const MAX_DESCRIPTION_CHARS = 600;
+const MAX_ACCEPTANCE_CRITERIA_CHARS = 600;
 
 export async function findSimilarStories(
   requirement: string,
@@ -91,12 +89,15 @@ export async function findSimilarStories(
 async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Promise<BacklogIndexCache> {
   const cacheKey = KEYS.backlogIndex(projectKey);
   const cached = await objectRead<BacklogIndexCache>(cacheKey);
-  if (cached?.builtAt && Date.now() - new Date(cached.builtAt).getTime() < INDEX_TTL_MS && cached.docs?.length) {
+  if (cached?.docs?.length) {
     return cached;
   }
 
   const refreshed = await buildBacklogIndex(projectKey, config);
-  await objectWrite(cacheKey, refreshed);
+  const persisted = await objectWrite(cacheKey, refreshed);
+  if (!persisted) {
+    console.warn(`[similar-stories] Failed to persist backlog cache for ${projectKey}; using in-memory index for this run.`);
+  }
   return refreshed;
 }
 
@@ -117,7 +118,10 @@ export async function getBacklogCacheInfo(projectKey: string): Promise<{ project
 
 export async function refreshBacklogCache(projectKey: string, config: TenantConfig): Promise<{ projectKey: string; builtAt: string; issueCount: number }> {
   const refreshed = await buildBacklogIndex(projectKey, config);
-  await objectWrite(KEYS.backlogIndex(projectKey), refreshed);
+  const persisted = await objectWrite(KEYS.backlogIndex(projectKey), refreshed);
+  if (!persisted) {
+    throw new Error(`Backlog cache for ${projectKey} is too large to store. Narrow the backlog scope or reduce indexed history.`);
+  }
   return {
     projectKey,
     builtAt: refreshed.builtAt,
@@ -145,7 +149,7 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
   const statusClause = buildBacklogStatusClause(config, projectKey);
   const docs: BacklogDoc[] = [];
   let nextPageToken: string | undefined;
-  const pageSize = 50;
+  const pageSize = 100;
 
   while (docs.length < MAX_INDEX_ITEMS) {
     const data = await runSearchJql({
@@ -321,21 +325,15 @@ function issueToBacklogDoc(
     || config.arMappings?.find(m => m.projectKey === '*');
 
   const summary = String(issue.fields.summary ?? '').trim();
-  const description = extractText(issue.fields.description).trim();
-  const acceptanceCriteria = extractAcceptanceCriteria(issue.fields, mapping).trim();
-  const combinedText = [summary, description, acceptanceCriteria].filter(Boolean).join('\n\n');
+  const description = trimBacklogText(extractText(issue.fields.description), MAX_DESCRIPTION_CHARS);
+  const acceptanceCriteria = trimBacklogText(extractAcceptanceCriteria(issue.fields, mapping), MAX_ACCEPTANCE_CRITERIA_CHARS);
 
   return {
     key: issue.key,
-    summary,
+    summary: trimBacklogText(summary, MAX_SUMMARY_CHARS),
     description,
     acceptanceCriteria,
     updated: String(issue.fields.updated ?? ''),
-    combinedText,
-    scoreHints: {
-      summaryTerms: tokenize(summary),
-      arTerms: tokenize(acceptanceCriteria),
-    },
   };
 }
 
@@ -370,33 +368,65 @@ function extractText(value: unknown): string {
   return '';
 }
 
+function trimBacklogText(text: string, maxChars: number): string {
+  const compact = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!compact || compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trimEnd()}...`;
+}
+
 function lexicalRetrieve(requirement: string, docs: BacklogDoc[]): Array<BacklogDoc & { relevanceScore: number }> {
   const terms = buildQueryTerms(requirement);
   if (!terms.length) return [];
 
-  const avgLen = docs.reduce((sum, doc) => sum + tokenize(doc.combinedText).length, 0) / Math.max(docs.length, 1);
-  const scored = docs.map(doc => {
-    const docTerms = tokenize(doc.combinedText);
-    const freq = buildTermFreq(docTerms);
-    const docLen = Math.max(docTerms.length, 1);
+  const preparedDocs = docs.map(doc => {
+    const combinedText = buildBacklogSearchText(doc);
+    const combinedTerms = tokenize(combinedText);
+    return {
+      doc,
+      combinedTerms,
+      combinedTermSet: new Set(combinedTerms),
+      summaryTerms: new Set(tokenize(doc.summary)),
+      arTerms: new Set(tokenize(doc.acceptanceCriteria)),
+    };
+  });
+
+  const avgLen = preparedDocs.reduce((sum, entry) => sum + entry.combinedTerms.length, 0) / Math.max(preparedDocs.length, 1);
+  const docFreqByTerm = new Map<string, number>();
+  for (const term of terms) {
+    let docFreq = 0;
+    for (const entry of preparedDocs) {
+      if (entry.combinedTermSet.has(term)) {
+        docFreq += 1;
+      }
+    }
+    docFreqByTerm.set(term, Math.max(docFreq, 1));
+  }
+
+  const scored = preparedDocs.map(entry => {
+    const freq = buildTermFreq(entry.combinedTerms);
+    const docLen = Math.max(entry.combinedTerms.length, 1);
     let score = 0;
 
     for (const term of terms) {
       const tf = freq[term] ?? 0;
       if (!tf) continue;
-      const docFreq = docs.filter(d => tokenize(d.combinedText).includes(term)).length || 1;
+      const docFreq = docFreqByTerm.get(term) ?? 1;
       const idf = Math.log((docs.length + 1) / docFreq);
       score += idf * ((tf * 2.5) / (tf + 1.5 * (1 - 0.75 + 0.75 * (docLen / Math.max(avgLen, 1)))));
     }
 
-    const summaryBoost = terms.filter(term => doc.scoreHints.summaryTerms.includes(term)).length * 1.2;
-    const arBoost = terms.filter(term => doc.scoreHints.arTerms.includes(term)).length * 0.9;
-    return { ...doc, relevanceScore: score + summaryBoost + arBoost };
+    const summaryBoost = terms.filter(term => entry.summaryTerms.has(term)).length * 1.2;
+    const arBoost = terms.filter(term => entry.arTerms.has(term)).length * 0.9;
+    return { ...entry.doc, relevanceScore: score + summaryBoost + arBoost };
   });
 
   return scored
     .filter(doc => doc.relevanceScore > 0)
     .sort((a, b) => b.relevanceScore - a.relevanceScore);
+}
+
+function buildBacklogSearchText(doc: BacklogDoc): string {
+  return [doc.summary, doc.description, doc.acceptanceCriteria].filter(Boolean).join('\n\n');
 }
 
 function buildQueryTerms(requirement: string): string[] {

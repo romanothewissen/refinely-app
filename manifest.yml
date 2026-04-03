@@ -25,10 +25,13 @@ modules:
       handler: resolvers/index.handler
     - key: generation-consumer
       handler: queues/generation.handler
+      timeoutSeconds: 900
     - key: clarify-consumer
       handler: queues/clarify.handler
+      timeoutSeconds: 180
     - key: backlog-cache-refresh
       handler: queues/backlog-cache-refresh.handler
+      timeoutSeconds: 900
   consumer:
     - key: generation-consumer-listener
       queue: generation-queue

@@ -133,6 +133,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
+const MAX_CLARIFY_QUESTION_CHARS = 190;
+const MAX_CLARIFY_SUGGESTION_CHARS = 90;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -564,10 +566,10 @@ export function assessRequirement(input: {
   // ── Question plan (unchanged thresholds) ──
   const questionPlan: ClarifyQuestionPlan =
     clarityScore >= 4
-      ? { min: 4, max: 6, target: 5, clarity: 'clear' }
+      ? { min: 3, max: 4, target: 3, clarity: 'clear' }
       : clarityScore <= 1
-        ? { min: 10, max: 14, target: 12, clarity: 'vague' }
-        : { min: 6, max: 9, target: 7, clarity: 'medium' };
+        ? { min: 5, max: 8, target: 6, clarity: 'vague' }
+        : { min: 4, max: 6, target: 5, clarity: 'medium' };
 
   // ── Shape tier (5 buckets) ──
   // Floor: short underspecified requirements with any broad concept should not
@@ -685,9 +687,12 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
     .filter(x => typeof x === 'object' && x !== null && typeof (x as any).question === 'string')
     .map(x => ({
       category: String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow',
-      question: String((x as any).question ?? '').trim(),
+      question: trimClarifyCopy(String((x as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
       suggestions: Array.isArray((x as any).suggestions)
-        ? (x as any).suggestions.map((s: unknown) => String(s ?? '').trim()).filter(Boolean).slice(0, 4)
+        ? (x as any).suggestions
+          .map((s: unknown) => trimClarifyCopy(String(s ?? ''), MAX_CLARIFY_SUGGESTION_CHARS))
+          .filter(Boolean)
+          .slice(0, 4)
         : [],
     }))
     .filter(q => q.question.length > 0);
@@ -703,6 +708,17 @@ function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
     result.push(q);
   }
   return result;
+}
+
+function trimClarifyCopy(text: string, maxChars: number): string {
+  const compact = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  if (compact.length <= maxChars) return compact;
+
+  const clipped = compact.slice(0, maxChars);
+  const lastSpace = clipped.lastIndexOf(' ');
+  const safe = lastSpace >= Math.floor(maxChars * 0.6) ? clipped.slice(0, lastSpace) : clipped;
+  return `${safe.trimEnd()}...`;
 }
 
 // ─── Main Generation ──────────────────────────────────────────────────────────
