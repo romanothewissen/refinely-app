@@ -1,16 +1,16 @@
 /**
- * Project backlog retrieval with project-level cached indexing.
+ * Project backlog retrieval with sharded project-level caching.
  *
  * Uses deployed Jira issues from the selected project as the main context pool.
- * Retrieval is cheap-first: cached lexical scoring, then optional LLM rerank on
- * a small shortlist only.
+ * Retrieval is cheap-first: adaptive theme shortlist -> shard load -> lexical
+ * scoring -> optional LLM rerank on a small shortlist only.
  */
 
 import { asApp, assumeTrustedRoute } from '@forge/api';
 import { callLlmJson } from './llm';
 import { buildRerankPrompt } from './prompts';
-import { SimilarStory, TenantConfig } from '../types';
-import { objectRead, objectWrite, KEYS } from '../services/cache';
+import { ClarifyAnswer, SimilarStory, TenantConfig } from '../types';
+import { objectDelete, objectRead, objectWrite, KEYS } from '../services/cache';
 
 interface BacklogDoc {
   key: string;
@@ -20,11 +20,110 @@ interface BacklogDoc {
   updated: string;
 }
 
-interface BacklogIndexCache {
+interface LegacyBacklogIndexCache {
   projectKey: string;
   builtAt: string;
   issueCount: number;
   docs: BacklogDoc[];
+}
+
+interface BacklogShard {
+  projectKey: string;
+  shardId: string;
+  builtAt: string;
+  issueCount: number;
+  docs: BacklogDoc[];
+}
+
+interface BacklogShardMeta {
+  shardId: string;
+  cacheKey: string;
+  issueCount: number;
+  rawBytes: number;
+  minUpdated?: string;
+  maxUpdated?: string;
+  firstIssueKey?: string;
+  lastIssueKey?: string;
+}
+
+interface BacklogManifest {
+  schemaVersion: 2;
+  projectKey: string;
+  builtAt: string;
+  issueCount: number;
+  shardCount: number;
+  shards: BacklogShardMeta[];
+  themeBuiltAt?: string;
+  themeCount: number;
+  themeBudget: number;
+}
+
+interface BacklogTheme {
+  id: string;
+  label: string;
+  summary: string;
+  keywords: string[];
+  docCount: number;
+  shardIds: string[];
+  sampleIssueKeys: string[];
+  updatedRange: {
+    from?: string;
+    to?: string;
+  };
+  signatureTerms: string[];
+}
+
+interface BacklogThemeIndex {
+  schemaVersion: 1;
+  projectKey: string;
+  builtAt: string;
+  issueCount: number;
+  targetThemeCount: number;
+  themes: BacklogTheme[];
+}
+
+interface BacklogIndexInfo {
+  projectKey: string;
+  builtAt?: string;
+  issueCount: number;
+  stale: boolean;
+  shardCount: number;
+  themeCount: number;
+  themeBuiltAt?: string;
+  legacyFallback: boolean;
+}
+
+interface LoadedBacklogIndex {
+  manifest?: BacklogManifest;
+  themeIndex?: BacklogThemeIndex | null;
+  legacy?: LegacyBacklogIndexCache | null;
+}
+
+interface SearchJqlResponse {
+  issues?: Array<{ key: string; fields: Record<string, unknown> }>;
+  total?: number;
+  nextPageToken?: string;
+  isLast?: boolean;
+}
+
+interface ThemeCandidate {
+  label: string;
+  score: number;
+  docCount: number;
+  shardIds: Set<string>;
+  sampleIssueKeys: string[];
+  sampleSummaries: string[];
+  updatedRange: { from?: string; to?: string };
+  keywordScores: Map<string, number>;
+}
+
+interface SimilarStoryQuery {
+  requirement: string;
+  attachmentText?: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  config: TenantConfig;
+  projectKey?: string;
+  maxResults?: number;
 }
 
 export interface BacklogCacheDiagnostics {
@@ -37,42 +136,100 @@ export interface BacklogCacheDiagnostics {
   likelyReason: string;
 }
 
-interface SearchJqlResponse {
-  issues?: Array<{ key: string; fields: Record<string, unknown> }>;
-  total?: number;
-  nextPageToken?: string;
-  isLast?: boolean;
-}
-
 export const INDEX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_INDEX_ITEMS = 100;
 const MAX_SUMMARY_CHARS = 180;
 const MAX_DESCRIPTION_CHARS = 600;
 const MAX_ACCEPTANCE_CRITERIA_CHARS = 600;
+const MAX_SHARD_RAW_BYTES = 170 * 1024;
+const MAX_THEME_COUNT = 120;
+const MIN_THEME_COUNT = 24;
+const MAX_QUERY_THEMES = 6;
+const MAX_QUERY_SHARDS = 12;
+const FALLBACK_SHARDS = 3;
+const TOP_THEME_TERMS_PER_DOC = 8;
+const MAX_THEME_KEYWORDS = 6;
+const MAX_THEME_SIGNATURE_TERMS = 8;
+const THEME_NORMALIZATION_BATCH_SIZE = 20;
+
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'not', 'into', 'onto', 'from', 'with', 'without',
+  'that', 'this', 'these', 'those', 'than', 'then', 'there', 'their', 'they', 'them',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'for', 'of', 'to', 'in', 'on', 'at',
+  'as', 'by', 'it', 'its', 'if', 'when', 'while', 'after', 'before', 'during', 'through',
+  'over', 'under', 'only', 'should', 'must', 'can', 'could', 'would', 'need', 'needs',
+  'user', 'users', 'record', 'records', 'data', 'details', 'detail', 'field', 'fields',
+  'screen', 'page', 'system', 'service', 'services', 'item', 'items', 'saved', 'save',
+  'allow', 'allows', 'able', 'status', 'statuses',
+]);
 
 export async function findSimilarStories(
-  requirement: string,
-  config: TenantConfig,
-  projectKey = '*',
+  requirementOrQuery: string | SimilarStoryQuery,
+  maybeConfig?: TenantConfig,
+  maybeProjectKey = '*',
 ): Promise<SimilarStory[]> {
-  if (!projectKey || projectKey === '*') {
+  const query = typeof requirementOrQuery === 'string'
+    ? {
+        requirement: requirementOrQuery,
+        config: maybeConfig as TenantConfig,
+        projectKey: maybeProjectKey,
+      }
+    : requirementOrQuery;
+
+  const requirement = query.requirement?.trim() ?? '';
+  const config = query.config;
+  const projectKey = query.projectKey ?? '*';
+  const maxResults = query.maxResults ?? 12;
+
+  if (!requirement || !config || !projectKey || projectKey === '*') {
     return [];
   }
 
   try {
     const index = await ensureBacklogIndex(projectKey, config);
-    if (!index.docs.length) return [];
+    let docs: BacklogDoc[] = [];
 
-    const candidates = lexicalRetrieve(requirement, index.docs).slice(0, 24);
+    if (index.manifest) {
+      const queryText = buildSimilarityQueryText({
+        requirement,
+        attachmentText: query.attachmentText,
+        clarifyAnswers: query.clarifyAnswers,
+      });
+
+      const shortlistedShardIds = shortlistShardIds(queryText, index.themeIndex, index.manifest);
+      docs = shortlistedShardIds.length
+        ? await loadDocsForShards(projectKey, shortlistedShardIds)
+        : await loadFallbackDocs(projectKey, index.manifest);
+
+      if (docs.length < 30) {
+        const fallbackDocs = await loadFallbackDocs(projectKey, index.manifest, FALLBACK_SHARDS + 2);
+        const seenKeys = new Set(docs.map(doc => doc.key));
+        for (const doc of fallbackDocs) {
+          if (seenKeys.has(doc.key)) continue;
+          docs.push(doc);
+          seenKeys.add(doc.key);
+        }
+      }
+    } else if (index.legacy?.docs?.length) {
+      docs = index.legacy.docs;
+    }
+
+    if (!docs.length) return [];
+
+    const queryText = buildSimilarityQueryText({
+      requirement,
+      attachmentText: query.attachmentText,
+      clarifyAnswers: query.clarifyAnswers,
+    });
+    const candidates = lexicalRetrieve(queryText, docs).slice(0, 24);
     if (!candidates.length) return [];
 
     let ranked = candidates;
     if (config.similarityConfig.useLlmRerank && candidates.length > 5) {
-      ranked = await rerankWithClaude(requirement, candidates, config.generatorConfig.themeModel);
+      ranked = await rerankWithLlm(requirement, candidates, config.generatorConfig.themeModel);
     }
 
     const baseUrl = await getJiraBaseUrl();
-    return ranked.slice(0, 12).map(item => ({
+    return ranked.slice(0, maxResults).map(item => ({
       key: item.key,
       summary: item.summary,
       description: item.description,
@@ -86,52 +243,150 @@ export async function findSimilarStories(
   }
 }
 
-async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Promise<BacklogIndexCache> {
-  const cacheKey = KEYS.backlogIndex(projectKey);
-  const cached = await objectRead<BacklogIndexCache>(cacheKey);
-  if (cached?.docs?.length) {
-    return cached;
+async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Promise<LoadedBacklogIndex> {
+  const manifest = await objectRead<BacklogManifest>(KEYS.backlogManifest(projectKey));
+  if (manifest && Array.isArray(manifest.shards)) {
+    const themeIndex = await objectRead<BacklogThemeIndex>(KEYS.backlogThemes(projectKey));
+    return { manifest, themeIndex };
   }
 
-  const refreshed = await buildBacklogIndex(projectKey, config);
-  const persisted = await objectWrite(cacheKey, refreshed);
-  if (!persisted) {
-    console.warn(`[similar-stories] Failed to persist backlog cache for ${projectKey}; using in-memory index for this run.`);
+  const legacy = await objectRead<LegacyBacklogIndexCache>(KEYS.backlogIndex(projectKey));
+  if (legacy?.docs?.length) {
+    return { legacy };
   }
-  return refreshed;
+
+  const refreshed = await refreshBacklogCache(projectKey, config);
+  const refreshedManifest = await objectRead<BacklogManifest>(KEYS.backlogManifest(projectKey));
+  if (refreshedManifest && Array.isArray(refreshedManifest.shards)) {
+    const themeIndex = await objectRead<BacklogThemeIndex>(KEYS.backlogThemes(projectKey));
+    return { manifest: refreshedManifest, themeIndex };
+  }
+
+  return {
+    legacy: {
+      projectKey,
+      builtAt: refreshed.builtAt ?? new Date().toISOString(),
+      issueCount: refreshed.issueCount,
+      docs: [],
+    },
+  };
 }
 
-export async function getBacklogCacheInfo(projectKey: string): Promise<{ projectKey: string; builtAt?: string; issueCount: number; stale: boolean }> {
-  const cacheKey = KEYS.backlogIndex(projectKey);
-  const cached = await objectRead<BacklogIndexCache>(cacheKey);
-  if (!cached) {
-    return { projectKey, issueCount: 0, stale: true };
+export async function getBacklogCacheInfo(projectKey: string): Promise<BacklogIndexInfo> {
+  const manifest = await objectRead<BacklogManifest>(KEYS.backlogManifest(projectKey));
+  if (manifest && Array.isArray(manifest.shards)) {
+    return {
+      projectKey,
+      builtAt: manifest.builtAt,
+      issueCount: manifest.issueCount ?? 0,
+      stale: !manifest.builtAt || Date.now() - new Date(manifest.builtAt).getTime() >= INDEX_TTL_MS,
+      shardCount: manifest.shardCount ?? manifest.shards.length,
+      themeCount: manifest.themeCount ?? 0,
+      themeBuiltAt: manifest.themeBuiltAt,
+      legacyFallback: false,
+    };
+  }
+
+  const legacy = await objectRead<LegacyBacklogIndexCache>(KEYS.backlogIndex(projectKey));
+  if (legacy?.docs?.length) {
+    return {
+      projectKey,
+      builtAt: legacy.builtAt,
+      issueCount: legacy.issueCount ?? legacy.docs.length,
+      stale: !legacy.builtAt || Date.now() - new Date(legacy.builtAt).getTime() >= INDEX_TTL_MS,
+      shardCount: 0,
+      themeCount: 0,
+      themeBuiltAt: undefined,
+      legacyFallback: true,
+    };
   }
 
   return {
     projectKey,
-    builtAt: cached.builtAt,
-    issueCount: cached.issueCount ?? cached.docs?.length ?? 0,
-    stale: !cached.builtAt || (Date.now() - new Date(cached.builtAt).getTime() >= INDEX_TTL_MS),
+    issueCount: 0,
+    stale: true,
+    shardCount: 0,
+    themeCount: 0,
+    themeBuiltAt: undefined,
+    legacyFallback: false,
   };
 }
 
-export async function refreshBacklogCache(projectKey: string, config: TenantConfig): Promise<{ projectKey: string; builtAt: string; issueCount: number }> {
-  const refreshed = await buildBacklogIndex(projectKey, config);
-  const persisted = await objectWrite(KEYS.backlogIndex(projectKey), refreshed);
-  if (!persisted) {
-    throw new Error(`Backlog cache for ${projectKey} is too large to store. Narrow the backlog scope or reduce indexed history.`);
+export async function refreshBacklogCache(projectKey: string, config: TenantConfig): Promise<BacklogIndexInfo> {
+  const previousManifest = await objectRead<BacklogManifest>(KEYS.backlogManifest(projectKey));
+  const builtAt = new Date().toISOString();
+  const docs = await buildBacklogDocs(projectKey, config);
+  const shards = buildBacklogShards(projectKey, docs, builtAt);
+  const themeIndex = await buildBacklogThemeIndex(projectKey, docs, shards, config, builtAt);
+  const manifest: BacklogManifest = {
+    schemaVersion: 2,
+    projectKey,
+    builtAt,
+    issueCount: docs.length,
+    shardCount: shards.length,
+    shards: shards.map(shard => ({
+      shardId: shard.shardId,
+      cacheKey: KEYS.backlogDocsShard(projectKey, shard.shardId),
+      issueCount: shard.issueCount,
+      rawBytes: Buffer.byteLength(JSON.stringify(shard.docs), 'utf8'),
+      minUpdated: shard.docs[shard.docs.length - 1]?.updated,
+      maxUpdated: shard.docs[0]?.updated,
+      firstIssueKey: shard.docs[0]?.key,
+      lastIssueKey: shard.docs[shard.docs.length - 1]?.key,
+    })),
+    themeBuiltAt: themeIndex.builtAt,
+    themeCount: themeIndex.themes.length,
+    themeBudget: themeIndex.targetThemeCount,
+  };
+
+  const writtenShardKeys: string[] = [];
+  for (const shard of shards) {
+    const cacheKey = KEYS.backlogDocsShard(projectKey, shard.shardId);
+    const persisted = await objectWrite(cacheKey, shard);
+    if (!persisted) {
+      for (const key of writtenShardKeys) {
+        await objectDelete(key);
+      }
+      throw new Error(`Backlog shard ${shard.shardId} for ${projectKey} is too large to store.`);
+    }
+    writtenShardKeys.push(cacheKey);
   }
+
+  if (!(await objectWrite(KEYS.backlogThemes(projectKey), themeIndex))) {
+    throw new Error(`Backlog theme index for ${projectKey} is too large to store.`);
+  }
+
+  if (!(await objectWrite(KEYS.backlogManifest(projectKey), manifest))) {
+    throw new Error(`Backlog manifest for ${projectKey} is too large to store.`);
+  }
+
+  if (previousManifest?.shards?.length) {
+    const nextShardIds = new Set(shards.map(shard => shard.shardId));
+    for (const shard of previousManifest.shards) {
+      if (!nextShardIds.has(shard.shardId)) {
+        await objectDelete(KEYS.backlogDocsShard(projectKey, shard.shardId));
+      }
+    }
+  }
+
   return {
     projectKey,
-    builtAt: refreshed.builtAt,
-    issueCount: refreshed.issueCount,
+    builtAt: manifest.builtAt,
+    issueCount: manifest.issueCount,
+    stale: false,
+    shardCount: manifest.shardCount,
+    themeCount: manifest.themeCount,
+    themeBuiltAt: manifest.themeBuiltAt,
+    legacyFallback: false,
   };
 }
 
-export async function refreshBacklogCachesForProjects(projectKeys: string[], config: TenantConfig): Promise<Array<{ projectKey: string; builtAt: string; issueCount: number }>> {
+export async function refreshBacklogCachesForProjects(
+  projectKeys: string[],
+  config: TenantConfig,
+): Promise<BacklogIndexInfo[]> {
   const uniqueProjectKeys = [...new Set(projectKeys.filter(key => key && key !== '*'))];
-  const results: Array<{ projectKey: string; builtAt: string; issueCount: number }> = [];
+  const results: BacklogIndexInfo[] = [];
 
   for (const projectKey of uniqueProjectKeys) {
     try {
@@ -144,14 +399,14 @@ export async function refreshBacklogCachesForProjects(projectKeys: string[], con
   return results;
 }
 
-async function buildBacklogIndex(projectKey: string, config: TenantConfig): Promise<BacklogIndexCache> {
+async function buildBacklogDocs(projectKey: string, config: TenantConfig): Promise<BacklogDoc[]> {
   const fields = buildFieldList(config, projectKey);
   const statusClause = buildBacklogStatusClause(config, projectKey);
   const docs: BacklogDoc[] = [];
   let nextPageToken: string | undefined;
   const pageSize = 100;
 
-  while (docs.length < MAX_INDEX_ITEMS) {
+  while (true) {
     const data = await runSearchJql({
       jql: `project = ${projectKey} AND ${statusClause} AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
       maxResults: pageSize,
@@ -166,19 +421,331 @@ async function buildBacklogIndex(projectKey: string, config: TenantConfig): Prom
       if (doc.summary || doc.description || doc.acceptanceCriteria) {
         docs.push(doc);
       }
-      if (docs.length >= MAX_INDEX_ITEMS) break;
     }
 
     if (data.isLast || !data.nextPageToken) break;
     nextPageToken = data.nextPageToken;
   }
 
+  return docs;
+}
+
+function buildBacklogShards(projectKey: string, docs: BacklogDoc[], builtAt: string): BacklogShard[] {
+  if (!docs.length) {
+    return [];
+  }
+
+  const shards: BacklogShard[] = [];
+  let currentDocs: BacklogDoc[] = [];
+  let currentBytes = 2;
+  let shardIndex = 1;
+
+  for (const doc of docs) {
+    const docBytes = Buffer.byteLength(JSON.stringify(doc), 'utf8') + 2;
+    const exceeds = currentDocs.length > 0 && currentBytes + docBytes > MAX_SHARD_RAW_BYTES;
+    if (exceeds) {
+      shards.push({
+        projectKey,
+        shardId: shardIndex.toString().padStart(4, '0'),
+        builtAt,
+        issueCount: currentDocs.length,
+        docs: currentDocs,
+      });
+      shardIndex += 1;
+      currentDocs = [];
+      currentBytes = 2;
+    }
+    currentDocs.push(doc);
+    currentBytes += docBytes;
+  }
+
+  if (currentDocs.length || !shards.length) {
+    shards.push({
+      projectKey,
+      shardId: shardIndex.toString().padStart(4, '0'),
+      builtAt,
+      issueCount: currentDocs.length,
+      docs: currentDocs,
+    });
+  }
+
+  return shards;
+}
+
+async function buildBacklogThemeIndex(
+  projectKey: string,
+  docs: BacklogDoc[],
+  shards: BacklogShard[],
+  config: TenantConfig,
+  builtAt: string,
+): Promise<BacklogThemeIndex> {
+  const shardIdByDocKey = new Map<string, string>();
+  for (const shard of shards) {
+    for (const doc of shard.docs) {
+      shardIdByDocKey.set(doc.key, shard.shardId);
+    }
+  }
+
+  const targetThemeCount = computeThemeBudget(docs.length, config.backlogThemeBudgetOverride);
+  const candidateMap = new Map<string, ThemeCandidate>();
+
+  for (const doc of docs) {
+    const topTerms = selectTopTerms(extractDocThemeScores(doc), TOP_THEME_TERMS_PER_DOC);
+    if (!topTerms.length) continue;
+    const shardId = shardIdByDocKey.get(doc.key) ?? shards[0]?.shardId ?? '0001';
+    const keywords = topTerms.map(([term]) => term);
+    for (const [term, score] of topTerms) {
+      const existing = candidateMap.get(term) ?? {
+        label: term,
+        score: 0,
+        docCount: 0,
+        shardIds: new Set<string>(),
+        sampleIssueKeys: [],
+        sampleSummaries: [],
+        updatedRange: { from: doc.updated, to: doc.updated },
+        keywordScores: new Map<string, number>(),
+      };
+      existing.score += score;
+      existing.docCount += 1;
+      existing.shardIds.add(shardId);
+      if (existing.sampleIssueKeys.length < 6) {
+        existing.sampleIssueKeys.push(doc.key);
+      }
+      if (existing.sampleSummaries.length < 4 && doc.summary) {
+        existing.sampleSummaries.push(doc.summary);
+      }
+      existing.updatedRange.from = minIso(existing.updatedRange.from, doc.updated);
+      existing.updatedRange.to = maxIso(existing.updatedRange.to, doc.updated);
+      for (const keyword of keywords) {
+        existing.keywordScores.set(keyword, (existing.keywordScores.get(keyword) ?? 0) + (keyword === term ? score : Math.max(score / 3, 1)));
+      }
+      candidateMap.set(term, existing);
+    }
+  }
+
+  const candidates = [...candidateMap.values()];
+  const selected = selectThemeCandidates(candidates, targetThemeCount);
+  const normalized = await normalizeThemesWithLlm(
+    selected.map((candidate, index) => ({
+      id: `theme-${(index + 1).toString().padStart(3, '0')}`,
+      label: titleCase(candidate.label),
+      summary: `Backlog stories related to ${candidate.label}.`,
+      keywords: selectThemeKeywords(candidate.keywordScores),
+      docCount: candidate.docCount,
+      shardIds: Array.from(candidate.shardIds).sort(),
+      sampleIssueKeys: candidate.sampleIssueKeys.slice(0, 6),
+      updatedRange: candidate.updatedRange,
+      signatureTerms: selectThemeKeywords(candidate.keywordScores).slice(0, MAX_THEME_SIGNATURE_TERMS),
+      sampleSummaries: candidate.sampleSummaries,
+    })),
+    config,
+  );
+
+  const themes: BacklogTheme[] = normalized.map(({ sampleSummaries: _sampleSummaries, ...theme }) => theme);
+
   return {
+    schemaVersion: 1,
     projectKey,
-    builtAt: new Date().toISOString(),
+    builtAt,
     issueCount: docs.length,
-    docs,
+    targetThemeCount,
+    themes,
   };
+}
+
+function selectThemeCandidates(candidates: ThemeCandidate[], targetThemeCount: number): ThemeCandidate[] {
+  if (!candidates.length || targetThemeCount <= 0) return [];
+
+  const ranked = candidates
+    .slice()
+    .sort((a, b) => {
+      const phraseBoostA = a.label.includes(' ') ? 5 : 0;
+      const phraseBoostB = b.label.includes(' ') ? 5 : 0;
+      const scoreA = (a.docCount * 10) + a.score + phraseBoostA;
+      const scoreB = (b.docCount * 10) + b.score + phraseBoostB;
+      return scoreB - scoreA || b.docCount - a.docCount || a.label.localeCompare(b.label);
+    });
+
+  const selected: ThemeCandidate[] = [];
+
+  const tryAddCandidates = (predicate: (candidate: ThemeCandidate) => boolean) => {
+    for (const candidate of ranked) {
+      if (!predicate(candidate)) continue;
+      if (selected.length >= targetThemeCount) break;
+      if (selected.some(existing => areThemeLabelsNearDuplicate(existing.label, candidate.label))) {
+        continue;
+      }
+      selected.push(candidate);
+    }
+  };
+
+  tryAddCandidates(candidate => candidate.docCount >= 2);
+  if (selected.length < targetThemeCount) {
+    tryAddCandidates(() => true);
+  }
+
+  return selected.slice(0, targetThemeCount);
+}
+
+async function normalizeThemesWithLlm(
+  themes: Array<BacklogTheme & { sampleSummaries?: string[] }>,
+  config: TenantConfig,
+): Promise<Array<BacklogTheme & { sampleSummaries?: string[] }>> {
+  if (!themes.length) return themes;
+
+  const providerOpts = buildLlmProviderOpts(config);
+  const normalizedById = new Map<string, { label?: string; summary?: string; keywords?: string[] }>();
+
+  for (let i = 0; i < themes.length; i += THEME_NORMALIZATION_BATCH_SIZE) {
+    const batch = themes.slice(i, i + THEME_NORMALIZATION_BATCH_SIZE);
+    try {
+      const prompt = JSON.stringify(batch.map(theme => ({
+        id: theme.id,
+        draftLabel: theme.label,
+        keywords: theme.keywords,
+        docCount: theme.docCount,
+        sampleIssueKeys: theme.sampleIssueKeys,
+        sampleSummaries: theme.sampleSummaries?.slice(0, 3) ?? [],
+      })));
+
+      const response = await callLlmJson<Array<{ id: string; label?: string; summary?: string; keywords?: string[] }>>({
+        model: config.generatorConfig.themeModel,
+        systemPrompt: [
+          'You clean up Jira backlog theme clusters for retrieval.',
+          'Rewrite each theme into a concise business-facing label and one-sentence summary.',
+          'Preserve scope, avoid inventing new domains, and keep keywords short and searchable.',
+          'Return valid JSON only.',
+        ].join(' '),
+        userMessage: [
+          'Normalize these theme drafts.',
+          'For each theme return: {"id":"...","label":"3-7 words","summary":"1 short sentence","keywords":["3-6 short phrases"]}.',
+          'Do not mention that these are themes or clusters.',
+          `Input JSON:\n${prompt}`,
+        ].join('\n\n'),
+        maxTokens: 4096,
+        reasoningEffort: 'low',
+        ...providerOpts,
+      });
+
+      if (!Array.isArray(response)) continue;
+      for (const item of response) {
+        if (!item?.id) continue;
+        normalizedById.set(item.id, {
+          label: trimText(item.label, 72),
+          summary: trimText(item.summary, 180),
+          keywords: Array.isArray(item.keywords)
+            ? item.keywords.map(keyword => trimText(keyword, 40)).filter(Boolean).slice(0, MAX_THEME_KEYWORDS)
+            : undefined,
+        });
+      }
+    } catch (err) {
+      console.warn('[similar-stories] Theme normalization failed, keeping deterministic labels:', err);
+    }
+  }
+
+  return themes.map(theme => {
+    const normalized = normalizedById.get(theme.id);
+    if (!normalized) return theme;
+    return {
+      ...theme,
+      label: normalized.label || theme.label,
+      summary: normalized.summary || theme.summary,
+      keywords: normalized.keywords?.length ? normalized.keywords : theme.keywords,
+      signatureTerms: dedupeStrings([
+        ...(normalized.keywords ?? []),
+        ...theme.signatureTerms,
+      ]).slice(0, MAX_THEME_SIGNATURE_TERMS),
+    };
+  });
+}
+
+function shortlistShardIds(
+  queryText: string,
+  themeIndex: BacklogThemeIndex | null | undefined,
+  manifest: BacklogManifest,
+): string[] {
+  if (!themeIndex?.themes?.length || !themeIndex.builtAt || themeIndex.builtAt < manifest.builtAt) {
+    return manifest.shards.slice(0, FALLBACK_SHARDS).map(shard => shard.shardId);
+  }
+
+  const queryScores = extractWeightedTerms(queryText, 1);
+  const scored = themeIndex.themes
+    .map(theme => ({
+      theme,
+      score: scoreThemeMatch(queryText, queryScores, theme),
+    }))
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score || b.theme.docCount - a.theme.docCount || a.theme.label.localeCompare(b.theme.label));
+
+  if (!scored.length) {
+    return manifest.shards.slice(0, FALLBACK_SHARDS).map(shard => shard.shardId);
+  }
+
+  const selectedShardIds = new Set<string>();
+  let selectedThemes = 0;
+  for (const entry of scored) {
+    if (selectedThemes >= MAX_QUERY_THEMES || selectedShardIds.size >= MAX_QUERY_SHARDS) break;
+    entry.theme.shardIds.forEach(shardId => {
+      if (selectedShardIds.size < MAX_QUERY_SHARDS) {
+        selectedShardIds.add(shardId);
+      }
+    });
+    selectedThemes += 1;
+  }
+
+  return selectedShardIds.size
+    ? manifest.shards
+        .filter(shard => selectedShardIds.has(shard.shardId))
+        .map(shard => shard.shardId)
+    : manifest.shards.slice(0, FALLBACK_SHARDS).map(shard => shard.shardId);
+}
+
+function scoreThemeMatch(
+  queryText: string,
+  queryScores: Map<string, number>,
+  theme: BacklogTheme,
+): number {
+  const themeScores = extractWeightedTerms(
+    [theme.label, theme.summary, ...theme.keywords, ...theme.signatureTerms].filter(Boolean).join(' '),
+    1,
+  );
+
+  let score = weightedOverlap(queryScores, themeScores);
+  const loweredQuery = queryText.toLowerCase();
+
+  if (theme.label && loweredQuery.includes(theme.label.toLowerCase())) {
+    score += 8;
+  }
+  for (const keyword of theme.keywords ?? []) {
+    if (loweredQuery.includes(keyword.toLowerCase())) {
+      score += keyword.includes(' ') ? 4 : 2;
+    }
+  }
+
+  return score;
+}
+
+function weightedOverlap(left: Map<string, number>, right: Map<string, number>): number {
+  let total = 0;
+  for (const [term, leftScore] of left.entries()) {
+    const rightScore = right.get(term);
+    if (!rightScore) continue;
+    total += Math.min(leftScore, rightScore);
+  }
+  return total;
+}
+
+async function loadDocsForShards(projectKey: string, shardIds: string[]): Promise<BacklogDoc[]> {
+  const shards = await Promise.all(
+    shardIds.map(shardId => objectRead<BacklogShard>(KEYS.backlogDocsShard(projectKey, shardId))),
+  );
+  return shards
+    .filter((shard): shard is BacklogShard => Boolean(shard))
+    .flatMap(shard => shard.docs ?? []);
+}
+
+async function loadFallbackDocs(projectKey: string, manifest: BacklogManifest, shardCount = FALLBACK_SHARDS): Promise<BacklogDoc[]> {
+  return loadDocsForShards(projectKey, manifest.shards.slice(0, shardCount).map(shard => shard.shardId));
 }
 
 export async function diagnoseBacklogCache(projectKey: string, config: TenantConfig): Promise<BacklogCacheDiagnostics> {
@@ -374,6 +941,25 @@ function trimBacklogText(text: string, maxChars: number): string {
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
+function buildSimilarityQueryText(input: {
+  requirement: string;
+  attachmentText?: string;
+  clarifyAnswers?: ClarifyAnswer[];
+}): string {
+  const parts = [input.requirement.trim()];
+  if (input.attachmentText?.trim()) {
+    parts.push(input.attachmentText.trim().slice(0, 6000));
+  }
+  if (input.clarifyAnswers?.length) {
+    parts.push(
+      input.clarifyAnswers
+        .map(answer => `${answer.question} ${answer.answer}`)
+        .join('\n'),
+    );
+  }
+  return parts.filter(Boolean).join('\n\n');
+}
+
 function lexicalRetrieve(requirement: string, docs: BacklogDoc[]): Array<BacklogDoc & { relevanceScore: number }> {
   const terms = buildQueryTerms(requirement);
   if (!terms.length) return [];
@@ -431,30 +1017,47 @@ function buildBacklogSearchText(doc: BacklogDoc): string {
 
 function buildQueryTerms(requirement: string): string[] {
   const baseTerms = tokenize(requirement);
-  const phrases = requirement
+  const words = requirement
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
 
   const bigrams: string[] = [];
-  for (let i = 0; i < phrases.length - 1; i++) {
-    const left = phrases[i];
-    const right = phrases[i + 1];
-    if (left.length > 2 && right.length > 2) {
+  for (let i = 0; i < words.length - 1; i++) {
+    const left = normalizeToken(words[i]);
+    const right = normalizeToken(words[i + 1]);
+    if (left.length > 2 && right.length > 2 && !STOP_WORDS.has(left) && !STOP_WORDS.has(right)) {
       bigrams.push(`${left} ${right}`);
     }
   }
 
-  return [...new Set([...baseTerms.slice(0, 10), ...bigrams.slice(0, 4)])];
+  return [...new Set([...baseTerms.slice(0, 14), ...bigrams.slice(0, 8)])];
 }
 
 function tokenize(text: string): string[] {
-  const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'and', 'or', 'is', 'are', 'was', 'be', 'been', 'with', 'that', 'this', 'from', 'by', 'as', 'it', 'its', 'into', 'then']);
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(word => word.length > 2 && !stopWords.has(word));
+    .map(normalizeToken)
+    .filter(word => word.length > 2 && !STOP_WORDS.has(word));
+}
+
+function normalizeToken(word: string): string {
+  let normalized = word.toLowerCase().trim();
+  if (normalized.length <= 3) return normalized;
+  if (normalized.endsWith('ies') && normalized.length > 4) {
+    normalized = `${normalized.slice(0, -3)}y`;
+  } else if (normalized.endsWith('ing') && normalized.length > 5) {
+    normalized = normalized.slice(0, -3);
+  } else if (normalized.endsWith('ed') && normalized.length > 4) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith('es') && normalized.length > 4) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith('s') && normalized.length > 4) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
 }
 
 function buildTermFreq(terms: string[]): Record<string, number> {
@@ -465,13 +1068,90 @@ function buildTermFreq(terms: string[]): Record<string, number> {
   return freq;
 }
 
-async function rerankWithClaude(
+function extractDocThemeScores(doc: BacklogDoc): Map<string, number> {
+  const sections = [
+    { text: doc.summary, weight: 2.4 },
+    { text: doc.description, weight: 1.4 },
+    { text: doc.acceptanceCriteria, weight: 1.2 },
+  ];
+  const scores = new Map<string, number>();
+  for (const section of sections) {
+    const sectionScores = extractWeightedTerms(section.text, section.weight);
+    for (const [term, score] of sectionScores.entries()) {
+      scores.set(term, (scores.get(term) ?? 0) + score);
+    }
+  }
+  return scores;
+}
+
+function extractWeightedTerms(text: string, baseWeight: number): Map<string, number> {
+  const scores = new Map<string, number>();
+  const tokens = tokenize(text);
+  for (const token of tokens) {
+    scores.set(token, (scores.get(token) ?? 0) + baseWeight);
+  }
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const left = tokens[i];
+    const right = tokens[i + 1];
+    if (!left || !right) continue;
+    const bigram = `${left} ${right}`;
+    scores.set(bigram, (scores.get(bigram) ?? 0) + (baseWeight * 2.2));
+  }
+  return scores;
+}
+
+function selectTopTerms(scores: Map<string, number>, limit: number): Array<[string, number]> {
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1] || Number(b[0].includes(' ')) - Number(a[0].includes(' ')) || a[0].localeCompare(b[0]))
+    .slice(0, limit);
+}
+
+function selectThemeKeywords(keywordScores: Map<string, number>): string[] {
+  return [...keywordScores.entries()]
+    .sort((a, b) => b[1] - a[1] || Number(b[0].includes(' ')) - Number(a[0].includes(' ')) || a[0].localeCompare(b[0]))
+    .map(([term]) => titleCase(term))
+    .slice(0, MAX_THEME_KEYWORDS);
+}
+
+function computeThemeBudget(issueCount: number, override?: number | null): number {
+  if (issueCount <= 0) return 0;
+  const normalizedOverride = typeof override === 'number' && Number.isFinite(override) && override > 0
+    ? Math.round(override)
+    : null;
+  const adaptive = normalizedOverride ?? clamp(Math.ceil(issueCount / 50), MIN_THEME_COUNT, MAX_THEME_COUNT);
+  return clamp(adaptive, 1, Math.min(MAX_THEME_COUNT, issueCount));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function areThemeLabelsNearDuplicate(left: string, right: string): boolean {
+  const leftTokens = new Set(tokenize(left));
+  const rightTokens = new Set(tokenize(right));
+  if (!leftTokens.size || !rightTokens.size) return false;
+  const intersection = [...leftTokens].filter(token => rightTokens.has(token)).length;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  if (!union) return false;
+  const similarity = intersection / union;
+  return similarity >= 0.75 || isSubset(leftTokens, rightTokens) || isSubset(rightTokens, leftTokens);
+}
+
+function isSubset(left: Set<string>, right: Set<string>): boolean {
+  if (left.size > right.size) return false;
+  for (const token of left) {
+    if (!right.has(token)) return false;
+  }
+  return true;
+}
+
+async function rerankWithLlm(
   requirement: string,
   candidates: Array<BacklogDoc & { relevanceScore: number }>,
   model: string,
 ): Promise<Array<BacklogDoc & { relevanceScore: number }>> {
   try {
-    const summaries = candidates.map(c => `${c.key}: ${c.summary}`);
+    const summaries = candidates.map(candidate => `${candidate.key}: ${candidate.summary}`);
     const prompt = buildRerankPrompt(requirement, summaries);
 
     const ranked = await callLlmJson<number[]>({
@@ -490,6 +1170,21 @@ async function rerankWithClaude(
   }
 }
 
+function buildLlmProviderOpts(config: TenantConfig) {
+  return {
+    provider: config.generatorConfig.provider,
+    geminiApiKey: config.generatorConfig.geminiApiKey,
+    geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+    openaiApiKey: config.generatorConfig.openaiApiKey,
+    openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
+    azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
+    azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+    modelCatalogs: config.generatorConfig.modelCatalogs,
+    piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
+  };
+}
+
 async function getJiraBaseUrl(): Promise<string> {
   try {
     const res = await asApp().requestJira(assumeTrustedRoute('/rest/api/3/serverInfo'));
@@ -498,6 +1193,36 @@ async function getJiraBaseUrl(): Promise<string> {
   } catch {
     return 'https://your-site.atlassian.net';
   }
+}
+
+function minIso(left?: string, right?: string): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return left <= right ? left : right;
+}
+
+function maxIso(left?: string, right?: string): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return left >= right ? left : right;
+}
+
+function titleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function trimText(value: unknown, maxChars: number): string {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars).trimEnd()}...`;
+}
+
+function dedupeStrings(items: string[]): string[] {
+  return [...new Set(items.map(item => item.trim()).filter(Boolean))];
 }
 
 export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): string {

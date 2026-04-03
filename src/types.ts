@@ -133,6 +133,7 @@ export interface TenantConfig {
   arMappings: ProjectArMapping[];
   domainContexts: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
+  backlogThemeBudgetOverride?: number | null;
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
@@ -200,6 +201,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     }
   ],
   backlogStatusScopes: [],
+  backlogThemeBudgetOverride: null,
 };
 
 // ─── Feature / Story Types ────────────────────────────────────────────────────

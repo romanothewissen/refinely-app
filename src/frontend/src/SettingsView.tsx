@@ -39,6 +39,17 @@ interface BacklogDiagnostics {
   likelyReason: string;
 }
 
+interface BacklogCacheInfoRow {
+  projectKey: string;
+  builtAt?: string;
+  issueCount: number;
+  stale: boolean;
+  shardCount: number;
+  themeCount: number;
+  themeBuiltAt?: string;
+  legacyFallback: boolean;
+}
+
 interface WiDocRow {
   docId: string;
   filename: string;
@@ -160,6 +171,13 @@ function buildGuidanceContextPayload(baseContext: string, roleRows: RoleGuidance
     .join('\n');
 }
 
+function normalizeOptionalPositiveInt(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'stats' | 'billing'; initialProjectKey?: string }) {
   const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'stats' | 'billing'>(initialTab);
   const [isSaving, setIsSaving] = useState(false);
@@ -202,9 +220,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [arMappings, setArMappings] = useState<ProjectArMapping[]>([]);
   const [backlogStatusScopes, setBacklogStatusScopes] = useState<ProjectBacklogStatusScope[]>([]);
   const [activeArProj, setActiveArProj] = useState(initialProjectKey); // Global context selector
-  const [backlogCacheInfo, setBacklogCacheInfo] = useState<{ projectKey: string; builtAt?: string; issueCount: number; stale: boolean } | null>(null);
+  const [backlogCacheInfo, setBacklogCacheInfo] = useState<BacklogCacheInfoRow | null>(null);
   const [backlogDiagnostics, setBacklogDiagnostics] = useState<BacklogDiagnostics | null>(null);
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
+  const [backlogThemeBudgetOverride, setBacklogThemeBudgetOverride] = useState('');
 
   // Domain State
   const [domainContext, setDomainContext] = useState('');
@@ -258,6 +277,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           builtAt: res.builtAt,
           issueCount: res.issueCount ?? 0,
           stale: !!res.stale,
+          shardCount: res.shardCount ?? 0,
+          themeCount: res.themeCount ?? 0,
+          themeBuiltAt: res.themeBuiltAt,
+          legacyFallback: !!res.legacyFallback,
         });
       }
     } catch (e) {
@@ -350,6 +373,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (existingConfig.arMappings) setArMappings(existingConfig.arMappings.map((mapping: any) => normalizeProjectArMapping(mapping)));
         if (existingConfig.domainContexts) setDomainContexts(existingConfig.domainContexts);
         if (existingConfig.backlogStatusScopes) setBacklogStatusScopes(existingConfig.backlogStatusScopes);
+        if (existingConfig.backlogThemeBudgetOverride) {
+          setBacklogThemeBudgetOverride(String(existingConfig.backlogThemeBudgetOverride));
+        } else {
+          setBacklogThemeBudgetOverride('');
+        }
         if (existingConfig.branding?.logoUrl !== undefined) setBrandingLogoUrl(existingConfig.branding.logoUrl || '');
         if (existingConfig.isAdmin !== undefined) setIsAdmin(existingConfig.isAdmin);
       }
@@ -423,6 +451,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           builtAt: res.builtAt,
           issueCount: res.issueCount ?? 0,
           stale: false,
+          shardCount: res.shardCount ?? 0,
+          themeCount: res.themeCount ?? 0,
+          themeBuiltAt: res.themeBuiltAt,
+          legacyFallback: !!res.legacyFallback,
         };
         setBacklogCacheInfo(nextInfo);
         setBacklogDiagnostics(res.diagnostics ?? null);
@@ -542,6 +574,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         issueLinkType,
         arMappings,
         backlogStatusScopes,
+        backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
         tier,
       });
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
@@ -1055,6 +1088,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       backlogDiagnostics={backlogDiagnostics}
                       isRefreshingBacklogCache={isRefreshingBacklogCache}
                       onRefreshBacklogCache={handleRefreshBacklogCache}
+                      backlogThemeBudgetOverride={backlogThemeBudgetOverride}
+                      onBacklogThemeBudgetOverrideChange={setBacklogThemeBudgetOverride}
                     />
                   ) : (
                     <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-[var(--rf-border)]">
@@ -1677,6 +1712,7 @@ function ProjectConfigurationManager({
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
   activeArProj, isAdmin, isProjectAdmin,
   backlogCacheInfo, backlogDiagnostics, isRefreshingBacklogCache, onRefreshBacklogCache,
+  backlogThemeBudgetOverride, onBacklogThemeBudgetOverrideChange,
 }: any) {
   const currentMapping = useMemo(() => {
     const existing = arMappings.find((m: any) => m.projectKey === activeArProj);
@@ -1738,6 +1774,11 @@ function ProjectConfigurationManager({
     setIsSavingProject(true);
     setProjectNotice(null);
     try {
+      if (isAdmin) {
+        await api.patchConfig({
+          backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
+        });
+      }
       await api.saveProjectConfig({
         projectKey: activeArProj,
         arMapping: currentMapping,
@@ -1753,6 +1794,11 @@ function ProjectConfigurationManager({
     setIsSavingProject(true);
     setProjectNotice(null);
     try {
+      if (isAdmin) {
+        await api.patchConfig({
+          backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
+        });
+      }
       await api.saveProjectConfig({
         projectKey: activeArProj,
         arMapping: currentMapping,
@@ -1833,7 +1879,7 @@ function ProjectConfigurationManager({
 
            {expandedSections.backlog && (
            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
                <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
                  <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{indexedCount}</div>
@@ -1844,15 +1890,67 @@ function ProjectConfigurationManager({
                  </div>
                </div>
                <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Shards</div>
+                 <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{backlogCacheInfo?.shardCount ?? 0}</div>
+                 <div className="mt-1 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+                   Lean cache slices sized for Forge storage.
+                 </div>
+               </div>
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Themes</div>
+                 <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{backlogCacheInfo?.themeCount ?? 0}</div>
+                 <div className="mt-1 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+                   Adaptive shortlist index for retrieval.
+                 </div>
+               </div>
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
                  <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)]">
                    {backlogCacheInfo?.builtAt ? new Date(backlogCacheInfo.builtAt).toLocaleString() : 'Not built yet'}
                  </div>
                </div>
                <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
+                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Theme Index</div>
+                 <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)]">
+                   {backlogCacheInfo?.themeBuiltAt ? new Date(backlogCacheInfo.themeBuiltAt).toLocaleString() : 'Not built yet'}
+                 </div>
+               </div>
+               <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Status</div>
                  <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)] flex items-center gap-1.5">
                    {backlogCacheInfo?.stale ? <><AlertCircle className="w-4 h-4 text-amber-500"/> Needs refresh</> : <><Check className="w-4 h-4 text-emerald-500"/> Fresh</>}
+                 </div>
+                 {backlogCacheInfo?.legacyFallback && (
+                   <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">Legacy cache fallback</div>
+                 )}
+               </div>
+             </div>
+
+             <div className="rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-4 shadow-sm">
+               <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                 <div className="space-y-1">
+                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Adaptive Theme Budget</div>
+                   <div className="text-sm font-bold text-[var(--rf-text)]">Optional override for large or unusual projects</div>
+                   <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)] max-w-xl">
+                     Leave blank to use the adaptive default: <span className="font-bold text-[var(--rf-text-secondary)]">ceil(issueCount / 50)</span>, clamped between 24 and 120.
+                   </div>
+                 </div>
+                 <div className="w-full md:w-56">
+                   <input
+                     type="number"
+                     min={1}
+                     max={120}
+                     value={backlogThemeBudgetOverride}
+                     onChange={(e) => onBacklogThemeBudgetOverrideChange(e.target.value)}
+                     placeholder="Adaptive default"
+                     disabled={!isAdmin}
+                     className="w-full rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-sm font-bold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                   />
+                   {!isAdmin && (
+                     <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                       Workspace admin only
+                     </div>
+                   )}
                  </div>
                </div>
              </div>

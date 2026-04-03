@@ -32,6 +32,11 @@ interface SidebarProps {
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
   onRefreshWiDocs: () => void | Promise<void>;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
+  runAttachments: Array<{ id: string; filename: string; charCount: number }>;
+  runAttachmentParseState: { filename: string; stage: 'reading' | 'parsing' } | null;
+  runAttachmentError: string | null;
+  onAddRunAttachments: (files: File[]) => void | Promise<void>;
+  onRemoveRunAttachment: (attachmentId: string) => void;
 }
 
 const fadeUpVariant = {
@@ -70,7 +75,12 @@ export function Sidebar({
   availableProjects,
   wiDocs,
   onRefreshWiDocs,
-  onOpenProjectSettings
+  onOpenProjectSettings,
+  runAttachments,
+  runAttachmentParseState,
+  runAttachmentError,
+  onAddRunAttachments,
+  onRemoveRunAttachment,
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
@@ -84,12 +94,14 @@ export function Sidebar({
     ? 'Global Workspace'
     : `${projectKey}${availableProject?.name ? ` \u00b7 ${availableProject.name}` : ''}`;
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const projectDocInputRef = React.useRef<HTMLInputElement | null>(null);
+  const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [wiUploadState, setWiUploadState] = React.useState<{ filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null>(null);
   const [wiUploadError, setWiUploadError] = React.useState<string | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
   const canUploadWi = Boolean(isAdmin) && contextReady && projectKey !== '*' && !wiUploadState;
   const supportedWiExtensions = ['.pdf', '.xlsx', '.xls', '.csv', '.txt', '.md', '.eml'];
+  const attachmentChipLabel = runAttachments.length === 1 ? '1 file attached' : `${runAttachments.length} files attached`;
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -143,6 +155,13 @@ export function Sidebar({
     } finally {
       setWiUploadState(null);
     }
+  }
+
+  async function handleRunAttachmentUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+    await onAddRunAttachments(files);
   }
 
   return (
@@ -322,16 +341,62 @@ export function Sidebar({
             whileTap={{ scale: 0.98 }}
           >
             <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Docs</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Project Docs</div>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${activeWiDocs.length > 0 ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-brand)]/20' : 'bg-[var(--rf-border-subtle)] text-[var(--rf-text-tertiary)] border-[var(--rf-border)]'}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${activeWiDocs.length > 0 ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
                 {activeWiDocs.length > 0 ? 'Ingested' : 'Empty'}
               </span>
             </div>
             <div className="text-xs font-medium text-[var(--rf-text)] leading-snug">
-              {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'None active'}
+              {activeWiDocs.length > 0 ? `${activeWiDocs.length} document${activeWiDocs.length !== 1 ? 's' : ''}` : 'No project documents yet'}
             </div>
           </motion.button>
+        </motion.div>
+
+        <motion.div
+          className="rf-sidebar-card px-4 py-3.5"
+          variants={fadeUpVariant}
+          initial="hidden"
+          animate="visible"
+          custom={2.5}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)] mb-1">Project Docs</div>
+              <div className="text-xs font-semibold text-[var(--rf-text)] leading-snug">
+                {projectKey === '*'
+                  ? 'Choose a project to upload grounding docs.'
+                  : 'Admin-only reference docs that stay with the selected project.'}
+              </div>
+            </div>
+            <motion.button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!isAdmin) {
+                  onOpenProjectSettings('jira', projectKey);
+                  return;
+                }
+                projectDocInputRef.current?.click();
+              }}
+              disabled={!canUploadWi}
+              title={!contextReady ? 'Choose project-specific or global mode first' : !isAdmin ? 'Admin access is required to upload project docs' : projectKey === '*' ? 'Select a project to upload project docs' : 'Upload project docs'}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--rf-sidebar-border)] bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-text)] disabled:cursor-not-allowed disabled:opacity-40"
+              whileTap={{ scale: 0.97 }}
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+              {wiUploadState ? 'Uploading' : 'Upload'}
+            </motion.button>
+          </div>
+          <input
+            ref={projectDocInputRef}
+            type="file"
+            onChange={handleWiUpload}
+            accept=".pdf,.xlsx,.xls,.csv,.txt,.md,.eml"
+            multiple
+            className="hidden"
+            disabled={!canUploadWi}
+          />
         </motion.div>
 
         {/* Requirement scope label */}
@@ -365,49 +430,91 @@ export function Sidebar({
             disabled={isWorking || !contextReady}
             className="min-h-[280px] h-[clamp(280px,40vh,460px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-sm leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
           />
+          {runAttachments.length > 0 && (
+            <div className="border-t border-[var(--rf-sidebar-border)] bg-[linear-gradient(180deg,rgba(247,250,249,0.98),rgba(239,245,243,0.98))] px-4 py-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Run Attachments</div>
+                  <div className="mt-1 text-[11px] font-medium text-[var(--rf-text-tertiary)]">{attachmentChipLabel}</div>
+                </div>
+                <div className="rounded-full border border-[var(--rf-brand)]/15 bg-white/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--rf-brand)] shadow-sm">
+                  Prompt ready
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {runAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="group flex items-center gap-2 rounded-2xl border border-[var(--rf-brand)]/15 bg-white px-3 py-2 shadow-[0_8px_24px_rgba(43,89,74,0.08)]"
+                  >
+                    <div className="min-w-0">
+                      <div className="max-w-[190px] truncate text-[11px] font-bold text-[var(--rf-text)]">{attachment.filename}</div>
+                      <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveRunAttachment(attachment.id)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)]"
+                      title={`Remove ${attachment.filename}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-sidebar-border)] px-4 py-2.5 bg-[var(--rf-bg-sidebar)]">
             <motion.button
               type="button"
-              onClick={() => {
-                if (!isAdmin) {
-                  onOpenProjectSettings('jira', projectKey);
-                  return;
-                }
-                fileInputRef.current?.click();
-              }}
-              disabled={!canUploadWi}
-              title={!contextReady ? 'Choose project-specific or global mode first' : !isAdmin ? 'Admin access is required to upload grounding documents' : projectKey === '*' ? 'Select a project to upload work instructions' : 'Attach grounding documents'}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-sidebar-card)] hover:text-[var(--rf-text)]"
+              onClick={() => runAttachmentInputRef.current?.click()}
+              disabled={isWorking}
+              title="Attach supporting files for this run only"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-brand)]/15 bg-white px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] shadow-sm transition hover:border-[var(--rf-brand)]/35 hover:text-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-40"
               whileTap={{ scale: 0.97 }}
             >
               <Paperclip className="w-3.5 h-3.5" />
-              <span>{wiUploadState ? 'Uploading…' : 'Attach docs'}</span>
+              <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length ? attachmentChipLabel : 'Attach file'}</span>
             </motion.button>
             <input
-              ref={fileInputRef}
+              ref={runAttachmentInputRef}
               type="file"
-              onChange={handleWiUpload}
+              onChange={handleRunAttachmentUpload}
               accept=".pdf,.xlsx,.xls,.csv,.txt,.md,.eml"
               multiple
               className="hidden"
-              disabled={!canUploadWi}
+              disabled={isWorking}
             />
             <div className="text-[10px] font-medium text-[var(--rf-text-tertiary)] tabular-nums">{wordCount} words</div>
           </div>
         </motion.div>
 
-        {(wiUploadState || wiUploadError) && (
+        {(runAttachmentParseState || runAttachmentError || wiUploadState || wiUploadError) && (
           <motion.div
-            className={`rf-sidebar-card px-4 py-3 ${wiUploadError ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]' : ''}`}
+            className={`rf-sidebar-card px-4 py-3 ${(runAttachmentError || wiUploadError) ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]' : ''}`}
             variants={fadeUpVariant}
             initial="hidden"
             animate="visible"
             custom={4.5}
           >
-            {wiUploadState && (
-              <div className="space-y-2">
+            {runAttachmentParseState && (
+              <div className="space-y-2 mb-3 last:mb-0">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">
-                  {wiUploadState.stage === 'reading' ? 'Reading document' : wiUploadState.stage === 'uploading' ? 'Uploading document' : 'Indexing document'}
+                  {runAttachmentParseState.stage === 'reading' ? 'Reading attachment' : 'Parsing attachment'}
+                </div>
+                <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{runAttachmentParseState.filename}</div>
+              </div>
+            )}
+            {runAttachmentError && (
+              <div className="space-y-2 mb-3 last:mb-0">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-danger)]">Attachment failed</div>
+                <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{runAttachmentError}</div>
+              </div>
+            )}
+            {wiUploadState && (
+              <div className="space-y-2 mb-3 last:mb-0">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">
+                  {wiUploadState.stage === 'reading' ? 'Reading project doc' : wiUploadState.stage === 'uploading' ? 'Uploading project doc' : 'Indexing project doc'}
                 </div>
                 <div className="text-xs font-semibold text-[var(--rf-text)] break-words">{wiUploadState.filename}</div>
               </div>

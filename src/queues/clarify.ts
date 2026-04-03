@@ -46,7 +46,12 @@ export async function handler(event: { body: ClarifyEvent }) {
         ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
-        ? findSimilarStories(maskedRequirement.text, config, projectKey)
+        ? findSimilarStories({
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            config,
+            projectKey,
+          })
         : Promise.resolve([]),
     ]);
 

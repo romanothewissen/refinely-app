@@ -61,6 +61,13 @@ interface WorkflowTokenUsage {
   total: number;
 }
 
+interface RunAttachment {
+  id: string;
+  filename: string;
+  text: string;
+  charCount: number;
+}
+
 /** Recursively extract plain text from an Atlassian Document Format node */
 function extractAdfText(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
@@ -113,6 +120,18 @@ function getDefaultSidebarWidth(viewportWidth?: number): number {
   if (!width || width <= 0) return 420;
   if (width <= 720) return Math.max(300, width - 48);
   return Math.min(Math.max(Math.round(width * 0.5), 360), Math.round(width * 0.7));
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      resolve(dataUrl.split(',')[1] || dataUrl);
+    };
+    reader.onerror = () => reject(new Error('Read failed'));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function App() {
@@ -182,6 +201,9 @@ export default function App() {
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
+  const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
+  const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
+  const [runAttachmentError, setRunAttachmentError] = useState<string | null>(null);
 
   // History
   const [conversations, setConversations] = useState<any[]>([]);
@@ -431,6 +453,9 @@ export default function App() {
 
   const handleStartBrainstorm = async () => {
     if (!requirement.trim()) return;
+    const attachmentText = runAttachments
+      .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
+      .join('\n\n');
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
@@ -446,7 +471,7 @@ export default function App() {
     }
 
     try {
-      const res = await api.startClarify(sessionId, requirement, undefined, projectKey) as any;
+      const res = await api.startClarify(sessionId, requirement, attachmentText, projectKey) as any;
       if (res.success) {
         setPendingClarifySessionId(sessionId);
       } else {
@@ -465,6 +490,9 @@ export default function App() {
   const startGeneration = async (reqText: string, clarifyAnswers: any[]) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
+    const attachmentText = runAttachments
+      .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
+      .join('\n\n');
     
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
@@ -483,6 +511,7 @@ export default function App() {
         sessionId: sid,
         requirement: req,
         clarifyAnswers,
+        attachmentText,
         projectKey,
       }) as any;
 
@@ -531,6 +560,9 @@ export default function App() {
         setGenerationProgressMeta(null);
         setIsWorking(false);
         setClarifyQuestions([]);
+        setRunAttachments([]);
+        setRunAttachmentParseState(null);
+        setRunAttachmentError(null);
         setSessionId(res.conversation.sessionId);
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
@@ -543,6 +575,50 @@ export default function App() {
         setViewMode('generate');
       }
     } catch {}
+  };
+
+  const handleAddRunAttachments = async (files: File[]) => {
+    if (!files.length) return;
+    setRunAttachmentError(null);
+
+    try {
+      const parsedAttachments: RunAttachment[] = [];
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const label = files.length > 1 ? `${file.name} (${i + 1}/${files.length})` : file.name;
+        setRunAttachmentParseState({ filename: label, stage: 'reading' });
+        const base64 = await fileToBase64(file);
+        setRunAttachmentParseState({ filename: label, stage: 'parsing' });
+        const res = await api.parseRunAttachment(file.name, base64) as any;
+        if (res?.success === false) {
+          throw new Error(res.error || `Could not parse ${file.name}`);
+        }
+        parsedAttachments.push({
+          id: `${file.name}_${file.size}_${file.lastModified}`,
+          filename: res?.filename || file.name,
+          text: String(res?.text ?? ''),
+          charCount: Number(res?.charCount ?? String(res?.text ?? '').length),
+        });
+      }
+
+      setRunAttachments(prev => {
+        const next = new Map(prev.map(attachment => [attachment.id, attachment]));
+        parsedAttachments.forEach(attachment => {
+          next.set(attachment.id, attachment);
+        });
+        return [...next.values()];
+      });
+    } catch (err: any) {
+      console.error('Run attachment parsing failed', err);
+      setRunAttachmentError(err?.message || 'Could not parse the selected attachment.');
+    } finally {
+      setRunAttachmentParseState(null);
+    }
+  };
+
+  const handleRemoveRunAttachment = (attachmentId: string) => {
+    setRunAttachments(prev => prev.filter(attachment => attachment.id !== attachmentId));
+    setRunAttachmentError(null);
   };
 
   // Open settings: always collapse sidebar to give full screen
@@ -597,6 +673,9 @@ export default function App() {
                 setGenerationError(null);
                 setWorkflowRunId(prev => prev + 1);
                 setIsWorking(false);
+                setRunAttachments([]);
+                setRunAttachmentParseState(null);
+                setRunAttachmentError(null);
                 setSidebarOpen(true);
                 setSidebarExiting(false);
                 setSessionId(newSid);
@@ -624,6 +703,11 @@ export default function App() {
               wiDocs={wiDocs}
               onRefreshWiDocs={() => loadWiDocs(projectKey)}
               onOpenProjectSettings={openProjectSettings}
+              runAttachments={runAttachments}
+              runAttachmentParseState={runAttachmentParseState}
+              runAttachmentError={runAttachmentError}
+              onAddRunAttachments={handleAddRunAttachments}
+              onRemoveRunAttachment={handleRemoveRunAttachment}
             />
               {/* Resize Handle */}
               {sidebarOpen && (

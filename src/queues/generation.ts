@@ -112,7 +112,13 @@ export async function handler(event: { body: GenerationEvent }) {
         ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
-        ? findSimilarStories(maskedRequirement.text, config, projectKey)
+        ? findSimilarStories({
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            clarifyAnswers: maskedAnswers.answers,
+            config,
+            projectKey,
+          })
         : Promise.resolve([]),
       assessRequirementWithLlm({
         requirement: maskedRequirement.text,

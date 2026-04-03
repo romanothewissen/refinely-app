@@ -34,6 +34,7 @@ import {
 } from '../core/story-generator';
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
+import { extractDocumentText } from '../core/document-parser';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
@@ -753,6 +754,30 @@ resolver.define('uploadWi', async ({ payload, context }) => {
   });
 
   return { success: true, ...result };
+});
+
+resolver.define('parseRunAttachment', async ({ payload }) => {
+  const filename = String(payload?.filename ?? '').trim();
+  const fileBase64 = String(payload?.fileBase64 ?? '').trim();
+  if (!filename || !fileBase64) {
+    return { success: false, error: 'Filename and file payload are required.' };
+  }
+
+  try {
+    const buffer = Buffer.from(fileBase64, 'base64');
+    const text = await extractDocumentText(filename, buffer);
+    return {
+      success: true,
+      filename,
+      text,
+      charCount: text.length,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Attachment parsing failed.',
+    };
+  }
 });
 
 resolver.define('listWiDocs', async ({ payload }) => {

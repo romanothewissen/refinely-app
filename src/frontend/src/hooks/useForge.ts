@@ -64,6 +64,8 @@ export const api = {
   // Work Instructions
   uploadWi: (filename: string, fileBase64: string, revision?: string, projectKey?: string) =>
     invoke('uploadWi', { filename, fileBase64, revision, projectKey }),
+  parseRunAttachment: (filename: string, fileBase64: string) =>
+    invoke('parseRunAttachment', { filename, fileBase64 }),
   listWiDocs: (projectKey?: string) => invoke('listWiDocs', { projectKey }),
   removeWiDoc: (docId: string) => invoke('removeWiDoc', { docId }),
 
