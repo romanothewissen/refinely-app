@@ -529,7 +529,7 @@ export function expandRawQuestionCandidate(raw: {
       const normalizedQuestion = normalizeQuestionText(variant);
       if (!normalizedQuestion) return null;
       if (looksCompoundQuestion(normalizedQuestion)) return null;
-      return {
+      const question: ClarifyQuestion = {
         categoryKey,
         category: labelForCategoryKey(categoryKey),
         intent: index === 0
@@ -539,7 +539,8 @@ export function expandRawQuestionCandidate(raw: {
         suggestions: splitQuestions.length > 1
           ? defaultSuggestionsForCategory(categoryKey)
           : (baseSuggestions.length ? baseSuggestions : defaultSuggestionsForCategory(categoryKey)),
-      } satisfies ClarifyQuestion;
+      };
+      return question;
     })
     .filter((question): question is ClarifyQuestion => Boolean(question));
 }
