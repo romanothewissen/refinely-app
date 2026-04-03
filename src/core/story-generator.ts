@@ -12,6 +12,7 @@ import {
   Feature,
   ClarifyQuestion,
   ClarifyAnswer,
+  ClarifyCategoryKey,
   TenantConfig,
   GenerationResult,
   ValidationViolation,
@@ -33,8 +34,16 @@ import {
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 import {
+  MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
+  MAX_INITIAL_DISCOVERY_QUESTIONS,
+  MAX_TOTAL_DISCOVERY_QUESTIONS,
+  MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
+  MIN_INITIAL_DISCOVERY_QUESTIONS,
+  expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
   finalizeInitialDiscoveryQuestions,
+  labelForCategoryKey,
+  normalizeCategoryKey,
   normalizeDiscoveryProfile,
 } from './discovery';
 
@@ -99,7 +108,7 @@ interface ClarifyDiscoveryResult {
 interface DiscoverySufficiencyEvaluation {
   sufficient: boolean;
   questions?: ClarifyQuestion[];
-  missingDimensions: string[];
+  missingCategoryKeys: ClarifyCategoryKey[];
   reasonCodes: string[];
   tokenUsage: TokenUsageSummary;
   durationMs: number;
@@ -155,8 +164,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
-const MAX_CLARIFY_QUESTION_CHARS = 320;
-const MAX_CLARIFY_SUGGESTION_CHARS = 160;
+const MAX_CLARIFY_QUESTION_CHARS = 180;
+const MAX_CLARIFY_SUGGESTION_CHARS = 96;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -769,17 +778,27 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
 
   return candidates
     .filter(x => typeof x === 'object' && x !== null && typeof (x as any).question === 'string')
-    .map(x => ({
-      category: String((x as any).category ?? 'Discovery').trim() || 'Discovery',
-      question: trimClarifyCopy(String((x as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
-      suggestions: Array.isArray((x as any).suggestions)
-        ? (x as any).suggestions
-          .map((s: unknown) => trimClarifyCopy(String(s ?? ''), MAX_CLARIFY_SUGGESTION_CHARS))
+    .flatMap((candidate) => expandRawQuestionCandidate({
+      categoryKey: (candidate as any).categoryKey,
+      category: (candidate as any).category,
+      intent: (candidate as any).intent,
+      question: trimClarifyCopy(String((candidate as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
+      suggestions: Array.isArray((candidate as any).suggestions)
+        ? (candidate as any).suggestions
+          .map((suggestion: unknown) => trimClarifyCopy(String(suggestion ?? ''), MAX_CLARIFY_SUGGESTION_CHARS))
           .filter(Boolean)
           .slice(0, 4)
         : [],
     }))
-    .filter(q => q.question.length > 0);
+    .map((question) => ({
+      ...question,
+      question: trimClarifyCopy(question.question, MAX_CLARIFY_QUESTION_CHARS),
+      suggestions: question.suggestions
+        .map((suggestion) => trimClarifyCopy(suggestion, MAX_CLARIFY_SUGGESTION_CHARS))
+        .filter(Boolean)
+        .slice(0, 4),
+    }))
+    .filter((question) => question.question.length > 0);
 }
 
 function parseDiscoveryProfileCandidate(rawData: unknown): Partial<DiscoveryProfile> | null {
@@ -794,13 +813,19 @@ function parseDiscoveryProfileCandidate(rawData: unknown): Partial<DiscoveryProf
     typeof root.scope === 'string' ||
     typeof root.complexity === 'string' ||
     typeof root.ambiguity === 'string' ||
+    Array.isArray(root.missingCategoryKeys) ||
     Array.isArray(root.missingDimensions)
   ) {
+    const rawMissingCategoryKeys = Array.isArray(root.missingCategoryKeys)
+      ? root.missingCategoryKeys as ClarifyCategoryKey[]
+      : Array.isArray(root.missingDimensions)
+        ? root.missingDimensions as ClarifyCategoryKey[]
+        : undefined;
     return {
       scope: typeof root.scope === 'string' ? root.scope : undefined,
       complexity: typeof root.complexity === 'string' ? root.complexity : undefined,
       ambiguity: typeof root.ambiguity === 'string' ? root.ambiguity : undefined,
-      missingDimensions: Array.isArray(root.missingDimensions) ? root.missingDimensions as string[] : undefined,
+      missingCategoryKeys: rawMissingCategoryKeys,
       recommendedInitialCount: typeof root.recommendedInitialCount === 'number' ? root.recommendedInitialCount : undefined,
       followupCap: typeof root.followupCap === 'number' ? root.followupCap : undefined,
     } as Partial<DiscoveryProfile>;
@@ -809,7 +834,7 @@ function parseDiscoveryProfileCandidate(rawData: unknown): Partial<DiscoveryProf
   return null;
 }
 
-function parseStringList(rawData: unknown, key: 'missingDimensions' | 'reasonCodes'): string[] {
+function parseStringList(rawData: unknown, key: 'reasonCodes'): string[] {
   if (!rawData || typeof rawData !== 'object') return [];
   const candidate = (rawData as Record<string, unknown>)[key];
   if (!Array.isArray(candidate)) return [];
@@ -817,6 +842,26 @@ function parseStringList(rawData: unknown, key: 'missingDimensions' | 'reasonCod
     .map((value) => String(value ?? '').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .filter((value, index, values) => values.findIndex((entry) => entry.toLowerCase() === value.toLowerCase()) === index);
+}
+
+function parseCategoryKeyList(rawData: unknown): ClarifyCategoryKey[] {
+  if (!rawData || typeof rawData !== 'object') return [];
+  const root = rawData as Record<string, unknown>;
+  const candidate = Array.isArray(root.missingCategoryKeys)
+    ? root.missingCategoryKeys
+    : Array.isArray(root.missingDimensions)
+      ? root.missingDimensions
+      : [];
+
+  const seen = new Set<ClarifyCategoryKey>();
+  const keys: ClarifyCategoryKey[] = [];
+  candidate.forEach((value) => {
+    const normalized = normalizeCategoryKey(value);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    keys.push(normalized);
+  });
+  return keys;
 }
 
 function ambiguityAssessmentFromDiscoveryProfile(
@@ -840,12 +885,12 @@ function ambiguityAssessmentFromDiscoveryProfile(
   return {
     level,
     score,
-    reasons: profile.missingDimensions.length
-      ? profile.missingDimensions.map((dimension) => `${dimension} still needs clarification.`)
+    reasons: profile.missingCategoryKeys.length
+      ? profile.missingCategoryKeys.map((categoryKey) => `${labelForCategoryKey(categoryKey)} still needs clarification.`)
       : ['Discovery is focused on confirming the remaining implementation details.'],
     questionPlan: {
-      min: 5,
-      max: 10,
+      min: MIN_INITIAL_DISCOVERY_QUESTIONS,
+      max: MAX_INITIAL_DISCOVERY_QUESTIONS,
       target: profile.recommendedInitialCount,
     },
     generatedQuestions,
@@ -1095,9 +1140,14 @@ export async function generateClarifyingQuestions(opts: {
   const parsedQuestions = parseQuestionCandidates(raw.data);
   const normalizedProfile = normalizeDiscoveryProfile(
     parseDiscoveryProfileCandidate(raw.data),
-    parsedQuestions.length || 7,
+    parsedQuestions.length || 8,
   );
-  const filteredQuestions = finalizeInitialDiscoveryQuestions(parsedQuestions, normalizedProfile);
+  const filteredQuestions = finalizeInitialDiscoveryQuestions(parsedQuestions, normalizedProfile, {
+    requirement,
+    attachmentText,
+    wiContextText,
+    similarStoriesText,
+  });
   const discoveryProfile: DiscoveryProfile = {
     ...normalizedProfile,
     recommendedInitialCount: filteredQuestions.length,
@@ -1124,30 +1174,56 @@ export async function generateClarifyingQuestions(opts: {
 export async function evaluateSufficiency(opts: {
   requirement: string;
   answers: ClarifyAnswer[];
-  askedQuestions?: string[];
+  askedQuestions?: Array<string | Pick<ClarifyQuestion, 'categoryKey' | 'intent' | 'question'>>;
   followupCap?: number;
   initialQuestionCount?: number;
   totalQuestionBudget?: number;
   config: TenantConfig;
 }): Promise<DiscoverySufficiencyEvaluation> {
   const initialQuestionCount = Math.max(0, Number(opts.initialQuestionCount ?? 0));
-  const totalQuestionBudget = Math.max(initialQuestionCount, Number(opts.totalQuestionBudget ?? 15));
+  const totalQuestionBudget = Math.max(
+    initialQuestionCount,
+    Math.min(MAX_TOTAL_DISCOVERY_QUESTIONS, Number(opts.totalQuestionBudget ?? MAX_TOTAL_DISCOVERY_QUESTIONS)),
+  );
   const remainingBudget = Math.max(0, totalQuestionBudget - initialQuestionCount);
   const followupCap = Math.min(
     remainingBudget,
-    Math.max(2, Math.min(5, Math.round(opts.followupCap ?? 3))),
+    Math.max(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, Math.min(MAX_FOLLOWUP_DISCOVERY_QUESTIONS, Math.round(opts.followupCap ?? 4))),
   );
-  const followupMin = followupCap > 0 ? Math.min(2, followupCap) : 0;
+  const followupMin = followupCap > 0 ? Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, followupCap) : 0;
   const qaText = opts.answers
     .map(a => `Q: ${a.question}\nA: ${a.answer}`)
     .join('\n\n');
-  const askedQuestions = (opts.askedQuestions ?? opts.answers.map((answer) => answer.question))
-    .map((question) => question.trim())
-    .filter(Boolean);
+  const askedQuestionDetails = (opts.askedQuestions ?? opts.answers.map((answer) => ({
+    question: answer.question,
+    categoryKey: answer.categoryKey,
+    intent: answer.intent,
+  })))
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return { question: entry.trim() };
+      }
+
+      return {
+        question: String(entry?.question ?? '').trim(),
+        categoryKey: entry?.categoryKey,
+        intent: entry?.intent,
+      };
+    })
+    .filter((entry) => entry.question);
 
   const userMessage = [
     `REQUIREMENT: ${opts.requirement}`,
-    askedQuestions.length ? `DISCOVERY QUESTIONS ALREADY ASKED:\n${askedQuestions.map((question, index) => `${index + 1}. ${question}`).join('\n')}` : '',
+    askedQuestionDetails.length
+      ? `DISCOVERY QUESTIONS ALREADY ASKED:\n${askedQuestionDetails.map((entry, index) => {
+          const parts = [
+            entry.categoryKey ? labelForCategoryKey(entry.categoryKey) : null,
+            entry.intent ? String(entry.intent).trim() : null,
+          ].filter(Boolean);
+          const prefix = parts.length ? ` [${parts.join(' | ')}]` : '';
+          return `${index + 1}.${prefix} ${entry.question}`;
+        }).join('\n')}`
+      : '',
     `DISCOVERY ANSWERS:\n${qaText}`,
   ].filter(Boolean).join('\n\n');
 
@@ -1166,15 +1242,24 @@ export async function evaluateSufficiency(opts: {
   const durationMs = Date.now() - startedAt;
 
   const sufficient = Boolean((result.data as Record<string, unknown>).sufficient);
-  const missingDimensions = parseStringList(result.data, 'missingDimensions');
+  const parsedQuestions = parseQuestionCandidates(result.data);
+  const missingCategoryKeys = (() => {
+    const explicit = parseCategoryKeyList(result.data);
+    if (explicit.length) return explicit;
+
+    const inferred = parsedQuestions
+      .map((question) => question.categoryKey)
+      .filter((value, index, values) => values.indexOf(value) === index);
+    return inferred;
+  })();
   const reasonCodes = parseStringList(result.data, 'reasonCodes')
     .map((code) => code.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase())
     .filter(Boolean);
 
   const questions = !sufficient && followupCap > 0
-    ? finalizeFollowupDiscoveryQuestions(parseQuestionCandidates(result.data), {
-        askedQuestions,
-        missingDimensions,
+    ? finalizeFollowupDiscoveryQuestions(parsedQuestions, {
+        askedQuestions: askedQuestionDetails.map((entry) => entry.question),
+        missingCategoryKeys,
         followupCap,
         initialQuestionCount,
       })
@@ -1183,7 +1268,7 @@ export async function evaluateSufficiency(opts: {
   return {
     sufficient,
     questions: sufficient ? undefined : questions,
-    missingDimensions,
+    missingCategoryKeys,
     reasonCodes,
     durationMs,
     tokenUsage: {

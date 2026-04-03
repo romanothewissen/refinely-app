@@ -226,6 +226,8 @@ export interface ReferencedSimilarStory {
   key: string;
   summary: string;
   relevanceScore?: number;
+  url?: string;
+  jiraIssueUrl?: string;
 }
 
 export interface ReferencedWiSection {
@@ -235,11 +237,19 @@ export interface ReferencedWiSection {
   excerpt: string;
 }
 
+export type ClarifyCategoryKey =
+  | 'context_trigger'
+  | 'user_personas'
+  | 'information_architecture'
+  | 'business_rules'
+  | 'state_lifecycle'
+  | 'edge_cases_exceptions';
+
 export interface DiscoveryProfile {
   scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
   complexity: 'low' | 'medium' | 'high' | 'very_high';
   ambiguity: 'low' | 'medium' | 'high';
-  missingDimensions: string[];
+  missingCategoryKeys: ClarifyCategoryKey[];
   recommendedInitialCount: number;
   followupCap: number;
 }
@@ -248,7 +258,7 @@ export interface DiscoverySufficiencyResult {
   evaluated: boolean;
   sufficient: boolean | null;
   roundEvaluated: number;
-  missingDimensions: string[];
+  missingCategoryKeys: ClarifyCategoryKey[];
   reasonCodes: string[];
 }
 
@@ -325,7 +335,9 @@ export interface SimilarStory {
 // ─── Clarifying Questions ────────────────────────────────────────────────────
 
 export interface ClarifyQuestion {
+  categoryKey: ClarifyCategoryKey;
   category: string;
+  intent: string;
   question: string;
   suggestions: string[];
 }
@@ -333,6 +345,10 @@ export interface ClarifyQuestion {
 export interface ClarifyAnswer {
   question: string;
   answer: string;
+  selectedSuggestions: string[];
+  customAnswer?: string;
+  categoryKey?: ClarifyCategoryKey;
+  intent?: string;
 }
 
 // ─── Conversation / History ───────────────────────────────────────────────────

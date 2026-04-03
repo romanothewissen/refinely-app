@@ -106,7 +106,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         evaluated: false,
         sufficient: null,
         roundEvaluated: 0,
-        missingDimensions: discoveryProfile.missingDimensions,
+        missingCategoryKeys: discoveryProfile.missingCategoryKeys,
         reasonCodes: [],
       },
       tokenUsage,

@@ -32,7 +32,7 @@ export const api = {
   evaluateSufficiency: (payload: {
     requirement: string;
     answers: unknown[];
-    askedQuestions?: string[];
+    askedQuestions?: unknown[];
     followupCap?: number;
     initialQuestionCount?: number;
     totalQuestionBudget?: number;

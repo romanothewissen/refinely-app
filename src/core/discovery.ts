@@ -1,74 +1,181 @@
-import { ClarifyQuestion, DiscoveryProfile } from '../types';
+import { ClarifyCategoryKey, ClarifyQuestion, DiscoveryProfile } from '../types';
 
-export const MIN_INITIAL_DISCOVERY_QUESTIONS = 5;
-export const MAX_INITIAL_DISCOVERY_QUESTIONS = 10;
+export const MIN_INITIAL_DISCOVERY_QUESTIONS = 6;
+export const MAX_INITIAL_DISCOVERY_QUESTIONS = 12;
 export const MIN_FOLLOWUP_DISCOVERY_QUESTIONS = 2;
-export const MAX_FOLLOWUP_DISCOVERY_QUESTIONS = 5;
-export const MAX_TOTAL_DISCOVERY_QUESTIONS = 15;
+export const MAX_FOLLOWUP_DISCOVERY_QUESTIONS = 8;
+export const MAX_TOTAL_DISCOVERY_QUESTIONS = 20;
+export const MAX_ATOMIC_QUESTION_WORDS = 28;
 
-type FallbackTemplate = {
-  dimension: string;
-  category: string;
+export const CLARIFY_CATEGORY_ORDER: ClarifyCategoryKey[] = [
+  'context_trigger',
+  'user_personas',
+  'information_architecture',
+  'business_rules',
+  'state_lifecycle',
+  'edge_cases_exceptions',
+];
+
+export const CLARIFY_CATEGORY_LABELS: Record<ClarifyCategoryKey, string> = {
+  context_trigger: 'Context & Trigger',
+  user_personas: 'User Personas',
+  information_architecture: 'Information Architecture',
+  business_rules: 'Business Rules',
+  state_lifecycle: 'State & Lifecycle',
+  edge_cases_exceptions: 'Edge Cases & Exceptions',
+};
+
+type DiscoveryTemplate = {
+  categoryKey: ClarifyCategoryKey;
+  intent: string;
   question: string;
   suggestions: string[];
 };
 
-const GENERIC_DISCOVERY_TEMPLATES: FallbackTemplate[] = [
+const DISCOVERY_TEMPLATES: DiscoveryTemplate[] = [
   {
-    dimension: 'Objective & Outcome',
-    category: 'Objective & Outcome',
-    question: 'What concrete outcome should this request achieve beyond the high-level improvement or change that has been described so far?',
-    suggestions: ['Clear business result', 'Faster completion', 'Higher quality', 'Better visibility'],
+    categoryKey: 'context_trigger',
+    intent: 'business_outcome',
+    question: 'What business problem or outcome should this capability directly address?',
+    suggestions: ['Resolve a support need', 'Reduce manual handling', 'Improve response speed', 'Increase visibility'],
   },
   {
-    dimension: 'Actors & Ownership',
-    category: 'Actors & Ownership',
-    question: 'Which people, teams, or user groups need to initiate this, own decisions within it, or be directly affected by the outcome?',
-    suggestions: ['Single actor group', 'Multiple actor groups', 'Shared ownership', 'Still unclear'],
+    categoryKey: 'context_trigger',
+    intent: 'trigger_event',
+    question: 'What exact event or condition should trigger this behavior to begin?',
+    suggestions: ['User action', 'Incoming communication', 'Status change', 'Scheduled condition'],
   },
   {
-    dimension: 'Trigger & Context',
-    category: 'Trigger & Context',
-    question: 'What event, condition, or business context should cause this to happen, and when should it apply versus stay inactive?',
-    suggestions: ['Manual trigger', 'Automatic trigger', 'Scheduled trigger', 'Context dependent'],
+    categoryKey: 'context_trigger',
+    intent: 'success_signal',
+    question: 'What should count as a successful result once this has happened?',
+    suggestions: ['Case created correctly', 'Right party notified', 'Record updated', 'Request resolved'],
   },
   {
-    dimension: 'Inputs & Data',
-    category: 'Inputs & Data',
-    question: 'What information, signals, or inputs must be available for this to work correctly, and which of them are essential versus optional?',
-    suggestions: ['Single required input', 'Several required inputs', 'Optional supporting inputs', 'Still being defined'],
+    categoryKey: 'user_personas',
+    intent: 'primary_actor',
+    question: 'Who is the primary actor that should initiate or own this capability?',
+    suggestions: ['Support agent', 'Operations user', 'Supervisor', 'External contact'],
   },
   {
-    dimension: 'Workflow & Decisions',
-    category: 'Workflow & Decisions',
-    question: 'What are the main steps or decision points this should follow from start to finish once the request is in motion?',
-    suggestions: ['Straight-through flow', 'Several decision points', 'Manual review step', 'Branching workflow'],
+    categoryKey: 'user_personas',
+    intent: 'downstream_actors',
+    question: 'Who else is affected by the result or needs visibility into what happened?',
+    suggestions: ['Internal team', 'Approver', 'Requester', 'No other actor'],
   },
   {
-    dimension: 'Rules & Constraints',
-    category: 'Rules & Constraints',
-    question: 'Which business rules, limits, priorities, or constraints must always be enforced so the behavior is considered correct?',
-    suggestions: ['Priority rules', 'Eligibility rules', 'Approval constraints', 'None defined yet'],
+    categoryKey: 'user_personas',
+    intent: 'permissions_scope',
+    question: 'Whose permissions, ownership, or access level differ from the default flow?',
+    suggestions: ['Admins only differ', 'Managers approve', 'Assigned owner differs', 'No special permissions'],
   },
   {
-    dimension: 'Exceptions & Failure Modes',
-    category: 'Exceptions & Failure Modes',
-    question: 'What edge cases, conflicts, invalid states, or failures should be handled explicitly instead of following the normal path?',
-    suggestions: ['Validation failures', 'Conflicting inputs', 'Missing data', 'Fallback path needed'],
+    categoryKey: 'information_architecture',
+    intent: 'required_inputs',
+    question: 'What minimum information must be captured or available for this to work correctly?',
+    suggestions: ['Identifiers only', 'Context plus reason', 'Full request details', 'Still undefined'],
   },
   {
-    dimension: 'Dependencies & Boundaries',
-    category: 'Dependencies & Boundaries',
-    question: 'What dependencies, handoffs, or scope boundaries need to be respected so this request stays complete without expanding beyond intent?',
-    suggestions: ['Depends on another process', 'Needs upstream input', 'Needs downstream handoff', 'Scope boundary unclear'],
+    categoryKey: 'information_architecture',
+    intent: 'outputs_displays',
+    question: 'What output, record, or display should this produce or update?',
+    suggestions: ['Create a record', 'Update existing record', 'Show a summary', 'Send a notification'],
   },
   {
-    dimension: 'Success Criteria',
-    category: 'Success Criteria',
-    question: 'How should success be judged once this is delivered, and what would tell us that the result is acceptable in practice?',
-    suggestions: ['Business KPI', 'Adoption signal', 'Quality threshold', 'Operational outcome'],
+    categoryKey: 'information_architecture',
+    intent: 'entity_linkage',
+    question: 'What identifier or linkage is needed to connect this to the right person, case, or conversation?',
+    suggestions: ['Phone number', 'Message thread', 'Customer identifier', 'Case reference'],
+  },
+  {
+    categoryKey: 'business_rules',
+    intent: 'core_constraints',
+    question: 'What rule or constraint must always be enforced for this behavior to be considered correct?',
+    suggestions: ['Eligibility rule', 'Priority rule', 'Approval rule', 'Validation rule'],
+  },
+  {
+    categoryKey: 'business_rules',
+    intent: 'timing_dependencies',
+    question: 'What timing, sequencing, or dependency rule affects when this can happen?',
+    suggestions: ['Immediate only', 'After another step', 'Within a time window', 'Depends on status'],
+  },
+  {
+    categoryKey: 'business_rules',
+    intent: 'decision_logic',
+    question: 'What decision logic, threshold, or policy should change the outcome here?',
+    suggestions: ['Keyword based', 'Priority based', 'Role based', 'Threshold based'],
+  },
+  {
+    categoryKey: 'state_lifecycle',
+    intent: 'lifecycle_states',
+    question: 'What statuses or lifecycle states should this move through from start to finish?',
+    suggestions: ['Open to closed', 'New to assigned', 'Draft to approved', 'Single state only'],
+  },
+  {
+    categoryKey: 'state_lifecycle',
+    intent: 'transition_triggers',
+    question: 'What action or event should move this from one state to the next?',
+    suggestions: ['Manual action', 'Automatic transition', 'Approval event', 'External update'],
+  },
+  {
+    categoryKey: 'state_lifecycle',
+    intent: 'reopen_retry',
+    question: 'What should happen if this needs to be retried, reopened, or reversed later?',
+    suggestions: ['Reopen existing item', 'Create a new item', 'Allow retry only', 'No reversal allowed'],
+  },
+  {
+    categoryKey: 'edge_cases_exceptions',
+    intent: 'missing_data_fallback',
+    question: 'What should happen if required information is missing or incomplete at the moment this runs?',
+    suggestions: ['Block and notify', 'Create partial record', 'Queue for review', 'Use fallback'],
+  },
+  {
+    categoryKey: 'edge_cases_exceptions',
+    intent: 'conflicts_duplicates',
+    question: 'What should happen if this conflicts with an existing item or would create a duplicate?',
+    suggestions: ['Update existing item', 'Create a new item', 'Ask for review', 'Ignore duplicate'],
+  },
+  {
+    categoryKey: 'edge_cases_exceptions',
+    intent: 'offline_failure_behavior',
+    question: 'What should happen if a system, channel, or integration is unavailable when this tries to run?',
+    suggestions: ['Retry later', 'Queue for recovery', 'Fall back manually', 'Fail and alert'],
   },
 ];
+
+const CATEGORY_ALIASES: Record<string, ClarifyCategoryKey> = {
+  'context trigger': 'context_trigger',
+  'context and trigger': 'context_trigger',
+  'trigger context': 'context_trigger',
+  'trigger and context': 'context_trigger',
+  'objective outcome': 'context_trigger',
+  'objective and outcome': 'context_trigger',
+  'success criteria': 'context_trigger',
+  'success and measurement': 'context_trigger',
+  'actors ownership': 'user_personas',
+  'actors and ownership': 'user_personas',
+  'roles personas': 'user_personas',
+  'roles and personas': 'user_personas',
+  'user personas': 'user_personas',
+  'personas': 'user_personas',
+  'information architecture': 'information_architecture',
+  'inputs data': 'information_architecture',
+  'inputs and data': 'information_architecture',
+  'data': 'information_architecture',
+  'business rules': 'business_rules',
+  'rules constraints': 'business_rules',
+  'rules and constraints': 'business_rules',
+  'dependencies boundaries': 'business_rules',
+  'dependencies and boundaries': 'business_rules',
+  'state lifecycle': 'state_lifecycle',
+  'state and lifecycle': 'state_lifecycle',
+  'workflow decisions': 'state_lifecycle',
+  'workflow and decisions': 'state_lifecycle',
+  'edge cases exceptions': 'edge_cases_exceptions',
+  'edge cases and exceptions': 'edge_cases_exceptions',
+  'exceptions failure modes': 'edge_cases_exceptions',
+  'exceptions and failure modes': 'edge_cases_exceptions',
+};
 
 function clampCount(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -86,13 +193,48 @@ function normalizeKey(value: string): string {
     .trim();
 }
 
-function normalizeDimension(value: string): string {
-  const normalized = normalizeKey(value);
-  const template = GENERIC_DISCOVERY_TEMPLATES.find((candidate) => {
-    const candidateKey = normalizeKey(candidate.dimension);
-    return normalized === candidateKey || normalized.includes(candidateKey) || candidateKey.includes(normalized);
-  });
-  return template?.dimension ?? cleanText(value);
+function questionWordCount(value: string): number {
+  return cleanText(value).split(/\s+/).filter(Boolean).length;
+}
+
+function ensureQuestionMark(value: string): string {
+  const trimmed = cleanText(value).replace(/[?.!]+$/g, '');
+  return trimmed ? `${trimmed}?` : '';
+}
+
+function sentenceCaseQuestion(value: string): string {
+  const normalized = ensureQuestionMark(value);
+  if (!normalized) return '';
+  return normalized.replace(/^[a-z]/, (letter) => letter.toUpperCase());
+}
+
+function toSnakeCase(value: string): string {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+}
+
+function combinedContextText(input: {
+  requirement?: string;
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
+}): string {
+  return [
+    input.requirement,
+    input.attachmentText,
+    input.wiContextText,
+    input.similarStoriesText,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .toLowerCase();
+}
+
+function uniqueCategoryKeys(values: ClarifyCategoryKey[]): ClarifyCategoryKey[] {
+  return CLARIFY_CATEGORY_ORDER.filter((key) => values.includes(key));
 }
 
 function uniqueStrings(values: unknown[]): string[] {
@@ -109,7 +251,97 @@ function uniqueStrings(values: unknown[]): string[] {
   return result;
 }
 
-function dedupeQuestions(
+function categoryTemplates(categoryKey: ClarifyCategoryKey): DiscoveryTemplate[] {
+  return DISCOVERY_TEMPLATES.filter((template) => template.categoryKey === categoryKey);
+}
+
+export function labelForCategoryKey(categoryKey: ClarifyCategoryKey): string {
+  return CLARIFY_CATEGORY_LABELS[categoryKey];
+}
+
+export function normalizeCategoryKey(value: unknown): ClarifyCategoryKey | null {
+  const raw = cleanText(String(value ?? ''));
+  if (!raw) return null;
+  if ((CLARIFY_CATEGORY_ORDER as string[]).includes(raw)) return raw as ClarifyCategoryKey;
+
+  const cleaned = normalizeKey(String(value ?? ''));
+  if (!cleaned) return null;
+  if (CATEGORY_ALIASES[cleaned]) return CATEGORY_ALIASES[cleaned];
+  if ((CLARIFY_CATEGORY_ORDER as string[]).includes(cleaned)) return cleaned as ClarifyCategoryKey;
+  return null;
+}
+
+export function inferCategoryKeyFromQuestion(question: string): ClarifyCategoryKey {
+  const normalized = cleanText(question).toLowerCase();
+
+  if (/\b(status|state|lifecycle|transition|stage|reopen|retry|reverse|progression|move through)\b/.test(normalized)) {
+    return 'state_lifecycle';
+  }
+  if (/\b(missing|duplicate|conflict|offline|unavailable|error|fail|fallback|exception|invalid)\b/.test(normalized)) {
+    return 'edge_cases_exceptions';
+  }
+  if (/\b(rule|constraint|priority|validation|approval|threshold|policy|dependency|sequence|timing|rank|score)\b/.test(normalized)) {
+    return 'business_rules';
+  }
+  if (/\b(input|output|field|data|capture|extract|display|record|identifier|link|associate|update)\b/.test(normalized)) {
+    return 'information_architecture';
+  }
+  if (/\b(who|actor|owner|permission|access|role|team|persona|visibility)\b/.test(normalized)) {
+    return 'user_personas';
+  }
+  return 'context_trigger';
+}
+
+export function normalizeQuestionIntent(value: unknown, categoryKey: ClarifyCategoryKey, fallbackQuestion?: string): string {
+  const provided = toSnakeCase(String(value ?? ''));
+  if (provided) return provided;
+  if (fallbackQuestion) {
+    const inferred = toSnakeCase(fallbackQuestion.split('?')[0]);
+    if (inferred) return inferred;
+  }
+  const template = categoryTemplates(categoryKey)[0];
+  return template?.intent ?? `clarify_${categoryKey}`;
+}
+
+function defaultSuggestionsForCategory(categoryKey: ClarifyCategoryKey): string[] {
+  const templates = categoryTemplates(categoryKey);
+  return templates[0]?.suggestions.slice(0, 4) ?? [];
+}
+
+function looksCompoundQuestion(question: string): boolean {
+  const normalized = cleanText(question).toLowerCase();
+  if (!normalized) return false;
+  if (questionWordCount(normalized) > MAX_ATOMIC_QUESTION_WORDS) return true;
+  if ((normalized.match(/\b(and|as well as)\s+(what|which|who|when|where|why|how|whether)\b/g) ?? []).length > 0) return true;
+  if ((normalized.match(/\bwhat\b|\bwhich\b|\bwho\b|\bwhen\b|\bwhere\b|\bwhy\b|\bhow\b|\bwhether\b/g) ?? []).length > 1) return true;
+  if (normalized.includes(';')) return true;
+  return false;
+}
+
+function splitCompoundQuestion(question: string): string[] {
+  const compact = ensureQuestionMark(question);
+  if (!compact) return [];
+
+  const interrogativePattern = /\b(what|which|who|when|where|why|how|whether)\b/i;
+  const firstInterrogativeIndex = compact.search(interrogativePattern);
+  if (firstInterrogativeIndex < 0) return [compact];
+
+  const prefix = compact.slice(0, firstInterrogativeIndex);
+  const splitter = compact.match(/^(.*?)(?:,\s*|\s+)and\s+(what|which|who|when|where|why|how|whether)\b(.*)$/i);
+  if (splitter) {
+    const first = ensureQuestionMark(splitter[1]);
+    const second = ensureQuestionMark(`${prefix}${splitter[2]}${splitter[3]}`);
+    return [first, second].filter(Boolean);
+  }
+
+  return [compact];
+}
+
+function normalizeQuestionText(question: string): string {
+  return sentenceCaseQuestion(question);
+}
+
+function normalizeQuestions(
   questions: ClarifyQuestion[],
   alreadyAsked: Set<string>,
 ): ClarifyQuestion[] {
@@ -117,14 +349,16 @@ function dedupeQuestions(
   const result: ClarifyQuestion[] = [];
 
   questions.forEach((question) => {
-    const cleanedQuestion = cleanText(question.question);
-    if (!cleanedQuestion) return;
-    const key = normalizeKey(cleanedQuestion);
+    const normalizedQuestion = normalizeQuestionText(question.question);
+    if (!normalizedQuestion) return;
+    const key = normalizeKey(normalizedQuestion);
     if (!key || seen.has(key)) return;
     seen.add(key);
     result.push({
-      category: cleanText(question.category) || 'Discovery',
-      question: cleanedQuestion,
+      categoryKey: question.categoryKey,
+      category: labelForCategoryKey(question.categoryKey),
+      intent: normalizeQuestionIntent(question.intent, question.categoryKey, normalizedQuestion),
+      question: normalizedQuestion,
       suggestions: uniqueStrings(question.suggestions).slice(0, 4),
     });
   });
@@ -132,35 +366,48 @@ function dedupeQuestions(
   return result;
 }
 
-function fallbackTemplatesForDimensions(missingDimensions: string[]): FallbackTemplate[] {
-  const normalizedDimensions = missingDimensions.map(normalizeDimension).filter(Boolean);
-  const preferred = normalizedDimensions
-    .map((dimension) => GENERIC_DISCOVERY_TEMPLATES.find((template) => template.dimension === dimension))
-    .filter((template): template is FallbackTemplate => Boolean(template));
-
-  const remaining = GENERIC_DISCOVERY_TEMPLATES.filter(
-    (template) => !preferred.some((picked) => picked.dimension === template.dimension),
-  );
-
-  return [...preferred, ...remaining];
+function questionComparator(left: ClarifyQuestion, right: ClarifyQuestion): number {
+  const leftIndex = CLARIFY_CATEGORY_ORDER.indexOf(left.categoryKey);
+  const rightIndex = CLARIFY_CATEGORY_ORDER.indexOf(right.categoryKey);
+  if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+  return left.question.localeCompare(right.question);
 }
 
-function fallbackQuestions(
-  missingDimensions: string[],
+function buildFallbackQuestions(
+  categoryKeys: ClarifyCategoryKey[],
   alreadyAsked: Set<string>,
   needed: number,
 ): ClarifyQuestion[] {
   if (needed <= 0) return [];
 
+  const orderedKeys = uniqueCategoryKeys(categoryKeys);
+  const primaryTemplates = [
+    ...orderedKeys.map((categoryKey) => categoryTemplates(categoryKey)[0]).filter(Boolean),
+    ...CLARIFY_CATEGORY_ORDER
+      .filter((categoryKey) => !orderedKeys.includes(categoryKey))
+      .map((categoryKey) => categoryTemplates(categoryKey)[0])
+      .filter(Boolean),
+  ];
+  const secondaryTemplates = [
+    ...orderedKeys.flatMap((categoryKey) => categoryTemplates(categoryKey).slice(1)),
+    ...CLARIFY_CATEGORY_ORDER
+      .filter((categoryKey) => !orderedKeys.includes(categoryKey))
+      .flatMap((categoryKey) => categoryTemplates(categoryKey).slice(1)),
+  ];
+  const templates = [...primaryTemplates, ...secondaryTemplates];
+
   const questions: ClarifyQuestion[] = [];
-  for (const template of fallbackTemplatesForDimensions(missingDimensions)) {
-    const key = normalizeKey(template.question);
+  for (const template of templates) {
+    const normalizedQuestion = normalizeQuestionText(template.question);
+    const key = normalizeKey(normalizedQuestion);
     if (!key || alreadyAsked.has(key)) continue;
     alreadyAsked.add(key);
     questions.push({
-      category: template.category,
-      question: template.question,
-      suggestions: [...template.suggestions],
+      categoryKey: template.categoryKey,
+      category: labelForCategoryKey(template.categoryKey),
+      intent: template.intent,
+      question: normalizedQuestion,
+      suggestions: template.suggestions.slice(0, 4),
     });
     if (questions.length >= needed) break;
   }
@@ -168,9 +415,55 @@ function fallbackQuestions(
   return questions;
 }
 
+function inferRequiredCategoryKeys(input: {
+  requirement?: string;
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
+}): ClarifyCategoryKey[] {
+  const text = combinedContextText(input);
+  const required = new Set<ClarifyCategoryKey>();
+
+  const hasActor = /\b(user|users|actor|agent|manager|owner|approver|reviewer|team|customer|caller|sender|recipient|operator|requester|assignee|contact)\b/.test(text);
+  const hasPermission = /\b(permission|permissions|access|role|roles|owner|ownership|approve|approval|visibility|who can|who may)\b/.test(text);
+  if (!hasActor || !hasPermission) required.add('user_personas');
+
+  const hasTrigger = /\b(trigger|when|after|before|upon|once|if|incoming|arrival|creation|submission|request|call|message|event)\b/.test(text);
+  const hasOutcome = /\b(outcome|goal|success|result|measure|kpi|solve|resolve|improve|ensure|so that)\b/.test(text);
+  if (!hasTrigger || !hasOutcome) required.add('context_trigger');
+
+  if (/\b(capture|captured|extract|populate|field|fields|data|input|output|record|display|show|identifier|id|associate|link|message content|call duration)\b/.test(text)) {
+    required.add('information_architecture');
+  }
+
+  if (/\b(rule|rules|constraint|constraints|priority|validation|timing|dependency|dependencies|calculation|approval|policy|threshold|rank|score|sla|deadline|only|unless|must)\b/.test(text)) {
+    required.add('business_rules');
+  }
+
+  if (/\b(status|statuses|state|states|lifecycle|transition|transitions|stage|stages|draft|approved|open|closed|reopen|retry|complete|completion|cancel|queue)\b/.test(text)) {
+    required.add('state_lifecycle');
+  }
+
+  if (/\b(automatic|automation|integration|offline|missing|incomplete|conflict|duplicate|fallback|error|failure|exception|exceptions|invalid|unavailable|retry)\b/.test(text)) {
+    required.add('edge_cases_exceptions');
+  }
+
+  return uniqueCategoryKeys([...required]);
+}
+
+function categoryCoverageKeys(profile: DiscoveryProfile, input?: {
+  requirement?: string;
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
+}): ClarifyCategoryKey[] {
+  const inferred = input ? inferRequiredCategoryKeys(input) : [];
+  return uniqueCategoryKeys([...profile.missingCategoryKeys, ...inferred]);
+}
+
 export function normalizeDiscoveryProfile(
   candidate?: Partial<DiscoveryProfile> | null,
-  fallbackQuestionCount = 7,
+  fallbackQuestionCount = 8,
 ): DiscoveryProfile {
   const scope = cleanText(candidate?.scope).toLowerCase();
   const complexity = cleanText(candidate?.complexity).toLowerCase();
@@ -182,6 +475,9 @@ export function normalizeDiscoveryProfile(
     MIN_INITIAL_DISCOVERY_QUESTIONS,
     MAX_INITIAL_DISCOVERY_QUESTIONS,
   );
+  const rawMissing = Array.isArray((candidate as { missingCategoryKeys?: unknown[] } | null | undefined)?.missingCategoryKeys)
+    ? ((candidate as { missingCategoryKeys?: unknown[] }).missingCategoryKeys ?? [])
+    : [];
 
   return {
     scope: scope === 'narrow' || scope === 'moderate' || scope === 'broad' || scope === 'very_broad'
@@ -193,43 +489,109 @@ export function normalizeDiscoveryProfile(
     ambiguity: ambiguity === 'low' || ambiguity === 'medium' || ambiguity === 'high'
       ? ambiguity
       : 'medium',
-    missingDimensions: uniqueStrings((candidate?.missingDimensions ?? []).map(normalizeDimension)),
+    missingCategoryKeys: uniqueCategoryKeys(
+      rawMissing
+        .map((value) => normalizeCategoryKey(value))
+        .filter((value): value is ClarifyCategoryKey => Boolean(value)),
+    ),
     recommendedInitialCount,
     followupCap: clampCount(
-      Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 3,
+      Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4,
       MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
       MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
     ),
   };
 }
 
+export function expandRawQuestionCandidate(raw: {
+  categoryKey?: unknown;
+  category?: unknown;
+  intent?: unknown;
+  question?: unknown;
+  suggestions?: unknown[];
+}): ClarifyQuestion[] {
+  const rawQuestion = cleanText(raw.question);
+  if (!rawQuestion) return [];
+
+  const categoryKey =
+    normalizeCategoryKey(raw.categoryKey)
+    ?? normalizeCategoryKey(raw.category)
+    ?? inferCategoryKeyFromQuestion(rawQuestion);
+
+  const baseSuggestions = Array.isArray(raw.suggestions)
+    ? uniqueStrings(raw.suggestions).slice(0, 4)
+    : [];
+  const splitQuestions = splitCompoundQuestion(rawQuestion);
+  const variants = splitQuestions.length > 1 ? splitQuestions : [rawQuestion];
+
+  return variants
+    .map((variant, index) => {
+      const normalizedQuestion = normalizeQuestionText(variant);
+      if (!normalizedQuestion) return null;
+      if (looksCompoundQuestion(normalizedQuestion)) return null;
+      return {
+        categoryKey,
+        category: labelForCategoryKey(categoryKey),
+        intent: index === 0
+          ? normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)
+          : `${normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)}_part_${index + 1}`,
+        question: normalizedQuestion,
+        suggestions: splitQuestions.length > 1
+          ? defaultSuggestionsForCategory(categoryKey)
+          : (baseSuggestions.length ? baseSuggestions : defaultSuggestionsForCategory(categoryKey)),
+      } satisfies ClarifyQuestion;
+    })
+    .filter((question): question is ClarifyQuestion => Boolean(question));
+}
+
 export function finalizeInitialDiscoveryQuestions(
   questions: ClarifyQuestion[],
   profile: DiscoveryProfile,
+  input?: {
+    requirement?: string;
+    attachmentText?: string;
+    wiContextText?: string;
+    similarStoriesText?: string;
+  },
 ): ClarifyQuestion[] {
   const targetCount = clampCount(
     profile.recommendedInitialCount,
     MIN_INITIAL_DISCOVERY_QUESTIONS,
     MAX_INITIAL_DISCOVERY_QUESTIONS,
   );
-  const deduped = dedupeQuestions(questions, new Set<string>());
+  const preferredCategories = categoryCoverageKeys(profile, input);
+  const deduped = normalizeQuestions(questions, new Set<string>()).sort(questionComparator);
+  const result: ClarifyQuestion[] = [];
+  const addedQuestions = new Set<string>();
 
-  if (deduped.length >= targetCount) {
-    return deduped.slice(0, targetCount);
+  preferredCategories.forEach((categoryKey) => {
+    const existing = deduped.find((question) => question.categoryKey === categoryKey && !addedQuestions.has(normalizeKey(question.question)));
+    if (!existing) return;
+    addedQuestions.add(normalizeKey(existing.question));
+    result.push(existing);
+  });
+
+  deduped.forEach((question) => {
+    if (result.length >= targetCount) return;
+    const key = normalizeKey(question.question);
+    if (addedQuestions.has(key)) return;
+    addedQuestions.add(key);
+    result.push(question);
+  });
+
+  if (result.length < targetCount) {
+    const filler = buildFallbackQuestions(preferredCategories, addedQuestions, targetCount - result.length);
+    result.push(...filler);
   }
 
-  const asked = new Set(deduped.map((question) => normalizeKey(question.question)));
-  return [
-    ...deduped,
-    ...fallbackQuestions(profile.missingDimensions, asked, targetCount - deduped.length),
-  ].slice(0, targetCount);
+  return result.slice(0, targetCount).sort(questionComparator);
 }
 
 export function finalizeFollowupDiscoveryQuestions(
   questions: ClarifyQuestion[],
   opts: {
     askedQuestions: string[];
-    missingDimensions: string[];
+    missingCategoryKeys: ClarifyCategoryKey[];
     followupCap: number;
     initialQuestionCount: number;
   },
@@ -244,19 +606,35 @@ export function finalizeFollowupDiscoveryQuestions(
   if (maxFollowup <= 0) return [];
 
   const asked = new Set(opts.askedQuestions.map(normalizeKey).filter(Boolean));
-  const deduped = dedupeQuestions(questions, asked);
-  const limited = deduped.slice(0, maxFollowup);
+  const deduped = normalizeQuestions(questions, asked).sort(questionComparator);
+  const result: ClarifyQuestion[] = [];
+  const preferredCategories = uniqueCategoryKeys(opts.missingCategoryKeys);
+  const addedQuestions = new Set<string>();
 
-  if (limited.length >= Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, maxFollowup)) {
-    return limited;
+  preferredCategories.forEach((categoryKey) => {
+    if (result.length >= maxFollowup) return;
+    const existing = deduped.find((question) => question.categoryKey === categoryKey && !addedQuestions.has(normalizeKey(question.question)));
+    if (!existing) return;
+    addedQuestions.add(normalizeKey(existing.question));
+    result.push(existing);
+  });
+
+  deduped.forEach((question) => {
+    if (result.length >= maxFollowup) return;
+    const key = normalizeKey(question.question);
+    if (addedQuestions.has(key)) return;
+    addedQuestions.add(key);
+    result.push(question);
+  });
+
+  if (result.length < Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, maxFollowup)) {
+    const filler = buildFallbackQuestions(
+      preferredCategories.length ? preferredCategories : CLARIFY_CATEGORY_ORDER,
+      new Set([...asked, ...result.map((question) => normalizeKey(question.question))]),
+      maxFollowup - result.length,
+    );
+    result.push(...filler);
   }
 
-  return [
-    ...limited,
-    ...fallbackQuestions(
-      opts.missingDimensions,
-      new Set([...asked, ...limited.map((question) => normalizeKey(question.question))]),
-      maxFollowup - limited.length,
-    ),
-  ].slice(0, maxFollowup);
+  return result.slice(0, maxFollowup).sort(questionComparator);
 }

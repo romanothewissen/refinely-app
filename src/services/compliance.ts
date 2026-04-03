@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { asUser, route } from '@forge/api';
-import { ComplianceAuditEvent, PiiMaskingStats, TransparencyReport } from '../types';
+import { ClarifyAnswer, ComplianceAuditEvent, PiiMaskingStats, TransparencyReport } from '../types';
 import { entityGet, entitySet, KEYS } from './cache';
 
 interface MaskResult {
@@ -55,16 +55,33 @@ export function maskPiiText(text: string, enabled: boolean): MaskResult {
 }
 
 export function maskPiiInAnswers(
-  answers: Array<{ question: string; answer: string }>,
+  answers: ClarifyAnswer[],
   enabled: boolean,
-): { answers: Array<{ question: string; answer: string }>; stats: PiiMaskingStats } {
+): { answers: ClarifyAnswer[]; stats: PiiMaskingStats } {
   const totals: Record<string, number> = {};
   const next = answers.map((entry) => {
     const q = maskPiiText(entry.question, enabled);
     const a = maskPiiText(entry.answer, enabled);
+    const selectedSuggestions = (entry.selectedSuggestions ?? []).map((suggestion) => maskPiiText(suggestion, enabled));
+    const customAnswer = typeof entry.customAnswer === 'string'
+      ? maskPiiText(entry.customAnswer, enabled)
+      : null;
     Object.entries(q.stats.byType).forEach(([k, v]) => { totals[k] = (totals[k] ?? 0) + v; });
     Object.entries(a.stats.byType).forEach(([k, v]) => { totals[k] = (totals[k] ?? 0) + v; });
-    return { question: q.text, answer: a.text };
+    selectedSuggestions.forEach((masked) => {
+      Object.entries(masked.stats.byType).forEach(([k, v]) => { totals[k] = (totals[k] ?? 0) + v; });
+    });
+    if (customAnswer) {
+      Object.entries(customAnswer.stats.byType).forEach(([k, v]) => { totals[k] = (totals[k] ?? 0) + v; });
+    }
+    return {
+      question: q.text,
+      answer: a.text,
+      selectedSuggestions: selectedSuggestions.map((masked) => masked.text),
+      customAnswer: customAnswer?.text,
+      categoryKey: entry.categoryKey,
+      intent: entry.intent,
+    };
   });
   const totalRedactions = Object.values(totals).reduce((sum, value) => sum + value, 0);
   return { answers: next, stats: { enabled, totalRedactions, byType: totals } };

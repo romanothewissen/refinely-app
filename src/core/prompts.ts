@@ -322,12 +322,21 @@ DISCOVERY RULES:
 - Do NOT introduce company names, product names, role taxonomies, or internal terms unless the request or supporting evidence already uses them.
 - Preserve user-provided nouns exactly.
 - Use supporting evidence only to avoid redundant questions and to understand the business context.
-- Ask between 5 and 10 questions in this first round.
-- Bias upward when business rules, ownership, exceptions, dependencies, decision logic, or success criteria are still unclear.
-- Cover only the dimensions that are still missing from this neutral set: objective, actors, trigger/context, inputs, workflow, rules, exceptions, dependencies/boundaries, success criteria.
+- Evaluate all 6 categories below, then ask only from the ones that are still materially unresolved:
+  - context_trigger = business problem, initiating event, success criteria
+  - user_personas = actors, impacted parties, ownership, permissions
+  - information_architecture = required inputs, extracted fields, outputs, linkage
+  - business_rules = validation, timing, dependencies, approval, policy, calculations
+  - state_lifecycle = statuses, transitions, completion, reopen, retry
+  - edge_cases_exceptions = missing data, conflicts, duplicates, offline behavior, fallback handling
+- Ask between 6 and 12 questions in this first round.
+- Bias upward when business rules, ownership, lifecycle behavior, exceptions, dependencies, or success criteria are still unclear.
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
-- Keep each question to one sentence, concise but substantive.
+- Every question must capture exactly one business decision.
+- Do NOT write compound questions. If two decisions are needed, split them into two questions.
+- Do NOT combine trigger plus data capture, permissions plus workflow, or rules plus fallback in one question.
+- Keep each question to one short sentence with direct wording.
 - Keep suggestions short and scannable.
 - Provide exactly 4 suggestions per question.
 
@@ -338,13 +347,14 @@ Return JSON only in this shape:
     "scope": "narrow|moderate|broad|very_broad",
     "complexity": "low|medium|high|very_high",
     "ambiguity": "low|medium|high",
-    "missingDimensions": ["..."],
-    "recommendedInitialCount": 5,
-    "followupCap": 2
+    "missingCategoryKeys": ["context_trigger", "business_rules"],
+    "recommendedInitialCount": 8,
+    "followupCap": 4
   },
   "questions": [
     {
-      "category": "...",
+      "categoryKey": "context_trigger",
+      "intent": "trigger_event",
       "question": "...",
       "suggestions": ["...", "...", "...", "..."]
     }
@@ -352,10 +362,12 @@ Return JSON only in this shape:
 }
 
 OUTPUT RULES:
-- "recommendedInitialCount" must be between 5 and 10.
-- "followupCap" must be between 2 and 5.
+- "recommendedInitialCount" must be between 6 and 12.
+- "followupCap" must be between 2 and 8.
 - The number of questions returned must exactly match "recommendedInitialCount".
-- "missingDimensions" should describe the most important remaining gaps in neutral language.`;
+- "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
+- Every question must include exactly one fixed "categoryKey" and one concise "intent".
+- Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".`;
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
@@ -371,17 +383,27 @@ Assess whether the answered discovery set now contains enough information to wri
 RULES:
 - Stay generic and system-agnostic.
 - Do NOT introduce company-specific, product-specific, or role-taxonomy assumptions.
+- Evaluate sufficiency against this fixed taxonomy:
+  - context_trigger
+  - user_personas
+  - information_architecture
+  - business_rules
+  - state_lifecycle
+  - edge_cases_exceptions
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
 - Never repeat or lightly rephrase a question that was already asked.
 - Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
 - Keep follow-up questions specific and high leverage.
+- Every follow-up question must capture exactly one business decision.
+- Do NOT write compound questions. Split trigger/data, permissions/workflow, or rules/fallback into separate questions.
 - Provide exactly 4 suggestions per follow-up question.
-- Also return neutral "missingDimensions" and compact uppercase "reasonCodes" that explain why more discovery is needed.
+- Return only fixed-category follow-up questions with "categoryKey" and "intent".
+- Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 
 Return JSON only in one of these shapes:
-{"sufficient": true, "missingDimensions": [], "reasonCodes": []}
-{"sufficient": false, "missingDimensions": ["..."], "reasonCodes": ["..."], "questions": [{"category": "...", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
+{"sufficient": true, "missingCategoryKeys": [], "reasonCodes": []}
+{"sufficient": false, "missingCategoryKeys": ["business_rules"], "reasonCodes": ["MISSING_RULES"], "questions": [{"categoryKey": "business_rules", "intent": "decision_logic", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
 }
 
 // ─── Refinement (full feature set) ───────────────────────────────────────────

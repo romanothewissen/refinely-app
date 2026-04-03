@@ -9,6 +9,14 @@ import { api } from './hooks/useForge';
 import { useGenerationRealtime, useClarifyRealtime, type GenerationProgressPayload } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
+import type {
+  ClarifyAnswer,
+  ClarifyCategoryKey,
+  ClarifyContextMeta,
+  ClarifyQuestion,
+  GenerationContextMeta,
+  TokenUsageSummary,
+} from './types';
 
 export interface Feature {
   id: string;
@@ -29,72 +37,6 @@ export interface Feature {
 export interface AppConfig {
   branding?: { appTitle?: string; primaryColor?: string; secondaryColor?: string; logoUrl?: string | null };
   tier?: string;
-}
-
-interface GenerationContextMeta {
-  domainRolesUsed: string[];
-  projectKey: string;
-  domainContextApplied?: boolean;
-  attachmentIncluded?: boolean;
-  wiDocsCount?: number;
-  referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-  similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
-  tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
-}
-
-interface DiscoveryProfile {
-  scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
-  complexity: 'low' | 'medium' | 'high' | 'very_high';
-  ambiguity: 'low' | 'medium' | 'high';
-  missingDimensions: string[];
-  recommendedInitialCount: number;
-  followupCap: number;
-}
-
-interface DiscoverySufficiencyResult {
-  evaluated: boolean;
-  sufficient: boolean | null;
-  roundEvaluated: number;
-  missingDimensions: string[];
-  reasonCodes: string[];
-}
-
-interface TokenUsageSummary {
-  input: number;
-  output: number;
-  total: number;
-  byStage?: Record<string, { input: number; output: number; total: number }>;
-}
-
-interface ClarifyContextMeta {
-  projectKey: string;
-  domainRolesUsed: string[];
-  domainContextApplied?: boolean;
-  attachmentIncluded?: boolean;
-  similarStoriesCount?: number;
-  referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
-  discoveryProfile?: DiscoveryProfile;
-  ambiguityAssessment?: {
-    level: 'clear' | 'medium' | 'vague';
-    score: number;
-    reasons: string[];
-    questionPlan: { min: number; max: number; target: number };
-    generatedQuestions: number;
-  };
-  wiDocsCount?: number;
-  referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-  referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
-  roundsCompleted?: number;
-  initialQuestionCount?: number;
-  followupQuestionCount?: number;
-  totalQuestionCount?: number;
-  followupTriggered?: boolean;
-  initialClarifyDurationMs?: number;
-  sufficiencyEvaluationDurationMs?: number;
-  totalDiscoveryDurationMs?: number;
-  finalSufficiency?: DiscoverySufficiencyResult;
-  tokenUsage?: TokenUsageSummary;
 }
 
 interface WorkflowTokenUsage {
@@ -223,8 +165,8 @@ export default function App() {
   });
   
   // Realtime Integration
-  const [clarifyQuestions, setClarifyQuestions] = useState<any[]>([]);
-  const [clarifyAnswers, setClarifyAnswers] = useState<Array<{ question: string; answer: string }>>([]);
+  const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[]>([]);
+  const [clarifyAnswers, setClarifyAnswers] = useState<ClarifyAnswer[]>([]);
   const [clarifyRound, setClarifyRound] = useState<1 | 2>(1);
   const [isEvaluatingDiscovery, setIsEvaluatingDiscovery] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
@@ -482,7 +424,7 @@ export default function App() {
       setIsEvaluatingDiscovery(false);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
-        setClarifyQuestions(questions);
+        setClarifyQuestions(questions as ClarifyQuestion[]);
         setIsWorking(false);
       } else {
         startGeneration(requirement, []);
@@ -511,7 +453,7 @@ export default function App() {
     baseContext: ClarifyContextMeta | null,
     evaluation: {
       sufficient?: boolean;
-      missingDimensions?: string[];
+      missingCategoryKeys?: ClarifyCategoryKey[];
       reasonCodes?: string[];
       durationMs?: number;
       tokenUsage?: TokenUsageSummary;
@@ -536,7 +478,7 @@ export default function App() {
         evaluated: true,
         sufficient: evaluation.sufficient ?? null,
         roundEvaluated: 1,
-        missingDimensions: evaluation.missingDimensions ?? [],
+        missingCategoryKeys: evaluation.missingCategoryKeys ?? [],
         reasonCodes: evaluation.reasonCodes ?? [],
       },
       tokenUsage: mergedTokenUsage,
@@ -559,7 +501,7 @@ export default function App() {
     });
   };
 
-  const handleClarifyComplete = async (submittedAnswers: Array<{ question: string; answer: string }>) => {
+  const handleClarifyComplete = async (submittedAnswers: ClarifyAnswer[]) => {
     const mergedAnswers = [...clarifyAnswers, ...submittedAnswers];
 
     if (clarifyRound === 2) {
@@ -579,10 +521,14 @@ export default function App() {
       const evaluation = await api.evaluateSufficiency({
         requirement,
         answers: mergedAnswers,
-        askedQuestions: clarifyQuestions.map((question: any) => String(question?.question ?? '')).filter(Boolean),
+        askedQuestions: clarifyQuestions.map((question) => ({
+          categoryKey: question.categoryKey,
+          intent: question.intent,
+          question: question.question,
+        })),
         followupCap: clarifyContext?.discoveryProfile?.followupCap,
         initialQuestionCount: clarifyContext?.initialQuestionCount ?? clarifyQuestions.length,
-        totalQuestionBudget: 15,
+        totalQuestionBudget: 20,
       }) as any;
 
       setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation?.tokenUsage ?? null));
@@ -593,7 +539,7 @@ export default function App() {
       if (!evaluation?.sufficient && followupQuestions.length > 0) {
         setClarifyAnswers(mergedAnswers);
         setClarifyRound(2);
-        setClarifyQuestions(followupQuestions);
+        setClarifyQuestions(followupQuestions as ClarifyQuestion[]);
         setIsWorking(false);
         return;
       }
@@ -684,7 +630,7 @@ export default function App() {
   requirementRef.current = requirement;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
-  const startGeneration = async (reqText: string, clarifyAnswers: any[]) => {
+  const startGeneration = async (reqText: string, clarifyAnswers: ClarifyAnswer[]) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
     const attachmentText = runAttachments

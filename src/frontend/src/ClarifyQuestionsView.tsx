@@ -2,37 +2,35 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Menu, Sparkles, AlertCircle, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { router } from '@forge/bridge';
+import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyQuestion } from './types';
 
-interface Question { category: string; question: string; suggestions: string[]; }
-interface Answer   { question: string; answer: string; }
+const CATEGORY_ORDER: ClarifyCategoryKey[] = [
+  'context_trigger',
+  'user_personas',
+  'information_architecture',
+  'business_rules',
+  'state_lifecycle',
+  'edge_cases_exceptions',
+];
+
+const CATEGORY_LABELS: Record<ClarifyCategoryKey, string> = {
+  context_trigger: 'Context & Trigger',
+  user_personas: 'User Personas',
+  information_architecture: 'Information Architecture',
+  business_rules: 'Business Rules',
+  state_lifecycle: 'State & Lifecycle',
+  edge_cases_exceptions: 'Edge Cases & Exceptions',
+};
 
 interface ClarifyProps {
-  questions: Question[];
-  onComplete: (answers: Answer[]) => void;
+  questions: ClarifyQuestion[];
+  onComplete: (answers: ClarifyAnswer[]) => void;
   onSkip: () => void;
   round?: 1 | 2;
   isSubmitting?: boolean;
   submitLabel?: string;
   skipLabel?: string;
-  contextMeta?: {
-    projectKey: string;
-    domainRolesUsed: string[];
-    domainContextApplied?: boolean;
-    attachmentIncluded?: boolean;
-    similarStoriesCount?: number;
-    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
-    ambiguityAssessment?: {
-      level: 'clear' | 'medium' | 'vague';
-      score: number;
-      reasons: string[];
-      questionPlan: { min: number; max: number; target: number };
-      generatedQuestions: number;
-    };
-    wiDocsCount?: number;
-    referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
-    tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
-  } | null;
+  contextMeta?: ClarifyContextMeta | null;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
 }
@@ -88,6 +86,16 @@ function renderQuestionWithStoryLinks(
   return parts;
 }
 
+function buildCompatibilityAnswer(selectedSuggestions: string[], customAnswer: string): string {
+  const custom = customAnswer.trim();
+  const suggestions = selectedSuggestions.map((suggestion) => suggestion.trim()).filter(Boolean);
+
+  if (!suggestions.length) return custom;
+  const selectedBlock = `Selected considerations:\n${suggestions.map((suggestion) => `- ${suggestion}`).join('\n')}`;
+  if (!custom) return selectedBlock;
+  return `${selectedBlock}\n\nAdditional context:\n${custom}`;
+}
+
 export function ClarifyQuestionsView({
   questions,
   onComplete,
@@ -100,14 +108,14 @@ export function ClarifyQuestionsView({
   sidebarOpen,
   setSidebarOpen,
 }: ClarifyProps) {
-  const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
+  const [answers, setAnswers] = useState<Record<number, { selectedSuggestions: string[]; customAnswer: string }>>({});
   const [showContextDetails, setShowContextDetails] = useState(false);
 
   useEffect(() => {
     setAnswers({});
   }, [questions, round]);
 
-  const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
+  const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
   const storyLookup = new Map(
     (contextMeta?.referencedSimilarStories ?? [])
       .map(story => [story.key, resolveStoryUrl(story)] as const)
@@ -115,39 +123,49 @@ export function ClarifyQuestionsView({
   );
 
   function ensureAnswer(idx: number) {
-    return answers[idx] ?? { selected: [], custom: '' };
+    return answers[idx] ?? { selectedSuggestions: [], customAnswer: '' };
   }
 
   function toggleSuggestion(qIdx: number, sug: string) {
     const existing = ensureAnswer(qIdx);
-    const alreadySelected = existing.selected.includes(sug);
+    const alreadySelected = existing.selectedSuggestions.includes(sug);
     const newSelected = alreadySelected
-      ? existing.selected.filter(s => s !== sug)
-      : [...existing.selected, sug];
+      ? existing.selectedSuggestions.filter(s => s !== sug)
+      : [...existing.selectedSuggestions, sug];
 
-    const newCustom = newSelected.join('; ');
-    setAnswers(prev => ({ ...prev, [qIdx]: { selected: newSelected, custom: newCustom } }));
+    setAnswers(prev => ({ ...prev, [qIdx]: { ...existing, selectedSuggestions: newSelected } }));
   }
 
   function handleCustomChange(qIdx: number, val: string) {
-    setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), custom: val } }));
+    setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), customAnswer: val } }));
   }
 
   function handleSubmit() {
-    const result: Answer[] = questions.map((q, i) => {
+    const result: ClarifyAnswer[] = questions.map((q, i) => {
       const a = ensureAnswer(i);
-      const combined = a.custom.trim() || a.selected.join('; ');
-      return { question: q.question, answer: combined };
-    }).filter(a => a.answer);
+      const answer = buildCompatibilityAnswer(a.selectedSuggestions, a.customAnswer);
+      return {
+        question: q.question,
+        categoryKey: q.categoryKey,
+        intent: q.intent,
+        selectedSuggestions: a.selectedSuggestions,
+        customAnswer: a.customAnswer.trim() || undefined,
+        answer,
+      };
+    }).filter(answer => answer.answer || answer.selectedSuggestions.length || answer.customAnswer);
     console.log('[ClarifyQuestionsView] handleSubmit called, answers:', result.length);
     onComplete(result);
   }
 
-  const categories: Record<string, { idx: number; q: Question }[]> = {};
-  questions.forEach((q, i) => {
-    if (!categories[q.category]) categories[q.category] = [];
-    categories[q.category].push({ idx: i, q });
-  });
+  const categories = CATEGORY_ORDER
+    .map((categoryKey) => ({
+      categoryKey,
+      label: CATEGORY_LABELS[categoryKey],
+      items: questions
+        .map((question, index) => ({ idx: index, q: question }))
+        .filter(({ q }) => q.categoryKey === categoryKey),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
@@ -357,9 +375,9 @@ export function ClarifyQuestionsView({
             </motion.div>
           )}
 
-          {Object.entries(categories).map(([category, items], idx) => (
+          {categories.map(({ categoryKey, label, items }, idx) => (
             <motion.div
-              key={category}
+              key={categoryKey}
               className="space-y-4"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -367,7 +385,7 @@ export function ClarifyQuestionsView({
             >
               <div className="flex items-center gap-4">
                 <span className="inline-flex items-center rounded-lg px-3 py-1 text-[11px] font-bold uppercase tracking-widest bg-[var(--rf-text)] text-white shadow-sm">
-                  {category}
+                  {label}
                 </span>
                 <div className="flex-1 h-px bg-[var(--rf-border)]" />
               </div>
@@ -375,7 +393,7 @@ export function ClarifyQuestionsView({
               <div className="space-y-4">
                 {items.map(({ idx, q }) => {
                   const ans = ensureAnswer(idx);
-                  const isAnswered = ans.custom.trim().length > 0 || ans.selected.length > 0;
+                  const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
                   const suggestions = q.suggestions.slice(0, 4);
 
                   return (
@@ -395,7 +413,7 @@ export function ClarifyQuestionsView({
                           {suggestions.length > 0 && (
                             <div className="flex flex-wrap gap-2">
                               {suggestions.map((sug, si) => {
-                                const sel = ans.selected.includes(sug);
+                                const sel = ans.selectedSuggestions.includes(sug);
                                 return (
                                   <button
                                     key={si}
@@ -417,11 +435,30 @@ export function ClarifyQuestionsView({
                             </div>
                           )}
 
+                          {ans.selectedSuggestions.length > 0 && (
+                            <div className="rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]/60 px-4 py-3">
+                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)]">
+                                Selected Considerations
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {ans.selectedSuggestions.map((suggestion) => (
+                                  <span
+                                    key={suggestion}
+                                    className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-brand-subtle)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-brand-hover)]"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    {suggestion}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           <textarea
-                            value={ans.custom}
+                            value={ans.customAnswer}
                             onChange={e => handleCustomChange(idx, e.target.value)}
                             disabled={isSubmitting}
-                            placeholder={suggestions.length > 0 ? 'Click a suggestion or type your own answer\u2026' : 'Type your detailed answer here\u2026'}
+                            placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything the chips miss…' : 'Type your answer here…'}
                             rows={3}
                             className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
                           />
