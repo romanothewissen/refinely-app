@@ -43,6 +43,30 @@ interface GenerationContextMeta {
   tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
 }
 
+interface DiscoveryProfile {
+  scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
+  complexity: 'low' | 'medium' | 'high' | 'very_high';
+  ambiguity: 'low' | 'medium' | 'high';
+  missingDimensions: string[];
+  recommendedInitialCount: number;
+  followupCap: number;
+}
+
+interface DiscoverySufficiencyResult {
+  evaluated: boolean;
+  sufficient: boolean | null;
+  roundEvaluated: number;
+  missingDimensions: string[];
+  reasonCodes: string[];
+}
+
+interface TokenUsageSummary {
+  input: number;
+  output: number;
+  total: number;
+  byStage?: Record<string, { input: number; output: number; total: number }>;
+}
+
 interface ClarifyContextMeta {
   projectKey: string;
   domainRolesUsed: string[];
@@ -50,9 +74,27 @@ interface ClarifyContextMeta {
   attachmentIncluded?: boolean;
   similarStoriesCount?: number;
   referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
+  discoveryProfile?: DiscoveryProfile;
+  ambiguityAssessment?: {
+    level: 'clear' | 'medium' | 'vague';
+    score: number;
+    reasons: string[];
+    questionPlan: { min: number; max: number; target: number };
+    generatedQuestions: number;
+  };
   wiDocsCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-  tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
+  referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
+  roundsCompleted?: number;
+  initialQuestionCount?: number;
+  followupQuestionCount?: number;
+  totalQuestionCount?: number;
+  followupTriggered?: boolean;
+  initialClarifyDurationMs?: number;
+  sufficiencyEvaluationDurationMs?: number;
+  totalDiscoveryDurationMs?: number;
+  finalSufficiency?: DiscoverySufficiencyResult;
+  tokenUsage?: TokenUsageSummary;
 }
 
 interface WorkflowTokenUsage {
@@ -86,6 +128,35 @@ function addTokenUsage(
     input: (base?.input ?? 0) + (next.input ?? 0),
     output: (base?.output ?? 0) + (next.output ?? 0),
     total: (base?.total ?? 0) + (next.total ?? 0),
+  };
+}
+
+function mergeTokenUsageSummary(
+  base?: TokenUsageSummary | null,
+  next?: TokenUsageSummary | null,
+): TokenUsageSummary | undefined {
+  if (!base && !next) return undefined;
+  if (!base) return next ?? undefined;
+  if (!next) return base;
+
+  const mergedStages: Record<string, { input: number; output: number; total: number }> = {
+    ...(base.byStage ?? {}),
+  };
+
+  Object.entries(next.byStage ?? {}).forEach(([stage, usage]) => {
+    const existing = mergedStages[stage];
+    mergedStages[stage] = {
+      input: (existing?.input ?? 0) + usage.input,
+      output: (existing?.output ?? 0) + usage.output,
+      total: (existing?.total ?? 0) + usage.total,
+    };
+  });
+
+  return {
+    input: base.input + next.input,
+    output: base.output + next.output,
+    total: base.total + next.total,
+    byStage: Object.keys(mergedStages).length ? mergedStages : undefined,
   };
 }
 
@@ -153,6 +224,9 @@ export default function App() {
   
   // Realtime Integration
   const [clarifyQuestions, setClarifyQuestions] = useState<any[]>([]);
+  const [clarifyAnswers, setClarifyAnswers] = useState<Array<{ question: string; answer: string }>>([]);
+  const [clarifyRound, setClarifyRound] = useState<1 | 2>(1);
+  const [isEvaluatingDiscovery, setIsEvaluatingDiscovery] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingClarifySessionId, setPendingClarifySessionId] = useState<string | null>(null);
   const [workflowRunId, setWorkflowRunId] = useState(0);
@@ -403,6 +477,9 @@ export default function App() {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
       setClarifyContext(nextClarifyContext);
+      setClarifyRound(1);
+      setClarifyAnswers([]);
+      setIsEvaluatingDiscovery(false);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
         setClarifyQuestions(questions);
@@ -430,6 +507,119 @@ export default function App() {
     ? (clarifyProgress || 'Analyzing requirement and gathering context…')
     : (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'));
 
+  const applyDiscoveryEvaluationToContext = (
+    baseContext: ClarifyContextMeta | null,
+    evaluation: {
+      sufficient?: boolean;
+      missingDimensions?: string[];
+      reasonCodes?: string[];
+      durationMs?: number;
+      tokenUsage?: TokenUsageSummary;
+    },
+    followupQuestionCount: number,
+  ): ClarifyContextMeta | null => {
+    if (!baseContext) return baseContext;
+
+    const initialCount = baseContext.initialQuestionCount ?? baseContext.totalQuestionCount ?? 0;
+    const sufficiencyDurationMs = evaluation.durationMs ?? 0;
+    const mergedTokenUsage = mergeTokenUsageSummary(baseContext.tokenUsage, evaluation.tokenUsage ?? null);
+
+    return {
+      ...baseContext,
+      roundsCompleted: 1,
+      followupTriggered: followupQuestionCount > 0,
+      followupQuestionCount,
+      totalQuestionCount: initialCount + followupQuestionCount,
+      sufficiencyEvaluationDurationMs: sufficiencyDurationMs,
+      totalDiscoveryDurationMs: (baseContext.initialClarifyDurationMs ?? 0) + sufficiencyDurationMs,
+      finalSufficiency: {
+        evaluated: true,
+        sufficient: evaluation.sufficient ?? null,
+        roundEvaluated: 1,
+        missingDimensions: evaluation.missingDimensions ?? [],
+        reasonCodes: evaluation.reasonCodes ?? [],
+      },
+      tokenUsage: mergedTokenUsage,
+    };
+  };
+
+  const markDiscoveryRoundComplete = (completedRounds: 1 | 2) => {
+    setClarifyContext(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        roundsCompleted: completedRounds,
+        totalDiscoveryDurationMs:
+          prev.totalDiscoveryDurationMs
+          ?? ((prev.initialClarifyDurationMs ?? 0) + (prev.sufficiencyEvaluationDurationMs ?? 0)),
+        finalSufficiency: prev.finalSufficiency
+          ? { ...prev.finalSufficiency, roundEvaluated: completedRounds }
+          : prev.finalSufficiency,
+      };
+    });
+  };
+
+  const handleClarifyComplete = async (submittedAnswers: Array<{ question: string; answer: string }>) => {
+    const mergedAnswers = [...clarifyAnswers, ...submittedAnswers];
+
+    if (clarifyRound === 2) {
+      markDiscoveryRoundComplete(2);
+      await startGeneration(requirement, mergedAnswers);
+      return;
+    }
+
+    if (!mergedAnswers.length) {
+      markDiscoveryRoundComplete(1);
+      await startGeneration(requirement, mergedAnswers);
+      return;
+    }
+
+    setIsEvaluatingDiscovery(true);
+    try {
+      const evaluation = await api.evaluateSufficiency({
+        requirement,
+        answers: mergedAnswers,
+        askedQuestions: clarifyQuestions.map((question: any) => String(question?.question ?? '')).filter(Boolean),
+        followupCap: clarifyContext?.discoveryProfile?.followupCap,
+        initialQuestionCount: clarifyContext?.initialQuestionCount ?? clarifyQuestions.length,
+        totalQuestionBudget: 15,
+      }) as any;
+
+      setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation?.tokenUsage ?? null));
+      const followupQuestions = Array.isArray(evaluation?.questions) ? evaluation.questions : [];
+      const nextContext = applyDiscoveryEvaluationToContext(clarifyContext, evaluation ?? {}, followupQuestions.length);
+      setClarifyContext(nextContext);
+
+      if (!evaluation?.sufficient && followupQuestions.length > 0) {
+        setClarifyAnswers(mergedAnswers);
+        setClarifyRound(2);
+        setClarifyQuestions(followupQuestions);
+        setIsWorking(false);
+        return;
+      }
+
+      markDiscoveryRoundComplete(1);
+      await startGeneration(requirement, mergedAnswers);
+    } catch (err) {
+      console.error('Discovery sufficiency evaluation failed', err);
+      markDiscoveryRoundComplete(1);
+      await startGeneration(requirement, mergedAnswers);
+    } finally {
+      setIsEvaluatingDiscovery(false);
+    }
+  };
+
+  const handleClarifySkip = async () => {
+    if (clarifyRound === 2) {
+      markDiscoveryRoundComplete(2);
+      await startGeneration(requirement, clarifyAnswers);
+      return;
+    }
+
+    markDiscoveryRoundComplete(1);
+    await startGeneration(requirement, []);
+  };
+
   const handleCancelWorkflow = async () => {
     const clarifyActive = Boolean(pendingClarifySessionId || isClarifying);
     const generationActive = Boolean(pendingSessionId || isGenerating);
@@ -442,6 +632,9 @@ export default function App() {
     setPendingSessionId(null);
     setGenerationProgressMeta(null);
     setClarifyQuestions([]);
+    setClarifyAnswers([]);
+    setClarifyRound(1);
+    setIsEvaluatingDiscovery(false);
 
     if (clarifyActive) {
       await cancelClarify();
@@ -464,6 +657,10 @@ export default function App() {
     setGenerationProgressMeta(null);
     setClarifyContext(null);
     setWorkflowTokenUsage(null);
+    setClarifyQuestions([]);
+    setClarifyAnswers([]);
+    setClarifyRound(1);
+    setIsEvaluatingDiscovery(false);
 
     // Bind this session to the originating issue so re-launching restores it
     if (originIssueKey) {
@@ -498,6 +695,9 @@ export default function App() {
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
     setClarifyQuestions([]);
+    setClarifyAnswers([]);
+    setClarifyRound(1);
+    setIsEvaluatingDiscovery(false);
     setGenerationProgressMeta(null);
     // CRITICAL: Stop clarify polling if it was active
     setPendingClarifySessionId(null);
@@ -560,6 +760,9 @@ export default function App() {
         setGenerationProgressMeta(null);
         setIsWorking(false);
         setClarifyQuestions([]);
+        setClarifyAnswers([]);
+        setClarifyRound(1);
+        setIsEvaluatingDiscovery(false);
         setRunAttachments([]);
         setRunAttachmentParseState(null);
         setRunAttachmentError(null);
@@ -759,13 +962,14 @@ export default function App() {
           </AnimatePresence>
           {clarifyQuestions.length > 0 ? (
             <ClarifyQuestionsView 
+              key={`clarify-round-${clarifyRound}`}
               questions={clarifyQuestions} 
-              onComplete={(answers: any[]) => {
-                startGeneration(requirement, answers);
-              }}
-              onSkip={() => {
-                startGeneration(requirement, []);
-              }}
+              onComplete={handleClarifyComplete}
+              onSkip={handleClarifySkip}
+              round={clarifyRound}
+              isSubmitting={isEvaluatingDiscovery}
+              submitLabel={clarifyRound === 2 ? 'Generate Features' : 'Continue Discovery'}
+              skipLabel={clarifyRound === 2 ? 'Skip follow-up' : 'Skip all'}
               contextMeta={clarifyContext}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}

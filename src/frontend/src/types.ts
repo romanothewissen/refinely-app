@@ -235,6 +235,23 @@ export interface ReferencedWiSection {
   excerpt: string;
 }
 
+export interface DiscoveryProfile {
+  scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
+  complexity: 'low' | 'medium' | 'high' | 'very_high';
+  ambiguity: 'low' | 'medium' | 'high';
+  missingDimensions: string[];
+  recommendedInitialCount: number;
+  followupCap: number;
+}
+
+export interface DiscoverySufficiencyResult {
+  evaluated: boolean;
+  sufficient: boolean | null;
+  roundEvaluated: number;
+  missingDimensions: string[];
+  reasonCodes: string[];
+}
+
 export interface ContextSourceMeta {
   projectKey: string;
   domainRolesUsed: string[];
@@ -250,6 +267,7 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  discoveryProfile?: DiscoveryProfile;
   ambiguityAssessment?: {
     level: 'clear' | 'medium' | 'vague';
     score: number;
@@ -257,6 +275,16 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
     questionPlan: { min: number; max: number; target: number };
     generatedQuestions: number;
   };
+  roundsCompleted?: number;
+  initialQuestionCount?: number;
+  followupQuestionCount?: number;
+  totalQuestionCount?: number;
+  followupTriggered?: boolean;
+  initialClarifyDurationMs?: number;
+  sufficiencyEvaluationDurationMs?: number;
+  totalDiscoveryDurationMs?: number;
+  finalSufficiency?: DiscoverySufficiencyResult;
+  tokenUsage?: TokenUsageSummary;
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
@@ -359,6 +387,10 @@ export interface ClarifyEvent {
   requirement: string;
   attachmentText: string;
   config: TenantConfig;
+  license?: any;
+  projectKey?: string;
+  round?: 1 | 2;
+  priorAnswers?: ClarifyAnswer[];
 }
 
 // ─── Generation Queue Event ───────────────────────────────────────────────────

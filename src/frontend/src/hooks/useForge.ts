@@ -29,8 +29,14 @@ export const api = {
     invoke('startClarify', { sessionId, requirement, attachmentText, projectKey }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
-  evaluateSufficiency: (requirement: string, answers: unknown[]) =>
-    invoke('evaluateSufficiency', { requirement, answers }),
+  evaluateSufficiency: (payload: {
+    requirement: string;
+    answers: unknown[];
+    askedQuestions?: string[];
+    followupCap?: number;
+    initialQuestionCount?: number;
+    totalQuestionBudget?: number;
+  }) => invoke('evaluateSufficiency', payload),
 
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>

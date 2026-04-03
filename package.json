@@ -7,6 +7,8 @@
     "build": "tsc -p tsconfig.build.json && cd src/frontend && npm run build",
     "build:backend": "tsc -p tsconfig.build.json",
     "build:frontend": "cd src/frontend && npm run build",
+    "test": "npm run test:backend",
+    "test:backend": "npm run build:backend && node --test dist/core/__tests__/*.test.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "lint": "eslint src --ext .ts,.tsx"
   },

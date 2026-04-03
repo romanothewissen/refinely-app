@@ -378,6 +378,8 @@ resolver.define('startClarify', async ({ payload, context }) => {
       config,
       license: context?.license,
       projectKey: payload.projectKey || '*',
+      round: 1,
+      priorAnswers: [],
     };
     // Overwrite any stale result with a fresh progress marker
     await entitySet(KEYS.clarifyProgress(payload.sessionId), {
@@ -409,6 +411,10 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
   return evaluateSufficiency({
     requirement: payload.requirement,
     answers: payload.answers as ClarifyAnswer[],
+    askedQuestions: payload.askedQuestions as string[] | undefined,
+    followupCap: payload.followupCap as number | undefined,
+    initialQuestionCount: payload.initialQuestionCount as number | undefined,
+    totalQuestionBudget: payload.totalQuestionBudget as number | undefined,
     config,
   });
 });

@@ -14,6 +14,11 @@ export function platformContextBlock(domainContext: string): string {
   return `\nDOMAIN CONTEXT — use this to reason about scope and decomposition only. Never surface system names, object names, or technical concepts in any output.\n\n${domainContext.trim()}\n`;
 }
 
+function discoveryEvidenceBlock(domainContext: string): string {
+  if (!domainContext || !domainContext.trim()) return '';
+  return `\nOPTIONAL CONTEXT EVIDENCE — use this only to understand the business space and to avoid redundant questions. Do NOT introduce company names, product names, role labels, or internal terminology from this block unless the request or supporting evidence already uses them.\n\n${domainContext.trim()}\n`;
+}
+
 export function processTaxonomyBlock(taxonomy: ProcessCode[]): string {
   if (!taxonomy.length) return '';
   const lines = [
@@ -303,62 +308,80 @@ export function buildArPerFeatureUserMessage(opts: {
 
 export function buildClarifySystemPrompt(opts: {
   domainContext: string;
-  domainRoles: string[];
-  questionPlan: {
-    min: number;
-    max: number;
-    target: number;
-    clarity: 'clear' | 'medium' | 'vague';
-  };
 }): string {
-  const roleHint = opts.domainRoles.length
-    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}.`
-    : '';
+  return `You are a neutral discovery analyst preparing a software request for implementation.
+${discoveryEvidenceBlock(opts.domainContext)}
 
-  return `You are a senior business analyst performing a deep discovery session for a new product requirement.
-${platformContextBlock(opts.domainContext)}
-${roleHint}
+YOUR JOB:
+- Analyze the requirement and any supporting evidence.
+- Decide how much discovery is needed in this first round.
+- Ask a strong frontloaded batch of discovery questions that removes the highest-impact ambiguity before implementation.
 
-YOUR MISSION: Transition from a vague requirement to a precise, ready-to-build feature set. Ask only the highest-leverage questions that materially improve scoping and acceptance requirements.
+DISCOVERY RULES:
+- Keep discovery fully generic and system-agnostic.
+- Do NOT introduce company names, product names, role taxonomies, or internal terms unless the request or supporting evidence already uses them.
+- Preserve user-provided nouns exactly.
+- Use supporting evidence only to avoid redundant questions and to understand the business context.
+- Ask between 5 and 10 questions in this first round.
+- Bias upward when business rules, ownership, exceptions, dependencies, decision logic, or success criteria are still unclear.
+- Cover only the dimensions that are still missing from this neutral set: objective, actors, trigger/context, inputs, workflow, rules, exceptions, dependencies/boundaries, success criteria.
+- Do not ask multiple variations of the same question.
+- Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
+- Keep each question to one sentence, concise but substantive.
+- Keep suggestions short and scannable.
+- Provide exactly 4 suggestions per question.
 
-CLARITY ASSESSMENT:
-- The input appears: ${opts.questionPlan.clarity.toUpperCase()}
-- Generate between ${opts.questionPlan.min}-${opts.questionPlan.max} clarifying questions (target ${opts.questionPlan.target}).
-- Never output fewer than ${opts.questionPlan.min} questions.
-- If the requirement is very clear and specific, stay near the lower bound.
-- If the requirement is vague or underspecified, stay near the upper bound.
-- Use any provided backlog examples, deployed stories, and work instructions to avoid asking questions that are already answered by known context.
-- Ask only the questions that are truly missing for precise scoping, correct feature sizing, and strong acceptance requirements.
-- Keep every question concise but context-rich: usually 18-35 words.
-- Avoid rambling, but do include enough context that the user immediately understands why the question matters.
-- Keep answer suggestions short and scannable: usually 4-12 words each.
-- If you reference a backlog story, mention at most one story key and keep the reference brief.
-- If the requirement already names actor groups, preserve those exact labels in the questions and suggestions.
-- Do NOT translate requirement-stated actors into domain-specific personas unless the requirement explicitly asks for a mapping.
-- Do NOT ask generic role-mapping questions when the real uncertainty is about permissions, scope, saved-vs-unsaved state, approval, logging, or exceptions.
+OUTPUT CONTRACT:
+Return JSON only in this shape:
+{
+  "discoveryProfile": {
+    "scope": "narrow|moderate|broad|very_broad",
+    "complexity": "low|medium|high|very_high",
+    "ambiguity": "low|medium|high",
+    "missingDimensions": ["..."],
+    "recommendedInitialCount": 5,
+    "followupCap": 2
+  },
+  "questions": [
+    {
+      "category": "...",
+      "question": "...",
+      "suggestions": ["...", "...", "...", "..."]
+    }
+  ]
+}
 
-TASK: Generate targeted clarifying questions categorized into the areas below. Prioritize brevity, clarity, and coverage of the most important unknowns.
-1. Roles & Personas — who does this, who is affected
-2. Trigger & Context — when/why does this happen
-3. Functional Flow — what are the key steps and decisions
-4. Business Rules & Exceptions — what constraints, edge cases, failure modes
-5. Success & Measurement — how do we know it worked
-
-For each question, provide exactly 4 realistic, specific answer suggestions based on the domain.
-
-Output JSON only: [{"category": "...", "question": "...", "suggestions": ["...", "...", "..."]}, ...]`;
+OUTPUT RULES:
+- "recommendedInitialCount" must be between 5 and 10.
+- "followupCap" must be between 2 and 5.
+- The number of questions returned must exactly match "recommendedInitialCount".
+- "missingDimensions" should describe the most important remaining gaps in neutral language.`;
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
 
-export function buildEvaluateSystemPrompt(): string {
-  return `You are a senior business analyst evaluating whether answered discovery questions provide enough context to write precise, testable acceptance requirements for a Jira backlog.
+export function buildEvaluateSystemPrompt(opts: {
+  minQuestions: number;
+  maxQuestions: number;
+}): string {
+  return `You are a neutral discovery analyst evaluating whether the current discovery answers are sufficient to move into implementation planning.
 
-Assess the Q&A and decide: is there enough information to write clear GIVEN/WHEN/THEN acceptance requirements that cover the happy path, key business rules, and main edge cases?
+Assess whether the answered discovery set now contains enough information to write precise, testable acceptance requirements that cover the main path, key business rules, and important exceptions.
 
-If sufficient: return {"sufficient": true}
-If not sufficient: return {"sufficient": false, "questions": [{"category": "...", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}
-Ask at most 5 follow-up questions. Focus only on what is genuinely missing. Avoid repetitive questions, but ensure critical gaps are closed. For every follow-up question, provide exactly 4 realistic answer suggestions.`;
+RULES:
+- Stay generic and system-agnostic.
+- Do NOT introduce company-specific, product-specific, or role-taxonomy assumptions.
+- If the answers are sufficient, return no more questions.
+- If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
+- Never repeat or lightly rephrase a question that was already asked.
+- Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
+- Keep follow-up questions specific and high leverage.
+- Provide exactly 4 suggestions per follow-up question.
+- Also return neutral "missingDimensions" and compact uppercase "reasonCodes" that explain why more discovery is needed.
+
+Return JSON only in one of these shapes:
+{"sufficient": true, "missingDimensions": [], "reasonCodes": []}
+{"sufficient": false, "missingDimensions": ["..."], "reasonCodes": ["..."], "questions": [{"category": "...", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
 }
 
 // ─── Refinement (full feature set) ───────────────────────────────────────────

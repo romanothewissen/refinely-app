@@ -61,13 +61,15 @@ export async function handler(event: { body: ClarifyEvent }) {
     }
 
     await sendClarifyProgress(sessionId, 'Drafting clarifying questions from the gathered context…');
-    const { questions, tokenUsage, ambiguityAssessment } = await generateClarifyingQuestions({
+    const clarifyStartedAt = Date.now();
+    const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
     });
+    const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
@@ -77,7 +79,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     await sendClarifyProgress(sessionId, 'Finalizing discovery questions…');
     const clarifyContext: ClarifyContextMeta = {
       projectKey,
-      domainRolesUsed: config.domainRoles ?? [],
+      domainRolesUsed: [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
@@ -88,9 +90,24 @@ export async function handler(event: { body: ClarifyEvent }) {
         url: item.url,
         jiraIssueUrl: item.url,
       })),
+      discoveryProfile,
       ambiguityAssessment: {
         ...ambiguityAssessment,
         generatedQuestions: questions.length,
+      },
+      roundsCompleted: 0,
+      initialQuestionCount: questions.length,
+      followupQuestionCount: 0,
+      totalQuestionCount: questions.length,
+      followupTriggered: false,
+      initialClarifyDurationMs,
+      totalDiscoveryDurationMs: initialClarifyDurationMs,
+      finalSufficiency: {
+        evaluated: false,
+        sufficient: null,
+        roundEvaluated: 0,
+        missingDimensions: discoveryProfile.missingDimensions,
+        reasonCodes: [],
       },
       tokenUsage,
       wiDocsCount: wiContext.docs.length,
@@ -118,13 +135,14 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
-          `Generated ${questions.length} clarifying questions for ${ambiguityAssessment.level} ambiguity input.`,
-          `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
+          `Generated ${questions.length} initial discovery questions with a ${discoveryProfile.followupCap}-question follow-up cap.`,
+          `Discovery profile: ${discoveryProfile.scope} scope, ${discoveryProfile.complexity} complexity, ${discoveryProfile.ambiguity} ambiguity.`,
         ],
         contextUsage: {
           similarStoriesCount: similarStories.length,
           wiDocsCount: wiContext.docs.length,
           ambiguityScore: ambiguityAssessment.score,
+          initialClarifyDurationMs,
         },
         tokenUsage,
         piiMasking: {

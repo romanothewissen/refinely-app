@@ -16,6 +16,7 @@ import {
   GenerationResult,
   ValidationViolation,
   TokenUsageSummary,
+  DiscoveryProfile,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
@@ -31,6 +32,11 @@ import {
   buildRefineSufficiencyPrompt,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
+import {
+  finalizeFollowupDiscoveryQuestions,
+  finalizeInitialDiscoveryQuestions,
+  normalizeDiscoveryProfile,
+} from './discovery';
 
 // ─── Types from LLM response ──────────────────────────────────────────────────
 
@@ -83,6 +89,22 @@ interface ClarifyAmbiguityAssessment {
   generatedQuestions: number;
 }
 
+interface ClarifyDiscoveryResult {
+  questions: ClarifyQuestion[];
+  tokenUsage: TokenUsageSummary;
+  ambiguityAssessment: ClarifyAmbiguityAssessment;
+  discoveryProfile: DiscoveryProfile;
+}
+
+interface DiscoverySufficiencyEvaluation {
+  sufficient: boolean;
+  questions?: ClarifyQuestion[];
+  missingDimensions: string[];
+  reasonCodes: string[];
+  tokenUsage: TokenUsageSummary;
+  durationMs: number;
+}
+
 export class GenerationCancelledError extends Error {
   constructor() {
     super('Generation cancelled');
@@ -133,8 +155,8 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_EXECUTABLE_FEATURES = 8;
-const MAX_CLARIFY_QUESTION_CHARS = 240;
-const MAX_CLARIFY_SUGGESTION_CHARS = 140;
+const MAX_CLARIFY_QUESTION_CHARS = 320;
+const MAX_CLARIFY_SUGGESTION_CHARS = 160;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -727,21 +749,6 @@ export function assessRequirement(input: {
   };
 }
 
-function inferClarifyAssessment(input: {
-  requirement: string;
-  attachmentText: string;
-  wiContextText: string;
-  similarStoriesText?: string;
-  clarifyAnswers?: ClarifyAnswer[];
-}): { questionPlan: ClarifyQuestionPlan; ambiguityScore: number; ambiguityReasons: string[] } {
-  const assessed = assessRequirement(input);
-  return {
-    questionPlan: assessed.questionPlan,
-    ambiguityScore: assessed.ambiguityScore,
-    ambiguityReasons: assessed.ambiguityReasons,
-  };
-}
-
 function normaliseQuestionKey(question: string): string {
   return question
     .toLowerCase()
@@ -763,7 +770,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
   return candidates
     .filter(x => typeof x === 'object' && x !== null && typeof (x as any).question === 'string')
     .map(x => ({
-      category: String((x as any).category ?? 'Functional Flow').trim() || 'Functional Flow',
+      category: String((x as any).category ?? 'Discovery').trim() || 'Discovery',
       question: trimClarifyCopy(String((x as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
       suggestions: Array.isArray((x as any).suggestions)
         ? (x as any).suggestions
@@ -775,16 +782,74 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
     .filter(q => q.question.length > 0);
 }
 
-function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
-  const seen = new Set<string>();
-  const result: ClarifyQuestion[] = [];
-  for (const q of questions) {
-    const key = normaliseQuestionKey(q.question);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    result.push(q);
+function parseDiscoveryProfileCandidate(rawData: unknown): Partial<DiscoveryProfile> | null {
+  if (!rawData || typeof rawData !== 'object') return null;
+  const root = rawData as Record<string, unknown>;
+  const nested = root.discoveryProfile;
+  if (nested && typeof nested === 'object') {
+    return nested as Partial<DiscoveryProfile>;
   }
-  return result;
+
+  if (
+    typeof root.scope === 'string' ||
+    typeof root.complexity === 'string' ||
+    typeof root.ambiguity === 'string' ||
+    Array.isArray(root.missingDimensions)
+  ) {
+    return {
+      scope: typeof root.scope === 'string' ? root.scope : undefined,
+      complexity: typeof root.complexity === 'string' ? root.complexity : undefined,
+      ambiguity: typeof root.ambiguity === 'string' ? root.ambiguity : undefined,
+      missingDimensions: Array.isArray(root.missingDimensions) ? root.missingDimensions as string[] : undefined,
+      recommendedInitialCount: typeof root.recommendedInitialCount === 'number' ? root.recommendedInitialCount : undefined,
+      followupCap: typeof root.followupCap === 'number' ? root.followupCap : undefined,
+    } as Partial<DiscoveryProfile>;
+  }
+
+  return null;
+}
+
+function parseStringList(rawData: unknown, key: 'missingDimensions' | 'reasonCodes'): string[] {
+  if (!rawData || typeof rawData !== 'object') return [];
+  const candidate = (rawData as Record<string, unknown>)[key];
+  if (!Array.isArray(candidate)) return [];
+  return candidate
+    .map((value) => String(value ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((value, index, values) => values.findIndex((entry) => entry.toLowerCase() === value.toLowerCase()) === index);
+}
+
+function ambiguityAssessmentFromDiscoveryProfile(
+  profile: DiscoveryProfile,
+  generatedQuestions: number,
+): ClarifyAmbiguityAssessment {
+  const level: ClarifyAmbiguityAssessment['level'] =
+    profile.ambiguity === 'high'
+      ? 'vague'
+      : profile.ambiguity === 'low'
+        ? 'clear'
+        : 'medium';
+
+  const score =
+    profile.ambiguity === 'high'
+      ? 8
+      : profile.ambiguity === 'medium'
+        ? 5
+        : 2;
+
+  return {
+    level,
+    score,
+    reasons: profile.missingDimensions.length
+      ? profile.missingDimensions.map((dimension) => `${dimension} still needs clarification.`)
+      : ['Discovery is focused on confirming the remaining implementation details.'],
+    questionPlan: {
+      min: 5,
+      max: 10,
+      target: profile.recommendedInitialCount,
+    },
+    generatedQuestions,
+  };
 }
 
 function trimClarifyCopy(text: string, maxChars: number): string {
@@ -1006,50 +1071,51 @@ export async function generateClarifyingQuestions(opts: {
   wiContextText: string;
   similarStoriesText: string;
   config: TenantConfig;
-}): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
+}): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config } = opts;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
-  const assessment = inferClarifyAssessment({ requirement, attachmentText, wiContextText, similarStoriesText });
-  const questionPlan = assessment.questionPlan;
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
-    domainRoles: config.domainRoles,
-    questionPlan,
   });
 
-  const raw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
+  const raw = await callLlmJsonWithUsage<Record<string, unknown>>({
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
+    maxTokens: 4096,
     reasoningEffort: 'medium',
     ...buildLlmProviderOpts(config),
   });
 
-  let filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
+  const parsedQuestions = parseQuestionCandidates(raw.data);
+  const normalizedProfile = normalizeDiscoveryProfile(
+    parseDiscoveryProfileCandidate(raw.data),
+    parsedQuestions.length || 7,
+  );
+  const filteredQuestions = finalizeInitialDiscoveryQuestions(parsedQuestions, normalizedProfile);
+  const discoveryProfile: DiscoveryProfile = {
+    ...normalizedProfile,
+    recommendedInitialCount: filteredQuestions.length,
+  };
   const totalInputTokens = raw.usage.input;
   const totalOutputTokens = raw.usage.output;
   const totalTokens = totalInputTokens + totalOutputTokens;
 
   return {
     questions: filteredQuestions,
+    discoveryProfile,
     tokenUsage: {
       input: totalInputTokens,
       output: totalOutputTokens,
       total: totalTokens,
       byStage: { clarify: { input: totalInputTokens, output: totalOutputTokens, total: totalTokens } },
     },
-    ambiguityAssessment: {
-      level: questionPlan.clarity,
-      score: assessment.ambiguityScore,
-      reasons: assessment.ambiguityReasons.slice(0, 4),
-      questionPlan: { min: questionPlan.min, max: questionPlan.max, target: questionPlan.target },
-      generatedQuestions: filteredQuestions.length,
-    },
+    ambiguityAssessment: ambiguityAssessmentFromDiscoveryProfile(discoveryProfile, filteredQuestions.length),
   };
 }
 
@@ -1058,23 +1124,81 @@ export async function generateClarifyingQuestions(opts: {
 export async function evaluateSufficiency(opts: {
   requirement: string;
   answers: ClarifyAnswer[];
+  askedQuestions?: string[];
+  followupCap?: number;
+  initialQuestionCount?: number;
+  totalQuestionBudget?: number;
   config: TenantConfig;
-}): Promise<{ sufficient: boolean; questions?: ClarifyQuestion[] }> {
+}): Promise<DiscoverySufficiencyEvaluation> {
+  const initialQuestionCount = Math.max(0, Number(opts.initialQuestionCount ?? 0));
+  const totalQuestionBudget = Math.max(initialQuestionCount, Number(opts.totalQuestionBudget ?? 15));
+  const remainingBudget = Math.max(0, totalQuestionBudget - initialQuestionCount);
+  const followupCap = Math.min(
+    remainingBudget,
+    Math.max(2, Math.min(5, Math.round(opts.followupCap ?? 3))),
+  );
+  const followupMin = followupCap > 0 ? Math.min(2, followupCap) : 0;
   const qaText = opts.answers
     .map(a => `Q: ${a.question}\nA: ${a.answer}`)
     .join('\n\n');
+  const askedQuestions = (opts.askedQuestions ?? opts.answers.map((answer) => answer.question))
+    .map((question) => question.trim())
+    .filter(Boolean);
 
-  const userMessage = `REQUIREMENT: ${opts.requirement}\n\nQ&A:\n${qaText}`;
+  const userMessage = [
+    `REQUIREMENT: ${opts.requirement}`,
+    askedQuestions.length ? `DISCOVERY QUESTIONS ALREADY ASKED:\n${askedQuestions.map((question, index) => `${index + 1}. ${question}`).join('\n')}` : '',
+    `DISCOVERY ANSWERS:\n${qaText}`,
+  ].filter(Boolean).join('\n\n');
 
-  const result = await callLlmJson<{ sufficient: boolean; questions?: ClarifyQuestion[] }>({
+  const startedAt = Date.now();
+  const result = await callLlmJsonWithUsage<Record<string, unknown>>({
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
-    systemPrompt: buildEvaluateSystemPrompt(),
+    systemPrompt: buildEvaluateSystemPrompt({
+      minQuestions: Math.max(1, followupMin),
+      maxQuestions: Math.max(1, followupCap),
+    }),
     userMessage,
+    maxTokens: 1536,
     reasoningEffort: 'none',
     ...buildLlmProviderOpts(opts.config),
   });
+  const durationMs = Date.now() - startedAt;
 
-  return result;
+  const sufficient = Boolean((result.data as Record<string, unknown>).sufficient);
+  const missingDimensions = parseStringList(result.data, 'missingDimensions');
+  const reasonCodes = parseStringList(result.data, 'reasonCodes')
+    .map((code) => code.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase())
+    .filter(Boolean);
+
+  const questions = !sufficient && followupCap > 0
+    ? finalizeFollowupDiscoveryQuestions(parseQuestionCandidates(result.data), {
+        askedQuestions,
+        missingDimensions,
+        followupCap,
+        initialQuestionCount,
+      })
+    : [];
+
+  return {
+    sufficient,
+    questions: sufficient ? undefined : questions,
+    missingDimensions,
+    reasonCodes,
+    durationMs,
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: {
+        clarifyEvaluate: {
+          input: result.usage.input,
+          output: result.usage.output,
+          total: result.usage.input + result.usage.output,
+        },
+      },
+    },
+  };
 }
 
 // ─── Refinement ───────────────────────────────────────────────────────────────

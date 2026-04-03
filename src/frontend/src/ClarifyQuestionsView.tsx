@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Menu, Sparkles, AlertCircle, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { router } from '@forge/bridge';
@@ -10,6 +10,10 @@ interface ClarifyProps {
   questions: Question[];
   onComplete: (answers: Answer[]) => void;
   onSkip: () => void;
+  round?: 1 | 2;
+  isSubmitting?: boolean;
+  submitLabel?: string;
+  skipLabel?: string;
   contextMeta?: {
     projectKey: string;
     domainRolesUsed: string[];
@@ -84,9 +88,24 @@ function renderQuestionWithStoryLinks(
   return parts;
 }
 
-export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMeta, sidebarOpen, setSidebarOpen }: ClarifyProps) {
+export function ClarifyQuestionsView({
+  questions,
+  onComplete,
+  onSkip,
+  round = 1,
+  isSubmitting = false,
+  submitLabel,
+  skipLabel,
+  contextMeta,
+  sidebarOpen,
+  setSidebarOpen,
+}: ClarifyProps) {
   const [answers, setAnswers] = useState<Record<number, { selected: string[]; custom: string }>>({});
   const [showContextDetails, setShowContextDetails] = useState(false);
+
+  useEffect(() => {
+    setAnswers({});
+  }, [questions, round]);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selected.length > 0 || a.custom.trim())).length;
   const storyLookup = new Map(
@@ -157,7 +176,9 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
             </div>
             <div>
               <h1 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Requirement Discovery</h1>
-              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">{answeredCount} of {questions.length} questions explored</p>
+              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">
+                Round {round} of 2 · {answeredCount} of {questions.length} questions explored
+              </p>
             </div>
           </div>
         </div>
@@ -175,17 +196,20 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
         <div className="flex items-center gap-3 shrink-0">
           <motion.button
             onClick={onSkip}
+            disabled={isSubmitting}
             className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)]"
             whileTap={{ scale: 0.97 }}
           >
-            Skip all
+            {skipLabel ?? (round === 2 ? 'Skip follow-up' : 'Skip all')}
           </motion.button>
           <motion.button
             onClick={handleSubmit}
+            disabled={isSubmitting}
             className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
             whileTap={{ scale: 0.98 }}
           >
-            Generate Features <ArrowRight className="w-4 h-4" />
+            {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
+            <ArrowRight className="w-4 h-4" />
           </motion.button>
         </div>
       </motion.header>
@@ -376,6 +400,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                                   <button
                                     key={si}
                                     onClick={() => toggleSuggestion(idx, sug)}
+                                    disabled={isSubmitting}
                                     className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
                                       sel
                                         ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border-[var(--rf-brand-subtle)] shadow-sm'
@@ -395,6 +420,7 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                           <textarea
                             value={ans.custom}
                             onChange={e => handleCustomChange(idx, e.target.value)}
+                            disabled={isSubmitting}
                             placeholder={suggestions.length > 0 ? 'Click a suggestion or type your own answer\u2026' : 'Type your detailed answer here\u2026'}
                             rows={3}
                             className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
@@ -416,9 +442,11 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
           >
             <button
               onClick={handleSubmit}
+              disabled={isSubmitting}
               className="brainstorm-shimmer flex items-center gap-2 px-6 py-3 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
             >
-              Generate Features <ArrowRight className="w-4 h-4" />
+              {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
+              <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
         </div>
