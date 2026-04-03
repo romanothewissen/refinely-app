@@ -272,8 +272,8 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
-  goldExamplesCount: number;
-  referencedGoldExamples: ReferencedGoldExample[];
+  goldExamplesCount?: number;
+  referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   tokenUsage?: TokenUsageSummary;

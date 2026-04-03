@@ -58,10 +58,9 @@ export async function objectDelete(key: string): Promise<void> {
 
 export const KEYS = {
   tenantConfig: 'tenant_config',
-  goldStandards: 'gold_standards',
-  goldCacheInfo: 'gold_cache_info',
   backlogIndex: (projectKey: string) => `backlog_index_${projectKey}`,
   wiChunks: 'wi_chunks',
+  wiChunksForDoc: (docId: string) => `wi_chunks_${docId}`,
   wiDocs: 'wi_docs',
   usageCurrentMonth: 'usage_current_month',
   // site-scoped (no accountId) — kept for backward compat

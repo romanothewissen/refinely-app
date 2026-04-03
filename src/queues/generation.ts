@@ -2,18 +2,16 @@
  * Forge Queue Consumer: two-pass feature generation.
  *
  * Runs with 900s (15 min) timeout — handles the full generation pipeline
- * including gold standard fetching, WI context retrieval, pass 1 + pass 2.
+ * including WI context retrieval, triage, pass 1 + pass 2.
  *
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
 import { GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
-import { GenerationCancelledError, generateFeatures, generateSessionTitle } from '../core/story-generator';
+import { assessRequirementWithLlm, GenerationCancelledError, generateFeatures, generateSessionTitle } from '../core/story-generator';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
-import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
-import { getConfig } from '../services/tenant-config';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
 
@@ -58,19 +56,6 @@ function startProgressHeartbeat(
   };
 }
 
-function resolveRelevantGoldSources(
-  sources: GenerationEvent['config']['goldSources'],
-  projectKey: string,
-) {
-  const exact = sources.filter(s => s.targetProjects?.includes(projectKey));
-  const global = sources.filter(s => s.targetProjects?.includes('*'));
-  if (projectKey === '*') return global;
-
-  const deduped = new Map<string, (typeof sources)[number]>();
-  [...exact, ...global].forEach(source => deduped.set(source.key, source));
-  return Array.from(deduped.values());
-}
-
 function buildWiExcerpt(text: string, maxChars = 180): string {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
   if (compact.length <= maxChars) return compact;
@@ -80,18 +65,14 @@ function buildWiExcerpt(text: string, maxChars = 180): string {
 export async function handler(event: { body: GenerationEvent }) {
   const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
   
-  // Resolve project-specific context and filter gold sources
+  // Resolve project-specific context
   const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
     || eventConfig.domainContexts?.find(c => c.projectKey === '*')
     || { context: eventConfig.domainContext || '' };
-    
-  // STRICT PROJECT-LEVEL: Only sources that explicitly target this project. No global fallback.
-  const relevantGoldSources = resolveRelevantGoldSources(eventConfig.goldSources, projectKey);
   
   const config = { 
     ...eventConfig, 
     domainContext: relevantContext.context,
-    goldSources: relevantGoldSources,
     tier: getEffectiveTier(eventConfig, { license }) 
   };
   let stopHeartbeat: (() => void) | null = null;
@@ -107,28 +88,40 @@ export async function handler(event: { body: GenerationEvent }) {
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
-    const goldCount = relevantGoldSources.length;
     const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
-    await updateProgress(`Reading reference examples, work instructions, and related stories for ${projectLabel}…`);
+    await updateProgress(`Reading work instructions and related stories for ${projectLabel}…`);
 
-    const [goldItems, wiContext, similarStories] = await Promise.all([
-      goldCount
-        ? fetchGoldExamples(config.goldSources, 8)
-        : Promise.resolve([]),
+    const [wiContext, similarStories, triageResult] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
         ? findSimilarStories(maskedRequirement.text, config, projectKey)
         : Promise.resolve([]),
+      assessRequirementWithLlm({
+        requirement: maskedRequirement.text,
+        clarifyAnswers: maskedAnswers.answers,
+        generatorConfig: config.generatorConfig,
+        tier: config.tier,
+        providerOpts: {
+          provider: config.generatorConfig.provider,
+          geminiApiKey: config.generatorConfig.geminiApiKey,
+          geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+          openaiApiKey: config.generatorConfig.openaiApiKey,
+          openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+          azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
+          azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
+          azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+          modelCatalogs: config.generatorConfig.modelCatalogs,
+          piiMaskingEnabled: piiEnabled,
+        },
+      }),
     ]);
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
       return;
     }
-
-    const goldExamplesText = formatGoldExamplesText(goldItems);
     const similarStoriesText = formatSimilarStoriesText(similarStories);
 
     // Progress: pass 1
@@ -138,21 +131,18 @@ export async function handler(event: { body: GenerationEvent }) {
       requirement,
       clarifyAnswers: maskedAnswers.answers,
       attachmentText: maskedAttachment.text,
-      goldExamplesText,
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
+      precomputedTriage: triageResult,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
-        if (await isWorkflowCancelled(sessionId)) return;
         await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1);
       },
       onPass1Complete: async (featureCount) => {
-        if (await isWorkflowCancelled(sessionId)) return;
         await updateProgress(`Writing acceptance requirements for ${featureCount} feature${featureCount !== 1 ? 's' : ''}…`, 2);
       },
       onArProgress: async (completed, total) => {
-        if (await isWorkflowCancelled(sessionId)) return;
         await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2);
       },
     });
@@ -170,12 +160,6 @@ export async function handler(event: { body: GenerationEvent }) {
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
-      goldExamplesCount: goldItems.length,
-      referencedGoldExamples: goldItems.slice(0, 15).map(item => ({
-        key: item.key,
-        source: item.source,
-        summary: item.summary,
-      })),
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
         key: item.key,
@@ -200,11 +184,6 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     result.generationContext = generationContext;
 
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId);
-      return;
-    }
-
     // Record usage
     await recordGeneration();
 
@@ -220,11 +199,6 @@ export async function handler(event: { body: GenerationEvent }) {
       result.tokenUsage,
     );
 
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId);
-      return;
-    }
-
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
         sessionId,
@@ -235,12 +209,11 @@ export async function handler(event: { body: GenerationEvent }) {
         projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
-          `Generated features using ${goldItems.length} curated examples and ${similarStories.length} backlog references.`,
+          `Generated features using ${similarStories.length} backlog references.`,
           `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
           'Acceptance requirements were produced in a dedicated second pass for consistency.',
         ],
         contextUsage: {
-          goldExamplesCount: goldItems.length,
           similarStoriesCount: similarStories.length,
           wiDocsCount: wiContext.docs.length,
           domainRolesCount: config.domainRoles?.length ?? 0,
@@ -256,11 +229,6 @@ export async function handler(event: { body: GenerationEvent }) {
           },
         },
       });
-    }
-
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId);
-      return;
     }
 
     await appendComplianceAuditEvent({
@@ -280,35 +248,21 @@ export async function handler(event: { body: GenerationEvent }) {
       return;
     }
 
-    // Generate session title (non-critical; should not fail the generation run)
-    try {
-      if (await isWorkflowCancelled(sessionId)) {
-        await markCancelled(sessionId);
-        return;
-      }
-      const title = await generateSessionTitle(maskedRequirement.text, config);
-      if (await isWorkflowCancelled(sessionId)) {
-        await markCancelled(sessionId);
-        return;
-      }
-      await updateConversationTitle(sessionId, accountId, title);
-    } catch (titleErr) {
-      console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
-      await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
-    }
-
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId);
-      return;
-    }
-
-    // Write completed state to storage (frontend polls for this)
     await entitySet(KEYS.generationProgress(sessionId), {
       type: 'complete',
       sessionId,
       payload: result,
       updatedAt: Date.now(),
     } as RealtimeEvent);
+
+    void generateSessionTitle(maskedRequirement.text, config)
+      .then(async (title) => {
+        await updateConversationTitle(sessionId, accountId, title);
+      })
+      .catch(async (titleErr) => {
+        console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
+        await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
+      });
 
   } catch (err) {
     if (await isWorkflowCancelled(sessionId) || err instanceof GenerationCancelledError || String((err as { name?: string })?.name ?? '') === 'GenerationCancelledError') {

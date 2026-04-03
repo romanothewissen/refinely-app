@@ -29,7 +29,6 @@ import {
   buildRefineSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
-  formatGoldExample,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 
@@ -68,7 +67,7 @@ interface ArPlan {
   depth: 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
 }
 
-interface RequirementAssessment {
+export interface RequirementAssessment {
   questionPlan: ClarifyQuestionPlan;
   featurePlan: FeaturePlan;
   arPlan: ArPlan;
@@ -111,30 +110,29 @@ const GENERIC_ROLE_WORDS = new Set([
 
 const PASS1_CONTEXT_LIMITS = {
   requirement: 5000,
-  clarify: 6000,
-  attachment: 5000,
-  wi: 12000,
-  gold: 12000,
-  similar: 8000,
+  clarify: 5000,
+  attachment: 4000,
+  wi: 8000,
+  similar: 5000,
 } as const;
 
 const PASS1_CONTEXT_LIMITS_COMPACT = {
   requirement: 4000,
-  clarify: 4000,
-  attachment: 3000,
-  wi: 6000,
-  gold: 6000,
-  similar: 4000,
+  clarify: 3000,
+  attachment: 2000,
+  wi: 4000,
+  similar: 3000,
 } as const;
 
 const PASS2_CONTEXT_LIMITS = {
   requirement: 4000,
-  clarify: 5000,
+  clarify: 4000,
   attachment: 3000,
-  wi: 6000,
-  gold: 6000,
-  similar: 4000,
+  wi: 5000,
+  similar: 3000,
 } as const;
+
+const MAX_EXECUTABLE_FEATURES = 8;
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -154,7 +152,6 @@ function buildGenerationUserMessage(input: {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   wiContextText: string;
-  goldExamplesText: string;
   similarStoriesText: string;
   limits: typeof PASS1_CONTEXT_LIMITS | typeof PASS1_CONTEXT_LIMITS_COMPACT | typeof PASS2_CONTEXT_LIMITS;
 }): string {
@@ -169,7 +166,6 @@ function buildGenerationUserMessage(input: {
 
   pushPromptSection(parts, 'ATTACHMENT CONTEXT', input.attachmentText, input.limits.attachment);
   pushPromptSection(parts, 'WORK INSTRUCTIONS', input.wiContextText, input.limits.wi);
-  pushPromptSection(parts, 'GOLD STANDARD EXAMPLES (for high-level format reference)', input.goldExamplesText, input.limits.gold);
   pushPromptSection(parts, 'SIMILAR STORIES FROM BACKLOG (use these for business context and phrasing patterns only)', input.similarStoriesText, input.limits.similar);
 
   return parts.join('\n\n---\n\n');
@@ -198,6 +194,7 @@ async function runDecompositionPass(input: {
     systemPrompt: input.systemPrompt,
     userMessage: input.userMessage,
     maxTokens: input.generatorConfig.maxTokens,
+    reasoningEffort: 'high',
     ...input.providerOpts,
   });
 
@@ -211,6 +208,7 @@ async function runDecompositionPass(input: {
     systemPrompt: `${input.systemPrompt}\n\nFINAL REMINDER: Return at least 1 feature. Never return an empty features array.`,
     userMessage: `${input.userMessage}\n\nIMPORTANT: The previous result contained zero features. Return at least one well-scoped feature in valid JSON.`,
     maxTokens: input.generatorConfig.maxTokens,
+    reasoningEffort: 'high',
     ...input.providerOpts,
   });
 
@@ -293,6 +291,7 @@ async function runParallelArPass(input: {
           systemPrompt,
           userMessage: task.userMessage,
           maxTokens,
+          reasoningEffort: 'medium',
           ...input.providerOpts,
         });
         return { feature: task.feature, result };
@@ -334,7 +333,7 @@ async function runParallelArPass(input: {
 
 // ─── LLM-based Requirement Triage ────────────────────────────────────────────
 
-interface TriageResult {
+export interface TriageResult {
   estimatedFeatures: number;
   shape: FeaturePlan['shape'];
   complexity: FeaturePlan['complexity'];
@@ -356,15 +355,20 @@ function parseTriageResult(raw: unknown): TriageResult | null {
   const arDepth = typeof obj.arDepth === 'string' && VALID_AR_DEPTHS.has(obj.arDepth as ArPlan['depth'])
     ? obj.arDepth as ArPlan['depth'] : null;
   if (estimatedFeatures == null || !shape || !complexity || !arDepth) return null;
-  return { estimatedFeatures: Math.min(15, Math.max(1, Math.round(estimatedFeatures))), shape, complexity, arDepth };
+  return {
+    estimatedFeatures: Math.min(MAX_EXECUTABLE_FEATURES, Math.max(1, Math.round(estimatedFeatures))),
+    shape,
+    complexity,
+    arDepth,
+  };
 }
 
-function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan } {
+export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan } {
   // Build feature plan from LLM's assessment
-  const est = triage.estimatedFeatures;
+  const est = Math.min(MAX_EXECUTABLE_FEATURES, triage.estimatedFeatures);
   const featurePlan: FeaturePlan = {
     min: Math.max(1, est - Math.ceil(est * 0.3)),
-    max: Math.min(15, est + Math.ceil(est * 0.3)),
+    max: Math.min(MAX_EXECUTABLE_FEATURES, est + Math.ceil(est * 0.2)),
     target: est,
     shape: triage.shape,
     complexity: triage.complexity,
@@ -383,7 +387,44 @@ function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; a
   return { featurePlan, arPlan };
 }
 
-async function assessRequirementWithLlm(input: {
+export function capAssessmentForExecution(assessment: RequirementAssessment): RequirementAssessment {
+  const cappedTarget = Math.min(assessment.featurePlan.target, MAX_EXECUTABLE_FEATURES);
+  const cappedMax = Math.min(Math.max(cappedTarget, assessment.featurePlan.max), MAX_EXECUTABLE_FEATURES);
+  const cappedMin = Math.min(assessment.featurePlan.min, cappedMax);
+
+  const featurePlan: FeaturePlan = {
+    ...assessment.featurePlan,
+    min: cappedMin,
+    max: cappedMax,
+    target: cappedTarget,
+  };
+
+  const arPlan: ArPlan = featurePlan.target >= 7
+    ? {
+        min: Math.min(assessment.arPlan.min, 2),
+        max: Math.min(assessment.arPlan.max, 4),
+        target: Math.min(assessment.arPlan.target, 3),
+        depth: assessment.arPlan.depth === 'comprehensive'
+          ? 'thorough'
+          : assessment.arPlan.depth === 'thorough'
+            ? 'standard'
+            : assessment.arPlan.depth,
+      }
+    : assessment.arPlan;
+
+  return {
+    ...assessment,
+    featurePlan,
+    arPlan,
+  };
+}
+
+function clampFeatureCount(features: RawFeature[], maxFeatures: number): RawFeature[] {
+  if (features.length <= maxFeatures) return features;
+  return features.slice(0, maxFeatures);
+}
+
+export async function assessRequirementWithLlm(input: {
   requirement: string;
   clarifyAnswers?: ClarifyAnswer[];
   generatorConfig: TenantConfig['generatorConfig'];
@@ -411,6 +452,7 @@ async function assessRequirementWithLlm(input: {
       systemPrompt: buildTriageSystemPrompt(),
       userMessage,
       maxTokens: 256,
+      reasoningEffort: 'none',
       ...input.providerOpts,
     });
     return parseTriageResult(result.data);
@@ -421,18 +463,16 @@ async function assessRequirementWithLlm(input: {
 
 // ─── Heuristic Fallback Assessment ───────────────────────────────────────────
 
-function assessRequirement(input: {
+export function assessRequirement(input: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
-  goldExamplesText?: string;
   similarStoriesText?: string;
   clarifyAnswers?: ClarifyAnswer[];
 }): RequirementAssessment {
   const requirement = input.requirement?.trim() ?? '';
   const attachment = input.attachmentText?.trim() ?? '';
   const wi = input.wiContextText?.trim() ?? '';
-  const gold = input.goldExamplesText?.trim() ?? '';
   const similar = input.similarStoriesText?.trim() ?? '';
   const answers = input.clarifyAnswers ?? [];
 
@@ -440,7 +480,7 @@ function assessRequirement(input: {
   const reqSentences = requirement
     ? requirement.split(/[.!?]\s+/).map(s => s.trim()).filter(Boolean).length
     : 0;
-  const hasRichContext = attachment.length > 250 || wi.length > 250 || gold.length > 250 || similar.length > 250 || answers.length >= 4;
+  const hasRichContext = attachment.length > 250 || wi.length > 250 || similar.length > 250 || answers.length >= 4;
   const hasConstraints = /(must|should|cannot|can't|only|except|unless|sla|kpi|compliance|permission|role|workflow|edge case|error|fallback|validation|audit|security)/i
     .test(requirement);
   const hasAmbiguousTokens = /(something|somehow|etc|and so on|kind of|maybe|improve|optimi[sz]e|optimal|better|faster|enhance|fix this|update this|handle this|do it)/i
@@ -565,12 +605,12 @@ function assessRequirement(input: {
       high:   { min: 4, max: 7, target: 5 },
     },
     broad: {
-      low:    { min: 5, max: 9, target: 7 },
-      high:   { min: 6, max: 12, target: 8 },
+      low:    { min: 4, max: 7, target: 6 },
+      high:   { min: 5, max: 8, target: 7 },
     },
     epic: {
-      low:    { min: 8, max: 12, target: 10 },
-      high:   { min: 10, max: 15, target: 12 },
+      low:    { min: 6, max: 8, target: 7 },
+      high:   { min: 6, max: 8, target: 8 },
     },
   };
   const complexityBand = (complexity === 'high' || complexity === 'very_high') ? 'high' : 'low';
@@ -612,7 +652,6 @@ function inferClarifyAssessment(input: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
-  goldExamplesText?: string;
   similarStoriesText?: string;
   clarifyAnswers?: ClarifyAnswer[];
 }): { questionPlan: ClarifyQuestionPlan; ambiguityScore: number; ambiguityReasons: string[] } {
@@ -666,63 +705,22 @@ function dedupeQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
   return result;
 }
 
-function buildFallbackQuestions(requirement: string, needed: number): ClarifyQuestion[] {
-  const templates: ClarifyQuestion[] = [
-    {
-      category: 'Roles & Personas',
-      question: 'Which role is responsible for accepting, reordering, or overriding the proposed schedule?',
-      suggestions: ['Dispatcher', 'Team lead', 'Field service engineer (FSE)', 'No one; fully automatic'],
-    },
-    {
-      category: 'Functional Flow',
-      question: 'How should criticality and due date be weighted when they conflict for two jobs?',
-      suggestions: ['Criticality always wins', 'Due date always wins', 'Configurable weighted score', 'Tie-break by travel time'],
-    },
-    {
-      category: 'Business Rules & Exceptions',
-      question: 'What should happen when the optimal slot violates skill, parts, or availability constraints?',
-      suggestions: ['Skip and pick next best', 'Escalate for manual assignment', 'Allow temporary override', 'Flag as unschedulable'],
-    },
-    {
-      category: 'Trigger & Context',
-      question: 'When should schedules be generated or recalculated?',
-      suggestions: ['Nightly batch', 'On each new request', 'On demand by dispatcher', 'On request update events'],
-    },
-    {
-      category: 'Success & Measurement',
-      question: 'What defines an optimal schedule outcome for this process?',
-      suggestions: ['Max SLA compliance', 'Highest critical jobs completed first', 'Balanced utilization', 'Minimum overdue work'],
-    },
-  ];
-
-  const seed = requirement.toLowerCase().includes('schedule')
-    ? templates
-    : templates.map((q, idx) => ({
-        ...q,
-        question: idx === 0
-          ? 'Which user role owns the final decision for this requirement?'
-          : q.question,
-      }));
-
-  return seed.slice(0, Math.max(0, needed));
-}
-
 // ─── Main Generation ──────────────────────────────────────────────────────────
 
 export async function generateFeatures(opts: {
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
-  goldExamplesText: string;
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
+  precomputedTriage?: TriageResult | null;
   onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string }) => Promise<void>;
   onPass1Complete?: (featureCount: number) => Promise<void>;
   onArProgress?: (completed: number, total: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, goldExamplesText, similarStoriesText, wiContextText, config, onTriageComplete, onPass1Complete, onArProgress, shouldCancel } = opts;
+  const { requirement, clarifyAnswers, attachmentText, similarStoriesText, wiContextText, config, precomputedTriage, onTriageComplete, onPass1Complete, onArProgress, shouldCancel } = opts;
   const { generatorConfig } = config;
   const providerOpts = {
     provider: generatorConfig.provider,
@@ -744,24 +742,26 @@ export async function generateFeatures(opts: {
     clarifyAnswers,
     attachmentText,
     wiContextText,
-    goldExamplesText,
     similarStoriesText,
   });
 
-  const triageResult = await assessRequirementWithLlm({
-    requirement,
-    clarifyAnswers,
-    generatorConfig,
-    tier: config.tier,
-    providerOpts,
-  });
+  const triageResult = precomputedTriage !== undefined
+    ? precomputedTriage
+    : await assessRequirementWithLlm({
+        requirement,
+        clarifyAnswers,
+        generatorConfig,
+        tier: config.tier,
+        providerOpts,
+      });
 
-  const assessment: RequirementAssessment = triageResult
+  const rawAssessment: RequirementAssessment = triageResult
     ? {
         ...heuristicAssessment,
         ...triageToAssessment(triageResult),
       }
     : heuristicAssessment;
+  const assessment = capAssessmentForExecution(rawAssessment);
 
   if (onTriageComplete) {
     await onTriageComplete({
@@ -779,7 +779,6 @@ export async function generateFeatures(opts: {
     clarifyAnswers,
     attachmentText,
     wiContextText,
-    goldExamplesText,
     similarStoriesText,
     limits: (assessment.featurePlan.shape === 'minimal' || assessment.featurePlan.shape === 'narrow')
       ? PASS1_CONTEXT_LIMITS_COMPACT
@@ -803,7 +802,7 @@ export async function generateFeatures(opts: {
     providerOpts,
   });
 
-  const pass1Features = pass1Result.features;
+  const pass1Features = clampFeatureCount(pass1Result.features, assessment.featurePlan.max);
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.length);
@@ -844,7 +843,6 @@ export async function generateFeatures(opts: {
       clarifyAnswers,
       attachmentText,
       wiContextText,
-      goldExamplesText,
       similarStoriesText,
       limits: PASS2_CONTEXT_LIMITS,
     });
@@ -858,6 +856,7 @@ export async function generateFeatures(opts: {
       systemPrompt: pass2System,
       userMessage: pass2UserMessage,
       maxTokens: pass2MaxTokens,
+      reasoningEffort: 'medium',
       ...providerOpts,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
@@ -896,18 +895,16 @@ export async function generateClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
-  goldExamplesText: string;
   similarStoriesText: string;
   config: TenantConfig;
 }): Promise<{ questions: ClarifyQuestion[]; tokenUsage: TokenUsageSummary; ambiguityAssessment: ClarifyAmbiguityAssessment }> {
-  const { requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText, config } = opts;
+  const { requirement, attachmentText, wiContextText, similarStoriesText, config } = opts;
 
   const contextParts: string[] = [`REQUIREMENT: ${requirement}`];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 4000)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 4000)}`);
-  if (goldExamplesText) contextParts.push(`DEPLOYED GOLD EXAMPLES:\n${goldExamplesText.slice(0, 5000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 5000)}`);
-  const assessment = inferClarifyAssessment({ requirement, attachmentText, wiContextText, goldExamplesText, similarStoriesText });
+  const assessment = inferClarifyAssessment({ requirement, attachmentText, wiContextText, similarStoriesText });
   const questionPlan = assessment.questionPlan;
 
   const system = buildClarifySystemPrompt({
@@ -920,45 +917,13 @@ export async function generateClarifyingQuestions(opts: {
     model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
     systemPrompt: system,
     userMessage: contextParts.join('\n\n'),
+    reasoningEffort: 'medium',
     ...buildLlmProviderOpts(config),
   });
 
-  let totalInputTokens = raw.usage.input;
-  let totalOutputTokens = raw.usage.output;
   let filteredQuestions = dedupeQuestions(parseQuestionCandidates(raw.data)).slice(0, questionPlan.max);
-
-  if (filteredQuestions.length < questionPlan.min) {
-    const needed = questionPlan.min - filteredQuestions.length;
-    const topUpUserMessage = [
-      contextParts.join('\n\n'),
-      `ALREADY GENERATED QUESTIONS (do not repeat):\n${filteredQuestions.map((q, idx) => `${idx + 1}. ${q.question}`).join('\n') || '(none)'}`,
-      `Generate exactly ${needed} additional clarifying questions that are non-overlapping with the existing list.`,
-      'Return JSON array only in this shape: [{"category":"...","question":"...","suggestions":["...","...","...","..."]}]',
-    ].join('\n\n---\n\n');
-
-    const topUpRaw = await callLlmJsonWithUsage<ClarifyQuestion[]>({
-      model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-      systemPrompt: system,
-      userMessage: topUpUserMessage,
-      ...buildLlmProviderOpts(config),
-    });
-    totalInputTokens += topUpRaw.usage.input;
-    totalOutputTokens += topUpRaw.usage.output;
-
-    filteredQuestions = dedupeQuestions([
-      ...filteredQuestions,
-      ...parseQuestionCandidates(topUpRaw.data),
-    ]).slice(0, questionPlan.max);
-  }
-
-  if (filteredQuestions.length < questionPlan.min) {
-    const needed = questionPlan.min - filteredQuestions.length;
-    filteredQuestions = dedupeQuestions([
-      ...filteredQuestions,
-      ...buildFallbackQuestions(requirement, needed),
-    ]).slice(0, questionPlan.max);
-  }
-
+  const totalInputTokens = raw.usage.input;
+  const totalOutputTokens = raw.usage.output;
   const totalTokens = totalInputTokens + totalOutputTokens;
 
   return {
@@ -996,6 +961,7 @@ export async function evaluateSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildEvaluateSystemPrompt(),
     userMessage,
+    reasoningEffort: 'none',
     ...buildLlmProviderOpts(opts.config),
   });
 
@@ -1030,6 +996,7 @@ export async function refineFeatures(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: config.generatorConfig.maxTokens,
+    reasoningEffort: 'high',
     ...buildLlmProviderOpts(config),
   });
 
@@ -1066,6 +1033,7 @@ export async function refineSingleFeature(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: 4096,
+    reasoningEffort: 'medium',
     ...buildLlmProviderOpts(config),
   });
 
@@ -1126,6 +1094,7 @@ export async function generateSessionTitle(requirement: string, config: TenantCo
     systemPrompt: 'Generate a concise, prescriptive 5-7 word title for this business requirement. Make it action-oriented, outcome-focused, and easy to scan in a backlog. Avoid generic words like feature, flow, process, solution, or system. Output the title only, no quotes.',
     userMessage: requirement,
     maxTokens: 32,
+    reasoningEffort: 'none',
     ...buildLlmProviderOpts(config),
   });
   return formatSessionTitle(res.text, requirement);
@@ -1153,6 +1122,7 @@ export async function askQuestion(opts: {
     systemPrompt: opts.systemPrompt,
     userMessage,
     maxTokens: 2048,
+    reasoningEffort: 'low',
     ...buildLlmProviderOpts(opts.config),
   });
 
@@ -1335,8 +1305,6 @@ function mergeFeatures(pass1: RawFeature[], pass2: RawFeature[]): RawFeature[] {
     };
   });
 }
-
-export { formatGoldExample };
 
 function toStageUsage(usage: { input: number; output: number }) {
   return {

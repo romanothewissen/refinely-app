@@ -25,7 +25,12 @@ export async function patchConfig(patch: Partial<TenantConfig>): Promise<TenantC
 }
 
 export function isConfigured(config: TenantConfig): boolean {
-  return config.goldSources.length > 0;
+  return Boolean(
+    config.arMappings?.length
+    || config.domainContexts?.length
+    || config.backlogStatusScopes?.length
+    || config.wiConfig?.enabled,
+  );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

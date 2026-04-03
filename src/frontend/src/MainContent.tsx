@@ -282,8 +282,6 @@ interface MainContentProps {
   requirement: string;
   generationContext?: {
     domainRolesUsed: string[];
-    goldExamplesCount: number;
-    referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
     projectKey: string;
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
@@ -948,7 +946,7 @@ export function MainContent({
                       Project: <span className="font-bold text-[var(--rf-text)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</span>
                     </span>
                     <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
-                      Reference stories: <span className="font-bold text-[var(--rf-text)]">{generationContext.goldExamplesCount + (generationContext.similarStoriesCount ?? 0)}</span>
+                      Reference stories: <span className="font-bold text-[var(--rf-text)]">{generationContext.similarStoriesCount ?? 0}</span>
                     </span>
                     <span className="px-2.5 py-1 rounded-md bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)]">
                       WI sections: <span className="font-bold text-[var(--rf-text)]">{generationContext.referencedWiSections?.length ?? 0}</span>
@@ -975,30 +973,6 @@ export function MainContent({
                       exit={{ opacity: 0, height: 0 }}
                     >
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                        <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
-                          <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Reference examples</div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-md px-2 py-1">
-                              {generationContext.referencedGoldExamples?.length || 0}
-                            </div>
-                          </div>
-                          {(generationContext.referencedGoldExamples?.length ?? 0) > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {generationContext.referencedGoldExamples.map((example, i) => (
-                                <span
-                                  key={`${example.source}-${example.key}-${i}`}
-                                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-[var(--rf-brand-subtle)]"
-                                  title={example.summary}
-                                >
-                                  {example.source}: {example.key}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No reference examples found.</div>
-                          )}
-                        </div>
-
                         <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 shadow-sm">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Similar backlog stories</div>

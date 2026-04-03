@@ -29,13 +29,10 @@ export interface Feature {
 export interface AppConfig {
   branding?: { appTitle?: string; primaryColor?: string; secondaryColor?: string; logoUrl?: string | null };
   tier?: string;
-  goldSources?: unknown[];
 }
 
 interface GenerationContextMeta {
   domainRolesUsed: string[];
-  goldExamplesCount: number;
-  referencedGoldExamples: Array<{ key: string; source: string; summary: string }>;
   projectKey: string;
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -51,8 +48,6 @@ interface ClarifyContextMeta {
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
-  goldExamplesCount?: number;
-  referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
   similarStoriesCount?: number;
   referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   wiDocsCount?: number;
@@ -184,7 +179,6 @@ export default function App() {
   const [projectKey, setProjectKey] = useState<string>('*');
   const [contextMode, setContextMode] = useState<'undecided' | 'project' | 'global'>('undecided');
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
-  const [goldSources, setGoldSources] = useState<any[]>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
 
@@ -263,7 +257,6 @@ export default function App() {
   useEffect(() => {
     api.getConfig()
       .then((res: any) => {
-        setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
         setBrandingLogoUrl(res?.branding?.logoUrl || null);
       })
       .catch(() => {});
@@ -612,7 +605,6 @@ export default function App() {
               contextMode={contextMode}
               setContextMode={setContextMode}
               availableProjects={availableProjects}
-              goldSources={goldSources}
               wiDocs={wiDocs}
               onRefreshWiDocs={() => loadWiDocs(projectKey)}
               onOpenProjectSettings={openProjectSettings}
@@ -641,7 +633,6 @@ export default function App() {
             api.getConfig()
               .then((res: any) => {
                 if (!res) return;
-                setGoldSources(Array.isArray(res?.goldSources) ? res.goldSources : []);
                 setBrandingLogoUrl(res?.branding?.logoUrl || null);
                 if (res.tier) setTier(res.tier);
                 if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);

@@ -113,14 +113,15 @@ export function buildDecompositionSystemPrompt(opts: {
 - This is a COMPLEX, multi-workflow requirement. It MUST produce ${min}-${max} features.
 - Each distinct workflow, role-specific capability, or independently testable behavior MUST be its own feature.
 - DO NOT collapse multiple workflows into a single feature.
-- If the requirement describes ${min}+ things, output ${min}+ features.
-- Under-decomposition is worse than over-decomposition for requirements of this scale.`;
+- Keep the feature set practical for one generation run; prefer the most important independently deliverable capabilities first.
+- Do not exceed ${max} features in a single response.`;
 
     if (shape === 'broad')
       return `${base}
 - This is a broad requirement covering multiple capabilities. Target ${target} features.
 - Include supporting capabilities only when they are independently deliverable.
-- Each distinct workflow or role-specific behavior should be its own feature.`;
+- Each distinct workflow or role-specific behavior should be its own feature.
+- Do not exceed ${max} features in a single response.`;
 
     // balanced (default)
     return `${base}

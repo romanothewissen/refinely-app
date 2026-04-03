@@ -15,8 +15,6 @@ interface ClarifyProps {
     domainRolesUsed: string[];
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
-    goldExamplesCount?: number;
-    referencedGoldExamples?: Array<{ key: string; source: string; summary: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
     ambiguityAssessment?: {
@@ -207,24 +205,6 @@ export function ClarifyQuestionsView({ questions, onComplete, onSkip, contextMet
                       </div>
                     </div>
                   </div>
-
-                  {(contextMeta.referencedGoldExamples?.length ?? 0) > 0 && (
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Reference examples</div>
-                      <div className="flex flex-wrap gap-2">
-                        {contextMeta.referencedGoldExamples!.map((example, i) => (
-                          <span
-                            key={`${example.source}-${example.key}-${i}`}
-                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold tracking-wide bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border border-[var(--rf-brand-subtle)]"
-                            title={example.summary}
-                          >
-                            {example.source}: {example.key}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   {(contextMeta.referencedSimilarStories?.length ?? 0) > 0 && (
                     <div>
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>

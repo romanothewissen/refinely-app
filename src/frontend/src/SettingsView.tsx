@@ -7,20 +7,7 @@ import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 import type { ConcreteModelFamily, LlmModelCatalogByVendor, LlmModelCatalogEntry, LlmProvider } from './types';
 import { REDACTED } from './types';
-
-interface GoldSource {
-  key: string;
-  project: string;
-  issuetype: string;
-  status?: string;
-  statuses?: string[];
-  maxItems: number;
-  requirementsFieldId: string | null;
-  arFieldIds: string[];
-  targetProjects?: string[];
-}
 interface JiraProject { key: string; name: string }
-interface JiraIssueType { name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
 interface JiraField { id: string; name: string }
 interface ProjectBacklogStatusScope { projectKey: string; statuses: string[] }
@@ -209,10 +196,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   // Jira State
   const [issueLinkType, setIssueLinkType] = useState('Relates to');
   const [projects, setProjects] = useState<JiraProject[]>([]);
-  const [goldSources, setGoldSources] = useState<GoldSource[]>([]);
-  const [newSource, setNewSource] = useState<Partial<GoldSource>>({ statuses: [] });
-  const [issueTypes, setIssueTypes] = useState<JiraIssueType[]>([]);
-  const [statuses, setStatuses] = useState<JiraStatus[]>([]);
   const [backlogStatusOptions, setBacklogStatusOptions] = useState<JiraStatus[]>([]);
   const [customFields, setCustomFields] = useState<JiraField[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -308,15 +291,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     if (initialProjectKey) setActiveArProj(initialProjectKey);
   }, [initialProjectKey]);
 
-  function detectDefaultIssueType(types: JiraIssueType[]): string | undefined {
-    if (!types.length) return undefined;
-    const preferred = ['story', 'feature', 'task'];
-    const found = preferred
-      .map(name => types.find(t => t.name.toLowerCase() === name))
-      .find(Boolean);
-    return found?.name ?? types[0]?.name;
-  }
-
   function detectDefaultStatuses(statuses: JiraStatus[]): string[] {
     if (!statuses.length) return [];
     const byCategory = statuses
@@ -359,20 +333,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.azureOpenAIApiVersion) setAzureOpenAIApiVersion(gc.azureOpenAIApiVersion);
         if (gc.modelCatalogs) setModelCatalogs(gc.modelCatalogs);
 
-        if (existingConfig.goldSources) {
-          setGoldSources(existingConfig.goldSources.map((gs: any) => {
-            const normalizedStatuses = Array.isArray(gs.statuses) && gs.statuses.length
-              ? gs.statuses
-              : (gs.status ? [gs.status] : []);
-            return {
-              ...gs,
-              statuses: normalizedStatuses,
-              status: normalizedStatuses[0],
-              arFieldIds: Array.isArray(gs.arFieldIds) && gs.arFieldIds.length > 0 ? gs.arFieldIds : (gs.requirementsFieldId ? [gs.requirementsFieldId] : []),
-              requirementsFieldId: null,
-            };
-          }));
-        }
         const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
         setDomainContext(parsedContext.context);
         if (parsedContext.roleRows.length) {
@@ -547,7 +507,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     setIsSaving(true);
     try {
       await api.saveConfig({
-        goldSources,
         generatorConfig: {
           provider,
           decompositionModel,
@@ -637,44 +596,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       }
     } catch(e: any) { console.error('Discovery failed', e); }
     finally { setIsDiscovering(false); }
-  }
-
-  async function onProjectSelect(projectKey: string) {
-    setNewSource(prev => ({ ...prev, project: projectKey, statuses: [] }));
-    try {
-      const [it, st] = await Promise.all([api.discoverIssueTypes(projectKey) as Promise<any>, api.discoverStatuses(projectKey) as Promise<any>]);
-      const fetchedTypes = it.issueTypes ?? [];
-      const fetchedStatuses = st.statuses ?? [];
-      setIssueTypes(fetchedTypes);
-      setStatuses(fetchedStatuses);
-
-      const autoType = detectDefaultIssueType(fetchedTypes);
-      const autoStatuses = detectDefaultStatuses(fetchedStatuses);
-
-      setNewSource(prev => ({
-        ...prev,
-        statuses: autoStatuses,
-        ...(autoStatuses[0] ? { status: autoStatuses[0] } : {}),
-        ...(autoType ? { issuetype: autoType } : {}),
-      }));
-    } catch {}
-  }
-
-  function addGoldSource() {
-    const pickedStatuses = Array.isArray(newSource.statuses) ? newSource.statuses : [];
-    if (!newSource.project || !newSource.issuetype || pickedStatuses.length === 0) return;
-    setGoldSources(prev => [...prev, {
-      key: `src${goldSources.length + 1}`,
-      project: newSource.project!,
-      issuetype: newSource.issuetype!,
-      statuses: pickedStatuses,
-      status: pickedStatuses[0],
-      maxItems: 50,
-      requirementsFieldId: null,
-      arFieldIds: newSource.arFieldIds ?? [],
-      targetProjects: [activeArProj],
-    }]);
-    setNewSource({ statuses: [] }); setIssueTypes([]); setStatuses([]);
   }
 
   useEffect(() => {
@@ -791,7 +712,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   const settingsNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
-    { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, examples' },
+    { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, docs' },
     { id: 'domain', label: 'Guidance', icon: Globe, sub: 'Roles and workspace rules' },
     { id: 'stats', label: 'Stats', icon: BarChart3, sub: 'Usage and audit visibility' },
     { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
@@ -1119,12 +1040,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   {activeArProj !== '*' ? (
                     <ProjectConfigurationManager 
                       projects={projects || []} customFields={customFields || []} arMappings={arMappings || []} setArMappings={setArMappings}
-                      domainContexts={domainContexts || []} setDomainContexts={setDomainContexts} goldSources={goldSources || []} setGoldSources={setGoldSources}
+                      domainContexts={domainContexts || []} setDomainContexts={setDomainContexts}
                       backlogStatusScopes={backlogStatusScopes || []} setBacklogStatusScopes={setBacklogStatusScopes} backlogStatusOptions={backlogStatusOptions || []}
                       detectDefaultStatuses={detectDefaultStatuses}
                       activeArProj={activeArProj} setActiveArProj={setActiveArProj} isAdmin={isAdmin} isProjectAdmin={activeProjAdmin}
-                      issueTypes={issueTypes || []} statuses={statuses || []} onProjectSelect={onProjectSelect}
-                      newSource={newSource || {}} setNewSource={setNewSource} addGoldSource={addGoldSource}
                       backlogCacheInfo={backlogCacheInfo}
                       backlogDiagnostics={backlogDiagnostics}
                       isRefreshingBacklogCache={isRefreshingBacklogCache}
@@ -1134,7 +1053,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-[var(--rf-border)]">
                       <Database className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                       <h4 className="text-lg font-bold text-[var(--rf-text)]">Select a project to configure</h4>
-                      <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and optional curated examples for the selected project.</p>
+                      <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and project-specific guidance for the selected project.</p>
                     </div>
                   )}
 
@@ -1747,9 +1666,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 }
 
 function ProjectConfigurationManager({ 
-  projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts, goldSources, setGoldSources,
+  projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts,
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
-  activeArProj, isAdmin, isProjectAdmin, issueTypes, statuses, onProjectSelect, newSource, setNewSource, addGoldSource,
+  activeArProj, isAdmin, isProjectAdmin,
   backlogCacheInfo, backlogDiagnostics, isRefreshingBacklogCache, onRefreshBacklogCache,
 }: any) {
   const currentMapping = useMemo(() => {
@@ -1757,7 +1676,6 @@ function ProjectConfigurationManager({
     return normalizeProjectArMapping(existing || { projectKey: activeArProj });
   }, [arMappings, activeArProj]);
   const currentContext = domainContexts.find((c: any) => c.projectKey === activeArProj) || { projectKey: activeArProj, context: '' };
-  const currentGoldSources = goldSources.filter((s: any) => s.targetProjects?.includes(activeArProj));
   const currentBacklogScope = backlogStatusScopes.find((scope: any) => scope.projectKey === activeArProj) || { projectKey: activeArProj, statuses: [] };
   const effectiveBacklogStatuses = currentBacklogScope.statuses.length
     ? currentBacklogScope.statuses
@@ -1803,10 +1721,9 @@ function ProjectConfigurationManager({
     backlog: true,
     guidance: true,
     mapping: false,
-    examples: false,
   });
 
-  const toggleSection = (section: 'backlog' | 'guidance' | 'mapping' | 'examples') => {
+  const toggleSection = (section: 'backlog' | 'guidance' | 'mapping') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
@@ -1818,7 +1735,6 @@ function ProjectConfigurationManager({
         projectKey: activeArProj,
         arMapping: currentMapping,
         domainContext: currentContext.context,
-        goldSources: currentGoldSources,
         backlogStatuses: effectiveBacklogStatuses,
       });
       setProjectNotice('Project configuration saved.');
@@ -1834,7 +1750,6 @@ function ProjectConfigurationManager({
         projectKey: activeArProj,
         arMapping: currentMapping,
         domainContext: currentContext.context,
-        goldSources: currentGoldSources,
         backlogStatuses: effectiveBacklogStatuses,
       });
       const refreshed = await onRefreshBacklogCache(activeArProj);

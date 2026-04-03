@@ -68,8 +68,6 @@ export const api = {
   removeWiDoc: (docId: string) => invoke('removeWiDoc', { docId }),
 
   // Cache
-  getCacheInfo: () => invoke('getCacheInfo'),
-  refreshCache: () => invoke('refreshCache'),
   getBacklogCacheInfo: (projectKey: string) => invoke('getBacklogCacheInfo', { projectKey }),
   diagnoseBacklogCache: (projectKey: string) => invoke('diagnoseBacklogCache', { projectKey }),
   refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),

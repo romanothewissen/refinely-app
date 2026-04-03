@@ -11,24 +11,10 @@
 import { ClarifyContextMeta, ClarifyEvent } from '../types';
 import { generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
-import { fetchGoldExamples, formatGoldExamplesText } from '../core/gold-standard';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
-
-function resolveRelevantGoldSources(
-  sources: ClarifyEvent['config']['goldSources'],
-  projectKey: string,
-) {
-  const exact = sources.filter(s => s.targetProjects?.includes(projectKey));
-  const global = sources.filter(s => s.targetProjects?.includes('*'));
-  if (projectKey === '*') return global;
-
-  const deduped = new Map<string, (typeof sources)[number]>();
-  [...exact, ...global].forEach(source => deduped.set(source.key, source));
-  return Array.from(deduped.values());
-}
 
 function buildWiExcerpt(text: string, maxChars = 180): string {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
@@ -47,7 +33,6 @@ export async function handler(event: { body: ClarifyEvent }) {
   const config = { 
     ...eventConfig, 
     domainContext: relevantContext.context,
-    goldSources: resolveRelevantGoldSources(eventConfig.goldSources, projectKey),
     tier: getEffectiveTier(eventConfig, { license }) 
   };
 
@@ -55,14 +40,11 @@ export async function handler(event: { body: ClarifyEvent }) {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
-    await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and reference stories…');
-    const [wiContext, goldItems, similarStories] = await Promise.all([
+    await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and related stories…');
+    const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
-      config.goldSources.length
-        ? fetchGoldExamples(config.goldSources, 6)
-        : Promise.resolve([]),
       config.tier !== 'free'
         ? findSimilarStories(maskedRequirement.text, config, projectKey)
         : Promise.resolve([]),
@@ -78,7 +60,6 @@ export async function handler(event: { body: ClarifyEvent }) {
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
-      goldExamplesText: formatGoldExamplesText(goldItems, 6, 900, 900),
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
     });
@@ -94,12 +75,6 @@ export async function handler(event: { body: ClarifyEvent }) {
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
-      goldExamplesCount: goldItems.length,
-      referencedGoldExamples: goldItems.slice(0, 12).map(item => ({
-        key: item.key,
-        source: item.source,
-        summary: item.summary,
-      })),
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
         key: item.key,
@@ -127,11 +102,6 @@ export async function handler(event: { body: ClarifyEvent }) {
       })),
     };
 
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId);
-      return;
-    }
-
     await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext);
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
@@ -147,7 +117,6 @@ export async function handler(event: { body: ClarifyEvent }) {
           `Question plan targeted ${ambiguityAssessment.questionPlan.min}-${ambiguityAssessment.questionPlan.max} based on requirement clarity.`,
         ],
         contextUsage: {
-          goldExamplesCount: goldItems.length,
           similarStoriesCount: similarStories.length,
           wiDocsCount: wiContext.docs.length,
           ambiguityScore: ambiguityAssessment.score,

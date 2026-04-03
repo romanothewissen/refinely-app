@@ -29,7 +29,6 @@ interface SidebarProps {
   contextMode: 'undecided' | 'project' | 'global';
   setContextMode: (mode: 'undecided' | 'project' | 'global') => void;
   availableProjects: Array<{ key: string; name: string }>;
-  goldSources: Array<{ key: string; targetProjects?: string[]; project?: string; issuetype?: string; statuses?: string[]; status?: string }>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
   onRefreshWiDocs: () => void | Promise<void>;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
@@ -69,7 +68,6 @@ export function Sidebar({
   contextMode,
   setContextMode,
   availableProjects,
-  goldSources,
   wiDocs,
   onRefreshWiDocs,
   onOpenProjectSettings
@@ -80,12 +78,6 @@ export function Sidebar({
   const brainstormDisabled = !contextReady || !requirement.trim() || isWorking || isAtLimit;
   const [showUsage, setShowUsage] = React.useState(true);
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
-  const activeGoldSources = goldSources.filter(source => (source.targetProjects ?? []).includes(projectKey));
-  const matchedConnectorLabel = projectKey === '*'
-    ? 'Select a project for context'
-    : activeGoldSources.length > 0
-      ? `${activeGoldSources.length} active connector${activeGoldSources.length !== 1 ? 's' : ''}`
-      : 'No connectors active';
   const activeWiDocs = wiDocs.filter(doc => (doc.targetProjects ?? ['*']).includes('*') || (doc.targetProjects ?? []).includes(projectKey));
   const availableProject = availableProjects.find(p => p.key === projectKey);
   const projectTitle = projectKey === '*'
@@ -256,7 +248,7 @@ export function Sidebar({
           </div>
           {projectKey === '*' && availableProjects.length > 0 && (
             <div className="mt-2.5 text-[11px] text-[var(--rf-sidebar-text-muted)]">
-              Select a project to unlock project-scoped examples and instructions.
+              Select a project to unlock project-scoped backlog context and instructions.
             </div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
@@ -310,13 +302,17 @@ export function Sidebar({
             whileTap={{ scale: 0.98 }}
           >
             <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Connectors</div>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${activeGoldSources.length > 0 ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success)]/20' : 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)] border-[var(--rf-warning)]/20'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${activeGoldSources.length > 0 ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-warning)]'}`} />
-                {activeGoldSources.length > 0 ? 'Active' : 'Setup'}
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-sidebar-text-muted)]">Backlog Cache</div>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${projectKey !== '*' ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success)]/20' : 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)] border-[var(--rf-warning)]/20'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${projectKey !== '*' ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-warning)]'}`} />
+                {projectKey !== '*' ? 'Project' : 'Select'}
               </span>
             </div>
-            <div className="text-xs font-medium text-[var(--rf-text)] leading-snug">{matchedConnectorLabel}</div>
+            <div className="text-xs font-medium text-[var(--rf-text)] leading-snug">
+              {projectKey === '*'
+                ? 'Select a project to manage backlog indexing.'
+                : 'Backlog references come from the deployed stories cache.'}
+            </div>
           </motion.button>
 
           <motion.button

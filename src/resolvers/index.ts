@@ -35,7 +35,6 @@ import {
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
-import { refreshGoldCache, getCacheInfo } from '../core/gold-standard';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
@@ -763,7 +762,7 @@ resolver.define('listWiDocs', async ({ payload }) => {
 
 
 resolver.define('saveProjectConfig', async ({ payload, context }) => {
-  const { projectKey, arMapping, domainContext, goldSources, backlogStatuses } = payload;
+  const { projectKey, arMapping, domainContext, backlogStatuses } = payload;
   await ensureAdmin(context, projectKey);
   
   const current = await getConfig();
@@ -784,18 +783,6 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
     else current.domainContexts.push({ projectKey, context: domainContext });
   }
   
-  // Gold Sources
-  if (goldSources) {
-    // Keep sources that don't target this project
-    const otherSources = current.goldSources.filter(s => !s.targetProjects?.includes(projectKey));
-    // Add the new ones, ensuring they target this project
-    const projectSources = goldSources.map((s: any) => ({
-      ...s,
-      targetProjects: s.targetProjects?.includes(projectKey) ? s.targetProjects : [...(s.targetProjects || []), projectKey]
-    }));
-    current.goldSources = [...otherSources, ...projectSources];
-  }
-
   if (Array.isArray(backlogStatuses)) {
     const otherScopes = (current.backlogStatusScopes || []).filter(scope => scope.projectKey !== projectKey);
     current.backlogStatusScopes = [
@@ -817,7 +804,6 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
       updated: {
         arMapping: !!arMapping,
         domainContext: domainContext !== undefined,
-        goldSources: !!goldSources,
         backlogStatuses: Array.isArray(backlogStatuses),
       },
     },
@@ -854,13 +840,6 @@ resolver.define('removeWiDoc', async ({ payload, context }) => {
   return { success: true };
 });
 
-// ─── Gold Standards Cache ─────────────────────────────────────────────────────
-
-resolver.define('getCacheInfo', async () => {
-  const info = await getCacheInfo();
-  return { success: true, ...info };
-});
-
 resolver.define('getBacklogCacheInfo', async ({ payload }) => {
   const projectKey = payload?.projectKey || '*';
   const info = await getBacklogCacheInfo(projectKey);
@@ -877,18 +856,6 @@ resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
   }
   const diagnostics = await diagnoseBacklogCache(projectKey, config);
   return { success: true, diagnostics };
-});
-
-resolver.define('refreshCache', async ({ context }) => {
-  await ensureAdmin(context);
-  const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
-  
-  if (!config.goldSources.length) {
-    return { success: false, error: 'No gold standard sources configured.' };
-  }
-  const cache = await refreshGoldCache(config.goldSources);
-  return { success: true, itemCount: cache.itemCount, cachedAt: cache.cachedAt };
 });
 
 resolver.define('refreshBacklogCache', async ({ payload, context }) => {

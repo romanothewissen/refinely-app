@@ -29,6 +29,8 @@ export interface LlmCallOptions {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  /** Controls model reasoning depth. Maps to vendor-specific thinking/reasoning APIs. */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   provider?: LlmProvider;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
@@ -42,6 +44,58 @@ export interface LlmCallOptions {
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
+}
+
+function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number | undefined {
+  switch (effort) {
+    case 'none':
+      return 0;
+    case 'low':
+      return 4096;
+    case 'medium':
+      return 8192;
+    case 'high':
+      return 16384;
+    default:
+      return undefined;
+  }
+}
+
+const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
+
+function buildTimeoutError(label: string, timeoutMs: number): Error {
+  return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s.`);
+}
+
+async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = LLM_REQUEST_TIMEOUT_MS): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(buildTimeoutError(label, timeoutMs)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit | undefined, label: string, timeoutMs = LLM_REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') {
+      throw buildTimeoutError(label, timeoutMs);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
@@ -81,14 +135,17 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
   }
 
   try {
-    const response = await chat({
-      model: resolvedModel,
-      messages: [
-        { role: 'system', content: effectiveOpts.systemPrompt },
-        { role: 'user', content: effectiveOpts.userMessage },
-      ],
-      max_completion_tokens: opts.maxTokens ?? 8192,
-    });
+    const response = await withTimeout(
+      chat({
+        model: resolvedModel,
+        messages: [
+          { role: 'system', content: effectiveOpts.systemPrompt },
+          { role: 'user', content: effectiveOpts.userMessage },
+        ],
+        max_completion_tokens: opts.maxTokens ?? 8192,
+      }),
+      'LLM request',
+    );
 
     const content = response.choices[0]?.message?.content ?? '';
     const text = typeof content === 'string' ? content : JSON.stringify(content);
@@ -289,7 +346,7 @@ export async function discoverLlmModelCatalog(opts: {
     }
     const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
     const url = `${baseUrl}/models?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, undefined, 'Gemini model discovery');
     const payload = await res.json() as {
       models?: Array<{
         name?: string;
@@ -325,11 +382,11 @@ export async function discoverLlmModelCatalog(opts: {
     }
     const baseUrl = opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
     const url = `${baseUrl.replace(/\/+$/, '')}/models`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
-    });
+    }, 'OpenAI model discovery');
     const payload = await res.json() as { data?: Array<{ id?: string; created?: number }> };
     if (!res.ok) {
       throw new Error(`OpenAI model discovery failed with status ${res.status}`);
@@ -353,11 +410,11 @@ export async function discoverLlmModelCatalog(opts: {
     return getFallbackModelCatalog('azure_openai');
   }
   const url = `${endpoint.replace(/\/+$/, '')}/openai/deployments?api-version=${encodeURIComponent(apiVersion)}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: {
       'api-key': apiKey,
     },
-  });
+  }, 'Azure OpenAI deployment discovery');
   const payload = await res.json() as {
     data?: Array<{ id?: string; model?: string; created_at?: number; status?: string }>;
     value?: Array<{ id?: string; model?: string; createdAt?: number; status?: string }>;
@@ -401,6 +458,7 @@ async function callGemini(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
   geminiApiKey?: string;
   geminiBaseUrl?: string;
 }): Promise<LlmResponse> {
@@ -414,8 +472,19 @@ async function callGemini(opts: {
   const model = mapModelForGemini(opts.model);
   const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const thinkingBudget = geminiThinkingBudget(opts.reasoningEffort);
+  const useThinking = thinkingBudget !== undefined && thinkingBudget > 0;
+  const generationConfig: Record<string, unknown> = {
+    maxOutputTokens: opts.maxTokens ?? 8192,
+  };
+  if (!useThinking) {
+    generationConfig.responseMimeType = 'application/json';
+  }
+  if (thinkingBudget !== undefined) {
+    generationConfig.thinkingConfig = { thinkingBudget };
+  }
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -428,24 +497,21 @@ async function callGemini(opts: {
           parts: [{ text: opts.userMessage }],
         },
       ],
-      generationConfig: {
-        maxOutputTokens: opts.maxTokens ?? 8192,
-        responseMimeType: 'application/json', // Native JSON mode for better reliability
-      },
+      generationConfig,
     }),
-  });
+  }, 'Gemini request');
 
   const rawBody = await res.text();
   let payload: {
     error?: { message?: string };
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   } = {};
 
   try {
     payload = JSON.parse(rawBody) as {
       error?: { message?: string };
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
     };
   } catch {
@@ -458,6 +524,7 @@ async function callGemini(opts: {
   }
 
   const text = (payload.candidates?.[0]?.content?.parts ?? [])
+    .filter((p: { thought?: boolean }) => !p.thought)
     .map((p) => p.text ?? '')
     .join('')
     .trim();
@@ -478,6 +545,7 @@ async function callOpenAI(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
   openaiApiKey?: string;
   openaiBaseUrl?: string;
 }): Promise<LlmResponse> {
@@ -488,23 +556,27 @@ async function callOpenAI(opts: {
 
   const baseUrl = opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
   const url = `${baseUrl}/chat/completions`;
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: [
+      { role: 'system', content: opts.systemPrompt },
+      { role: 'user', content: opts.userMessage },
+    ],
+    max_tokens: opts.maxTokens ?? 8192,
+    response_format: { type: 'json_object' },
+  };
+  if (opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+    body.reasoning = { effort: opts.reasoningEffort };
+  }
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [
-        { role: 'system', content: opts.systemPrompt },
-        { role: 'user', content: opts.userMessage }
-      ],
-      max_tokens: opts.maxTokens ?? 8192,
-      response_format: { type: 'json_schema' } // Native OpenAI JSON mode for bulletproof parsing
-    })
-  });
+    body: JSON.stringify(body),
+  }, 'OpenAI request');
 
   const rawBody = await res.text();
   if (!res.ok) {
@@ -526,6 +598,7 @@ async function callAzureOpenAI(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -544,21 +617,25 @@ async function callAzureOpenAI(opts: {
   const baseUrl = endpoint.replace(/\/+$/, '');
   const deployment = opts.model.trim();
   const url = `${baseUrl}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+  const body: Record<string, unknown> = {
+    messages: [
+      { role: 'system', content: opts.systemPrompt },
+      { role: 'user', content: opts.userMessage },
+    ],
+    max_tokens: opts.maxTokens ?? 8192,
+  };
+  if (opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+    body.reasoning = { effort: opts.reasoningEffort };
+  }
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'api-key': apiKey,
     },
-    body: JSON.stringify({
-      messages: [
-        { role: 'system', content: opts.systemPrompt },
-        { role: 'user', content: opts.userMessage },
-      ],
-      max_tokens: opts.maxTokens ?? 8192,
-    }),
-  });
+    body: JSON.stringify(body),
+  }, 'Azure OpenAI request');
 
   const rawBody = await res.text();
   if (!res.ok) {
@@ -616,6 +693,7 @@ export async function callLlmJson<T>(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
   provider?: LlmProvider;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
@@ -638,6 +716,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
   provider?: LlmProvider;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
