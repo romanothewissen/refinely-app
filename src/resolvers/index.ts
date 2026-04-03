@@ -37,7 +37,7 @@ import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-
 import { extractDocumentText } from '../core/document-parser';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
 import { retrieveWiContext } from '../core/wi-ingestion';
-import { findSimilarStories, getBacklogCacheInfo, refreshBacklogCache, diagnoseBacklogCache } from '../core/similar-stories';
+import { findSimilarStories, getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
 import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
@@ -887,15 +887,37 @@ resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
 
 resolver.define('refreshBacklogCache', async ({ payload, context }) => {
   await ensureAdmin(context, payload?.projectKey);
-  const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   const projectKey = payload?.projectKey || '*';
   if (!projectKey || projectKey === '*') {
     return { success: false, error: 'Select a project before refreshing the backlog cache.' };
   }
-  const cache = await refreshBacklogCache(projectKey, config);
-  const diagnostics = await diagnoseBacklogCache(projectKey, config);
-  return { success: true, ...cache, diagnostics };
+  await entitySet(KEYS.backlogRefreshStatus(projectKey), {
+    projectKey,
+    status: 'queued',
+    queuedAt: new Date().toISOString(),
+    requestedBy: (context as { accountId?: string })?.accountId ?? 'unknown',
+    updatedAt: new Date().toISOString(),
+  });
+  const backlogRefreshQueue = new Queue({ key: 'backlog-cache-refresh-queue' });
+  await backlogRefreshQueue.push({
+    body: {
+      projectKey,
+      requestedAt: new Date().toISOString(),
+      requestedBy: (context as { accountId?: string })?.accountId ?? 'unknown',
+      manual: true,
+    },
+  });
+  return { success: true, queued: true, projectKey };
+});
+
+resolver.define('getBacklogRefreshStatus', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = payload?.projectKey || '*';
+  if (!projectKey || projectKey === '*') {
+    return { success: false, error: 'Select a project before checking refresh status.' };
+  }
+  const status = await entityGet(KEYS.backlogRefreshStatus(projectKey));
+  return { success: true, status: status ?? null };
 });
 
 // ─── Conversation History ─────────────────────────────────────────────────────

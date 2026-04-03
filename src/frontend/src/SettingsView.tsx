@@ -50,6 +50,21 @@ interface BacklogCacheInfoRow {
   legacyFallback: boolean;
 }
 
+interface BacklogRefreshStatusRow {
+  projectKey: string;
+  status: 'queued' | 'running' | 'completed' | 'error';
+  updatedAt?: string;
+  queuedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  issueCount?: number;
+  shardCount?: number;
+  themeCount?: number;
+  builtAt?: string;
+  themeBuiltAt?: string;
+  error?: string;
+}
+
 interface WiDocRow {
   docId: string;
   filename: string;
@@ -222,6 +237,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [activeArProj, setActiveArProj] = useState(initialProjectKey); // Global context selector
   const [backlogCacheInfo, setBacklogCacheInfo] = useState<BacklogCacheInfoRow | null>(null);
   const [backlogDiagnostics, setBacklogDiagnostics] = useState<BacklogDiagnostics | null>(null);
+  const [backlogRefreshStatus, setBacklogRefreshStatus] = useState<BacklogRefreshStatusRow | null>(null);
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
   const [backlogThemeBudgetOverride, setBacklogThemeBudgetOverride] = useState('');
 
@@ -272,7 +288,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     try {
       const res = await api.getBacklogCacheInfo(projectKey) as any;
       if (res?.success) {
-        setBacklogCacheInfo({
+        const nextInfo = {
           projectKey: res.projectKey,
           builtAt: res.builtAt,
           issueCount: res.issueCount ?? 0,
@@ -281,11 +297,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           themeCount: res.themeCount ?? 0,
           themeBuiltAt: res.themeBuiltAt,
           legacyFallback: !!res.legacyFallback,
-        });
+        };
+        setBacklogCacheInfo(nextInfo);
+        return nextInfo;
       }
     } catch (e) {
       console.error('Could not load backlog cache info', e);
     }
+    return null;
   }, []);
 
   const loadBacklogDiagnostics = useCallback(async (projectKey: string) => {
@@ -293,6 +312,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       const res = await api.diagnoseBacklogCache(projectKey) as any;
       if (res?.success) {
         setBacklogDiagnostics(res.diagnostics ?? null);
+        return res.diagnostics ?? null;
       } else {
         setBacklogDiagnostics(null);
       }
@@ -300,6 +320,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       console.error('Could not load backlog diagnostics', e);
       setBacklogDiagnostics(null);
     }
+    return null;
+  }, []);
+
+  const loadBacklogRefreshStatus = useCallback(async (projectKey: string) => {
+    try {
+      const res = await api.getBacklogRefreshStatus(projectKey) as any;
+      if (res?.success) {
+        setBacklogRefreshStatus(res.status ?? null);
+        return res.status ?? null;
+      }
+    } catch (e) {
+      console.error('Could not load backlog refresh status', e);
+    }
+    return null;
   }, []);
 
   useEffect(() => {
@@ -426,11 +460,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
       void loadBacklogCacheInfo(activeArProj);
       void loadBacklogDiagnostics(activeArProj);
+      void loadBacklogRefreshStatus(activeArProj);
     } else {
       setBacklogCacheInfo(null);
       setBacklogDiagnostics(null);
+      setBacklogRefreshStatus(null);
     }
-  }, [activeTab, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics]);
+  }, [activeTab, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics, loadBacklogRefreshStatus]);
 
   useEffect(() => {
     if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
@@ -446,19 +482,36 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     try {
       const res = await api.refreshBacklogCache(projectKey) as any;
       if (res?.success) {
-        const nextInfo = {
-          projectKey: res.projectKey,
-          builtAt: res.builtAt,
-          issueCount: res.issueCount ?? 0,
-          stale: false,
-          shardCount: res.shardCount ?? 0,
-          themeCount: res.themeCount ?? 0,
-          themeBuiltAt: res.themeBuiltAt,
-          legacyFallback: !!res.legacyFallback,
-        };
-        setBacklogCacheInfo(nextInfo);
-        setBacklogDiagnostics(res.diagnostics ?? null);
-        return { ...nextInfo, diagnostics: res.diagnostics ?? null };
+        setBacklogRefreshStatus({
+          projectKey,
+          status: 'queued',
+          queuedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < 15 * 60 * 1000) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const status = await loadBacklogRefreshStatus(projectKey);
+          if (!status) continue;
+          if (status.status === 'queued' || status.status === 'running') continue;
+          if (status.status === 'error') {
+            alert(status.error || 'Backlog cache refresh failed.');
+            return null;
+          }
+          const [nextInfo, diagnostics] = await Promise.all([
+            loadBacklogCacheInfo(projectKey),
+            loadBacklogDiagnostics(projectKey),
+          ]);
+          if (nextInfo) {
+            return {
+              ...nextInfo,
+              diagnostics,
+            };
+          }
+          return null;
+        }
+        alert('Backlog cache rebuild is still running in the background. Please check back in a moment.');
       } else {
         alert(res?.error || 'Backlog cache refresh failed.');
       }
@@ -1086,6 +1139,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       activeArProj={activeArProj} setActiveArProj={setActiveArProj} isAdmin={isAdmin} isProjectAdmin={activeProjAdmin}
                       backlogCacheInfo={backlogCacheInfo}
                       backlogDiagnostics={backlogDiagnostics}
+                      backlogRefreshStatus={backlogRefreshStatus}
                       isRefreshingBacklogCache={isRefreshingBacklogCache}
                       onRefreshBacklogCache={handleRefreshBacklogCache}
                       backlogThemeBudgetOverride={backlogThemeBudgetOverride}
@@ -1711,7 +1765,7 @@ function ProjectConfigurationManager({
   projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts,
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
   activeArProj, isAdmin, isProjectAdmin,
-  backlogCacheInfo, backlogDiagnostics, isRefreshingBacklogCache, onRefreshBacklogCache,
+  backlogCacheInfo, backlogDiagnostics, backlogRefreshStatus, isRefreshingBacklogCache, onRefreshBacklogCache,
   backlogThemeBudgetOverride, onBacklogThemeBudgetOverrideChange,
 }: any) {
   const currentMapping = useMemo(() => {
@@ -1805,6 +1859,7 @@ function ProjectConfigurationManager({
         domainContext: currentContext.context,
         backlogStatuses: effectiveBacklogStatuses,
       });
+      setProjectNotice('Backlog cache rebuild queued. This can take a little while on larger projects.');
       const refreshed = await onRefreshBacklogCache(activeArProj);
       if (refreshed) {
         if (refreshed.issueCount > 0) {
@@ -1916,10 +1971,24 @@ function ProjectConfigurationManager({
                  </div>
                </div>
                <div className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3 shadow-sm">
-                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Status</div>
+               <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Status</div>
                  <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)] flex items-center gap-1.5">
-                   {backlogCacheInfo?.stale ? <><AlertCircle className="w-4 h-4 text-amber-500"/> Needs refresh</> : <><Check className="w-4 h-4 text-emerald-500"/> Fresh</>}
+                   {isRefreshingBacklogCache || backlogRefreshStatus?.status === 'queued' || backlogRefreshStatus?.status === 'running'
+                     ? <><RefreshCw className="w-4 h-4 animate-spin text-[var(--rf-brand)]"/> Rebuilding</>
+                     : backlogCacheInfo?.stale
+                       ? <><AlertCircle className="w-4 h-4 text-amber-500"/> Needs refresh</>
+                       : <><Check className="w-4 h-4 text-emerald-500"/> Fresh</>}
                  </div>
+                 {(backlogRefreshStatus?.status === 'queued' || backlogRefreshStatus?.status === 'running') && (
+                   <div className="mt-2 text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+                     {backlogRefreshStatus.status === 'queued' ? 'Queued in the long-running refresh worker.' : 'Building shards and theme index in the background.'}
+                   </div>
+                 )}
+                 {backlogRefreshStatus?.status === 'error' && (
+                   <div className="mt-2 text-[10px] font-medium text-[var(--rf-danger)]">
+                     {backlogRefreshStatus.error || 'Last rebuild attempt failed.'}
+                   </div>
+                 )}
                  {backlogCacheInfo?.legacyFallback && (
                    <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">Legacy cache fallback</div>
                  )}

@@ -39,6 +39,9 @@ modules:
     - key: clarify-consumer-listener
       queue: clarify-queue
       function: clarify-consumer
+    - key: backlog-cache-refresh-listener
+      queue: backlog-cache-refresh-queue
+      function: backlog-cache-refresh
   scheduledTrigger:
     - key: weekly-backlog-cache-refresh
       function: backlog-cache-refresh

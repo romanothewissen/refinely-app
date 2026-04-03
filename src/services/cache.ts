@@ -62,6 +62,7 @@ export const KEYS = {
   backlogManifest: (projectKey: string) => `backlog_manifest_${projectKey}`,
   backlogDocsShard: (projectKey: string, shardId: string) => `backlog_docs_${projectKey}_${shardId}`,
   backlogThemes: (projectKey: string) => `backlog_themes_${projectKey}`,
+  backlogRefreshStatus: (projectKey: string) => `backlog_refresh_status_${projectKey}`,
   wiChunks: 'wi_chunks',
   wiChunksForDoc: (docId: string) => `wi_chunks_${docId}`,
   wiDocs: 'wi_docs',
