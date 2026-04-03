@@ -1,4 +1,4 @@
-import { ClarifyCategoryKey, ClarifyQuestion, DiscoveryProfile } from '../types';
+import { ClarifyCategoryKey, ClarifyFailureReasonCode, ClarifyQuestion, DiscoveryProfile } from '../types';
 
 export const MIN_INITIAL_DISCOVERY_QUESTIONS = 6;
 export const MAX_INITIAL_DISCOVERY_QUESTIONS = 12;
@@ -432,7 +432,14 @@ function inferRequiredCategoryKeys(input: {
   const hasOutcome = /\b(outcome|goal|success|result|measure|kpi|solve|resolve|improve|ensure|so that)\b/.test(text);
   if (!hasTrigger || !hasOutcome) required.add('context_trigger');
 
-  if (/\b(capture|captured|extract|populate|field|fields|data|input|output|record|display|show|identifier|id|associate|link|message content|call duration)\b/.test(text)) {
+  if (/\b(capture|captured|extract|populate|field|fields|data|input|output|record|display|show|identifier|id|associate|link|details|metadata|channel|channels|message content|call duration)\b/.test(text)) {
+    required.add('information_architecture');
+  }
+
+  const hasMultiVariantScope =
+    /\b(various|multiple|different|several|many|across|multi(?:ple)?|omni(?:channel)?|all channels)\b/.test(text)
+    || (text.match(/,/g)?.length ?? 0) >= 3;
+  if (hasMultiVariantScope) {
     required.add('information_architecture');
   }
 
@@ -440,7 +447,17 @@ function inferRequiredCategoryKeys(input: {
     required.add('business_rules');
   }
 
+  const hasAutomation = /\b(automatic|automatically|automation|auto[-\s]?create|auto[-\s]?assign|auto[-\s]?route)\b/.test(text);
+  if (hasAutomation) {
+    required.add('business_rules');
+  }
+
   if (/\b(status|statuses|state|states|lifecycle|transition|transitions|stage|stages|draft|approved|open|closed|reopen|retry|complete|completion|cancel|queue)\b/.test(text)) {
+    required.add('state_lifecycle');
+  }
+
+  const hasEntityLifecycle = /\b(create|created|open|opened|update|updated|assign|assigned|route|routed|close|closed|manage|managed|track|tracked|case|cases|ticket|tickets|request|requests|record|records|conversation|conversations)\b/.test(text);
+  if (hasAutomation && hasEntityLifecycle) {
     required.add('state_lifecycle');
   }
 
@@ -459,6 +476,86 @@ function categoryCoverageKeys(profile: DiscoveryProfile, input?: {
 }): ClarifyCategoryKey[] {
   const inferred = input ? inferRequiredCategoryKeys(input) : [];
   return uniqueCategoryKeys([...profile.missingCategoryKeys, ...inferred]);
+}
+
+function raiseScope(
+  current: DiscoveryProfile['scope'],
+  minimum: DiscoveryProfile['scope'],
+): DiscoveryProfile['scope'] {
+  const rank: DiscoveryProfile['scope'][] = ['narrow', 'moderate', 'broad', 'very_broad'];
+  return rank[Math.max(rank.indexOf(current), rank.indexOf(minimum))] ?? current;
+}
+
+function raiseComplexity(
+  current: DiscoveryProfile['complexity'],
+  minimum: DiscoveryProfile['complexity'],
+): DiscoveryProfile['complexity'] {
+  const rank: DiscoveryProfile['complexity'][] = ['low', 'medium', 'high', 'very_high'];
+  return rank[Math.max(rank.indexOf(current), rank.indexOf(minimum))] ?? current;
+}
+
+function raiseAmbiguity(
+  current: DiscoveryProfile['ambiguity'],
+  minimum: DiscoveryProfile['ambiguity'],
+): DiscoveryProfile['ambiguity'] {
+  const rank: DiscoveryProfile['ambiguity'][] = ['low', 'medium', 'high'];
+  return rank[Math.max(rank.indexOf(current), rank.indexOf(minimum))] ?? current;
+}
+
+export function calibrateDiscoveryProfile(
+  profile: DiscoveryProfile,
+  opts: {
+    requiredCategoryKeys?: ClarifyCategoryKey[];
+    repairApplied?: boolean;
+    repairedQuestionCount?: number;
+  } = {},
+): DiscoveryProfile {
+  const requiredCategoryKeys = uniqueCategoryKeys(opts.requiredCategoryKeys ?? profile.missingCategoryKeys);
+  const breadth = requiredCategoryKeys.length;
+  const repairedQuestionCount = Math.max(0, opts.repairedQuestionCount ?? profile.recommendedInitialCount);
+  const repairApplied = Boolean(opts.repairApplied);
+
+  let scope = profile.scope;
+  let complexity = profile.complexity;
+  let ambiguity = profile.ambiguity;
+  let recommendedInitialCount = profile.recommendedInitialCount;
+
+  if (breadth >= 4) {
+    scope = raiseScope(scope, 'broad');
+    complexity = raiseComplexity(complexity, 'high');
+    ambiguity = raiseAmbiguity(ambiguity, 'high');
+    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
+  }
+
+  if (breadth >= 6 || repairedQuestionCount >= 10) {
+    scope = raiseScope(scope, 'very_broad');
+    complexity = raiseComplexity(complexity, 'very_high');
+    ambiguity = raiseAmbiguity(ambiguity, 'high');
+    recommendedInitialCount = Math.max(recommendedInitialCount, 10);
+  }
+
+  if (repairApplied) {
+    scope = raiseScope(scope, breadth >= 5 ? 'very_broad' : 'broad');
+    complexity = raiseComplexity(complexity, breadth >= 5 ? 'very_high' : 'high');
+    ambiguity = raiseAmbiguity(ambiguity, 'high');
+    recommendedInitialCount = Math.max(
+      recommendedInitialCount,
+      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(8, breadth + 2)),
+    );
+  }
+
+  return {
+    ...profile,
+    scope,
+    complexity,
+    ambiguity,
+    missingCategoryKeys: requiredCategoryKeys,
+    recommendedInitialCount: clampCount(
+      recommendedInitialCount,
+      MIN_INITIAL_DISCOVERY_QUESTIONS,
+      MAX_INITIAL_DISCOVERY_QUESTIONS,
+    ),
+  };
 }
 
 export function normalizeDiscoveryProfile(
@@ -500,6 +597,130 @@ export function normalizeDiscoveryProfile(
       MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
       MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
     ),
+  };
+}
+
+type InitialDiscoveryValidation = {
+  valid: boolean;
+  requiredCategoryKeys: ClarifyCategoryKey[];
+  failureReasonCode: ClarifyFailureReasonCode | null;
+};
+
+function validateInitialDiscoveryQuestions(
+  questions: ClarifyQuestion[],
+  profile: DiscoveryProfile,
+  input?: {
+    requirement?: string;
+    attachmentText?: string;
+    wiContextText?: string;
+    similarStoriesText?: string;
+  },
+): InitialDiscoveryValidation {
+  const requiredCategoryKeys = categoryCoverageKeys(profile, input);
+  if (!questions.length) {
+    return {
+      valid: false,
+      requiredCategoryKeys,
+      failureReasonCode: 'invalid_empty_questions',
+    };
+  }
+
+  if (questions.length < MIN_INITIAL_DISCOVERY_QUESTIONS) {
+    return {
+      valid: false,
+      requiredCategoryKeys,
+      failureReasonCode: 'invalid_underpowered_questions',
+    };
+  }
+
+  const presentCategoryKeys = new Set(questions.map((question) => question.categoryKey));
+  const missingCoverage = requiredCategoryKeys.filter((categoryKey) => !presentCategoryKeys.has(categoryKey));
+  if (missingCoverage.length > 0) {
+    return {
+      valid: false,
+      requiredCategoryKeys,
+      failureReasonCode: 'invalid_underpowered_questions',
+    };
+  }
+
+  return {
+    valid: true,
+    requiredCategoryKeys,
+    failureReasonCode: null,
+  };
+}
+
+export function validateAndRepairInitialDiscovery(
+  questions: ClarifyQuestion[],
+  profile: DiscoveryProfile,
+  input?: {
+    requirement?: string;
+    attachmentText?: string;
+    wiContextText?: string;
+    similarStoriesText?: string;
+  },
+): {
+  questions: ClarifyQuestion[];
+  discoveryProfile: DiscoveryProfile;
+  repairApplied: boolean;
+  failureReasonCode: ClarifyFailureReasonCode | null;
+} {
+  const initialValidation = validateInitialDiscoveryQuestions(questions, profile, input);
+  const calibratedProfile = calibrateDiscoveryProfile(profile, {
+    requiredCategoryKeys: initialValidation.requiredCategoryKeys,
+    repairApplied: false,
+    repairedQuestionCount: questions.length,
+  });
+  const finalizedQuestions = finalizeInitialDiscoveryQuestions(questions, calibratedProfile, input);
+  const finalizedValidation = validateInitialDiscoveryQuestions(finalizedQuestions, calibratedProfile, input);
+  const initialRepairApplied =
+    !initialValidation.valid
+    || questions.length !== finalizedQuestions.length;
+
+  if (finalizedValidation.valid) {
+    return {
+      questions: finalizedQuestions,
+      discoveryProfile: calibrateDiscoveryProfile(
+        {
+          ...calibratedProfile,
+          recommendedInitialCount: finalizedQuestions.length,
+        },
+        {
+          requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
+          repairApplied: initialRepairApplied,
+          repairedQuestionCount: finalizedQuestions.length,
+        },
+      ),
+      repairApplied: initialRepairApplied,
+      failureReasonCode: null,
+    };
+  }
+
+  const repairedProfile = calibrateDiscoveryProfile(
+    {
+      ...calibratedProfile,
+      recommendedInitialCount: Math.max(
+        calibratedProfile.recommendedInitialCount,
+        Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(8, finalizedValidation.requiredCategoryKeys.length + 2)),
+      ),
+    },
+    {
+      requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
+      repairApplied: true,
+      repairedQuestionCount: finalizedQuestions.length,
+    },
+  );
+  const repairedQuestions = finalizeInitialDiscoveryQuestions([], repairedProfile, input);
+  const repairedValidation = validateInitialDiscoveryQuestions(repairedQuestions, repairedProfile, input);
+
+  return {
+    questions: repairedValidation.valid ? repairedQuestions : [],
+    discoveryProfile: {
+      ...repairedProfile,
+      recommendedInitialCount: repairedQuestions.length || repairedProfile.recommendedInitialCount,
+    },
+    repairApplied: true,
+    failureReasonCode: repairedValidation.failureReasonCode,
   };
 }
 
@@ -581,7 +802,13 @@ export function finalizeInitialDiscoveryQuestions(
   });
 
   if (result.length < targetCount) {
-    const filler = buildFallbackQuestions(preferredCategories, addedQuestions, targetCount - result.length);
+    const coveredCategoryKeys = new Set(result.map((question) => question.categoryKey));
+    const uncoveredPreferredCategories = preferredCategories.filter((categoryKey) => !coveredCategoryKeys.has(categoryKey));
+    const filler = buildFallbackQuestions(
+      uncoveredPreferredCategories.length ? uncoveredPreferredCategories : preferredCategories,
+      addedQuestions,
+      targetCount - result.length,
+    );
     result.push(...filler);
   }
 

@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  calibrateDiscoveryProfile,
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
   finalizeInitialDiscoveryQuestions,
   MAX_TOTAL_DISCOVERY_QUESTIONS,
   normalizeDiscoveryProfile,
+  validateAndRepairInitialDiscovery,
 } from '../discovery';
 import { buildClarifySystemPrompt, buildEvaluateSystemPrompt } from '../prompts';
 
@@ -81,6 +83,83 @@ test('finalizeInitialDiscoveryQuestions fills required BA taxonomy categories wh
     questions.some((question) => question.categoryKey === 'information_architecture'),
     'expected data/input coverage for captured fields',
   );
+});
+
+test('validateAndRepairInitialDiscovery repairs an empty model output into a valid initial batch', () => {
+  const profile = normalizeDiscoveryProfile({
+    scope: 'moderate',
+    complexity: 'medium',
+    ambiguity: 'medium',
+    missingCategoryKeys: ['context_trigger'],
+    recommendedInitialCount: 6,
+    followupCap: 4,
+  });
+
+  const repaired = validateAndRepairInitialDiscovery([], profile, {
+    requirement: 'As a TSS, I need to manage various input channels and have cases created automatically.',
+  });
+
+  assert.equal(repaired.failureReasonCode, null);
+  assert.ok(repaired.questions.length >= 6);
+  assert.ok(repaired.questions.some((question) => question.categoryKey === 'context_trigger'));
+  assert.ok(repaired.questions.some((question) => question.categoryKey === 'user_personas'));
+  assert.ok(repaired.questions.some((question) => question.categoryKey === 'business_rules'));
+  assert.ok(repaired.questions.some((question) => question.categoryKey === 'state_lifecycle'));
+});
+
+test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonomy breadth', () => {
+  const calibrated = calibrateDiscoveryProfile(normalizeDiscoveryProfile({
+    scope: 'moderate',
+    complexity: 'medium',
+    ambiguity: 'medium',
+    missingCategoryKeys: [
+      'context_trigger',
+      'user_personas',
+      'information_architecture',
+      'business_rules',
+      'state_lifecycle',
+      'edge_cases_exceptions',
+    ],
+    recommendedInitialCount: 7,
+    followupCap: 4,
+  }), {
+    requiredCategoryKeys: [
+      'context_trigger',
+      'user_personas',
+      'information_architecture',
+      'business_rules',
+      'state_lifecycle',
+      'edge_cases_exceptions',
+    ],
+    repairApplied: true,
+    repairedQuestionCount: 10,
+  });
+
+  assert.equal(calibrated.scope, 'very_broad');
+  assert.equal(calibrated.complexity, 'very_high');
+  assert.equal(calibrated.ambiguity, 'high');
+  assert.ok(calibrated.recommendedInitialCount >= 10);
+});
+
+test('broad multi-input automation asks infer a non-trivial unresolved-category set', () => {
+  const profile = normalizeDiscoveryProfile({
+    scope: 'moderate',
+    complexity: 'medium',
+    ambiguity: 'medium',
+    missingCategoryKeys: [],
+    recommendedInitialCount: 6,
+    followupCap: 4,
+  });
+
+  const repaired = validateAndRepairInitialDiscovery([], profile, {
+    requirement: 'As a TSS, I need to be able to manage my various input channels efficiently (phone, whatsapp, text, email) and have cases created from it automatically',
+  });
+
+  assert.equal(repaired.failureReasonCode, null);
+  assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
+  assert.ok(['broad', 'very_broad'].includes(repaired.discoveryProfile.scope));
+  assert.equal(repaired.discoveryProfile.ambiguity, 'high');
+  assert.ok(repaired.questions.length >= 8);
 });
 
 test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total question cap', () => {

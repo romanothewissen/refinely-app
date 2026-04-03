@@ -352,6 +352,35 @@ async function cancelWorkflowProgress(
   return { success: true };
 }
 
+async function enqueueClarifyWorkflow(
+  payload: { sessionId: string; requirement: string; attachmentText?: string; projectKey?: string },
+  context: any,
+) {
+  const config = await getConfig();
+  const clarifyQueue = new Queue({ key: 'clarify-queue' });
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const event: ClarifyEvent = {
+    sessionId: payload.sessionId,
+    accountId,
+    requirement: payload.requirement,
+    attachmentText: payload.attachmentText ?? '',
+    config,
+    license: context?.license,
+    projectKey: payload.projectKey || '*',
+    round: 1,
+    priorAnswers: [],
+  };
+
+  await entitySet(KEYS.clarifyProgress(payload.sessionId), {
+    type: 'progress',
+    sessionId: payload.sessionId,
+    message: 'Analyzing requirement and gathering project context…',
+    updatedAt: Date.now(),
+  });
+  await clarifyQueue.push({ body: event });
+  return { success: true };
+}
+
 // ─── Generation progress (polling) ───────────────────────────────────────────
 
 resolver.define('getProgress', async ({ payload }: { payload: { sessionId: string } }) => {
@@ -367,29 +396,16 @@ resolver.define('cancelGeneration', async ({ payload }: { payload: { sessionId: 
 
 resolver.define('startClarify', async ({ payload, context }) => {
   try {
-    const config = await getConfig();
-    const clarifyQueue = new Queue({ key: 'clarify-queue' });
-    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-    const event: ClarifyEvent = {
-      sessionId: payload.sessionId,
-      accountId,
-      requirement: payload.requirement,
-      attachmentText: payload.attachmentText ?? '',
-      config,
-      license: context?.license,
-      projectKey: payload.projectKey || '*',
-      round: 1,
-      priorAnswers: [],
-    };
-    // Overwrite any stale result with a fresh progress marker
-    await entitySet(KEYS.clarifyProgress(payload.sessionId), {
-      type: 'progress',
-      sessionId: payload.sessionId,
-      message: 'Analyzing requirement and gathering project context…',
-      updatedAt: Date.now(),
-    });
-    await clarifyQueue.push({ body: event });
-    return { success: true };
+    return await enqueueClarifyWorkflow(payload, context);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+});
+
+resolver.define('retryClarify', async ({ payload, context }) => {
+  try {
+    return await enqueueClarifyWorkflow(payload, context);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, error: message };

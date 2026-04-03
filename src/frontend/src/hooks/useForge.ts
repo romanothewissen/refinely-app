@@ -27,6 +27,8 @@ export const api = {
   // Clarify (async queue)
   startClarify: (sessionId: string, requirement: string, attachmentText?: string, projectKey?: string) =>
     invoke('startClarify', { sessionId, requirement, attachmentText, projectKey }),
+  retryClarify: (sessionId: string, requirement: string, attachmentText?: string, projectKey?: string) =>
+    invoke('retryClarify', { sessionId, requirement, attachmentText, projectKey }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
   evaluateSufficiency: (payload: {

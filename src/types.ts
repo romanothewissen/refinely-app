@@ -258,6 +258,13 @@ export type ClarifyCategoryKey =
   | 'state_lifecycle'
   | 'edge_cases_exceptions';
 
+export type ClarifyDiscoveryStatus = 'ready' | 'blocked';
+export type ClarifyFailureReasonCode =
+  | 'timeout'
+  | 'queue_error'
+  | 'invalid_empty_questions'
+  | 'invalid_underpowered_questions';
+
 export interface DiscoveryProfile {
   scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
   complexity: 'low' | 'medium' | 'high' | 'very_high';
@@ -286,6 +293,8 @@ export interface ContextSourceMeta {
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {
+  discoveryStatus?: ClarifyDiscoveryStatus;
+  failureReasonCode?: ClarifyFailureReasonCode;
   goldExamplesCount?: number;
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;

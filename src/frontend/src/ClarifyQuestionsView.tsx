@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Menu, Sparkles, AlertCircle, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { router } from '@forge/bridge';
-import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyQuestion } from './types';
+import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
 
 const CATEGORY_ORDER: ClarifyCategoryKey[] = [
   'context_trigger',
@@ -26,11 +26,14 @@ interface ClarifyProps {
   questions: ClarifyQuestion[];
   onComplete: (answers: ClarifyAnswer[]) => void;
   onSkip: () => void;
+  onRetry?: () => void;
   round?: 1 | 2;
   isSubmitting?: boolean;
   submitLabel?: string;
   skipLabel?: string;
   contextMeta?: ClarifyContextMeta | null;
+  blockingState?: { message: string; reasonCode?: ClarifyFailureReasonCode } | null;
+  inlineError?: string | null;
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
 }
@@ -100,11 +103,14 @@ export function ClarifyQuestionsView({
   questions,
   onComplete,
   onSkip,
+  onRetry,
   round = 1,
   isSubmitting = false,
   submitLabel,
   skipLabel,
   contextMeta,
+  blockingState,
+  inlineError,
   sidebarOpen,
   setSidebarOpen,
 }: ClarifyProps) {
@@ -116,6 +122,7 @@ export function ClarifyQuestionsView({
   }, [questions, round]);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
+  const isBlocked = Boolean(blockingState && questions.length === 0);
   const storyLookup = new Map(
     (contextMeta?.referencedSimilarStories ?? [])
       .map(story => [story.key, resolveStoryUrl(story)] as const)
@@ -220,15 +227,27 @@ export function ClarifyQuestionsView({
           >
             {skipLabel ?? (round === 2 ? 'Skip follow-up' : 'Skip all')}
           </motion.button>
-          <motion.button
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-            className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
-            whileTap={{ scale: 0.98 }}
-          >
-            {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
-            <ArrowRight className="w-4 h-4" />
-          </motion.button>
+          {isBlocked ? (
+            <motion.button
+              onClick={onRetry}
+              disabled={isSubmitting || !onRetry}
+              className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20 disabled:opacity-60"
+              whileTap={{ scale: 0.98 }}
+            >
+              Retry discovery
+              <ArrowRight className="w-4 h-4" />
+            </motion.button>
+          ) : (
+            <motion.button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
+              whileTap={{ scale: 0.98 }}
+            >
+              {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
+              <ArrowRight className="w-4 h-4" />
+            </motion.button>
+          )}
         </div>
       </motion.header>
 
@@ -375,7 +394,60 @@ export function ClarifyQuestionsView({
             </motion.div>
           )}
 
-          {categories.map(({ categoryKey, label, items }, idx) => (
+          {inlineError && questions.length > 0 && (
+            <motion.div
+              className="rounded-2xl border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35 px-5 py-4 text-sm text-[var(--rf-danger)] shadow-sm"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="font-bold">Discovery needs another try</div>
+              <div className="mt-1 leading-relaxed">{inlineError}</div>
+            </motion.div>
+          )}
+
+          {blockingState && questions.length === 0 && (
+            <motion.div
+              className="rounded-3xl border border-[var(--rf-border)] bg-white/85 backdrop-blur-md p-8 shadow-sm"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-[var(--rf-danger-subtle)]/50 flex items-center justify-center text-[var(--rf-danger)] border border-[var(--rf-danger-subtle)]">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <h2 className="text-lg font-bold text-[var(--rf-text)]">Discovery is blocked</h2>
+                  <p className="mt-2 text-sm text-[var(--rf-text-secondary)] leading-relaxed">
+                    {blockingState.message}
+                  </p>
+                  <p className="mt-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                    Requirement discovery did not complete successfully, so generation is paused until you retry or skip explicitly.
+                  </p>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    {onRetry && (
+                      <button
+                        type="button"
+                        onClick={onRetry}
+                        className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
+                      >
+                        Retry discovery
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={onSkip}
+                      className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-[var(--rf-surface-soft)] transition"
+                    >
+                      {skipLabel ?? 'Skip all'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {questions.length > 0 && categories.map(({ categoryKey, label, items }, idx) => (
             <motion.div
               key={categoryKey}
               className="space-y-4"
@@ -471,21 +543,23 @@ export function ClarifyQuestionsView({
             </motion.div>
           ))}
 
-          <motion.div
-            className="flex justify-end pt-6"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-          >
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="brainstorm-shimmer flex items-center gap-2 px-6 py-3 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
+          {questions.length > 0 && (
+            <motion.div
+              className="flex justify-end pt-6"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
             >
-              {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </motion.div>
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="brainstorm-shimmer flex items-center gap-2 px-6 py-3 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-lg shadow-[var(--rf-brand)]/20 active:scale-[0.98]"
+              >
+                {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
         </div>
       </div>
     </div>

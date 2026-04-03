@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
+import type { ClarifyContextMeta, ClarifyFailureReasonCode } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -87,11 +88,17 @@ const PROGRESS_STABILITY_MS = 250;
 const CLARIFY_TIMEOUT_MS = 90000;
 const CLARIFY_STALE_PROGRESS_MS = 75000;
 
+export interface ClarifyBlockedPayload {
+  message: string;
+  reasonCode: ClarifyFailureReasonCode;
+  contextMeta?: ClarifyContextMeta | null;
+}
+
 export function useClarifyRealtime(
   sessionId: string | null,
   runId: number,
   onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
-  onFallthrough: () => void,
+  onBlocked: (payload: ClarifyBlockedPayload) => void,
   onCancel?: () => void,
 ) {
   const [progress, setProgress] = useState('');
@@ -102,8 +109,8 @@ export function useClarifyRealtime(
   // Keep callbacks in refs so the polling interval always calls the latest version
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  const onFallthroughRef = useRef(onFallthrough);
-  onFallthroughRef.current = onFallthrough;
+  const onBlockedRef = useRef(onBlocked);
+  onBlockedRef.current = onBlocked;
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
 
@@ -131,7 +138,15 @@ export function useClarifyRealtime(
       try {
         const res = await invoke('getClarifyResult', { sessionId }) as {
           success: boolean;
-          result?: { type: string; message?: string; questions?: unknown[]; contextMeta?: unknown; updatedAt?: number };
+          result?: {
+            type: string;
+            message?: string;
+            error?: string;
+            reasonCode?: ClarifyFailureReasonCode;
+            questions?: unknown[];
+            contextMeta?: ClarifyContextMeta;
+            updatedAt?: number;
+          };
         };
         if (!active) return;
         const result = res.result;
@@ -146,7 +161,11 @@ export function useClarifyRealtime(
             timerRef.current = null;
             setIsClarifying(false);
             setProgress('');
-            onFallthroughRef.current();
+            onBlockedRef.current({
+              message: 'Discovery timed out while waiting for clarifying questions.',
+              reasonCode: 'timeout',
+              contextMeta: null,
+            });
             return;
           }
           if (Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS) {
@@ -154,7 +173,11 @@ export function useClarifyRealtime(
             timerRef.current = null;
             setIsClarifying(false);
             setProgress('');
-            onFallthroughRef.current();
+            onBlockedRef.current({
+              message: 'Discovery timed out before clarifying questions were ready.',
+              reasonCode: 'timeout',
+              contextMeta: null,
+            });
           }
           return;
         }
@@ -177,19 +200,27 @@ export function useClarifyRealtime(
           setProgress('');
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
-          console.warn('[useClarifyRealtime] complete but no questions found — falling through to generate');
+          console.warn('[useClarifyRealtime] complete but no questions found — blocking discovery');
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsClarifying(false);
           setProgress('');
-          onFallthroughRef.current();
-        } else if (result.type === 'error') {
-          console.error('[useClarifyRealtime] error result from backend');
+          onBlockedRef.current({
+            message: 'Discovery completed without any questions. Please retry discovery.',
+            reasonCode: 'invalid_empty_questions',
+            contextMeta: (result.contextMeta as ClarifyContextMeta | undefined) ?? null,
+          });
+        } else if (result.type === 'error' || result.type === 'blocked') {
+          console.error('[useClarifyRealtime] blocked result from backend');
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsClarifying(false);
           setProgress('');
-          onFallthroughRef.current();
+          onBlockedRef.current({
+            message: result.error || result.message || 'Discovery could not prepare clarifying questions.',
+            reasonCode: result.reasonCode ?? 'queue_error',
+            contextMeta: (result.contextMeta as ClarifyContextMeta | undefined) ?? null,
+          });
         }
       } catch {
         // transient polling error — keep trying

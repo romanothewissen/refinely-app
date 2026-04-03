@@ -13,6 +13,7 @@ import type {
   ClarifyAnswer,
   ClarifyCategoryKey,
   ClarifyContextMeta,
+  ClarifyFailureReasonCode,
   ClarifyQuestion,
   GenerationContextMeta,
   TokenUsageSummary,
@@ -174,6 +175,8 @@ export default function App() {
   const [workflowRunId, setWorkflowRunId] = useState(0);
   const [isWorking, setIsWorking] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
+  const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
@@ -418,6 +421,8 @@ export default function App() {
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
+      setClarifyBlockingError(null);
+      setClarifyEvaluationError(null);
       setClarifyContext(nextClarifyContext);
       setClarifyRound(1);
       setClarifyAnswers([]);
@@ -426,14 +431,23 @@ export default function App() {
       if (questions.length > 0) {
         setClarifyQuestions(questions as ClarifyQuestion[]);
         setIsWorking(false);
-      } else {
-        startGeneration(requirement, []);
       }
     },
-    () => {
-      // Error or timeout — skip clarify and go straight to generation
+    ({ message, reasonCode, contextMeta }) => {
       setPendingClarifySessionId(null);
-      startGeneration(requirement, []);
+      setIsEvaluatingDiscovery(false);
+      setIsWorking(false);
+      setClarifyQuestions([]);
+      setClarifyContext(
+        (contextMeta as ClarifyContextMeta | undefined)
+        ?? {
+          projectKey,
+          domainRolesUsed: [],
+          discoveryStatus: 'blocked',
+          failureReasonCode: reasonCode,
+        },
+      );
+      setClarifyBlockingError({ message, reasonCode });
     },
     () => {
       setPendingClarifySessionId(null);
@@ -503,15 +517,10 @@ export default function App() {
 
   const handleClarifyComplete = async (submittedAnswers: ClarifyAnswer[]) => {
     const mergedAnswers = [...clarifyAnswers, ...submittedAnswers];
+    setClarifyEvaluationError(null);
 
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
-      await startGeneration(requirement, mergedAnswers);
-      return;
-    }
-
-    if (!mergedAnswers.length) {
-      markDiscoveryRoundComplete(1);
       await startGeneration(requirement, mergedAnswers);
       return;
     }
@@ -540,6 +549,7 @@ export default function App() {
         setClarifyAnswers(mergedAnswers);
         setClarifyRound(2);
         setClarifyQuestions(followupQuestions as ClarifyQuestion[]);
+        setClarifyEvaluationError(null);
         setIsWorking(false);
         return;
       }
@@ -548,14 +558,16 @@ export default function App() {
       await startGeneration(requirement, mergedAnswers);
     } catch (err) {
       console.error('Discovery sufficiency evaluation failed', err);
-      markDiscoveryRoundComplete(1);
-      await startGeneration(requirement, mergedAnswers);
+      setClarifyEvaluationError('Discovery could not evaluate the current answers. Please retry discovery or skip explicitly if you want to continue without it.');
+      setIsWorking(false);
     } finally {
       setIsEvaluatingDiscovery(false);
     }
   };
 
   const handleClarifySkip = async () => {
+    setClarifyBlockingError(null);
+    setClarifyEvaluationError(null);
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
       await startGeneration(requirement, clarifyAnswers);
@@ -580,6 +592,8 @@ export default function App() {
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
+    setClarifyBlockingError(null);
+    setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
 
     if (clarifyActive) {
@@ -606,6 +620,8 @@ export default function App() {
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
+    setClarifyBlockingError(null);
+    setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
 
     // Bind this session to the originating issue so re-launching restores it
@@ -618,10 +634,76 @@ export default function App() {
       if (res.success) {
         setPendingClarifySessionId(sessionId);
       } else {
-        await startGeneration(requirement, []);
+        setIsWorking(false);
+        setClarifyContext({
+          projectKey,
+          domainRolesUsed: [],
+          discoveryStatus: 'blocked',
+          failureReasonCode: 'queue_error',
+        });
+        setClarifyBlockingError({
+          message: res.error || 'Discovery could not be started. Please retry.',
+          reasonCode: 'queue_error',
+        });
       }
-    } catch {
-      await startGeneration(requirement, []);
+    } catch (err: any) {
+      setIsWorking(false);
+      setClarifyContext({
+        projectKey,
+        domainRolesUsed: [],
+        discoveryStatus: 'blocked',
+        failureReasonCode: 'queue_error',
+      });
+      setClarifyBlockingError({
+        message: err?.message ?? 'Discovery could not be started. Please retry.',
+        reasonCode: 'queue_error',
+      });
+    }
+  };
+
+  const handleRetryClarify = async () => {
+    const attachmentText = runAttachments
+      .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
+      .join('\n\n');
+
+    setIsWorking(true);
+    setWorkflowRunId(prev => prev + 1);
+    setPendingClarifySessionId(sessionId);
+    setClarifyBlockingError(null);
+    setClarifyEvaluationError(null);
+    setClarifyQuestions([]);
+    setClarifyRound(1);
+    setClarifyAnswers([]);
+
+    try {
+      const res = await api.retryClarify(sessionId, requirement, attachmentText, projectKey) as any;
+      if (!res?.success) {
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
+        setClarifyContext({
+          projectKey,
+          domainRolesUsed: [],
+          discoveryStatus: 'blocked',
+          failureReasonCode: 'queue_error',
+        });
+        setClarifyBlockingError({
+          message: res?.error || 'Discovery could not be retried. Please try again.',
+          reasonCode: 'queue_error',
+        });
+      }
+    } catch (err: any) {
+      setPendingClarifySessionId(null);
+      setIsWorking(false);
+      setClarifyContext({
+        projectKey,
+        domainRolesUsed: [],
+        discoveryStatus: 'blocked',
+        failureReasonCode: 'queue_error',
+      });
+      setClarifyBlockingError({
+        message: err?.message ?? 'Discovery could not be retried. Please try again.',
+        reasonCode: 'queue_error',
+      });
     }
   };
 
@@ -643,6 +725,8 @@ export default function App() {
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
+    setClarifyBlockingError(null);
+    setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
     setGenerationProgressMeta(null);
     // CRITICAL: Stop clarify polling if it was active
@@ -708,6 +792,8 @@ export default function App() {
         setClarifyQuestions([]);
         setClarifyAnswers([]);
         setClarifyRound(1);
+        setClarifyBlockingError(null);
+        setClarifyEvaluationError(null);
         setIsEvaluatingDiscovery(false);
         setRunAttachments([]);
         setRunAttachmentParseState(null);
@@ -906,17 +992,20 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
-          {clarifyQuestions.length > 0 ? (
+          {(clarifyQuestions.length > 0 || clarifyBlockingError) ? (
             <ClarifyQuestionsView 
               key={`clarify-round-${clarifyRound}`}
               questions={clarifyQuestions} 
               onComplete={handleClarifyComplete}
               onSkip={handleClarifySkip}
+              onRetry={handleRetryClarify}
               round={clarifyRound}
               isSubmitting={isEvaluatingDiscovery}
               submitLabel={clarifyRound === 2 ? 'Generate Features' : 'Continue Discovery'}
               skipLabel={clarifyRound === 2 ? 'Skip follow-up' : 'Skip all'}
               contextMeta={clarifyContext}
+              blockingState={clarifyBlockingError}
+              inlineError={clarifyEvaluationError}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
             />

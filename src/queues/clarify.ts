@@ -8,8 +8,8 @@
  * Result is stored in Forge Storage; the frontend polls getClarifyResult.
  */
 
-import { ClarifyContextMeta, ClarifyEvent } from '../types';
-import { generateClarifyingQuestions } from '../core/story-generator';
+import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode } from '../types';
+import { ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
 import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
@@ -80,6 +80,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     const clarifyContext: ClarifyContextMeta = {
       projectKey,
       domainRolesUsed: [],
+      discoveryStatus: 'ready',
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
@@ -175,9 +176,16 @@ export async function handler(event: { body: ClarifyEvent }) {
       await markCancelled(sessionId);
       return;
     }
+    const failureReasonCode: ClarifyFailureReasonCode =
+      err instanceof ClarifyDiscoveryError
+        ? err.reasonCode
+        : 'queue_error';
+    const message = err instanceof Error ? err.message : 'Clarify failed';
     await entitySet(KEYS.clarifyProgress(sessionId), {
-      type: 'error',
-      error: err instanceof Error ? err.message : 'Clarify failed',
+      type: 'blocked',
+      error: message,
+      reasonCode: failureReasonCode,
+      contextMeta: buildBlockedClarifyContext(projectKey, failureReasonCode),
       updatedAt: Date.now(),
     });
   }
@@ -204,6 +212,30 @@ async function markCancelled(sessionId: string) {
     message: 'Clarifying questions cancelled.',
     updatedAt: Date.now(),
   });
+}
+
+function buildBlockedClarifyContext(
+  projectKey: string,
+  failureReasonCode: ClarifyFailureReasonCode,
+): ClarifyContextMeta {
+  return {
+    projectKey,
+    domainRolesUsed: [],
+    discoveryStatus: 'blocked',
+    failureReasonCode,
+    roundsCompleted: 0,
+    initialQuestionCount: 0,
+    followupQuestionCount: 0,
+    totalQuestionCount: 0,
+    followupTriggered: false,
+    finalSufficiency: {
+      evaluated: false,
+      sufficient: null,
+      roundEvaluated: 0,
+      missingCategoryKeys: [],
+      reasonCodes: [failureReasonCode.toUpperCase()],
+    },
+  };
 }
 
 async function saveClarifyTurn(

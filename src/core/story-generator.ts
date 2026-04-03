@@ -13,6 +13,7 @@ import {
   ClarifyQuestion,
   ClarifyAnswer,
   ClarifyCategoryKey,
+  ClarifyFailureReasonCode,
   TenantConfig,
   GenerationResult,
   ValidationViolation,
@@ -40,11 +41,12 @@ import {
   MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
   MIN_INITIAL_DISCOVERY_QUESTIONS,
   expandRawQuestionCandidate,
+  calibrateDiscoveryProfile,
   finalizeFollowupDiscoveryQuestions,
-  finalizeInitialDiscoveryQuestions,
   labelForCategoryKey,
   normalizeCategoryKey,
   normalizeDiscoveryProfile,
+  validateAndRepairInitialDiscovery,
 } from './discovery';
 
 // ─── Types from LLM response ──────────────────────────────────────────────────
@@ -118,6 +120,16 @@ export class GenerationCancelledError extends Error {
   constructor() {
     super('Generation cancelled');
     this.name = 'GenerationCancelledError';
+  }
+}
+
+export class ClarifyDiscoveryError extends Error {
+  reasonCode: ClarifyFailureReasonCode;
+
+  constructor(reasonCode: ClarifyFailureReasonCode, message?: string) {
+    super(message ?? 'Clarifying question discovery failed');
+    this.name = 'ClarifyDiscoveryError';
+    this.reasonCode = reasonCode;
   }
 }
 
@@ -1142,16 +1154,30 @@ export async function generateClarifyingQuestions(opts: {
     parseDiscoveryProfileCandidate(raw.data),
     parsedQuestions.length || 8,
   );
-  const filteredQuestions = finalizeInitialDiscoveryQuestions(parsedQuestions, normalizedProfile, {
+  const repairedDiscovery = validateAndRepairInitialDiscovery(parsedQuestions, normalizedProfile, {
     requirement,
     attachmentText,
     wiContextText,
     similarStoriesText,
   });
-  const discoveryProfile: DiscoveryProfile = {
-    ...normalizedProfile,
-    recommendedInitialCount: filteredQuestions.length,
-  };
+  if (!repairedDiscovery.questions.length || repairedDiscovery.failureReasonCode) {
+    throw new ClarifyDiscoveryError(
+      repairedDiscovery.failureReasonCode ?? 'invalid_underpowered_questions',
+      'Discovery did not produce a valid question set.',
+    );
+  }
+  const filteredQuestions = repairedDiscovery.questions;
+  const discoveryProfile: DiscoveryProfile = calibrateDiscoveryProfile(
+    {
+      ...repairedDiscovery.discoveryProfile,
+      recommendedInitialCount: filteredQuestions.length,
+    },
+    {
+      requiredCategoryKeys: repairedDiscovery.discoveryProfile.missingCategoryKeys,
+      repairApplied: repairedDiscovery.repairApplied,
+      repairedQuestionCount: filteredQuestions.length,
+    },
+  );
   const totalInputTokens = raw.usage.input;
   const totalOutputTokens = raw.usage.output;
   const totalTokens = totalInputTokens + totalOutputTokens;
