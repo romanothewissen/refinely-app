@@ -1063,7 +1063,7 @@ export default function App() {
             )}
           </AnimatePresence>
           <AnimatePresence mode="wait">
-            {(clarifyQuestions.length > 0 || clarifyBlockingError) ? (
+            {(clarifyQuestions.length > 0 || clarifyBlockingError) && !isEvaluatingDiscovery ? (
               <motion.div
                 key="clarify-view"
                 className="flex-1 flex flex-col h-full overflow-hidden"
@@ -1102,9 +1102,9 @@ export default function App() {
                   features={features}
                   setFeatures={setFeatures}
                   onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
-                  isGenerating={isCanvasLoading}
-                  progress={loadingProgress}
-                  loadingTitle={loadingTitle}
+                  isGenerating={isCanvasLoading || isEvaluatingDiscovery}
+                  progress={isEvaluatingDiscovery ? 'Validating information sufficiency...' : loadingProgress}
+                  loadingTitle={isEvaluatingDiscovery ? 'Assessing scope' : loadingTitle}
                   onCancelLoading={handleCancelWorkflow}
                   canCancelLoading={isCanvasLoading}
                   sidebarOpen={sidebarOpen}

@@ -148,7 +148,7 @@ function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: str
 }
 
 type GenerationProgressMeta = {
-  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  stage?: 'context' | 'triage' | 'validation' | 'decomposition' | 'acceptance_requirements';
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
@@ -168,6 +168,7 @@ type GenerationProgressMeta = {
 const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: string; shortLabel: string }> = [
   { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
   { key: 'triage', label: 'Assessing scope', shortLabel: 'Triage' },
+  { key: 'validation', label: 'Validating sufficiency', shortLabel: 'Validation' },
   { key: 'decomposition', label: 'Sketching features', shortLabel: 'Features' },
   { key: 'acceptance_requirements', label: 'Writing acceptance requirements', shortLabel: 'ARs' },
 ];
@@ -178,9 +179,10 @@ function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?:
     if (idx >= 0) return idx;
   }
   const text = (progress || '').toLowerCase();
-  if (text.includes('acceptance requirement')) return 3;
+  if (text.includes('acceptance requirement')) return 4;
+  if (text.includes('planning feature') || text.includes('feature structure') || text.includes('sketching')) return 3;
+  if (text.includes('sufficiency') || text.includes('validat') || text.includes('discovery')) return 2;
   if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
-  if (text.includes('planning feature') || text.includes('feature structure')) return 2;
   return 0;
 }
 
@@ -243,7 +245,7 @@ function ComplexityMeter({ current }: { current: string }) {
                       className="mt-1 flex flex-col items-center"
                     >
                       <span className="text-[9px] font-black text-[var(--rf-text)] bg-white/90 border border-[rgba(0,0,0,0.05)] px-1.5 py-0.5 rounded-md shadow-sm">
-                        {level.features} features · {level.ar} ARs
+                        Estimated: {level.features} features · {level.ar} ARs
                       </span>
                     </motion.div>
                   )}
@@ -839,7 +841,7 @@ export function MainContent({
       exit={{ opacity: 0, y: -20, scale: 0.985 }}
       transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
+      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-white shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
         {/* Prominent Loading Indicator */}
         <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
           <motion.div 
@@ -849,7 +851,7 @@ export function MainContent({
           />
         </div>
 
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.06),transparent_42%),var(--rf-surface-soft)]/20 px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
           <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
           
           <div className="relative flex flex-col gap-10">
@@ -918,36 +920,36 @@ export function MainContent({
                       </div>
                     )}
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="grid gap-3 sm:grid-cols-5">
                     {GENERATION_STEPS.map((step, index) => {
                       const isDone = index < liveStageIndex;
                       const isCurrent = index === liveStageIndex;
                       return (
                         <div
                           key={step.key}
-                          className={`rounded-2xl border px-4 py-3.5 transition-all ${
+                          className={`rounded-2xl border px-3 py-3 transition-all ${
                             isCurrent
-                              ? 'border-[var(--rf-brand-subtle)] bg-[linear-gradient(135deg,rgba(53,113,95,0.12),rgba(255,255,255,0.92))] shadow-lg'
+                              ? 'border-[var(--rf-brand-subtle)] bg-white shadow-lg'
                               : isDone
-                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/20'
-                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55'
+                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/10'
+                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
-                             <div className={`p-1.5 rounded-lg ${isDone || isCurrent ? 'bg-white shadow-sm' : ''}`}>
+                             <div className={`p-1.5 rounded-lg ${isDone || isCurrent ? 'bg-white shadow-sm border border-[var(--rf-border-subtle)]' : ''}`}>
                                {isDone ? (
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-[var(--rf-success)]" />
+                                  <CheckCircle2 className="h-3 w-3 text-[var(--rf-success)]" />
                                 ) : isCurrent ? (
-                                  <Clock3 className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+                                  <Clock3 className="h-3 w-3 text-[var(--rf-brand)]" />
                                 ) : (
-                                  <div className="h-3.5 w-3.5 rounded-full border-2 border-[var(--rf-border)]" />
+                                  <div className="h-3 w-3 rounded-full border border-[var(--rf-border)]" />
                                 )}
                              </div>
-                            <span className={`text-[9px] font-black uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                              Step {index + 1}
+                            <span className={`text-[8px] font-black uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                              S{index + 1}
                             </span>
                           </div>
-                          <div className={`mt-3 text-xs font-bold leading-snug ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                          <div className={`mt-2.5 text-[10px] font-bold leading-snug ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
                             {step.label}
                           </div>
                         </div>
@@ -1112,10 +1114,10 @@ export function MainContent({
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
               {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
-                  {liveSources!.referencedSimilarStories!.slice(0, 3).map((story, index) => {
+                  {liveSources!.referencedSimilarStories!.slice(0, 5).map((story, index) => {
                     const storyUrl = resolveStoryUrl(story);
                     return (
-                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
+                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[rgba(0,0,0,0.05)] bg-white p-3 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                           {storyUrl ? (
                             <button type="button" onClick={() => void router.navigate(storyUrl)} className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition">
@@ -1126,12 +1128,12 @@ export function MainContent({
                             <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
                           )}
                           {typeof story.relevanceScore === 'number' && (
-                            <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+                            <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
                               {(story.relevanceScore * 100).toFixed(0)}%
                             </span>
                           )}
                         </div>
-                        <div className="mt-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
+                        <div className="mt-2 text-[11px] leading-relaxed text-[var(--rf-text-secondary)]">
                           {buildExcerpt(story.summary, 140)}
                         </div>
                       </div>
@@ -1147,15 +1149,15 @@ export function MainContent({
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
               {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
-                  {liveSources!.referencedWiSections!.slice(0, 3).map((section, index) => (
-                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
+                  {liveSources!.referencedWiSections!.slice(0, 5).map((section, index) => (
+                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[rgba(0,0,0,0.05)] bg-white p-3 shadow-sm">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
-                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
+                        <span className="rounded-full bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
                           S{section.chunkIndex + 1}
                         </span>
                       </div>
-                      <div className="mt-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
+                      <div className="mt-2 text-[11px] leading-relaxed text-[var(--rf-text-secondary)]">
                         {buildExcerpt(section.excerpt, 135)}
                       </div>
                     </div>
