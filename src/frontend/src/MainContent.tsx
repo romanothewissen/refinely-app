@@ -781,7 +781,7 @@ export function MainContent({
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
     >
       <div className="w-full max-w-5xl overflow-hidden rounded-[30px] border border-[var(--rf-border)] bg-[var(--rf-surface)] shadow-lg">
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-6 sm:px-8 pt-7 sm:pt-8 pb-7">
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface)] px-6 sm:px-8 pt-7 sm:pt-8 pb-7">
           <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
           <div className="relative flex flex-col gap-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1318,7 +1318,7 @@ export function MainContent({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.12),transparent_40%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,239,230,0.88))] px-5 py-5 sm:px-6">
+                <div className="border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface)] px-5 py-5 sm:px-6">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)]">Source stack</div>
