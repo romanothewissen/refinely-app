@@ -23,16 +23,16 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
 
   if (isCompact) {
     return (
-      <div className={`flex items-center gap-2.5 px-3 py-2 bg-[var(--rf-text)]/50 rounded-xl border border-slate-700 ${className}`}>
+      <div className={`flex items-center gap-2.5 px-3 py-2 bg-[var(--rf-brand-muted)]/50 rounded-xl border border-[rgba(43,89,74,0.08)] ${className}`}>
         <div className="flex items-center gap-2">
-          <Zap className={`w-3.5 h-3.5 ${isAtLimit ? 'text-rose-500' : 'text-[var(--rf-brand)]'}`} />
-          <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{tierName}</span>
+          <Zap className={`w-3.5 h-3.5 ${isAtLimit ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand)]'}`} />
+          <span className="text-[10px] font-bold text-[var(--rf-text-secondary)] uppercase tracking-widest">{tierName}</span>
         </div>
         {!isUnlimited && (
           <div className="flex items-center gap-2.5">
-            <div className="w-16 h-1.5 bg-[var(--rf-text)] rounded-full overflow-hidden">
+            <div className="w-16 h-1.5 bg-white/60 rounded-full overflow-hidden border border-[rgba(0,0,0,0.04)]">
               <div
-                className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-danger-subtle)]0' : isNearLimit ? 'bg-amber-500' : 'bg-[var(--rf-brand-muted)]0'}`}
+                className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-danger)]' : isNearLimit ? 'bg-[var(--rf-warning)]' : 'bg-[var(--rf-brand)]'}`}
                 style={{ width: `${percentage}%` }}
               />
             </div>
@@ -49,11 +49,11 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
     <div className={`space-y-4 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={`p-1.5 rounded-lg shadow-sm ${(tier === 'premium' || tier === 'enterprise') ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : tier === 'standard' ? 'bg-[var(--rf-brand-muted)]0/10 text-blue-400 border border-[var(--rf-brand)]/20' : 'bg-white/5 text-[var(--rf-text-tertiary)] border border-white/10'}`}>
+          <div className={`p-1.5 rounded-lg shadow-sm ${(tier === 'premium' || tier === 'enterprise') ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.1)]' : tier === 'standard' ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.1)]' : 'bg-white/70 text-[var(--rf-text-tertiary)] border border-[rgba(0,0,0,0.06)]'}`}>
             {(tier === 'premium' || tier === 'enterprise') ? <ShieldCheck className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
           </div>
           <div>
-            <h4 className="text-[13px] font-bold text-white tracking-tight">{tierName} Plan</h4>
+            <h4 className="text-[13px] font-bold text-[var(--rf-text)] tracking-tight">{tierName} Plan</h4>
             <p className="text-[10px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest mt-0.5">Current Usage</p>
           </div>
         </div>
@@ -63,17 +63,17 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
       <div className="space-y-2">
         <div className="flex justify-between items-end">
           <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
-          <span className="text-sm font-bold text-white tracking-tight">
+          <span className="text-sm font-bold text-[var(--rf-brand)] tracking-tight">
             {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '\u221e' : max}</span>
           </span>
         </div>
         {!isUnlimited && (
-          <div className="w-full h-2 bg-[var(--rf-text)] rounded-full overflow-hidden shadow-inner">
+          <div className="w-full h-2 bg-white/60 border border-[rgba(0,0,0,0.04)] rounded-full overflow-hidden shadow-inner">
             <div
               className={`h-full transition-all duration-500 rounded-full ${
-                isAtLimit ? 'bg-[var(--rf-danger-subtle)]0 shadow-[0_0_10px_rgba(244,63,94,0.5)]' :
-                isNearLimit ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' :
-                'bg-[var(--rf-brand-muted)]0 shadow-[0_0_10px_rgba(59,130,246,0.5)]'
+                isAtLimit ? 'bg-[var(--rf-danger)] shadow-[0_0_8px_rgba(158,62,71,0.2)]' :
+                isNearLimit ? 'bg-[var(--rf-warning)] shadow-[0_0_8px_rgba(179,94,48,0.2)]' :
+                'bg-[var(--rf-brand)] shadow-[0_0_8px_rgba(43,89,74,0.2)]'
               }`}
               style={{ width: `${percentage}%` }}
             />

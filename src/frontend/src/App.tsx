@@ -1062,46 +1062,73 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
-          {(clarifyQuestions.length > 0 || clarifyBlockingError) ? (
-            <ClarifyQuestionsView 
-              key={`clarify-round-${clarifyRound}`}
-              questions={clarifyQuestions} 
-              onComplete={handleClarifyComplete}
-              onSkip={handleClarifySkip}
-              onRetry={handleRetryClarify}
-              round={clarifyRound}
-              isSubmitting={isEvaluatingDiscovery}
-              submitLabel={clarifyRound === 2 ? 'Generate Features' : 'Continue Discovery'}
-              skipLabel={clarifyRound === 2 ? 'Skip follow-up' : 'Skip all'}
-              contextMeta={clarifyContext}
-              blockingState={clarifyBlockingError}
-              inlineError={clarifyEvaluationError}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-            />
-          ) : (
-            <MainContent
-              features={features}
-              setFeatures={setFeatures}
-              onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
-              isGenerating={isCanvasLoading}
-              progress={loadingProgress}
-              loadingTitle={loadingTitle}
-              onCancelLoading={handleCancelWorkflow}
-              canCancelLoading={isCanvasLoading}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-              sessionId={sessionId}
-              requirement={requirement}
-              generationContext={generationContext}
-              generationProgressMeta={generationProgressMeta}
-              projectKey={projectKey}
-              workflowTokenUsage={workflowTokenUsage}
-              onWorkflowTokenUsage={(usageDelta) => {
-                setWorkflowTokenUsage(prev => addTokenUsage(prev, usageDelta));
-              }}
-            />
-          )}
+          <AnimatePresence mode="wait">
+            {(clarifyQuestions.length > 0 || clarifyBlockingError) ? (
+              <motion.div
+                key="clarify-view"
+                className="flex-1 flex flex-col h-full overflow-hidden"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <ClarifyQuestionsView 
+                  key={`clarify-round-${clarifyRound}`}
+                  questions={clarifyQuestions} 
+                  onComplete={handleClarifyComplete}
+                  onSkip={handleClarifySkip}
+                  onRetry={handleRetryClarify}
+                  round={clarifyRound}
+                  isSubmitting={isEvaluatingDiscovery}
+                  submitLabel={clarifyRound === 2 ? 'Generate Features' : 'Continue Discovery'}
+                  skipLabel={clarifyRound === 2 ? 'Skip follow-up' : 'Skip all'}
+                  contextMeta={clarifyContext}
+                  blockingState={clarifyBlockingError}
+                  inlineError={clarifyEvaluationError}
+                  sidebarOpen={sidebarOpen}
+                  setSidebarOpen={setSidebarOpen}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="main-view"
+                className="flex-1 flex flex-col h-full overflow-hidden"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <MainContent
+                  features={features}
+                  setFeatures={setFeatures}
+                  onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
+                  isGenerating={isCanvasLoading}
+                  progress={loadingProgress}
+                  loadingTitle={loadingTitle}
+                  onCancelLoading={handleCancelWorkflow}
+                  canCancelLoading={isCanvasLoading}
+                  sidebarOpen={sidebarOpen}
+                  setSidebarOpen={setSidebarOpen}
+                  sessionId={sessionId}
+                  requirement={requirement}
+                  generationContext={generationContext}
+                  generationProgressMeta={generationProgressMeta}
+                  projectKey={projectKey}
+                  workflowTokenUsage={workflowTokenUsage}
+                  onWorkflowTokenUsage={(usageDelta) => {
+                    setWorkflowTokenUsage(prev => {
+                      const base = prev || { input: 0, output: 0, total: 0 };
+                      return {
+                        input: base.input + usageDelta.input,
+                        output: base.output + usageDelta.output,
+                        total: base.total + usageDelta.total
+                      };
+                    });
+                  }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 

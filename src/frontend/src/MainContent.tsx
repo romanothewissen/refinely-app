@@ -192,14 +192,71 @@ function buildFeatureExcerpt(text: string, maxChars = 150) {
 
 function getTriageSupportCopy(triage?: GenerationProgressMeta['triage']) {
   if (!triage) return 'Sizing the request so the pipeline knows how much depth to apply.';
-  if (triage.complexity === 'high' || triage.complexity === 'very high' || triage.shape === 'broad') {
-    return 'This looks like a broader, heavier request, so the system is spending extra time decomposing and tightening the output.';
-  }
-  if (triage.complexity === 'medium') {
-    return 'This looks moderately involved, so the system is balancing speed with a bit more reasoning before it writes the details.';
-  }
-  return 'This looks fairly contained, so the system should move through decomposition quickly.';
+  return `The AI has determined this is a ${triage.complexity.replace('_', ' ')} complexity request, targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance depth.`;
 }
+
+function ComplexityMeter({ current }: { current: string }) {
+  const levels = [
+    { key: 'trivial', label: 'Trivial', features: '1', ar: 'Light' },
+    { key: 'low', label: 'Low', features: '2-4', ar: 'Standard' },
+    { key: 'medium', label: 'Medium', features: '5-7', ar: 'Thorough' },
+    { key: 'high', label: 'High', features: '8-12', ar: 'Deep' },
+    { key: 'very_high', label: 'Complex', features: '13+', ar: 'Epic' },
+  ];
+
+  const currentIndex = levels.findIndex(l => l.key === current);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity Analysis</span>
+        <span className="text-[10px] font-bold py-0.5 px-2 bg-[var(--rf-brand)] text-white rounded-full uppercase tracking-widest shadow-sm">Decided by Model</span>
+      </div>
+      <div className="relative pt-2 pb-8">
+        {/* Scale Line */}
+        <div className="absolute top-4 left-0 right-0 h-1 bg-[var(--rf-surface-soft)] rounded-full border border-[rgba(0,0,0,0.03)]" />
+        
+        <div className="flex justify-between relative z-10">
+          {levels.map((level, idx) => {
+            const isActive = idx === currentIndex;
+            const isPast = idx < currentIndex;
+            
+            return (
+              <div key={level.key} className="flex flex-col items-center gap-2 group">
+                <div 
+                  className={`w-4 h-4 rounded-full border-2 transition-all duration-500 scale-100 ${
+                    isActive 
+                      ? 'bg-[var(--rf-brand)] border-[var(--rf-brand)] scale-125 shadow-[0_0_12px_rgba(43,89,74,0.4)]' 
+                      : isPast
+                        ? 'bg-[var(--rf-brand-muted)] border-[var(--rf-brand-subtle)]'
+                        : 'bg-white border-[var(--rf-border)]'
+                  }`} 
+                />
+                <div className="absolute top-8 flex flex-col items-center whitespace-nowrap">
+                  <span className={`text-[10px] font-bold uppercase tracking-tighter transition-colors ${isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-60'}`}>
+                    {level.label}
+                  </span>
+                  {isActive && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mt-1 flex flex-col items-center"
+                    >
+                      <span className="text-[9px] font-black text-[var(--rf-text)] bg-white/90 border border-[rgba(0,0,0,0.05)] px-1.5 py-0.5 rounded-md shadow-sm">
+                        {level.features} features · {level.ar} ARs
+                      </span>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -775,171 +832,182 @@ export function MainContent({
   // ── Generating skeleton ──────────────────────────────────────────────────
   const renderGeneratingSkeleton = () => (
     <motion.div
+      key="generating-skeleton"
       className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex-1 flex items-start justify-center"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0, y: 24, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -20, scale: 0.985 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-5xl overflow-hidden rounded-[30px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_30px_90px_-40px_rgba(15,23,42,0.35)]">
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-6 sm:px-8 pt-7 sm:pt-8 pb-7">
+      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
+        {/* Prominent Loading Indicator */}
+        <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
+          <motion.div 
+            className="h-full bg-[linear-gradient(90deg,transparent,var(--rf-brand),transparent)] w-1/3 absolute"
+            animate={{ x: ['-100%', '300%'] }}
+            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+          />
+        </div>
+
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
           <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
-          <div className="relative flex flex-col gap-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex items-start gap-4">
-                <div className="flex h-16 w-16 items-center justify-center rounded-[22px] border border-[var(--rf-border)] bg-white shadow-lg shadow-[var(--rf-shadow-sm)]">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(53,113,95,0.18),rgba(53,113,95,0.05))]">
-                    <Sparkles className="h-6 w-6 text-[var(--rf-brand)] animate-pulse" />
+          
+          <div className="relative flex flex-col gap-10">
+            {/* Header / Loading State */}
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-6">
+                <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--rf-border)] bg-white shadow-2xl relative">
+                   <div className="absolute inset-0 bg-[var(--rf-brand)]/5 rounded-[28px] animate-pulse" />
+                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(53,113,95,0.2),rgba(53,113,95,0.06))] border border-[var(--rf-brand)]/10">
+                    <Sparkles className="h-7 w-7 text-[var(--rf-brand)] animate-shimmer" />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm">
-                    Live Run
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm mb-3">
+                    Active Pipeline
                     <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
                   </div>
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-bold text-[var(--rf-text)] tracking-tight">
-                      {loadingTitle || 'Crafting features'}
-                    </h2>
-                    <p className="mt-1 max-w-2xl text-sm font-medium leading-relaxed text-[var(--rf-text-tertiary)]">
-                      {progress || 'Processing your request…'}
-                    </p>
-                    <p className="mt-2 max-w-2xl text-xs font-medium leading-relaxed text-[var(--rf-text-tertiary)]">
-                      {triageSupportCopy}
-                    </p>
-                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-[var(--rf-text)] tracking-tight">
+                    {loadingTitle || 'Crafting features'}
+                  </h2>
+                  <p className="mt-1 text-sm font-semibold text-[var(--rf-text-tertiary)] flex items-center gap-2">
+                    <span className="dot-bounce inline-flex gap-1"><span /><span /><span /></span>
+                    {progress || 'Processing your request…'}
+                  </p>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2.5 lg:justify-end">
-                {liveTriage && (
-                  <>
-                    <span className="rounded-full border border-[rgba(35,74,61,0.12)] bg-white/80 px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)]">
-                      {liveTriage.shape} scope
-                    </span>
-                    <span className="rounded-full border border-[rgba(35,74,61,0.12)] bg-white/80 px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)]">
-                      {liveTriage.complexity} complexity
-                    </span>
-                    <span className="rounded-full border border-[rgba(35,74,61,0.12)] bg-white/80 px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)]">
-                      ~{liveTriage.featureTarget} features
-                    </span>
-                  </>
-                )}
-                {canCancelLoading && onCancelLoading && (
-                  <motion.button
-                    type="button"
-                    onClick={onCancelLoading}
-                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    Stop
-                  </motion.button>
-                )}
-              </div>
+              
+              {canCancelLoading && onCancelLoading && (
+                <motion.button
+                  type="button"
+                  onClick={onCancelLoading}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-2.5 text-xs font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Stop Run
+                </motion.button>
+              )}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <div className="rf-card p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
-                    Pipeline
-                  </div>
-                  {liveArProgress?.total ? (
-                    <div className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">
-                      {liveArProgress.completed}/{liveArProgress.total} AR passes done
+            {/* Analysis Center */}
+            <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+              <div className="space-y-6">
+                <div className="rf-card p-6 bg-white/40 border-[rgba(0,0,0,0.04)]">
+                   {liveTriage ? (
+                     <ComplexityMeter current={liveTriage.complexity} />
+                   ) : (
+                     <div className="py-2.5 space-y-4">
+                        <div className="h-4 w-1/4 shimmer rounded" />
+                        <div className="h-8 w-full shimmer rounded-full" />
+                     </div>
+                   )}
+                   <p className="mt-8 text-xs font-medium leading-relaxed text-[var(--rf-text-tertiary)] border-t border-[rgba(0,0,0,0.03)] pt-4 italic">
+                    {triageSupportCopy}
+                  </p>
+                </div>
+
+                <div className="rf-card p-6 border-[rgba(0,0,0,0.04)]">
+                  <div className="flex items-center justify-between gap-3 mb-5">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
+                      Pipeline Progression
                     </div>
-                  ) : (
-                    <div className="dot-bounce text-[var(--rf-brand)]"><span /><span /><span /></div>
-                  )}
-                </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                  {GENERATION_STEPS.map((step, index) => {
-                    const isDone = index < liveStageIndex;
-                    const isCurrent = index === liveStageIndex;
-                    return (
-                      <div
-                        key={step.key}
-                        className={`rounded-2xl border px-3.5 py-3 transition-all ${
-                          isCurrent
-                            ? 'border-[rgba(35,74,61,0.2)] bg-[linear-gradient(135deg,rgba(53,113,95,0.14),rgba(255,255,255,0.92))] shadow-sm'
-                            : isDone
-                              ? 'border-[rgba(16,185,129,0.18)] bg-[rgba(16,185,129,0.08)]'
-                              : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                            {step.shortLabel}
-                          </span>
-                          {isDone ? (
-                            <CheckCircle2 className="h-4 w-4 text-[var(--rf-success)]" />
-                          ) : isCurrent ? (
-                            <Clock3 className="h-4 w-4 text-[var(--rf-brand)]" />
-                          ) : (
-                            <div className="h-2.5 w-2.5 rounded-full border border-[var(--rf-border)] bg-white" />
-                          )}
-                        </div>
-                        <div className="mt-2 text-sm font-semibold leading-snug text-[var(--rf-text)]">
-                          {step.label}
-                        </div>
+                    {liveArProgress?.total && (
+                      <div className="text-[11px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] px-2.5 py-1 rounded-full">
+                        {liveArProgress.completed}/{liveArProgress.total} requirements
                       </div>
-                    );
-                  })}
-                </div>
-                <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-[rgba(35,74,61,0.08)]">
-                  <div
-                    className="h-full rounded-full bg-[linear-gradient(90deg,rgba(35,74,61,0.72),rgba(53,113,95,0.95),rgba(126,211,158,0.95))] transition-all duration-700"
-                    style={{ width: `${liveArProgress?.total ? Math.max(((liveStageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8) : ((liveStageIndex + 1) / GENERATION_STEPS.length) * 100}%` }}
-                  />
+                    )}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    {GENERATION_STEPS.map((step, index) => {
+                      const isDone = index < liveStageIndex;
+                      const isCurrent = index === liveStageIndex;
+                      return (
+                        <div
+                          key={step.key}
+                          className={`rounded-2xl border px-4 py-3.5 transition-all ${
+                            isCurrent
+                              ? 'border-[var(--rf-brand-subtle)] bg-[linear-gradient(135deg,rgba(53,113,95,0.12),rgba(255,255,255,0.92))] shadow-lg'
+                              : isDone
+                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/20'
+                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                             <div className={`p-1.5 rounded-lg ${isDone || isCurrent ? 'bg-white shadow-sm' : ''}`}>
+                               {isDone ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-[var(--rf-success)]" />
+                                ) : isCurrent ? (
+                                  <Clock3 className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+                                ) : (
+                                  <div className="h-3.5 w-3.5 rounded-full border-2 border-[var(--rf-border)]" />
+                                )}
+                             </div>
+                            <span className={`text-[9px] font-black uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                              Step {index + 1}
+                            </span>
+                          </div>
+                          <div className={`mt-3 text-xs font-bold leading-snug ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                            {step.label}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-6 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.06)] border border-[rgba(0,0,0,0.02)]">
+                    <motion.div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${liveArProgress?.total ? Math.max(((liveStageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8) : ((liveStageIndex + 1) / GENERATION_STEPS.length) * 100}%` }}
+                      transition={{ type: 'spring', damping: 25, stiffness: 120 }}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="rf-card p-4">
-                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
-                  Context Signals
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 p-3">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
-                      <Layers3 className="h-4 w-4 text-[var(--rf-brand)]" />
-                      Backlog
-                    </div>
-                    <div className="mt-2 text-2xl font-black tracking-tight text-[var(--rf-text)]">
-                      {liveSources?.similarStoriesCount ?? 0}
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">reference stories</div>
+              <div className="space-y-6">
+                 {/* Simplified Signals */}
+                <div className="rf-card p-6 border-[rgba(0,0,0,0.04)] h-full">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-6">
+                    Sources Feeding Run
                   </div>
-                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 p-3">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
-                      <FileText className="h-4 w-4 text-[var(--rf-brand)]" />
-                      WI Docs
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3.5 rounded-2xl border border-[rgba(0,0,0,0.04)] bg-white/50">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-blue-50 text-blue-600"><Layers3 className="h-4 w-4" /></div>
+                        <span className="text-[11px] font-bold text-[var(--rf-text-secondary)]">Backlog Stories</span>
+                      </div>
+                      <span className="text-sm font-black text-[var(--rf-text)]">{liveSources?.similarStoriesCount ?? 0}</span>
                     </div>
-                    <div className="mt-2 text-2xl font-black tracking-tight text-[var(--rf-text)]">
-                      {liveSources?.wiDocsCount ?? 0}
+                    <div className="flex items-center justify-between p-3.5 rounded-2xl border border-[rgba(0,0,0,0.04)] bg-white/50">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-amber-50 text-amber-600"><FileText className="h-4 w-4" /></div>
+                        <span className="text-[11px] font-bold text-[var(--rf-text-secondary)]">WI Sections</span>
+                      </div>
+                      <span className="text-sm font-black text-[var(--rf-text)]">{liveSources?.referencedWiSections?.length ?? 0}</span>
                     </div>
-                    <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">docs informing the run</div>
                   </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {liveTriage && (
-                    <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
-                      Early read: <span className="text-[var(--rf-brand)]">{liveTriage.shape} / {liveTriage.complexity}</span>
+
+                  <div className="mt-8 pt-8 border-t border-[rgba(0,0,0,0.03)] space-y-3">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-[var(--rf-text-tertiary)]">Project Scope</span>
+                      <span className="font-black text-[var(--rf-brand)] px-2 py-0.5 rounded-md bg-[var(--rf-brand-muted)]">{liveSources?.projectKey === '*' ? 'Global' : liveSources?.projectKey || projectKey}</span>
                     </div>
-                  )}
-                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
-                    Project scope: <span className="text-[var(--rf-brand)]">{liveSources?.projectKey === '*' ? 'Global workspace' : liveSources?.projectKey || projectKey}</span>
-                  </div>
-                  <div className="rounded-2xl border border-[rgba(35,74,61,0.12)] bg-white/88 px-3.5 py-3 text-sm font-semibold text-[var(--rf-text)]">
-                    Domain guidance: <span className={liveSources?.domainContextApplied ? 'text-[var(--rf-success)]' : 'text-[var(--rf-text-tertiary)]'}>{liveSources?.domainContextApplied ? 'Applied' : 'Not configured'}</span>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-[var(--rf-text-tertiary)]">Domain Guidance</span>
+                      <span className={`font-black uppercase tracking-widest ${liveSources?.domainContextApplied ? 'text-[var(--rf-success)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                        {liveSources?.domainContextApplied ? 'Applied' : 'Off'}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="grid gap-4 px-5 py-5 sm:px-6 sm:py-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid gap-4 px-5 py-5 sm:px-6 sm:py-6 lg:grid-cols-[1.15fr_0.85fr] bg-[rgba(244,239,230,0.2)]">
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3 px-1">
               <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                 Draft feature canvas
               </div>
@@ -1100,8 +1168,9 @@ export function MainContent({
           </div>
         </div>
       </div>
-    </motion.div>
-  );
+    </div>
+  </motion.div>
+);
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
@@ -1275,28 +1344,33 @@ export function MainContent({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
-        {isGenerating ? (
-          renderGeneratingSkeleton()
-        ) : !hasFeatures ? (
-          <motion.div
-            className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-[var(--rf-shadow-sm)] border border-[var(--rf-border)]">
-              <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
-            </div>
-            <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
-            <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
-          </motion.div>
-        ) : (
-          <motion.div
-            className="w-full max-w-[900px] mx-auto space-y-5 pb-12"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          >
+        <AnimatePresence mode="wait">
+          {isGenerating ? (
+            renderGeneratingSkeleton()
+          ) : !hasFeatures ? (
+            <motion.div
+              key="empty-state"
+              className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.98 }}
+              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-[var(--rf-shadow-sm)] border border-[var(--rf-border)]">
+                <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
+              </div>
+              <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
+              <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="features-canvas"
+              className="w-full max-w-[900px] mx-auto space-y-5 pb-12"
+              initial={{ opacity: 0, y: 16, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.99 }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            >
             {generationContext && (
               <motion.div
                 className="overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,244,236,0.94))] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
@@ -1709,6 +1783,7 @@ export function MainContent({
             })}
           </motion.div>
         )}
+        </AnimatePresence>
       </div>
 
       {/* AI Refine Popup */}

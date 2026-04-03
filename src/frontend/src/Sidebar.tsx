@@ -1,6 +1,6 @@
 import React from 'react';
 import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { UsageMeter } from './UsageMeter';
 
 interface SidebarProps {
@@ -109,7 +109,7 @@ export function Sidebar({
   return (
     <aside
       className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden text-[var(--rf-sidebar-text)]"
-      style={{ width: width ?? 380 }}
+      style={{ width: width ?? 400 }}
     >
       {/* ── Header ── */}
       <motion.header
@@ -165,7 +165,7 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Scrollable body ── */}
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-3 overflow-y-auto no-scrollbar">
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-3 overflow-y-auto custom-scrollbar">
 
         {/* ── Workspace card ── */}
         <motion.div
@@ -180,43 +180,51 @@ export function Sidebar({
 
           {/* Project row */}
           <div className="px-4 pt-4 pb-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[rgba(43,89,74,0.1)] bg-[var(--rf-brand-subtle)] shadow-sm">
-                <Orbit className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(43,89,74,0.1)] bg-[var(--rf-brand-subtle)] shadow-sm">
+                  <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
+                </div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)]">Workspace</div>
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)] mb-0.5">Workspace</div>
-                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate leading-tight">{projectTitle}</div>
-              </div>
-              {/* Native select styled as a chip */}
-              <div className="relative shrink-0">
-                <select
-                  value={projectKey}
-                  onChange={(e) => {
-                    const nextValue = e.target.value;
-                    setProjectKey(nextValue);
-                    if (nextValue === '*') {
-                      if (contextMode === 'project') setContextMode('undecided');
-                    } else {
-                      setContextMode('project');
-                    }
-                  }}
-                  className="appearance-none pr-6 pl-2.5 py-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white/80 text-[11px] font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand)]/20 transition-all shadow-sm cursor-pointer max-w-[130px]"
-                >
-                  <option value="*">No project</option>
-                  {availableProjects.map(project => (
-                    <option key={project.key} value={project.key}>
-                      {project.key} – {project.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+              {projectKey !== '*' && (
+                <div className="text-[11px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
+                  Project Active
+                </div>
+              )}
+            </div>
+
+            {/* Enlarged Select */}
+            <div className="relative w-full">
+              <select
+                value={projectKey}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setProjectKey(nextValue);
+                  if (nextValue === '*') {
+                    if (contextMode === 'project') setContextMode('undecided');
+                  } else {
+                    setContextMode('project');
+                  }
+                }}
+                className="appearance-none w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/80 text-[13px] font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/10 transition-all shadow-sm cursor-pointer"
+              >
+                <option value="*">Global Workspace (No project)</option>
+                {availableProjects.map(project => (
+                  <option key={project.key} value={project.key}>
+                    {project.key} – {project.name}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-1">
+                <div className="w-px h-4 bg-[rgba(43,89,74,0.1)] mx-1" />
+                <ChevronDown className="w-4 h-4 text-[var(--rf-sidebar-text-muted)]" />
               </div>
             </div>
 
             {/* Hint text */}
             {projectKey === '*' && availableProjects.length > 0 && (
-              <p className="mt-2 text-[11px] text-[var(--rf-sidebar-text-muted)] leading-relaxed">
+              <p className="mt-2.5 text-[11px] text-[var(--rf-sidebar-text-muted)] leading-relaxed bg-[var(--rf-brand-muted)]/50 p-2 rounded-lg border border-[rgba(43,89,74,0.06)]">
                 Select a project to unlock project-scoped backlog context and instructions.
               </p>
             )}
@@ -228,7 +236,7 @@ export function Sidebar({
               type="button"
               onClick={() => { if (projectKey !== '*') setContextMode('project'); }}
               disabled={projectKey === '*'}
-              className={`flex-1 rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
+              className={`flex-1 rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
                 contextMode === 'project'
                   ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
                   : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
@@ -239,7 +247,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => { setProjectKey('*'); setContextMode('global'); }}
-              className={`flex-1 rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
+              className={`flex-1 rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
                 contextMode === 'global'
                   ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
                   : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
@@ -254,9 +262,9 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
-              <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <Database className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
                 <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
                 <div className="text-[11px] font-semibold text-[var(--rf-text)] truncate">
@@ -267,9 +275,9 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
-              <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <FileText className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
                 <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Docs</div>
                 <div className="text-[11px] font-semibold text-[var(--rf-text)] truncate">
@@ -361,7 +369,7 @@ export function Sidebar({
             onChange={(e) => setRequirement(e.target.value)}
             placeholder="Type your requirement here, or leave blank and attach a file. You can also do both."
             disabled={isWorking || !contextReady}
-            className="min-h-[200px] h-[clamp(200px,32vh,380px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
+            className="min-h-[160px] h-[clamp(160px,28vh,340px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
           />
 
           {/* Card footer */}
@@ -422,17 +430,33 @@ export function Sidebar({
             whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
-            {isWorking ? (
-              <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Working…</span>
-              </div>
-            ) : (
-              <>
-                <Zap className={`w-3.5 h-3.5 ${requirement.trim() ? 'fill-white' : ''}`} />
-                <span>{isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
-              </>
-            )}
+            <AnimatePresence mode="wait">
+              {isWorking ? (
+                <motion.div
+                  key="working"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex items-center gap-2"
+                >
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Working…</span>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="idle"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex items-center gap-2"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${requirement.trim() ? 'fill-white' : ''}`} />
+                  <span>{isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.button>
 
           {/* Secondary actions */}
@@ -473,7 +497,7 @@ export function Sidebar({
             >
               <X className="w-3 h-3" />
             </button>
-            <UsageMeter usage={usage} limits={limits} tier={tier} className="pr-7" />
+            <UsageMeter usage={usage} limits={limits} tier={tier} isCompact={true} className="pr-7" />
           </div>
         </motion.div>
       )}
