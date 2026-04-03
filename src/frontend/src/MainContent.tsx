@@ -147,6 +147,29 @@ function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: str
   return '';
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()),
+  );
+
+  return results;
+}
+
 // ─── AI Refine Popup ──────────────────────────────────────────────────────────
 function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
   feature: Feature;
@@ -609,35 +632,45 @@ export function MainContent({
     setIsBulkRefining(true);
 
     try {
-      const res = await api.refineFeatures(sessionId, requirement, features, bulkInput) as any;
-      if (res.success && Array.isArray(res.features)) {
-        const refined = res.features;
-        if (res.tokenUsage) {
-          setLastAiTokenUsage({ label: 'Bulk refine', ...res.tokenUsage });
-          onWorkflowTokenUsage?.(res.tokenUsage);
+      const feedback = bulkInput.trim();
+      const results = await mapWithConcurrency(features, 2, async (feature) => {
+        const res = await api.refineSingleFeature(feature, feedback, requirement, sessionId) as any;
+        if (!res.success || !res.feature) {
+          throw new Error(res.error || `Refinement failed for "${feature.summary}"`);
         }
-        setFeatures(prev => {
-          return prev.map((f, i) => {
-            const r = refined[i];
-            if (!r) {
-              return { ...f, pendingRemoval: true };
-            }
-            return {
-              ...f,
-              pendingRemoval: false,
-              pendingRefinement: {
-                ...f,
-                ...r,
-                acceptanceRequirements: r.acceptanceRequirements || f.acceptanceRequirements
-              }
-            };
-          });
-        });
-        setShowBulkRefine(false);
-        setBulkInput('');
-      } else {
-        throw new Error(res.error || 'Refinement failed');
+        return {
+          original: feature,
+          refined: res.feature,
+          tokenUsage: res.tokenUsage as { input: number; output: number; total: number } | undefined,
+        };
+      });
+
+      const aggregateUsage = results.reduce((acc, item) => ({
+        input: acc.input + (item.tokenUsage?.input ?? 0),
+        output: acc.output + (item.tokenUsage?.output ?? 0),
+        total: acc.total + (item.tokenUsage?.total ?? 0),
+      }), { input: 0, output: 0, total: 0 });
+
+      if (aggregateUsage.total > 0) {
+        setLastAiTokenUsage({ label: 'Bulk refine', ...aggregateUsage });
+        onWorkflowTokenUsage?.(aggregateUsage);
       }
+
+      setFeatures(prev => prev.map((f, i) => {
+        const refined = results[i]?.refined;
+        if (!refined) return f;
+        return {
+          ...f,
+          pendingRemoval: false,
+          pendingRefinement: {
+            ...f,
+            ...refined,
+            acceptanceRequirements: refined.acceptanceRequirements || f.acceptanceRequirements,
+          },
+        };
+      }));
+      setShowBulkRefine(false);
+      setBulkInput('');
     } catch (err: any) {
       console.error('Bulk refinement failed:', err);
       alert(`AI refinement failed: ${err.message || 'Unknown error'}. Please try again.`);
