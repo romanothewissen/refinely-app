@@ -902,7 +902,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                    <p className="text-[var(--rf-text-tertiary)] text-sm">Configure your LLM provider and specify which models handle the distinct reasoning steps.</p>
                 </div>
 
-                <div className="rf-card p-6  space-y-8">
+                <div className="rf-card p-6 lg:p-8  space-y-8">
                   <div className="space-y-3">
                     <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">LLM Provider</label>
                     <div className="flex p-1 bg-[var(--rf-surface-soft)] rounded-xl border border-[var(--rf-border)]">
@@ -1258,7 +1258,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Workspace Guidance</h3>
                   <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">Global defaults for the workspace. Project-specific rules live in Project Setup.</p>
                 </div>
-                <div className="rf-card p-6  space-y-8">
+                <div className="rf-card p-6 lg:p-8  space-y-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-xl bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm"><Users className="w-6 h-6" /></div>
@@ -1402,7 +1402,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                  <div className="rf-card p-6  space-y-3">
+                  <div className="rf-card p-5  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Transparency reports</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Recent model decisions and token usage.</div>
                     <div className="space-y-2">
@@ -1419,7 +1419,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="rf-card p-6  space-y-3">
+                  <div className="rf-card p-5  space-y-3">
                     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Compliance audit trail</div>
                     <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">Configuration, security, prompt, and runtime events.</div>
                     <div className="space-y-2">
@@ -1449,7 +1449,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <h3 className="text-2xl font-bold text-[var(--rf-text)] tracking-tight">Billing & Compliance</h3>
                 </div>
 
-                <div className="rf-card p-6  flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="rf-card p-8  flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
                     <p className="text-[10px] uppercase tracking-widest text-[var(--rf-text-tertiary)] font-bold">Current Plan</p>
                     <h4 className="text-3xl font-black text-[var(--rf-brand)] capitalize mt-1">{tier}</h4>
@@ -1470,7 +1470,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="rf-card p-6  space-y-6">
+                <div className="rf-card p-6 lg:p-8  space-y-6">
                   <div className="flex flex-col gap-2">
                     <div>
                       <p className="text-[11px] uppercase tracking-widest text-[var(--rf-brand)] font-bold">Usage & stats</p>
@@ -1585,7 +1585,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   })}
                 </div>
 
-                <div className="rf-card p-6  space-y-6">
+                <div className="rf-card p-6 lg:p-8  space-y-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -1633,7 +1633,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="rf-card p-6  space-y-6">
+                <div className="rf-card p-6 lg:p-8  space-y-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)]" />
@@ -2184,7 +2184,7 @@ function FieldMappingEditor({
   };
 
   return (
-    <div className="rf-card p-6  space-y-4">
+    <div className="rf-card p-5  space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{title}</div>

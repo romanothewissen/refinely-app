@@ -780,8 +780,8 @@ export function MainContent({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-5xl overflow-hidden rounded-[30px] border border-[var(--rf-border)] bg-[var(--rf-surface)] shadow-lg">
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface)] px-6 sm:px-8 pt-7 sm:pt-8 pb-7">
+      <div className="w-full max-w-5xl overflow-hidden rounded-[30px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_30px_90px_-40px_rgba(15,23,42,0.35)]">
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-6 sm:px-8 pt-7 sm:pt-8 pb-7">
           <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
           <div className="relative flex flex-col gap-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -838,7 +838,7 @@ export function MainContent({
             </div>
 
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <div className="flex flex-col gap-3">
+              <div className="rf-card p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                     Pipeline
@@ -860,7 +860,7 @@ export function MainContent({
                         key={step.key}
                         className={`rounded-2xl border px-3.5 py-3 transition-all ${
                           isCurrent
-                            ? 'border-[var(--rf-border-strong)] bg-[var(--rf-surface-soft)] shadow-sm'
+                            ? 'border-[rgba(35,74,61,0.2)] bg-[linear-gradient(135deg,rgba(53,113,95,0.14),rgba(255,255,255,0.92))] shadow-sm'
                             : isDone
                               ? 'border-[rgba(16,185,129,0.18)] bg-[rgba(16,185,129,0.08)]'
                               : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/55'
@@ -893,7 +893,7 @@ export function MainContent({
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3">
+              <div className="rf-card p-4">
                 <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
                   Context Signals
                 </div>
@@ -973,7 +973,7 @@ export function MainContent({
                     return (
                   <div className="flex">
                     <div className="w-1.5 shrink-0 bg-[linear-gradient(180deg,rgba(53,113,95,0.9),rgba(126,211,158,0.6))]" />
-                    <div className="flex-1 p-3 sm:p-4">
+                    <div className="flex-1 p-4 sm:p-5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-base font-bold leading-snug text-[var(--rf-text)]">{feature.summary}</div>
@@ -1040,14 +1040,14 @@ export function MainContent({
             <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
               Source highlights
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="rf-card p-4">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
               {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
                   {liveSources!.referencedSimilarStories!.slice(0, 3).map((story, index) => {
                     const storyUrl = resolveStoryUrl(story);
                     return (
-                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
+                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
                         <div className="flex items-start justify-between gap-3">
                           {storyUrl ? (
                             <button type="button" onClick={() => void router.navigate(storyUrl)} className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition">
@@ -1075,12 +1075,12 @@ export function MainContent({
               )}
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="rf-card p-4">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
               {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
                 <div className="mt-3 space-y-2.5">
                   {liveSources!.referencedWiSections!.slice(0, 3).map((section, index) => (
-                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
+                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.9))] p-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
                         <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
@@ -1275,50 +1275,36 @@ export function MainContent({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
-        <AnimatePresence mode="wait">
-          {isGenerating ? (
-            <motion.div
-              key="generating"
-              className="w-full flex-1 flex"
-              initial={{ opacity: 0, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, filter: 'blur(4px)' }}
-              transition={{ duration: 0.3 }}
-            >
-              {renderGeneratingSkeleton()}
-            </motion.div>
-          ) : !hasFeatures ? (
-            <motion.div
-              key="empty"
-              className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-[var(--rf-shadow-sm)] border border-[var(--rf-border)]">
-                <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
-              </div>
-              <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
-              <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="features"
-              className="w-full max-w-[900px] mx-auto space-y-5 pb-12"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            >
+        {isGenerating ? (
+          renderGeneratingSkeleton()
+        ) : !hasFeatures ? (
+          <motion.div
+            className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-[var(--rf-shadow-sm)] border border-[var(--rf-border)]">
+              <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
+            </div>
+            <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
+            <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
+          </motion.div>
+        ) : (
+          <motion.div
+            className="w-full max-w-[900px] mx-auto space-y-5 pb-12"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          >
             {generationContext && (
               <motion.div
-                className="overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[var(--rf-surface)] shadow-lg"
+                className="overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,244,236,0.94))] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface)] px-5 py-5 sm:px-6">
+                <div className="border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.12),transparent_40%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,239,230,0.88))] px-5 py-5 sm:px-6">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)]">Source stack</div>
@@ -1361,7 +1347,7 @@ export function MainContent({
                       exit={{ opacity: 0, height: 0 }}
                     >
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <div className="flex flex-col gap-3">
+                        <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
@@ -1373,7 +1359,7 @@ export function MainContent({
                               {generationContext.referencedSimilarStories!.slice(0, 4).map((story, i) => {
                                 const storyUrl = resolveStoryUrl(story);
                                 return (
-                                  <div key={`${story.key}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
+                                  <div key={`${story.key}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                                     <div className="flex items-start justify-between gap-3">
                                       {storyUrl ? (
                                         <button
@@ -1406,7 +1392,7 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="flex flex-col gap-3">
+                        <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
@@ -1416,7 +1402,7 @@ export function MainContent({
                           {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
                             <div className="space-y-2.5">
                               {generationContext.referencedWiSections!.map((section, i) => (
-                                <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
+                                <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                       <div className="text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
@@ -1436,16 +1422,23 @@ export function MainContent({
                           )}
                         </div>
 
-                        <div className="flex flex-col gap-3">
+                        <div className="rf-card p-4">
                           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
                           <div className="mt-3 space-y-2.5">
-                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
+                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                               <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Attachment context</div>
                               <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.attachmentIncluded ? 'Included in reasoning' : 'No attachment used'}</div>
                             </div>
-                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[var(--rf-surface-soft)] p-3">
+                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                               <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Work instruction docs</div>
                               <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.wiDocsCount ?? 0} document{(generationContext.wiDocsCount ?? 0) !== 1 ? 's' : ''} scanned</div>
+                            </div>
+                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Token usage</div>
+                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{(generationContext.tokenUsage?.total ?? 0).toLocaleString()} tokens total</div>
+                              <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">
+                                {(generationContext.tokenUsage?.input ?? 0).toLocaleString()} in / {(generationContext.tokenUsage?.output ?? 0).toLocaleString()} out
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1474,7 +1467,7 @@ export function MainContent({
                     {/* Left Accent Strip */}
                     <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]' : 'bg-[var(--rf-brand-muted)]'}`} />
 
-                    <div className="flex-1 p-4 sm:p-5">
+                    <div className="flex-1 p-5 sm:p-6">
                       {/* Header Row */}
                       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
                         {isEditing ? (
@@ -1716,7 +1709,6 @@ export function MainContent({
             })}
           </motion.div>
         )}
-        </AnimatePresence>
       </div>
 
       {/* AI Refine Popup */}

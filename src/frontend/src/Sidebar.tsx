@@ -201,7 +201,7 @@ export function Sidebar({
                       setContextMode('project');
                     }
                   }}
-                  className="appearance-none pr-6 pl-2.5 py-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white/80 text-[11px] font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand)]/20 transition-all shadow-sm cursor-pointer"
+                  className="appearance-none pr-6 pl-2.5 py-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white/80 text-[11px] font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand)]/20 transition-all shadow-sm cursor-pointer max-w-[130px]"
                 >
                   <option value="*">No project</option>
                   {availableProjects.map(project => (
@@ -405,13 +405,9 @@ export function Sidebar({
           </motion.div>
         )}
 
-      </div>
-
-      {/* ── Fixed Footer Actions ── */}
-      <div className="shrink-0 px-4 pt-4 pb-4 bg-[linear-gradient(180deg,rgba(244,242,236,0.9),rgba(235,232,224,1))] border-t border-[rgba(43,89,74,0.06)] backdrop-blur-md z-10 flex flex-col gap-3">
         {/* ── Actions ── */}
         <motion.div
-          className="space-y-2.5"
+          className="shrink-0 space-y-2.5 mt-0.5"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
@@ -459,28 +455,28 @@ export function Sidebar({
             </motion.button>
           </div>
         </motion.div>
-
-        {/* ── Usage footer ── */}
-        {!hasUnlimitedUsage && showUsage && (
-          <motion.div
-            className="relative shrink-0"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <div className="rf-sidebar-card relative overflow-hidden px-4 py-3.5">
-              <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.18),transparent)]" />
-              <button
-                onClick={() => setShowUsage(false)}
-                className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/80 hover:text-[var(--rf-text)]"
-              >
-                <X className="w-3 h-3" />
-              </button>
-              <UsageMeter usage={usage} limits={limits} tier={tier} className="pr-7" />
-            </div>
-          </motion.div>
-        )}
       </div>
+
+      {/* ── Usage footer ── */}
+      {!hasUnlimitedUsage && showUsage && (
+        <motion.div
+          className="px-4 pb-4 pt-1 shrink-0"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <div className="rf-sidebar-card relative overflow-hidden px-4 py-3.5">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.18),transparent)]" />
+            <button
+              onClick={() => setShowUsage(false)}
+              className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/80 hover:text-[var(--rf-text)]"
+            >
+              <X className="w-3 h-3" />
+            </button>
+            <UsageMeter usage={usage} limits={limits} tier={tier} className="pr-7" />
+          </div>
+        </motion.div>
+      )}
     </aside>
   );
 }
