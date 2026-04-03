@@ -257,6 +257,175 @@ function ComplexityMeter({ current }: { current: string }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Refactored Pipeline Component for Stability
+// ─────────────────────────────────────────────────────────────────────────────
+function GeneratingPipeline({ 
+  meta, progress, title, onCancel, canCancel, projectKey 
+}: { 
+  meta: GenerationProgressMeta | null; 
+  progress?: string; 
+  title?: string;
+  onCancel?: () => void;
+  canCancel?: boolean;
+  projectKey: string;
+}) {
+  const stageIndex = getGenerationStageIndex(meta, progress);
+  const triage = meta?.triage;
+  const arProgress = meta?.arProgress;
+  const draftFeatures = meta?.draftFeatures ?? [];
+  const featureProgress = meta?.featureProgress ?? [];
+  const sources = meta?.sources ?? null;
+  const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
+  const triageSupport = triage ? getTriageSupportCopy(triage) : 'Analyzing complexities...';
+  const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
+
+  return (
+    <motion.div 
+      className="w-full flex flex-col items-center py-8"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
+        <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
+          <motion.div 
+            className="h-full bg-[linear-gradient(90deg,transparent,var(--rf-brand),transparent)] w-1/3 absolute"
+            animate={{ x: ['-100%', '300%'] }}
+            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+          />
+        </div>
+
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
+          <div className="relative flex flex-col gap-10">
+             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-6">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--rf-border)] bg-white shadow-sm relative overflow-hidden p-3.5">
+                     <div className="absolute inset-0 bg-[var(--rf-brand)]/5 rounded-[28px] animate-pulse" />
+                     <img src="/logo.png" alt="Refinely" className="w-full h-full object-contain relative z-10" style={{ mixBlendMode: 'multiply' }} />
+                  </div>
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm mb-3">
+                      Pipeline Running <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-black text-[var(--rf-text)] tracking-tight">{title || 'Crafting features'}</h2>
+                    <p className="mt-1 text-sm font-semibold text-[var(--rf-text-tertiary)] flex items-center gap-2">
+                       <span className="dot-bounce flex gap-1"><span /><span /><span /></span>
+                       {progress || 'Processing\u2026'}
+                    </p>
+                  </div>
+                </div>
+                {canCancel && onCancel && (
+                  <button type="button" onClick={onCancel} className="rf-card px-5 py-2.5 text-xs font-bold text-[var(--rf-text-secondary)] hover:text-[var(--rf-danger)] flex items-center gap-2 transition bg-white/80">
+                    <X className="w-3.5 h-3.5" /> Stop Run
+                  </button>
+                )}
+             </div>
+
+             <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+                <div className="space-y-6">
+                  <div className="rf-card p-6 bg-white/40 border-[rgba(0,0,0,0.04)]">
+                    {triage ? <ComplexityMeter current={triage.complexity} /> : <div className="h-20 shimmer rounded-2xl" />}
+                    <p className="mt-6 text-[11px] font-medium text-[var(--rf-text-tertiary)] italic border-t border-[rgba(0,0,0,0.03)] pt-4">{triageSupport}</p>
+                  </div>
+
+                  <div className="rf-card p-6 border-[rgba(0,0,0,0.04)]">
+                    <div className="flex items-center justify-between mb-5">
+                      <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Runway</span>
+                      {arProgress?.total && <span className="text-[10px] font-black text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] px-3 py-1 rounded-full">{arProgress.completed}/{arProgress.total}</span>}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      {GENERATION_STEPS.map((step, idx) => {
+                        const isDone = idx < stageIndex;
+                        const isCurrent = idx === stageIndex;
+                        return (
+                          <div key={step.key} className={`rounded-2xl border p-4 transition-all ${isCurrent ? 'border-[var(--rf-brand)] bg-[rgba(53,113,95,0.04)]' : isDone ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/10' : 'border-[var(--rf-border)] opacity-60'}`}>
+                             <div className="flex items-center justify-between mb-3">
+                               {isDone ? <CheckCircle2 className="h-3.5 w-3.5 text-[var(--rf-success)]" /> : isCurrent ? <Clock3 className="h-3.5 w-3.5 text-[var(--rf-brand)]" /> : <div className="h-3.5 w-3.5 rounded-full border border-[var(--rf-border)]" />}
+                               <span className="text-[9px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step {idx + 1}</span>
+                             </div>
+                             <div className="text-xs font-bold">{step.label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-6 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.06)]">
+                      <motion.div 
+                        className="h-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.max(((stageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8)}%` }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 120 }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rf-card p-6 bg-[rgba(244,239,230,0.3)] border-[rgba(0,0,0,0.04)]">
+                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-6">Evidence Ingested</div>
+                   <div className="space-y-4">
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-white/40 border border-[rgba(0,0,0,0.03)]">
+                        <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Backlog Items</span>
+                        <span className="text-sm font-black text-[var(--rf-text)]">{sources?.similarStoriesCount ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-white/40 border border-[rgba(0,0,0,0.03)]">
+                        <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Wiki Snippets</span>
+                        <span className="text-sm font-black text-[var(--rf-text)]">{sources?.referencedWiSections?.length ?? 0}</span>
+                      </div>
+                      <div className="pt-6 mt-6 border-t border-[rgba(0,0,0,0.03)] flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Scope</span>
+                          <span className="text-[11px] font-black text-[var(--rf-brand)] uppercase">{sources?.projectKey === '*' ? 'Global' : sources?.projectKey || projectKey}</span>
+                      </div>
+                   </div>
+                </div>
+             </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 px-8 py-8 lg:grid-cols-[1.2fr_0.8fr] bg-[rgba(244,239,230,0.1)]">
+           <div className="space-y-4">
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-2">Refined Shapes</div>
+              {draftFeatures.length > 0 ? draftFeatures.map((f, i) => {
+                const status = featureProgressById.get(f.id) || (i === 0 ? 'active' : 'pending');
+                return (
+                  <div key={f.id} className="rf-card p-4 flex gap-4 bg-white/60">
+                    <div className={`w-1 rounded-full ${status === 'active' ? 'bg-[var(--rf-brand)]' : status === 'complete' ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-surface-soft)]'}`} />
+                    <div className="flex-1">
+                      <div className="text-sm font-bold truncate">{f.summary}</div>
+                      <div className="mt-4 h-1.5 w-full bg-[rgba(0,0,0,0.04)] rounded-full overflow-hidden">
+                        <div className={`h-full bg-[var(--rf-brand)] transition-all duration-700 ${status === 'active' ? 'w-[60%] animate-pulse' : status === 'complete' ? 'w-full bg-[var(--rf-success)]' : 'w-[10%]'}`} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="space-y-4">
+                  <div className="rf-card h-20 shimmer opacity-40 rounded-2xl" />
+                  <div className="rf-card h-20 shimmer opacity-40 rounded-2xl" />
+                </div>
+              )}
+           </div>
+
+           <div className="space-y-4">
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-2">Backlog Signal</div>
+              <div className="rf-card p-4 min-h-[200px]">
+                 {sources?.referencedSimilarStories && sources.referencedSimilarStories.length > 0 ? sources.referencedSimilarStories.slice(0, 3).map((s, i) => (
+                   <div key={s.key || i} className="mb-3 p-3 rounded-xl border border-[var(--rf-border)] bg-white/40 last:mb-0">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-tight">{s.key}</span>
+                        <span className="text-[10px] font-black">{Math.min(100, Math.round((s.relevanceScore || 0) * 100))}%</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--rf-text-secondary)] truncate">{s.summary}</div>
+                   </div>
+                 )) : <div className="text-xs italic text-[var(--rf-text-tertiary)] py-10 text-center">Awaiting context ingestion...</div>}
+              </div>
+           </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -829,347 +998,6 @@ export function MainContent({
     });
   };
 
-  // ── Generating skeleton ──────────────────────────────────────────────────
-  const renderGeneratingSkeleton = () => (
-    <motion.div
-      key="generating-skeleton"
-      className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex-1 flex items-start justify-center"
-      initial={{ opacity: 0, y: 24, scale: 0.985 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -20, scale: 0.985 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-    >
-      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
-        {/* Prominent Loading Indicator */}
-        <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
-          <motion.div 
-            className="h-full bg-[linear-gradient(90deg,transparent,var(--rf-brand),transparent)] w-1/3 absolute"
-            animate={{ x: ['-100%', '300%'] }}
-            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-          />
-        </div>
-
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
-          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
-          
-          <div className="relative flex flex-col gap-10">
-            {/* Header / Loading State */}
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-6">
-                <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--rf-border)] bg-white shadow-sm relative overflow-hidden p-3.5">
-                   <div className="absolute inset-0 bg-[var(--rf-brand)]/5 rounded-[28px] animate-pulse" />
-                   <img src="/logo.png" alt="Refinely" className="w-full h-full object-contain relative z-10" style={{ mixBlendMode: 'multiply' }} />
-                </div>
-                <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm mb-3">
-                    Active Pipeline
-                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
-                  </div>
-                  <h2 className="text-2xl sm:text-3xl font-black text-[var(--rf-text)] tracking-tight">
-                    {loadingTitle || 'Crafting features'}
-                  </h2>
-                  <p className="mt-1 text-sm font-semibold text-[var(--rf-text-tertiary)] flex items-center gap-2">
-                    <span className="dot-bounce inline-flex gap-1"><span /><span /><span /></span>
-                    {progress || 'Processing your request…'}
-                  </p>
-                </div>
-              </div>
-              
-              {canCancelLoading && onCancelLoading && (
-                <motion.button
-                  type="button"
-                  onClick={onCancelLoading}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-2.5 text-xs font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Stop Run
-                </motion.button>
-              )}
-            </div>
-
-            {/* Analysis Center */}
-            <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-              <div className="space-y-6">
-                <div className="rf-card p-6 bg-white/40 border-[rgba(0,0,0,0.04)]">
-                   {liveTriage ? (
-                     <ComplexityMeter current={liveTriage.complexity} />
-                   ) : (
-                     <div className="py-2.5 space-y-4">
-                        <div className="h-4 w-1/4 shimmer rounded" />
-                        <div className="h-8 w-full shimmer rounded-full" />
-                     </div>
-                   )}
-                   <p className="mt-8 text-xs font-medium leading-relaxed text-[var(--rf-text-tertiary)] border-t border-[rgba(0,0,0,0.03)] pt-4 italic">
-                    {triageSupportCopy}
-                  </p>
-                </div>
-
-                <div className="rf-card p-6 border-[rgba(0,0,0,0.04)]">
-                  <div className="flex items-center justify-between gap-3 mb-5">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
-                      Pipeline Progression
-                    </div>
-                    {liveArProgress?.total && (
-                      <div className="text-[11px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] px-2.5 py-1 rounded-full">
-                        {liveArProgress.completed}/{liveArProgress.total} requirements
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-4">
-                    {GENERATION_STEPS.map((step, index) => {
-                      const isDone = index < liveStageIndex;
-                      const isCurrent = index === liveStageIndex;
-                      return (
-                        <div
-                          key={step.key}
-                          className={`rounded-2xl border px-4 py-3.5 transition-all ${
-                            isCurrent
-                              ? 'border-[var(--rf-brand)] bg-[rgba(53,113,95,0.04)] shadow-sm'
-                              : isDone
-                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/10'
-                                : 'border-[var(--rf-border)] bg-transparent opacity-60'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                             <div className={`p-1.5 rounded-lg ${isDone || isCurrent ? 'bg-white shadow-sm' : ''}`}>
-                               {isDone ? (
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-[var(--rf-success)]" />
-                                ) : isCurrent ? (
-                                  <Clock3 className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
-                                ) : (
-                                  <div className="h-3.5 w-3.5 rounded-full border-2 border-[var(--rf-border)]" />
-                                )}
-                             </div>
-                            <span className={`text-[9px] font-black uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                              Step {index + 1}
-                            </span>
-                          </div>
-                          <div className={`mt-3 text-xs font-bold leading-snug ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                            {step.label}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-6 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.06)] border border-[rgba(0,0,0,0.02)]">
-                    <motion.div
-                      className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${liveArProgress?.total ? Math.max(((liveStageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8) : ((liveStageIndex + 1) / GENERATION_STEPS.length) * 100}%` }}
-                      transition={{ type: 'spring', damping: 25, stiffness: 120 }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                 {/* Simplified Signals */}
-                <div className="rf-card p-6 border-[rgba(0,0,0,0.04)] h-full">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-6">
-                    Sources Feeding Run
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3.5 rounded-2xl border border-[rgba(0,0,0,0.04)] bg-white/50">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-xl bg-blue-50 text-blue-600"><Layers3 className="h-4 w-4" /></div>
-                        <span className="text-[11px] font-bold text-[var(--rf-text-secondary)]">Backlog Stories</span>
-                      </div>
-                      <span className="text-sm font-black text-[var(--rf-text)]">{liveSources?.similarStoriesCount ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between p-3.5 rounded-2xl border border-[rgba(0,0,0,0.04)] bg-white/50">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-xl bg-amber-50 text-amber-600"><FileText className="h-4 w-4" /></div>
-                        <span className="text-[11px] font-bold text-[var(--rf-text-secondary)]">WI Sections</span>
-                      </div>
-                      <span className="text-sm font-black text-[var(--rf-text)]">{liveSources?.referencedWiSections?.length ?? 0}</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-8 pt-8 border-t border-[rgba(0,0,0,0.03)] space-y-3">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-[var(--rf-text-tertiary)]">Project Scope</span>
-                      <span className="font-black text-[var(--rf-brand)] px-2 py-0.5 rounded-md bg-[var(--rf-brand-muted)]">{liveSources?.projectKey === '*' ? 'Global' : liveSources?.projectKey || projectKey}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-[var(--rf-text-tertiary)]">Domain Guidance</span>
-                      <span className={`font-black uppercase tracking-widest ${liveSources?.domainContextApplied ? 'text-[var(--rf-success)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                        {liveSources?.domainContextApplied ? 'Applied' : 'Off'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        <div className="grid gap-4 px-5 py-5 sm:px-6 sm:py-6 lg:grid-cols-[1.15fr_0.85fr] bg-[rgba(244,239,230,0.2)]">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3 px-1">
-              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
-                Draft feature canvas
-              </div>
-              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
-                {liveDraftFeatures.length > 0 ? `${liveDraftFeatures.length} draft feature${liveDraftFeatures.length !== 1 ? 's' : ''}` : 'Feature shapes appear after decomposition'}
-              </div>
-            </div>
-            {liveDraftFeatures.length > 0 ? (
-              liveDraftFeatures.map((feature, i) => (
-                <motion.div
-                  key={feature.id || `${feature.summary}-${i}`}
-                  className="overflow-hidden rf-card"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-                >
-                  {(() => {
-                    const featureStatus = liveFeatureProgressById.get(feature.id) ?? (liveArProgress?.completed === liveArProgress?.total && liveArProgress?.total ? 'complete' : i === 0 ? 'active' : 'pending');
-                    const featureWidth = featureStatus === 'complete' ? '100%' : featureStatus === 'active' ? '62%' : '16%';
-                    const featureColor = featureStatus === 'complete'
-                      ? 'bg-[var(--rf-success)]'
-                      : featureStatus === 'active'
-                        ? 'bg-[var(--rf-brand)]'
-                        : 'bg-[var(--rf-border)]';
-                    const featureLabel = featureStatus === 'complete'
-                      ? 'Acceptance requirements complete'
-                      : featureStatus === 'active'
-                        ? 'Writing acceptance requirements'
-                        : 'Queued for acceptance requirements';
-
-                    return (
-                  <div className="flex">
-                    <div className={`w-1.5 shrink-0 transition-colors ${featureStatus === 'active' ? 'bg-[var(--rf-brand)] opacity-60' : featureStatus === 'complete' ? 'bg-[var(--rf-success)] opacity-40' : 'bg-transparent'}`} />
-                    <div className="flex-1 p-4 sm:p-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-base font-bold leading-snug text-[var(--rf-text)]">{feature.summary}</div>
-                          <div className="mt-2 text-sm leading-relaxed text-[var(--rf-text-secondary)]">
-                            {buildFeatureExcerpt(feature.description, 160)}
-                          </div>
-                        </div>
-                        <div className="shrink-0 rounded-full border border-[rgba(35,74,61,0.12)] bg-[var(--rf-surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-secondary)]">
-                          {feature.storyPoints ? `${feature.storyPoints} pts` : 'draft'}
-                        </div>
-                      </div>
-                      <div className="mt-4 rounded-2xl border border-[rgba(0,0,0,0.06)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
-                          <BrainCircuit className="h-4 w-4 text-[var(--rf-brand)]" />
-                            {featureLabel}
-                          </div>
-                          <div className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
-                            featureStatus === 'complete'
-                              ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]'
-                              : featureStatus === 'active'
-                                ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
-                                : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'
-                          }`}>
-                            {featureStatus}
-                          </div>
-                        </div>
-                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(0,0,0,0.04)]">
-                          <div
-                            className={`h-full rounded-full ${featureColor} transition-all duration-700 ${featureStatus === 'active' ? 'animate-pulse' : ''}`}
-                            style={{ width: featureWidth }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                    );
-                  })()}
-                </motion.div>
-              ))
-            ) : (
-              [1, 2, 3].map(i => (
-                <motion.div
-                  key={i}
-                  className="overflow-hidden rf-card"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-                >
-                  <div className="flex">
-                    <div className="w-1.5 shrink-0 bg-[var(--rf-surface-soft)]" />
-                    <div className="flex-1 p-5 space-y-3.5">
-                      <div className="shimmer h-5 w-2/5 rounded-md" />
-                      <div className="shimmer h-4 w-full rounded-md" />
-                      <div className="shimmer h-4 w-4/5 rounded-md" />
-                    </div>
-                  </div>
-                </motion.div>
-              ))
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
-              Source highlights
-            </div>
-            <div className="rf-card p-4">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Reference stories</div>
-              {(liveSources?.referencedSimilarStories?.length ?? 0) > 0 ? (
-                <div className="mt-3 space-y-2.5">
-                  {liveSources!.referencedSimilarStories!.slice(0, 5).map((story, index) => {
-                    const storyUrl = resolveStoryUrl(story);
-                    return (
-                      <div key={`${story.key}-${index}`} className="rounded-2xl border border-[var(--rf-border)] bg-[rgba(0,0,0,0.01)] p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          {storyUrl ? (
-                            <button type="button" onClick={() => void router.navigate(storyUrl)} className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition">
-                              {story.key}
-                              <ExternalLink className="h-3 w-3" />
-                            </button>
-                          ) : (
-                            <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
-                          )}
-                          {typeof story.relevanceScore === 'number' && (
-                            <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
-                              {Math.min(100, Math.round(story.relevanceScore * 100))}%
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
-                          {buildExcerpt(story.summary, 140)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="mt-3 text-xs italic text-[var(--rf-text-tertiary)]">No backlog references loaded yet.</div>
-              )}
-            </div>
-
-            <div className="rf-card p-4">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Work instruction snippets</div>
-              {(liveSources?.referencedWiSections?.length ?? 0) > 0 ? (
-                <div className="mt-3 space-y-2.5">
-                  {liveSources!.referencedWiSections!.slice(0, 5).map((section, index) => (
-                    <div key={`${section.docId}-${section.chunkIndex}-${index}`} className="rounded-2xl border border-[var(--rf-border)] bg-[rgba(0,0,0,0.01)] p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0 text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
-                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">
-                          S{section.chunkIndex + 1}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
-                        {buildExcerpt(section.excerpt, 135)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-3 text-xs italic text-[var(--rf-text-tertiary)]">No WI snippets matched yet.</div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </motion.div>
-);
-
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
       {/* Header */}
@@ -1344,7 +1172,14 @@ export function MainContent({
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         <AnimatePresence mode="wait">
           {isGenerating ? (
-            renderGeneratingSkeleton()
+            <GeneratingPipeline 
+              meta={generationProgressMeta || null} 
+              progress={progress} 
+              title={loadingTitle} 
+              onCancel={onCancelLoading} 
+              canCancel={canCancelLoading}
+              projectKey={projectKey}
+            />
           ) : !hasFeatures ? (
             <motion.div
               key="empty-state"
@@ -1448,7 +1283,7 @@ export function MainContent({
                                       )}
                                       {typeof story.relevanceScore === 'number' && (
                                         <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-full px-2 py-1">
-                                          {(story.relevanceScore * 100).toFixed(0)}% match
+                                          {Math.min(100, Math.round(story.relevanceScore * 100))}% match
                                         </div>
                                       )}
                                     </div>
