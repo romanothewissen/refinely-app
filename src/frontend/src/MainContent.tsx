@@ -173,16 +173,19 @@ const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: str
   { key: 'acceptance_requirements', label: 'Writing acceptance requirements', shortLabel: 'ARs' },
 ];
 
-function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?: string) {
+function getGenerationStageIndex(meta: GenerationProgressMeta | null | undefined, progress?: string, loadingTitle?: string) {
   if (meta?.stage) {
     const idx = GENERATION_STEPS.findIndex(step => step.key === meta.stage);
     if (idx >= 0) return idx;
   }
+  const title = (loadingTitle || '').toLowerCase();
   const text = (progress || '').toLowerCase();
-  if (text.includes('acceptance requirement')) return 4;
-  if (text.includes('planning feature') || text.includes('feature structure') || text.includes('sketching')) return 3;
+
+  // Mapping string states to stage indices with stable priority
+  if (text.includes('acceptance') || title.includes('acceptance')) return 4;
+  if (text.includes('sketching') || title.includes('sketching') || text.includes('planning feature') || text.includes('feature structure')) return 3;
   if (text.includes('sufficiency') || text.includes('validat') || text.includes('discovery')) return 2;
-  if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
+  if (text.includes('scope') || text.includes('complexity') || text.includes('targeting') || title.includes('triage') || title.includes('assessing') || title.includes('init')) return 1;
   return 0;
 }
 
@@ -841,7 +844,7 @@ export function MainContent({
       exit={{ opacity: 0, y: -20, scale: 0.985 }}
       transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-white shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
+      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
         {/* Prominent Loading Indicator */}
         <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
           <motion.div 
@@ -851,7 +854,7 @@ export function MainContent({
           />
         </div>
 
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.06),transparent_42%),var(--rf-surface-soft)]/20 px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
+        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(43,113,95,0.12),transparent_42%),rgba(244,239,230,0.4)] px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
           <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(35,74,61,0.35),transparent)]" />
           
           <div className="relative flex flex-col gap-10">
@@ -895,83 +898,89 @@ export function MainContent({
             {/* Analysis Center */}
             <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
               <div className="space-y-6">
-                <div className="rf-card p-6 bg-white/40 border-[rgba(0,0,0,0.04)]">
+                <div className="rounded-[32px] border border-[rgba(0,0,0,0.06)] bg-white p-6 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.08)]">
                    {liveTriage ? (
                      <ComplexityMeter current={liveTriage.complexity} />
                    ) : (
-                     <div className="py-2.5 space-y-4">
-                        <div className="h-4 w-1/4 shimmer rounded" />
-                        <div className="h-8 w-full shimmer rounded-full" />
-                     </div>
+                      <div className="py-2.5 space-y-4">
+                        <div className="h-6 w-1/3 rounded-lg bg-[var(--rf-surface-soft)] animate-pulse" />
+                        <div className="h-3 w-full rounded-full bg-[var(--rf-surface-soft)] relative overflow-hidden">
+                           <motion.div 
+                             className="absolute inset-0 bg-[var(--rf-brand)]/10"
+                             animate={{ x: ['-100%', '100%'] }}
+                             transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                           />
+                        </div>
+                      </div>
                    )}
                    <p className="mt-8 text-xs font-medium leading-relaxed text-[var(--rf-text-tertiary)] border-t border-[rgba(0,0,0,0.03)] pt-4 italic">
                     {triageSupportCopy}
                   </p>
                 </div>
 
-                <div className="rf-card p-6 border-[rgba(0,0,0,0.04)]">
-                  <div className="flex items-center justify-between gap-3 mb-5">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">
-                      Pipeline Progression
-                    </div>
-                    {liveArProgress?.total && (
-                      <div className="text-[11px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] px-2.5 py-1 rounded-full">
-                        {liveArProgress.completed}/{liveArProgress.total} requirements
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-5">
-                    {GENERATION_STEPS.map((step, index) => {
-                      const isDone = index < liveStageIndex;
-                      const isCurrent = index === liveStageIndex;
-                      return (
-                        <div
-                          key={step.key}
-                          className={`rounded-2xl border px-3 py-3 transition-all ${
-                            isCurrent
-                              ? 'border-[var(--rf-brand-subtle)] bg-white shadow-lg'
-                              : isDone
-                                ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/10'
-                                : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                             <div className={`p-1.5 rounded-lg ${isDone || isCurrent ? 'bg-white shadow-sm border border-[var(--rf-border-subtle)]' : ''}`}>
-                               {isDone ? (
-                                  <CheckCircle2 className="h-3 w-3 text-[var(--rf-success)]" />
-                                ) : isCurrent ? (
-                                  <Clock3 className="h-3 w-3 text-[var(--rf-brand)]" />
-                                ) : (
-                                  <div className="h-3 w-3 rounded-full border border-[var(--rf-border)]" />
-                                )}
-                             </div>
-                            <span className={`text-[8px] font-black uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                              S{index + 1}
-                            </span>
-                          </div>
-                          <div className={`mt-2.5 text-[10px] font-bold leading-snug ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                            {step.label}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-6 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.06)] border border-[rgba(0,0,0,0.02)]">
-                    <motion.div
-                      className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${liveArProgress?.total ? Math.max(((liveStageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8) : ((liveStageIndex + 1) / GENERATION_STEPS.length) * 100}%` }}
-                      transition={{ type: 'spring', damping: 25, stiffness: 120 }}
-                    />
-                  </div>
                 </div>
+
+                <div className="rounded-[32px] border border-[rgba(0,0,0,0.06)] bg-white p-6 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.08)]">
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Pipeline Progression</div>
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-[var(--rf-border)] shadow-sm">
+                        <div className="w-1.5 h-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                        <span className="text-[9px] font-bold text-[var(--rf-brand)] uppercase">Live</span>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-5">
+                      {GENERATION_STEPS.map((step, index) => {
+                        const currentStageIndex = getGenerationStageIndex(generationProgressMeta, progress, loadingTitle);
+                        const isDone = index < currentStageIndex;
+                        const isCurrent = index === currentStageIndex;
+                        return (
+                          <div
+                            key={step.key}
+                            className={`rounded-2xl border px-3 py-3 transition-all duration-500 ${
+                              isCurrent
+                                ? 'border-[var(--rf-brand-subtle)] bg-[var(--rf-brand)]/5 shadow-md scale-105 z-10'
+                                : isDone
+                                  ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/5'
+                                  : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/40 opacity-60'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                               <div className={`p-1.5 rounded-lg ${isDone || isCurrent ? 'bg-white shadow-sm border border-[var(--rf-border-subtle)]' : ''}`}>
+                                 {isDone ? (
+                                    <CheckCircle2 className="h-3 w-3 text-[var(--rf-success)]" />
+                                  ) : isCurrent ? (
+                                    <Clock3 className="h-3 w-3 text-[var(--rf-brand)]" />
+                                  ) : (
+                                    <div className="h-3 w-3 rounded-full border border-[var(--rf-border)]" />
+                                  )}
+                               </div>
+                              <span className={`text-[8px] font-black uppercase tracking-[0.18em] ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                                S{index + 1}
+                              </span>
+                            </div>
+                            <div className={`mt-2.5 text-[10px] font-bold leading-tight ${isCurrent || isDone ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                              {step.label}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
               </div>
 
               <div className="space-y-6">
                  {/* Simplified Signals */}
-                <div className="rf-card p-6 border-[rgba(0,0,0,0.04)] h-full">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-6">
-                    Sources Feeding Run
+                <div className="rounded-[32px] border border-[rgba(0,0,0,0.06)] bg-white p-6 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.08)] flex-1 flex flex-col min-h-0">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Sources Feeding Run</div>
+                    <div className="flex -space-x-2">
+                       <div className="w-5 h-5 rounded-full border border-white bg-[var(--rf-brand-muted)] flex items-center justify-center">
+                          <FileText className="w-2.5 h-2.5 text-[var(--rf-brand)]" />
+                       </div>
+                       <div className="w-5 h-5 rounded-full border border-white bg-[var(--rf-brand-muted)] flex items-center justify-center">
+                          <BrainCircuit className="w-2.5 h-2.5 text-[var(--rf-brand)]" />
+                       </div>
+                    </div>
                   </div>
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-3.5 rounded-2xl border border-[rgba(0,0,0,0.04)] bg-white/50">
@@ -1021,7 +1030,7 @@ export function MainContent({
               liveDraftFeatures.map((feature, i) => (
                 <motion.div
                   key={feature.id || `${feature.summary}-${i}`}
-                  className="overflow-hidden rf-card"
+                  className="overflow-hidden rounded-[24px] border border-[rgba(0,0,0,0.06)] bg-white shadow-sm"
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
@@ -1088,7 +1097,7 @@ export function MainContent({
               [1, 2, 3].map(i => (
                 <motion.div
                   key={i}
-                  className="overflow-hidden rf-card"
+                  className="overflow-hidden rounded-[24px] border border-[rgba(0,0,0,0.06)] bg-white shadow-sm"
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.08, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
@@ -1170,9 +1179,8 @@ export function MainContent({
           </div>
         </div>
       </div>
-    </div>
-  </motion.div>
-);
+    </motion.div>
+  );
 
   return (
     <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
