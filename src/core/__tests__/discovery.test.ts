@@ -228,6 +228,41 @@ test('validateAndRepairInitialDiscovery uses contextual fallback questions and s
   assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 30 && suggestion.length < 96)));
 });
 
+test('finalizeInitialDiscoveryQuestions preserves coherent model question and suggestion pairs', () => {
+  const profile = normalizeDiscoveryProfile({
+    ambiguity: 'medium',
+    missingCategoryKeys: ['business_rules'],
+    recommendedInitialCount: 4,
+    followupCap: 4,
+  });
+
+  const questions = finalizeInitialDiscoveryQuestions([
+    {
+      categoryKey: 'business_rules',
+      category: 'Business Rules',
+      intent: 'decision_logic',
+      question: 'How much can an FSE override the proposed work order sequence?',
+      suggestions: [
+        'FSEs can fully reorder work orders on their own',
+        'FSEs can make limited changes, but urgent work stays locked',
+        'FSEs must request schedule changes through a dispatcher or manager',
+        'The generated schedule is fixed and cannot be changed by the FSE',
+      ],
+    },
+  ], profile, {
+    requirement: 'An FSE must be provided an optimal schedule for service based on criticality and due dates.',
+  });
+
+  const target = questions.find((question) => question.question === 'How much can an FSE override the proposed work order sequence?');
+  assert.ok(target);
+  assert.deepEqual(target.suggestions, [
+    'FSEs can fully reorder work orders on their own',
+    'FSEs can make limited changes, but urgent work stays locked',
+    'FSEs must request schedule changes through a dispatcher or manager',
+    'The generated schedule is fixed and cannot be changed by the FSE',
+  ]);
+});
+
 test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into distinct alternatives', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'medium',
@@ -261,7 +296,7 @@ test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into d
   assert.ok(target.suggestions.every((suggestion) => suggestion.length <= 95));
 });
 
-test('finalizeInitialDiscoveryQuestions sanitizes evidence references and favors concise contrasting trigger options', () => {
+test('finalizeInitialDiscoveryQuestions keeps aligned scheduling suggestions instead of rewriting them into fallback policy chips', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'high',
     missingCategoryKeys: ['context_trigger'],
@@ -290,9 +325,37 @@ test('finalizeInitialDiscoveryQuestions sanitizes evidence references and favors
   assert.ok(target);
   assert.doesNotMatch(target.question, /Backlog Reference/i);
   assert.doesNotMatch(target.question, /["“”'‘’]/);
-  assert.ok(target.suggestions.length >= 2 && target.suggestions.length <= 3);
-  assert.ok(target.suggestions.every((suggestion) => suggestion.length <= 95));
-  assert.ok(target.suggestions.some((suggestion) => /manual review|key context|selected channels|usable/i.test(suggestion)));
+  assert.deepEqual(target.suggestions, [
+    "Changes to a Work Order's 'criticality of service' or 'due dates'",
+    "Changes to an FSE's availability, skills, or 'preferred work areas'",
+    'A manual request initiated by the FSE, a dispatcher, or a supervisor',
+    "At a fixed interval, such as daily, at the start of an FSE's shift, or hourly",
+  ]);
+});
+
+test('finalizeInitialDiscoveryQuestions does not invent template suggestions for an otherwise valid question with no chips', () => {
+  const profile = normalizeDiscoveryProfile({
+    ambiguity: 'medium',
+    missingCategoryKeys: ['information_architecture'],
+    recommendedInitialCount: 4,
+    followupCap: 4,
+  });
+
+  const questions = finalizeInitialDiscoveryQuestions([
+    {
+      categoryKey: 'information_architecture',
+      category: 'Information Architecture',
+      intent: 'required_inputs',
+      question: 'What minimum information is needed before the case can be created?',
+      suggestions: [],
+    },
+  ], profile, {
+    requirement: 'Create a case automatically from a phone or WhatsApp interaction.',
+  });
+
+  const target = questions.find((question) => question.question === 'What minimum information is needed before the case can be created?');
+  assert.ok(target);
+  assert.deepEqual(target.suggestions, []);
 });
 
 test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total question cap', () => {
@@ -387,6 +450,7 @@ test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery
   assert.match(clarifyPrompt, /Provide 2-3 suggestions by default/i);
   assert.match(clarifyPrompt, /Avoid quotes, parenthetical evidence references/i);
   assert.match(clarifyPrompt, /Ask for a business choice or policy direction/i);
+  assert.match(clarifyPrompt, /Keep the suggestions aligned to the actual question being asked/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
   assert.match(clarifyPrompt, /Important domain signals/i);
@@ -400,9 +464,9 @@ test('discovery prompts enforce the fixed taxonomy and distinct-answer discovery
   assert.match(evaluatePrompt, /1-4 follow-up questions/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Prefer one visible follow-up question per remaining business gap/i);
-  assert.match(evaluatePrompt, /contrasting business paths/i);
   assert.match(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
   assert.match(evaluatePrompt, /Avoid quotes, parenthetical evidence references/i);
+  assert.match(evaluatePrompt, /tightly aligned to the exact follow-up question being asked/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);

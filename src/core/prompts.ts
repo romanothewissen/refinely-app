@@ -376,7 +376,7 @@ DISCOVERY RULES:
 - Each suggestion must be easy to understand on first read and should represent a meaningfully different answer path or policy direction.
 - Keep most suggestions within roughly 55-95 characters.
 - Avoid near-synonyms, minor wording variants, or option sets where all answers could naturally be selected together.
-- Suggestions should usually be contrasting paths like default path, restricted path, review path, or no-extra-action path.
+- Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
 - Provide 2-3 suggestions by default. Use 4 only when the fourth option is clearly distinct and still easy to scan.
 
 OUTPUT CONTRACT:
@@ -456,7 +456,7 @@ RULES:
 - Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
 - Keep the wording direct and business-focused, but detailed enough to make the unresolved tradeoff explicit.
 - Provide 2-3 suggestions per follow-up question by default, and use 4 only when the fourth option is clearly distinct.
-- Keep follow-up suggestions concise, easy to scan, and framed as contrasting business paths rather than additive fragments.
+- Keep follow-up suggestions concise, easy to scan, and tightly aligned to the exact follow-up question being asked.
 - Avoid overlapping, near-synonymous, or “all can be true” follow-up suggestions.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.

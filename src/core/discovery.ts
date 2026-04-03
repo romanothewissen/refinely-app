@@ -257,7 +257,7 @@ function simplifyQuestionCopy(value: string): string {
   return cleanText(value)
     .replace(/\((?:as\s+per|per|see|from)\s+[^)]*(?:reference|references|doc|docs|story|stories|evidence|backlog|wi)[^)]*\)/gi, '')
     .replace(/\((?:backlog|reference|references|doc|docs|story|stories|wi)[^)]*\)/gi, '')
-    .replace(/["“”'‘’]([^"“”'‘’]{1,48})["“”'‘’]/g, '$1')
+    .replace(/["“”]([^"“”]{1,48})["“”]/g, '$1')
     .replace(/\bwhat exact\b/gi, 'what')
     .replace(/\bwhat other events or conditions should\b/gi, 'which policy should')
     .replace(/\bso the team knows this flow is solving the right problem\b/gi, 'first')
@@ -479,7 +479,7 @@ function normalizeSuggestionComparisonKey(value: string): string {
 
 function simplifySuggestionCopy(value: string): string {
   return cleanText(value)
-    .replace(/["“”'‘’]([^"“”'‘’]{1,48})["“”'‘’]/g, '$1')
+    .replace(/["“”]([^"“”]{1,48})["“”]/g, '$1')
     .replace(/\bmaterially\b/gi, 'really')
     .replace(/\bsubsequent\b/gi, 'later')
     .replace(/\butili[sz]e\b/gi, 'use')
@@ -537,70 +537,29 @@ function inferSuggestionArchetype(intent: string, value: string): string | null 
   return null;
 }
 
-function countUniqueSuggestionArchetypes(intent: string, values: string[]): number {
-  const archetypes = new Set(
-    values
-      .map((value) => inferSuggestionArchetype(intent, value))
-      .filter((value): value is string => Boolean(value)),
-  );
-  return archetypes.size;
-}
-
-function averageSuggestionOverlap(values: string[]): number {
-  if (values.length < 2) return 0;
-  let pairs = 0;
-  let total = 0;
-
-  for (let index = 0; index < values.length; index += 1) {
-    for (let next = index + 1; next < values.length; next += 1) {
-      total += overlapRatio(values[index], values[next]);
-      pairs += 1;
-    }
-  }
-
-  return pairs > 0 ? total / pairs : 0;
-}
-
-function shouldPreferFallbackSuggestions(intent: string, providedSuggestions: string[]): boolean {
-  if (providedSuggestions.length < 2) return false;
-
-  const simplified = uniqueStrings(providedSuggestions.map(simplifySuggestionCopy));
-  const averageLength = simplified.reduce((sum, value) => sum + value.length, 0) / Math.max(simplified.length, 1);
-  const archetypeCount = countUniqueSuggestionArchetypes(intent, simplified);
-  const overlap = averageSuggestionOverlap(simplified);
-  const additiveWordingCount = simplified.filter((value) => /\b(also|and|as well as|plus|along with)\b/i.test(value)).length;
-
-  return averageLength > 90 || archetypeCount < Math.min(2, simplified.length) || overlap >= 0.42 || additiveWordingCount >= Math.max(2, simplified.length - 1);
-}
-
-function shouldKeepFourSuggestions(intent: string, suggestions: string[]): boolean {
-  if (suggestions.length < 4) return false;
-  if (suggestions.some((suggestion) => suggestion.length > 95)) return false;
-  if (averageSuggestionOverlap(suggestions.slice(0, 4)) >= 0.32) return false;
-  if (suggestions.slice(0, 4).filter((suggestion) => /\b(also|and|plus|along with)\b/i.test(suggestion)).length >= 2) return false;
-  return countUniqueSuggestionArchetypes(intent, suggestions.slice(0, 4)) >= 4;
-}
-
 function normalizeSuggestionChoices(
   categoryKey: ClarifyCategoryKey,
   intent: string,
   suggestions: string[],
   input?: DiscoveryFallbackInput,
+  opts: { allowTemplateFallback?: boolean } = {},
 ): string[] {
+  const normalizedProvidedSuggestions = uniqueStrings(suggestions.map(simplifySuggestionCopy));
   const template = categoryTemplates(categoryKey).find((candidate) => candidate.intent === intent)
     ?? categoryTemplates(categoryKey)[0];
-  const fallbackSuggestions = template
-    ? uniqueStrings([
-        ...contextualizeDiscoveryTemplate(template, input).suggestions,
-        ...template.suggestions,
-      ])
-    : [];
-  const normalizedProvidedSuggestions = uniqueStrings(suggestions.map(simplifySuggestionCopy));
-  const preferFallback = shouldPreferFallbackSuggestions(intent, normalizedProvidedSuggestions);
-  const candidates = uniqueStrings([
-    ...(preferFallback ? fallbackSuggestions : normalizedProvidedSuggestions).map(simplifySuggestionCopy),
-    ...(preferFallback ? normalizedProvidedSuggestions : fallbackSuggestions).map(simplifySuggestionCopy),
-  ]);
+  const candidates = normalizedProvidedSuggestions.length
+    ? normalizedProvidedSuggestions
+    : opts.allowTemplateFallback
+      ? uniqueStrings(
+          (template
+            ? uniqueStrings([
+                ...contextualizeDiscoveryTemplate(template, input).suggestions,
+                ...template.suggestions,
+              ])
+            : []
+          ).map(simplifySuggestionCopy),
+        )
+      : [];
 
   const result: string[] = [];
   const archetypes = new Set<string>();
@@ -622,12 +581,7 @@ function normalizeSuggestionChoices(
     if (result.length >= 4) break;
   }
 
-  if (result.length >= 4 && !shouldKeepFourSuggestions(intent, result)) {
-    return result.slice(0, 3);
-  }
-
-  if (result.length >= 2) return result;
-  return result.length ? result : candidates.slice(0, 2);
+  return result;
 }
 
 function categoryTemplates(categoryKey: ClarifyCategoryKey): DiscoveryTemplate[] {
@@ -900,20 +854,9 @@ export function inferCategoryKeyFromQuestion(question: string): ClarifyCategoryK
 export function normalizeQuestionIntent(value: unknown, categoryKey: ClarifyCategoryKey, fallbackQuestion?: string): string {
   const provided = toSnakeCase(String(value ?? ''));
   if (provided) return provided;
-  if (fallbackQuestion) {
-    const inferred = toSnakeCase(fallbackQuestion.split('?')[0]);
-    if (inferred) return inferred;
-  }
+  void fallbackQuestion;
   const template = categoryTemplates(categoryKey)[0];
   return template?.intent ?? `clarify_${categoryKey}`;
-}
-
-function fallbackSuggestionsForIntent(
-  categoryKey: ClarifyCategoryKey,
-  intent: string,
-  input?: DiscoveryFallbackInput,
-): string[] {
-  return normalizeSuggestionChoices(categoryKey, intent, [], input);
 }
 
 function splitGroupedQuestion(question: string): string[] {
@@ -1016,6 +959,7 @@ function buildFallbackQuestions(
         contextualTemplate.intent,
         contextualTemplate.suggestions,
         input,
+        { allowTemplateFallback: true },
       ),
     });
     if (questions.length >= needed) break;
