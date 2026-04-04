@@ -518,30 +518,20 @@ export function ClarifyQuestionsView({
                           : 'border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(249,247,243,0.94))] hover:border-[var(--rf-border-strong)] hover:shadow-md'
                       }`}
                     >
-                      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)] lg:items-start">
-                        <div className="space-y-3">
-                          <div className="flex items-start gap-3">
-                            <div className={`flex h-8 w-8 rounded-xl items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
-                              {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
-                            </div>
-                            <div className="space-y-1.5 min-w-0">
-                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{label}</div>
-                              <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug">
-                                {renderQuestionWithStoryLinks(q.question, storyLookup)}
-                              </p>
-                              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
-                                Choose the closest framing, then add only the nuance that matters.
-                              </div>
+                      <div className="space-y-3 p-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`flex h-8 w-8 rounded-xl items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
+                            {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
+                          </div>
+                          <div className="space-y-1.5 min-w-0">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{label}</div>
+                            <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug">
+                              {renderQuestionWithStoryLinks(q.question, storyLookup)}
+                            </p>
+                            <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
+                              Choose the closest framing, then add only the nuance that matters.
                             </div>
                           </div>
-                          <textarea
-                            value={ans.customAnswer}
-                            onChange={e => handleCustomChange(idx, e.target.value)}
-                            disabled={isSubmitting}
-                            placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything your chosen answer does not cover…' : 'Type your answer here…'}
-                            rows={3}
-                            className="w-full bg-[rgba(255,255,255,0.82)] border border-[var(--rf-border)] rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
-                          />
                         </div>
 
                         {suggestions.length > 0 && (
@@ -549,7 +539,7 @@ export function ClarifyQuestionsView({
                             <div className="mb-2.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
                               Proposed answers
                             </div>
-                            <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                               {suggestions.map((sug, si) => {
                                 const sel = ans.selectedSuggestions.includes(sug);
                                 return (
@@ -557,7 +547,7 @@ export function ClarifyQuestionsView({
                                     key={si}
                                     onClick={() => toggleSuggestion(idx, sug)}
                                     disabled={isSubmitting}
-                                    className={`flex min-h-[74px] items-start rounded-[18px] border px-3.5 py-3 text-left text-[12px] font-semibold leading-relaxed transition-all ${
+                                    className={`flex min-h-[64px] items-start rounded-[18px] border px-3.5 py-3 text-left text-[12px] font-semibold leading-relaxed transition-all ${
                                       sel
                                         ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] shadow-sm'
                                         : 'border-[var(--rf-border)] bg-white/88 text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
@@ -575,6 +565,15 @@ export function ClarifyQuestionsView({
                             </div>
                           </div>
                         )}
+
+                        <textarea
+                          value={ans.customAnswer}
+                          onChange={e => handleCustomChange(idx, e.target.value)}
+                          disabled={isSubmitting}
+                          placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything your chosen answer does not cover…' : 'Type your answer here…'}
+                          rows={3}
+                          className="w-full bg-[rgba(255,255,255,0.82)] border border-[var(--rf-border)] rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
+                        />
                       </div>
                     </div>
                   );
