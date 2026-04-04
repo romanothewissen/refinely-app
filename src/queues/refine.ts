@@ -3,6 +3,7 @@ import { refineFeatures } from '../core/story-generator';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
+import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import { normalizeProjectKeys, resolvePrimaryProjectKey } from '../services/project-selection';
 
@@ -20,6 +21,7 @@ export async function handler(event: { body: RefineEvent }) {
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
     tier: getEffectiveTier(eventConfig, { license }),
   };
 

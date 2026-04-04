@@ -14,6 +14,7 @@ import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
+import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import {
   buildCombinedDomainContext,
@@ -39,6 +40,7 @@ export async function handler(event: { body: ClarifyEvent }) {
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
     domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
     tier: getEffectiveTier(eventConfig, { license }),
   };

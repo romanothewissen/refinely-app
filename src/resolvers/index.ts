@@ -25,6 +25,7 @@ import {
   saveTransparencyReport,
 } from '../services/compliance';
 import { getProjectActivitySummary, recordProjectActivity } from '../services/project-activity';
+import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
   normalizeProjectKeys,
@@ -216,7 +217,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   await saveConfig(payload);
 
   const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const modelFields = ['decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'triageModel', 'themeModel'];
+  const modelFields = ['modelStrategy', 'bucketClasses', 'modelStrategyVersion', 'decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'triageModel', 'themeModel'];
   const changedModelFields = modelFields.filter((field) => {
     return ngc[field] !== undefined && ngc[field] !== egc[field];
   });
@@ -530,7 +531,11 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
 
 resolver.define('refineSingleFeature', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const config = {
+    ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
+    tier: getEffectiveTier(eventConfig, context),
+  };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
   const maskedRequirement = maskPiiText(payload.requirement ?? '', piiEnabled);
@@ -588,7 +593,11 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
 
 resolver.define('checkRefineFeedback', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const config = {
+    ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
+    tier: getEffectiveTier(eventConfig, context),
+  };
   return checkRefineFeedbackSufficiency({
     feature: payload.feature as Feature,
     feedback: payload.feedback,
@@ -603,6 +612,7 @@ resolver.define('ask', async ({ payload, context }) => {
   const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
   const config = {
     ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
     domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
     tier: getEffectiveTier(eventConfig, context),
   };

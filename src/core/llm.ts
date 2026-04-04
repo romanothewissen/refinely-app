@@ -329,6 +329,9 @@ export function getFallbackModelCatalog(provider: LlmProvider): LlmVendorModelCa
   }
   if (provider === 'gemini') {
     return buildCatalog(provider, [
+      { id: 'gemini-3.1-pro', displayName: 'Gemini 3.1 Pro', family: 'pro' },
+      { id: 'gemini-3-flash', displayName: 'Gemini 3 Flash', family: 'flash' },
+      { id: 'gemini-3.1-flash-lite', displayName: 'Gemini 3.1 Flash-Lite', family: 'lite' },
       { id: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', family: 'pro' },
       { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', family: 'flash' },
       { id: 'gemini-2.5-flash-lite', displayName: 'Gemini 2.5 Flash-Lite', family: 'lite' },

@@ -13,6 +13,7 @@ import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { maskPiiText, maskPiiInAnswers, mergePiiMaskingStats, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
+import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import {
   buildCombinedDomainContext,
@@ -116,6 +117,7 @@ export async function handler(event: { body: GenerationEvent }) {
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
     domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
     tier: getEffectiveTier(eventConfig, { license }),
   };

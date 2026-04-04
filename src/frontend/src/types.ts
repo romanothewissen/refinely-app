@@ -23,6 +23,14 @@ export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'az
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
+export type GeneratorModelStrategy = 'stable' | 'latest' | 'custom';
+export type GeneratorBucketClass = 'pro' | 'flash' | 'lite';
+
+export interface GeneratorBucketClasses {
+  discovery: GeneratorBucketClass;
+  generation: GeneratorBucketClass;
+  refinement: GeneratorBucketClass;
+}
 
 export interface LlmModelCatalogEntry {
   id: string;
@@ -48,6 +56,9 @@ export type LlmModelCatalogByVendor = Partial<Record<LlmProvider, LlmVendorModel
 
 export interface GeneratorConfig {
   provider: LlmProvider;
+  modelStrategy: GeneratorModelStrategy;
+  bucketClasses: GeneratorBucketClasses;
+  modelStrategyVersion: string;
   decompositionModel: string;   // e.g. claude-opus-4-6, gpt-4o
   arModel: string;              // e.g. claude-opus-4-6, gpt-4o
   clarifyModel: string;         // e.g. claude-sonnet-4-6, gpt-4o-mini
@@ -142,14 +153,21 @@ export interface TenantConfig {
 export const DEFAULT_CONFIG: TenantConfig = {
   goldSources: [],
   generatorConfig: {
-    provider: 'forge_llms',
-    decompositionModel: 'claude-opus-4-6',
-    arModel: 'claude-opus-4-6',
-    clarifyModel: 'claude-sonnet-4-5-20250929',
-    refineModel: 'claude-opus-4-6',
-    evaluateModel: 'claude-haiku-4-5-20251001',
-    triageModel: 'claude-haiku-4-5-20251001',
-    themeModel: 'claude-haiku-4-5-20251001',
+    provider: 'anthropic',
+    modelStrategy: 'stable',
+    bucketClasses: {
+      discovery: 'flash',
+      generation: 'pro',
+      refinement: 'flash',
+    },
+    modelStrategyVersion: '2026-04-04',
+    decompositionModel: 'claude-opus-4-1-20250805',
+    arModel: 'claude-opus-4-1-20250805',
+    clarifyModel: 'claude-3-5-sonnet-20241022',
+    refineModel: 'claude-3-5-sonnet-20241022',
+    evaluateModel: 'claude-3-5-sonnet-20241022',
+    triageModel: 'claude-3-5-sonnet-20241022',
+    themeModel: 'claude-3-5-sonnet-20241022',
     maxTokens: 8192,
   },
   domainContext: '',

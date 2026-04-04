@@ -6,9 +6,23 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
-import type { ConcreteModelFamily, LlmModelCatalogByVendor, LlmModelCatalogEntry, LlmProvider, ProjectActivitySummaryRow } from './types';
+import type {
+  GeneratorBucketClasses,
+  GeneratorModelStrategy,
+  LlmModelCatalogByVendor,
+  LlmModelCatalogEntry,
+  LlmProvider,
+  ProjectActivitySummaryRow,
+} from './types';
 import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
+import {
+  BUCKET_CLASS_LABELS,
+  DEFAULT_BUCKET_CLASSES,
+  getCatalogEntriesForProvider,
+  MODEL_STRATEGY_VERSION,
+  resolveUiGeneratorStrategyState,
+} from './modelStrategy';
 interface JiraProject { key: string; name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
 interface JiraField { id: string; name: string }
@@ -113,42 +127,6 @@ interface PiiPreviewResult {
   totalRedactions: number;
   byType: Record<string, number>;
 }
-
-const CLAUDE_MODELS = [
-  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 · Latest flagship' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 · Latest balanced' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 · Latest fast' },
-  { id: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1 · Best reasoning' },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4 · Prior flagship' },
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 · Balanced' },
-  { id: 'claude-3-7-sonnet-20250219', label: 'Claude Sonnet 3.7 · Prior balanced' },
-  { id: 'claude-3-5-sonnet-20241022', label: 'Claude Sonnet 3.5 · Legacy balanced' },
-  { id: 'claude-3-5-haiku-20241022', label: 'Claude Haiku 3.5 · Fast' },
-  { id: 'claude-3-haiku-20240307', label: 'Claude Haiku 3 · Legacy fast' },
-];
-const GEMINI_MODELS = [
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro · Deep reasoning' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash · Balanced speed' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite · Lowest cost' },
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash · Fast multimodal text' },
-  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash-Lite · Lean fallback' },
-];
-const OPENAI_MODELS = [
-  { id: 'gpt-5.4', label: 'GPT-5.4 · Latest flagship' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini · Latest mini' },
-  { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano · Latest nano' },
-  { id: 'gpt-5', label: 'GPT-5 · Highest capability' },
-  { id: 'gpt-5-mini', label: 'GPT-5 Mini · Strong lighter-weight GPT' },
-  { id: 'gpt-5-nano', label: 'GPT-5 Nano · Fastest low-cost GPT' },
-  { id: 'gpt-4.1', label: 'GPT-4.1 · Strong general model' },
-  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini · Lightweight' },
-  { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano · Smallest 4.1 model' },
-  { id: 'gpt-4o', label: 'GPT-4o · Balanced' },
-  { id: 'gpt-4o-mini', label: 'GPT-4o Mini · Fast and economical' },
-  { id: 'o3', label: 'o3 · Heavy reasoning' },
-  { id: 'o4-mini', label: 'o4-mini · Efficient reasoning' },
-];
-const AZURE_OPENAI_MODELS: Array<{ id: string; label: string }> = [];
 const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 type UiProvider = Exclude<LlmProvider, 'forge_llms'>;
@@ -202,121 +180,14 @@ function maskPreviewText(text: string) {
   };
 }
 
-function inferModelFamily(modelId: string): ConcreteModelFamily | undefined {
-  const normalized = modelId.trim().toLowerCase();
-  if (normalized.includes('flash')) return 'flash';
-  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4') || normalized.includes('sonnet')) return normalized.includes('mini') ? 'lite' : 'flash';
-  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano') || normalized.includes('haiku')) return 'lite';
-  if (normalized.includes('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
-  return undefined;
-}
-
-function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
-  if (provider === 'anthropic' || provider === 'forge_llms') return CLAUDE_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-  if (provider === 'gemini') return GEMINI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-  if (provider === 'openai') return OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-  return AZURE_OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-}
-
 function getCatalogModelId(entry?: LlmModelCatalogEntry) {
   return entry?.deploymentName || entry?.id || '';
 }
 
-function getPreferredFamilyModel(entries: LlmModelCatalogEntry[], family: ConcreteModelFamily) {
+function getPreferredFamilyModel(entries: LlmModelCatalogEntry[], family: 'pro' | 'flash' | 'lite') {
   const preferred = entries.find(entry => entry.family === family && entry.isLatest)
     || entries.find(entry => entry.family === family);
   return getCatalogModelId(preferred);
-}
-
-function getRecommendedModelSet(provider: LlmProvider, entries: LlmModelCatalogEntry[]) {
-  const pro = getPreferredFamilyModel(entries, 'pro');
-  const flash = getPreferredFamilyModel(entries, 'flash');
-  const lite = getPreferredFamilyModel(entries, 'lite');
-
-  if (provider === 'gemini') {
-    return {
-      simple: {
-        discovery: flash || lite || 'gemini-2.5-flash',
-        generation: pro || 'gemini-2.5-pro',
-        refinement: flash || 'gemini-2.5-flash',
-      },
-      advanced: {
-        clarify: flash || 'gemini-2.5-flash',
-        evaluate: lite || flash || 'gemini-2.5-flash-lite',
-        triage: lite || flash || 'gemini-2.5-flash-lite',
-        decomposition: pro || 'gemini-2.5-pro',
-        acceptanceRequirements: pro || 'gemini-2.5-pro',
-        theme: lite || flash || 'gemini-2.5-flash-lite',
-        refine: flash || 'gemini-2.5-flash',
-      },
-    };
-  }
-
-  if (provider === 'openai') {
-    return {
-      simple: {
-        discovery: flash || lite || 'gpt-4.1',
-        generation: pro || 'gpt-5.4',
-        refinement: flash || lite || 'gpt-4.1',
-      },
-      advanced: {
-        clarify: flash || lite || 'gpt-4.1',
-        evaluate: lite || 'gpt-5.4-mini',
-        triage: lite || 'gpt-5.4-mini',
-        decomposition: pro || 'gpt-5.4',
-        acceptanceRequirements: pro || 'gpt-5.4',
-        theme: lite || 'gpt-5.4-mini',
-        refine: flash || lite || 'gpt-4.1',
-      },
-    };
-  }
-
-  if (provider === 'azure_openai') {
-    return {
-      simple: {
-        discovery: flash || lite || 'latest-flash',
-        generation: pro || flash || 'latest-pro',
-        refinement: flash || lite || 'latest-flash',
-      },
-      advanced: {
-        clarify: flash || lite || 'latest-flash',
-        evaluate: lite || flash || 'latest-lite',
-        triage: lite || flash || 'latest-lite',
-        decomposition: pro || flash || 'latest-pro',
-        acceptanceRequirements: pro || flash || 'latest-pro',
-        theme: lite || flash || 'latest-lite',
-        refine: flash || lite || 'latest-flash',
-      },
-    };
-  }
-
-  return {
-    simple: {
-      discovery: flash || lite || 'claude-sonnet-4-20250514',
-      generation: pro || 'claude-opus-4-1-20250805',
-      refinement: flash || 'claude-sonnet-4-20250514',
-    },
-    advanced: {
-      clarify: flash || 'claude-sonnet-4-20250514',
-      evaluate: lite || 'claude-3-5-haiku-20241022',
-      triage: lite || 'claude-3-5-haiku-20241022',
-      decomposition: pro || 'claude-opus-4-1-20250805',
-      acceptanceRequirements: pro || 'claude-opus-4-1-20250805',
-      theme: lite || 'claude-3-5-haiku-20241022',
-      refine: flash || 'claude-sonnet-4-20250514',
-    },
-  };
-}
-
-function recommendationBlurbForProvider(provider: LlmProvider) {
-  if (provider === 'gemini') return 'Recommended baseline: Pro for generation quality, Flash for discovery and iterative refinement, Flash-Lite for triage and low-cost utility phases.';
-  if (provider === 'openai') return 'Recommended baseline: GPT-5.4 for generation quality, GPT-4.1 or GPT-5.4 Mini for discovery and refinement, and a Mini/Nano tier for lightweight routing phases.';
-  if (provider === 'azure_openai') return 'Recommended baseline: use your strongest GPT deployment for generation, a faster GPT deployment for refinement, and your lightest deployment for triage and sufficiency.';
-  return 'Recommended baseline: Opus 4.6 for generation quality, Sonnet 4.6 for discovery and refinement, and Haiku 4.5 for fast utility phases like triage, sufficiency, and theme analysis.';
-}
-
-function isLatestAlias(modelId: string) {
-  return modelId.trim().toLowerCase().startsWith('latest');
 }
 
 function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
@@ -374,18 +245,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // Models State
   const [provider, setProvider] = useState<LlmProvider>('anthropic');
-  const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-6');
-  const [arModel, setArModel] = useState('claude-opus-4-6');
-  const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-6');
-  const [evaluateModel, setEvaluateModel] = useState('claude-haiku-4-5-20251001');
-  const [triageModel, setTriageModel] = useState('claude-haiku-4-5-20251001');
-  const [refineModel, setRefineModel] = useState('claude-sonnet-4-6');
-  const [themeModel, setThemeModel] = useState('claude-haiku-4-5-20251001');
-
-  const [advancedModelMode, setAdvancedModelMode] = useState(false);
-  const [qualityModel, setQualityModel] = useState('claude-opus-4-6');
-  const [speedModel, setSpeedModel] = useState('claude-haiku-4-5-20251001');
-  const [refinementModel, setRefinementModel] = useState('claude-sonnet-4-6');
+  const [modelStrategy, setModelStrategy] = useState<GeneratorModelStrategy>('stable');
+  const [bucketClasses, setBucketClasses] = useState<GeneratorBucketClasses>(DEFAULT_BUCKET_CLASSES);
+  const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-1-20250805');
+  const [arModel, setArModel] = useState('claude-opus-4-1-20250805');
+  const [clarifyModel, setClarifyModel] = useState('claude-3-5-sonnet-20241022');
+  const [evaluateModel, setEvaluateModel] = useState('claude-3-5-sonnet-20241022');
+  const [triageModel, setTriageModel] = useState('claude-3-5-sonnet-20241022');
+  const [refineModel, setRefineModel] = useState('claude-3-5-sonnet-20241022');
+  const [themeModel, setThemeModel] = useState('claude-3-5-sonnet-20241022');
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
@@ -587,7 +455,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       const existingConfig = await api.getConfig() as any;
       if (existingConfig) {
         const gc = existingConfig.generatorConfig || {};
-        if (gc.provider) setProvider(getDisplayProvider(gc.provider));
+        const loadedProvider = gc.provider ? getDisplayProvider(gc.provider) : 'anthropic';
+        setProvider(loadedProvider);
         if (gc.decompositionModel) setDecompositionModel(gc.decompositionModel);
         if (gc.arModel) setArModel(gc.arModel);
         if (gc.clarifyModel) setClarifyModel(gc.clarifyModel);
@@ -595,26 +464,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.triageModel) setTriageModel(gc.triageModel);
         if (gc.refineModel) setRefineModel(gc.refineModel);
         if (gc.themeModel) setThemeModel(gc.themeModel);
-        // Initialise tier selectors from loaded models.
-        // If models differ within a tier group, fall back to advanced mode.
-        const decomp = gc.decompositionModel || 'claude-opus-4-6';
-        const ar = gc.arModel || 'claude-opus-4-6';
-        const clarify = gc.clarifyModel || 'claude-haiku-4-5-20251001';
-        const triage = gc.triageModel || 'claude-haiku-4-5-20251001';
-        const evaluate = gc.evaluateModel || 'claude-haiku-4-5-20251001';
-        const theme = gc.themeModel || 'claude-haiku-4-5-20251001';
-        const refine = gc.refineModel || 'claude-sonnet-4-6';
-        const qualityUniform = decomp === ar;
-        const speedUniform = clarify === triage && clarify === evaluate && clarify === theme;
-        if (qualityUniform && speedUniform) {
-          setQualityModel(decomp);
-          setSpeedModel(clarify);
-          setRefinementModel(refine);
-          setAdvancedModelMode(false);
-        } else {
-          setAdvancedModelMode(true);
-        }
-        
+
         if (gc.geminiApiKey) setExistingGeminiApiKey(gc.geminiApiKey);
         if (gc.geminiBaseUrl) setGeminiBaseUrl(gc.geminiBaseUrl);
         if (gc.anthropicApiKey) setExistingAnthropicApiKey(gc.anthropicApiKey);
@@ -633,6 +483,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             };
           }
           setModelCatalogs(nextCatalogs);
+          const { entries, allowCatalogResolution } = getCatalogEntriesForProvider(loadedProvider, nextCatalogs);
+          const strategyState = resolveUiGeneratorStrategyState({
+            config: gc,
+            provider: loadedProvider,
+            catalogEntries: entries,
+            allowCatalogResolution,
+            hasStoredStrategy: Boolean(gc.modelStrategy),
+          });
+          setModelStrategy(strategyState.modelStrategy);
+          setBucketClasses(strategyState.bucketClasses);
+        } else {
+          const strategyState = resolveUiGeneratorStrategyState({
+            config: gc,
+            provider: loadedProvider,
+            hasStoredStrategy: Boolean(gc.modelStrategy),
+          });
+          setModelStrategy(strategyState.modelStrategy);
+          setBucketClasses(strategyState.bucketClasses);
         }
 
         const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
@@ -877,16 +745,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   async function handleSave() {
     setIsSaving(true);
     try {
+      const generatorModels = strategyState.resolvedModels;
       await api.saveConfig({
         generatorConfig: {
           provider,
-          decompositionModel,
-          arModel,
-          clarifyModel,
-          refineModel,
-          evaluateModel,
-          triageModel,
-          themeModel,
+          modelStrategy: provider === 'azure_openai' ? 'custom' : modelStrategy,
+          bucketClasses,
+          modelStrategyVersion: MODEL_STRATEGY_VERSION,
+          decompositionModel: generatorModels.decompositionModel,
+          arModel: generatorModels.arModel,
+          clarifyModel: generatorModels.clarifyModel,
+          refineModel: generatorModels.refineModel,
+          evaluateModel: generatorModels.evaluateModel,
+          triageModel: generatorModels.triageModel,
+          themeModel: generatorModels.themeModel,
           maxTokens: 8192,
           anthropicApiKey: provider === 'anthropic' ? (anthropicApiKey.trim() || existingAnthropicApiKey || undefined) : undefined,
           anthropicBaseUrl: provider === 'anthropic' ? (anthropicBaseUrl.trim() || undefined) : undefined,
@@ -932,15 +804,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   async function testLlmConnection() {
     setIsTestingLlm(true); setLlmTestResult(null);
     try {
-      const resolvedTestModel = isLatestAlias(clarifyModel)
-        ? (clarifyModel === 'latest-pro'
-            ? getPreferredFamilyModel(currentCatalogEntries, 'pro')
-            : clarifyModel === 'latest-flash'
-              ? getPreferredFamilyModel(currentCatalogEntries, 'flash')
-              : clarifyModel === 'latest-lite'
-                ? getPreferredFamilyModel(currentCatalogEntries, 'lite')
-                : getCatalogModelId(currentCatalogEntries[0]))
-        : clarifyModel.trim();
+      const resolvedTestModel = strategyState.resolvedModels.clarifyModel.trim();
       if (!resolvedTestModel) {
         throw new Error(provider === 'azure_openai'
           ? 'No Azure OpenAI deployment is available yet. Refresh models and choose a concrete deployment first.'
@@ -975,74 +839,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     } catch(e: any) { console.error('Discovery failed', e); }
     finally { setIsDiscovering(false); }
   }
-
-  useEffect(() => {
-    const providerEntries = modelCatalogs[provider]?.models?.length ? modelCatalogs[provider]!.models : buildStaticCatalog(provider);
-    const proModel = getPreferredFamilyModel(providerEntries, 'pro');
-    const flashModel = getPreferredFamilyModel(providerEntries, 'flash');
-    const liteModel = getPreferredFamilyModel(providerEntries, 'lite');
-
-    if (provider === 'gemini') {
-      if (!decompositionModel.startsWith('gemini-') || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gemini-2.5-pro');
-      if (!arModel.startsWith('gemini-') || isLatestAlias(arModel)) setArModel(proModel || 'gemini-2.5-pro');
-      if (!clarifyModel.startsWith('gemini-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gemini-2.5-flash');
-      if (!evaluateModel.startsWith('gemini-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
-      if (!triageModel.startsWith('gemini-') || isLatestAlias(triageModel)) setTriageModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
-      if (!refineModel.startsWith('gemini-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gemini-2.5-flash');
-      if (!themeModel.startsWith('gemini-') || isLatestAlias(themeModel)) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
-    } else if (provider === 'openai') {
-      if ((!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o')) || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gpt-5.4');
-      if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o')) || isLatestAlias(arModel)) setArModel(proModel || 'gpt-5.4');
-      if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o')) || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gpt-4.1');
-      if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o')) || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'gpt-5.4-mini');
-      if ((!triageModel.startsWith('gpt-') && !triageModel.startsWith('o')) || isLatestAlias(triageModel)) setTriageModel(liteModel || 'gpt-5.4-mini');
-      if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o')) || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gpt-4.1');
-      if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o')) || isLatestAlias(themeModel)) setThemeModel(liteModel || 'gpt-5.4-mini');
-    } else if (provider === 'azure_openai') {
-      const shouldResetAzureModel = (modelId: string) =>
-        !modelId.trim()
-        || isLatestAlias(modelId)
-        || modelId.startsWith('gemini-')
-        || modelId.startsWith('gpt-')
-        || modelId.startsWith('o')
-        || modelId.startsWith('claude-');
-      if (shouldResetAzureModel(decompositionModel) && proModel) setDecompositionModel(proModel);
-      if (shouldResetAzureModel(arModel) && proModel) setArModel(proModel);
-      if (shouldResetAzureModel(clarifyModel) && flashModel) setClarifyModel(flashModel);
-      if (shouldResetAzureModel(evaluateModel) && (liteModel || flashModel)) setEvaluateModel(liteModel || flashModel);
-      if (shouldResetAzureModel(triageModel) && (liteModel || flashModel)) setTriageModel(liteModel || flashModel);
-      if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
-      if (shouldResetAzureModel(themeModel) && (liteModel || flashModel)) setThemeModel(liteModel || flashModel);
-    } else {
-      if (!decompositionModel.startsWith('claude-') || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'claude-opus-4-6');
-      if (!arModel.startsWith('claude-') || isLatestAlias(arModel)) setArModel(proModel || 'claude-opus-4-6');
-      if (!clarifyModel.startsWith('claude-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'claude-sonnet-4-6');
-      if (!evaluateModel.startsWith('claude-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'claude-haiku-4-5-20251001');
-      if (!triageModel.startsWith('claude-') || isLatestAlias(triageModel)) setTriageModel(liteModel || 'claude-haiku-4-5-20251001');
-      if (!refineModel.startsWith('claude-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'claude-sonnet-4-6');
-      if (!themeModel.startsWith('claude-') || isLatestAlias(themeModel)) setThemeModel(liteModel || 'claude-haiku-4-5-20251001');
-    }
-  }, [provider, modelCatalogs, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
-
-  // Sync tier selectors → individual model states when in simple mode
-  useEffect(() => {
-    if (advancedModelMode) return;
-    setDecompositionModel(qualityModel);
-    setArModel(qualityModel);
-  }, [qualityModel, advancedModelMode]);
-
-  useEffect(() => {
-    if (advancedModelMode) return;
-    setClarifyModel(speedModel);
-    setTriageModel(speedModel);
-    setThemeModel(speedModel);
-    setEvaluateModel(speedModel);
-  }, [speedModel, advancedModelMode]);
-
-  useEffect(() => {
-    if (advancedModelMode) return;
-    setRefineModel(refinementModel);
-  }, [refinementModel, advancedModelMode]);
 
   const refreshModelCatalog = useCallback(async () => {
     setIsRefreshingModels(true);
@@ -1100,9 +896,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     }
   }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, modelCatalogs, refreshModelCatalog]);
 
+  const { entries: catalogEntries, allowCatalogResolution } = useMemo(
+    () => getCatalogEntriesForProvider(provider, modelCatalogs),
+    [provider, modelCatalogs],
+  );
+
   const currentCatalogEntries = useMemo(() => {
-    const entries = modelCatalogs[provider]?.models?.length ? modelCatalogs[provider]!.models : buildStaticCatalog(provider);
-    return [...entries].sort((a, b) => {
+    return [...catalogEntries].sort((a, b) => {
       const rank = (entry: LlmModelCatalogEntry) => {
         if (entry.family === 'pro') return 0;
         if (entry.family === 'flash') return 1;
@@ -1111,7 +911,96 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       };
       return rank(a) - rank(b) || (a.displayName || a.id).localeCompare(b.displayName || b.id);
     });
-  }, [modelCatalogs, provider]);
+  }, [catalogEntries]);
+
+  const strategyState = useMemo(() => resolveUiGeneratorStrategyState({
+    config: {
+      provider,
+      modelStrategy,
+      bucketClasses,
+      modelStrategyVersion: MODEL_STRATEGY_VERSION,
+      decompositionModel,
+      arModel,
+      clarifyModel,
+      refineModel,
+      evaluateModel,
+      triageModel,
+      themeModel,
+      maxTokens: 8192,
+    },
+    provider,
+    modelStrategy,
+    bucketClasses,
+    catalogEntries: currentCatalogEntries,
+    allowCatalogResolution,
+    hasStoredStrategy: true,
+  }), [
+    provider,
+    modelStrategy,
+    bucketClasses,
+    currentCatalogEntries,
+    allowCatalogResolution,
+    decompositionModel,
+    arModel,
+    clarifyModel,
+    refineModel,
+    evaluateModel,
+    triageModel,
+    themeModel,
+  ]);
+
+  useEffect(() => {
+    if (provider === 'azure_openai' && modelStrategy !== 'custom') {
+      setModelStrategy('custom');
+    }
+  }, [provider, modelStrategy]);
+
+  useEffect(() => {
+    if (modelStrategy !== 'custom') return;
+    const proModel = getPreferredFamilyModel(currentCatalogEntries, 'pro');
+    const flashModel = getPreferredFamilyModel(currentCatalogEntries, 'flash');
+    const liteModel = getPreferredFamilyModel(currentCatalogEntries, 'lite');
+
+    if (provider === 'gemini') {
+      if (!decompositionModel.startsWith('gemini-')) setDecompositionModel(proModel || 'gemini-2.5-pro');
+      if (!arModel.startsWith('gemini-')) setArModel(proModel || 'gemini-2.5-pro');
+      if (!clarifyModel.startsWith('gemini-')) setClarifyModel(flashModel || 'gemini-2.5-flash');
+      if (!evaluateModel.startsWith('gemini-')) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
+      if (!triageModel.startsWith('gemini-')) setTriageModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
+      if (!refineModel.startsWith('gemini-')) setRefineModel(flashModel || 'gemini-2.5-flash');
+      if (!themeModel.startsWith('gemini-')) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
+    } else if (provider === 'openai') {
+      if ((!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o'))) setDecompositionModel(proModel || 'gpt-5.4');
+      if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o'))) setArModel(proModel || 'gpt-5.4');
+      if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o'))) setClarifyModel(flashModel || 'gpt-4o');
+      if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o'))) setEvaluateModel(liteModel || 'gpt-4o-mini');
+      if ((!triageModel.startsWith('gpt-') && !triageModel.startsWith('o'))) setTriageModel(liteModel || 'gpt-4o-mini');
+      if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o'))) setRefineModel(flashModel || 'gpt-4o');
+      if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o'))) setThemeModel(liteModel || 'gpt-4o-mini');
+    } else if (provider === 'azure_openai') {
+      const shouldResetAzureModel = (modelId: string) =>
+        !modelId.trim()
+        || modelId.startsWith('gemini-')
+        || modelId.startsWith('gpt-')
+        || modelId.startsWith('o')
+        || modelId.startsWith('claude-');
+      if (shouldResetAzureModel(decompositionModel) && proModel) setDecompositionModel(proModel);
+      if (shouldResetAzureModel(arModel) && proModel) setArModel(proModel);
+      if (shouldResetAzureModel(clarifyModel) && flashModel) setClarifyModel(flashModel);
+      if (shouldResetAzureModel(evaluateModel) && (liteModel || flashModel)) setEvaluateModel(liteModel || flashModel);
+      if (shouldResetAzureModel(triageModel) && (liteModel || flashModel)) setTriageModel(liteModel || flashModel);
+      if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
+      if (shouldResetAzureModel(themeModel) && (liteModel || flashModel)) setThemeModel(liteModel || flashModel);
+    } else {
+      if (!decompositionModel.startsWith('claude-')) setDecompositionModel(proModel || 'claude-opus-4-1-20250805');
+      if (!arModel.startsWith('claude-')) setArModel(proModel || 'claude-opus-4-1-20250805');
+      if (!clarifyModel.startsWith('claude-')) setClarifyModel(flashModel || 'claude-3-5-sonnet-20241022');
+      if (!evaluateModel.startsWith('claude-')) setEvaluateModel(liteModel || 'claude-3-5-haiku-20241022');
+      if (!triageModel.startsWith('claude-')) setTriageModel(liteModel || 'claude-3-5-haiku-20241022');
+      if (!refineModel.startsWith('claude-')) setRefineModel(flashModel || 'claude-3-5-sonnet-20241022');
+      if (!themeModel.startsWith('claude-')) setThemeModel(liteModel || 'claude-3-5-haiku-20241022');
+    }
+  }, [provider, modelStrategy, currentCatalogEntries, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
 
   const availableModels = useMemo(() => {
     const options: Array<{ id: string; label: string }> = [];
@@ -1124,18 +1013,28 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         });
       }
     });
-    [clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel].forEach(modelId => {
+    [
+      clarifyModel,
+      decompositionModel,
+      arModel,
+      evaluateModel,
+      triageModel,
+      refineModel,
+      themeModel,
+      strategyState.resolvedModels.clarifyModel,
+      strategyState.resolvedModels.decompositionModel,
+      strategyState.resolvedModels.arModel,
+      strategyState.resolvedModels.evaluateModel,
+      strategyState.resolvedModels.triageModel,
+      strategyState.resolvedModels.refineModel,
+      strategyState.resolvedModels.themeModel,
+    ].forEach(modelId => {
       if (modelId && !options.some(option => option.id === modelId)) {
         options.push({ id: modelId, label: modelId });
       }
     });
     return options;
-  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel]);
-
-  const recommendedModels = useMemo(
-    () => getRecommendedModelSet(provider, currentCatalogEntries),
-    [provider, currentCatalogEntries],
-  );
+  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel, strategyState]);
 
   const showComplianceTab = true;
   const settingsNav = [
@@ -1318,39 +1217,68 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Recommendation</div>
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Strategy</div>
                     <div className="mt-1.5 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                      {recommendationBlurbForProvider(provider)}
+                      Stable stays on curated proven models. Latest upgrades to the newest approved family where the provider catalog confirms it. Custom gives you exact per-role control.
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Model assignments</span>
-                    <button
-                      onClick={() => setAdvancedModelMode(v => !v)}
-                      className="text-[12px] font-bold text-[var(--rf-brand)] hover:underline"
-                    >
-                      {advancedModelMode ? 'Simple mode' : 'Advanced mode'}
-                    </button>
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Mode</div>
+                    <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
+                      {(['stable', 'latest', 'custom'] as const).map((nextStrategy) => {
+                        const disabled = provider === 'azure_openai' && nextStrategy !== 'custom';
+                        return (
+                          <button
+                            key={nextStrategy}
+                            disabled={disabled}
+                            onClick={() => {
+                              if (nextStrategy === 'custom' && modelStrategy !== 'custom') {
+                                setDecompositionModel(strategyState.resolvedModels.decompositionModel);
+                                setArModel(strategyState.resolvedModels.arModel);
+                                setClarifyModel(strategyState.resolvedModels.clarifyModel);
+                                setEvaluateModel(strategyState.resolvedModels.evaluateModel);
+                                setTriageModel(strategyState.resolvedModels.triageModel);
+                                setRefineModel(strategyState.resolvedModels.refineModel);
+                                setThemeModel(strategyState.resolvedModels.themeModel);
+                              }
+                              setModelStrategy(nextStrategy);
+                            }}
+                            className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${
+                              modelStrategy === nextStrategy
+                                ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
+                                : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
+                            } disabled:opacity-40`}
+                          >
+                            {nextStrategy}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {provider === 'azure_openai' && (
+                      <div className="text-[12px] text-[var(--rf-text-tertiary)]">
+                        Azure OpenAI remains custom-only for now because deployment names differ per tenant.
+                      </div>
+                    )}
                   </div>
 
-                  {advancedModelMode ? (
+                  {modelStrategy === 'custom' ? (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
                       {[
-                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: `Round 1 discovery and follow-ups · Recommended: ${recommendedModels.advanced.clarify}` },
-                        { label: 'Sufficiency Check', val: evaluateModel, set: (v: string) => { setEvaluateModel(v); setThemeModel(v); }, sub: `Gate before generation continues · Recommended: ${recommendedModels.advanced.evaluate}` },
-                        { label: 'Triage', val: triageModel, set: setTriageModel, sub: `Scope, complexity, and routing · Recommended: ${recommendedModels.advanced.triage}` },
-                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel, sub: `Draft feature structure · Recommended: ${recommendedModels.advanced.decomposition}` },
-                        { label: 'Acceptance Requirements', val: arModel, set: setArModel, sub: `Write Given / When / Then · Recommended: ${recommendedModels.advanced.acceptanceRequirements}` },
-                        { label: 'Theme Analysis & Titles', val: themeModel, set: setThemeModel, sub: `Cluster themes and title features · Recommended: ${recommendedModels.advanced.theme}` },
-                        { label: 'Refinement', val: refineModel, set: setRefineModel, sub: `Interactive edits on a single feature · Recommended: ${recommendedModels.advanced.refine}` },
+                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: 'Round 1 discovery and follow-ups' },
+                        { label: 'Sufficiency Check', val: evaluateModel, set: setEvaluateModel, sub: 'Gate before generation continues' },
+                        { label: 'Triage', val: triageModel, set: setTriageModel, sub: 'Scope, complexity, and routing' },
+                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel, sub: 'Draft feature structure' },
+                        { label: 'Acceptance Requirements', val: arModel, set: setArModel, sub: 'Write Given / When / Then' },
+                        { label: 'Theme Analysis & Titles', val: themeModel, set: setThemeModel, sub: 'Cluster themes and title features' },
+                        { label: 'Refinement', val: refineModel, set: setRefineModel, sub: 'Interactive edits on a single feature' },
                       ].map((item, i) => (
                         <div key={i} className="flex items-center justify-between gap-4 py-2.5">
                           <div>
                             <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
                             <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
                           </div>
-                          <div className="relative w-[200px] shrink-0">
+                          <div className="relative w-[220px] shrink-0">
                             <select value={item.val} disabled={availableModels.length === 0 || !isAdmin} onChange={e => item.set(e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
                               {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                             </select>
@@ -1360,25 +1288,55 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       ))}
                     </div>
                   ) : (
-                    <div className="divide-y divide-[var(--rf-border-subtle)]">
-                      {[
-                        { label: 'Discovery', sub: `Clarifying questions, sufficiency check, triage · Recommended: ${recommendedModels.simple.discovery}`, val: speedModel, set: setSpeedModel },
-                        { label: 'Generation', sub: `Feature breakdown, AR writing, theme analysis · Recommended: ${recommendedModels.simple.generation}`, val: qualityModel, set: setQualityModel },
-                        { label: 'Refinement', sub: `Interactive iteration on existing features · Recommended: ${recommendedModels.simple.refinement}`, val: refinementModel, set: setRefinementModel },
-                      ].map((item, i) => (
-                        <div key={i} className="flex items-center justify-between gap-4 py-2.5">
-                          <div>
-                            <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
-                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
+                    <div className="space-y-4">
+                      <div className="divide-y divide-[var(--rf-border-subtle)]">
+                        {[
+                          { key: 'discovery' as const, label: 'Discovery', sub: 'Clarifying questions, sufficiency checks, triage, and themes', resolved: strategyState.resolvedBucketModels.discovery },
+                          { key: 'generation' as const, label: 'Generation', sub: 'Feature breakdown and acceptance requirements', resolved: strategyState.resolvedBucketModels.generation },
+                          { key: 'refinement' as const, label: 'Refinement', sub: 'Interactive edits on existing features', resolved: strategyState.resolvedBucketModels.refinement },
+                        ].map((item) => (
+                          <div key={item.key} className="flex items-center justify-between gap-4 py-2.5">
+                            <div>
+                              <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
+                              <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
+                              <div className="text-[12px] text-[var(--rf-brand)] mt-1 font-semibold">{item.resolved}</div>
+                            </div>
+                            <div className="relative w-[220px] shrink-0">
+                              <select
+                                value={bucketClasses[item.key]}
+                                disabled={!isAdmin || provider === 'azure_openai'}
+                                onChange={e => setBucketClasses(prev => ({ ...prev, [item.key]: e.target.value as 'pro' | 'flash' | 'lite' }))}
+                                className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60"
+                              >
+                                {(['pro', 'flash', 'lite'] as const).map((family) => (
+                                  <option key={family} value={family}>{BUCKET_CLASS_LABELS[family]}</option>
+                                ))}
+                              </select>
+                              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
+                            </div>
                           </div>
-                          <div className="relative w-[200px] shrink-0">
-                            <select value={item.val} disabled={availableModels.length === 0 || !isAdmin} onChange={e => item.set(e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
-                              {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                            </select>
-                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3 space-y-2">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced role breakdown</div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {[
+                            ['Clarifying Questions', strategyState.resolvedModels.clarifyModel],
+                            ['Sufficiency Check', strategyState.resolvedModels.evaluateModel],
+                            ['Triage', strategyState.resolvedModels.triageModel],
+                            ['Theme Analysis & Titles', strategyState.resolvedModels.themeModel],
+                            ['Feature Breakdown', strategyState.resolvedModels.decompositionModel],
+                            ['Acceptance Requirements', strategyState.resolvedModels.arModel],
+                            ['Refinement', strategyState.resolvedModels.refineModel],
+                          ].map(([label, model]) => (
+                            <div key={label} className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
+                              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{label}</div>
+                              <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{model}</div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
                   )}
 

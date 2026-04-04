@@ -11,6 +11,7 @@ import { callLlmJson } from './llm';
 import { buildRerankPrompt } from './prompts';
 import { ClarifyAnswer, SimilarStory, TenantConfig } from '../types';
 import { objectDelete, objectRead, objectWrite, KEYS } from '../services/cache';
+import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 
 interface BacklogDoc {
   key: string;
@@ -593,7 +594,11 @@ async function normalizeThemesWithLlm(
 ): Promise<Array<BacklogTheme & { sampleSummaries?: string[] }>> {
   if (!themes.length) return themes;
 
-  const providerOpts = buildLlmProviderOpts(config);
+  const effectiveConfig = {
+    ...config,
+    generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
+  };
+  const providerOpts = buildLlmProviderOpts(effectiveConfig);
   const normalizedById = new Map<string, { label?: string; summary?: string; keywords?: string[] }>();
 
   for (let i = 0; i < themes.length; i += THEME_NORMALIZATION_BATCH_SIZE) {
@@ -609,7 +614,7 @@ async function normalizeThemesWithLlm(
       })));
 
       const response = await callLlmJson<Array<{ id: string; label?: string; summary?: string; keywords?: string[] }>>({
-        model: config.generatorConfig.themeModel,
+        model: effectiveConfig.generatorConfig.themeModel,
         systemPrompt: [
           'You clean up Jira backlog theme clusters for retrieval.',
           'Rewrite each theme into a concise business-facing label and one-sentence summary.',
