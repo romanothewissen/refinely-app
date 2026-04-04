@@ -16,6 +16,16 @@ import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
 
+/**
+ * When the user provides only an attachment (empty requirement), fall back to
+ * using the first 600 chars of the attachment as the BM25 retrieval query.
+ */
+function deriveRetrievalQuery(requirement: string, attachmentText: string): string {
+  if ((requirement?.trim().length ?? 0) >= 30) return requirement.trim();
+  const att = attachmentText?.trim() ?? '';
+  return att ? att.slice(0, 600).replace(/\s+/g, ' ') : requirement;
+}
+
 function buildWiExcerpt(text: string, maxChars = 180): string {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
   if (compact.length <= maxChars) return compact;
@@ -43,7 +53,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and related stories…', inputSignature);
     const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveWiContext(maskedRequirement.text, 4, 20000, projectKey)
+        ? retrieveWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), 4, 20000, projectKey)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
         ? findSimilarStories({

@@ -134,6 +134,7 @@ export interface TenantConfig {
   domainContexts: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+  defaultProjectKey?: string;
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {

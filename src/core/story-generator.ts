@@ -176,7 +176,7 @@ const PASS2_CONTEXT_LIMITS = {
   similar: 3000,
 } as const;
 
-const MAX_EXECUTABLE_FEATURES = 8;
+const MAX_EXECUTABLE_FEATURES = 10;
 const MAX_CLARIFY_QUESTION_CHARS = 250;
 const MAX_CLARIFY_SUGGESTION_CHARS = 130;
 const FOLLOWUP_GROUNDING_STOPWORDS = new Set([
@@ -633,8 +633,8 @@ export async function assessRequirementWithLlm(input: {
       model: getTierModel(input.generatorConfig.triageModel, input.tier),
       systemPrompt: buildTriageSystemPrompt(),
       userMessage,
-      maxTokens: 256,
-      reasoningEffort: 'none',
+      maxTokens: 400,
+      reasoningEffort: 'low',
       ...input.providerOpts,
     });
     return parseTriageResult(result.data);
@@ -748,8 +748,8 @@ export function assessRequirement(input: {
     clarityScore >= 4
       ? { min: 4, max: 6, target: 5, clarity: 'clear' }
       : clarityScore <= 1
-        ? { min: 6, max: 9, target: 7, clarity: 'vague' }
-        : { min: 5, max: 7, target: 6, clarity: 'medium' };
+        ? { min: 7, max: 11, target: 9, clarity: 'vague' }
+        : { min: 5, max: 8, target: 7, clarity: 'medium' };
 
   // ── Shape tier (5 buckets) ──
   // Floor: short underspecified requirements with any broad concept should not
@@ -791,8 +791,8 @@ export function assessRequirement(input: {
       high:   { min: 5, max: 8, target: 7 },
     },
     epic: {
-      low:    { min: 6, max: 8, target: 7 },
-      high:   { min: 6, max: 8, target: 8 },
+      low:    { min: 6, max: 10, target: 8 },
+      high:   { min: 7, max: 10, target: 9 },
     },
   };
   const complexityBand = (complexity === 'high' || complexity === 'very_high') ? 'high' : 'low';

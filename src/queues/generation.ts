@@ -34,6 +34,18 @@ interface GenerationProgressPayload {
 
 const PROGRESS_HEARTBEAT_MS = 15000;
 
+/**
+ * When the user provides only an attachment (empty requirement), use the
+ * first 600 chars of the attachment as the retrieval query for WI and
+ * similar-stories BM25 search. This ensures relevant chunks are returned
+ * instead of an empty-string query producing meaningless results.
+ */
+function deriveRetrievalQuery(requirement: string, attachmentText: string): string {
+  if ((requirement?.trim().length ?? 0) >= 30) return requirement.trim();
+  const att = attachmentText?.trim() ?? '';
+  return att ? att.slice(0, 600).replace(/\s+/g, ' ') : requirement;
+}
+
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
   await entitySet(KEYS.generationProgress(sessionId), {
     type: 'progress',
@@ -173,11 +185,11 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const [wiContext, similarStories, triageResult] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveWiContext(maskedRequirement.text, config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
+        ? retrieveWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
         ? findSimilarStories({
-            requirement: maskedRequirement.text,
+            requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text),
             attachmentText: maskedAttachment.text,
             clarifyAnswers: maskedAnswers.answers,
             config,

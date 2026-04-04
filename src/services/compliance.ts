@@ -139,14 +139,60 @@ export async function saveTransparencyReport(report: Omit<TransparencyReport, 'r
 export async function listTransparencyReports(filters?: {
   sessionId?: string;
   turnType?: TransparencyReport['turnType'];
+  projectKey?: string;
   limit?: number;
 }): Promise<TransparencyReport[]> {
   const existing = await entityGet<TransparencyReport[]>(KEYS.transparencyReports) ?? [];
   const filtered = existing.filter((item) => {
     if (filters?.sessionId && item.sessionId !== filters.sessionId) return false;
     if (filters?.turnType && item.turnType !== filters.turnType) return false;
+    if (filters?.projectKey && item.projectKey !== filters.projectKey) return false;
     return true;
   });
   return [...filtered].reverse().slice(0, Math.max(1, Math.min(filters?.limit ?? 100, 1000)));
+}
+
+export interface ComplianceSummary {
+  totalByTurnType: Record<string, number>;
+  totalTokens: number;
+  piiRedactionsByType: Record<string, number>;
+  modelUsage: Record<string, number>;
+  projectBreakdown: Array<{ projectKey: string; count: number; tokenUsage: number; latestAt?: string }>;
+}
+
+export async function getComplianceSummary(): Promise<ComplianceSummary> {
+  const reports = await entityGet<TransparencyReport[]>(KEYS.transparencyReports) ?? [];
+
+  const totalByTurnType: Record<string, number> = {};
+  const piiRedactionsByType: Record<string, number> = {};
+  const modelUsage: Record<string, number> = {};
+  const projectMap: Record<string, { count: number; tokenUsage: number; latestAt?: string }> = {};
+  let totalTokens = 0;
+
+  for (const r of reports) {
+    totalByTurnType[r.turnType] = (totalByTurnType[r.turnType] ?? 0) + 1;
+    if (r.tokenUsage?.total) totalTokens += r.tokenUsage.total;
+    if (r.piiMasking?.byType) {
+      for (const [k, v] of Object.entries(r.piiMasking.byType)) {
+        piiRedactionsByType[k] = (piiRedactionsByType[k] ?? 0) + v;
+      }
+    }
+    if (r.model) modelUsage[r.model] = (modelUsage[r.model] ?? 0) + 1;
+    const pk = r.projectKey || 'Workspace';
+    const existing = projectMap[pk] ?? { count: 0, tokenUsage: 0 };
+    const tokens = r.tokenUsage?.total ?? 0;
+    const isLater = !existing.latestAt || r.createdAt > existing.latestAt;
+    projectMap[pk] = {
+      count: existing.count + 1,
+      tokenUsage: existing.tokenUsage + tokens,
+      latestAt: isLater ? r.createdAt : existing.latestAt,
+    };
+  }
+
+  const projectBreakdown = Object.entries(projectMap)
+    .map(([projectKey, data]) => ({ projectKey, ...data }))
+    .sort((a, b) => b.count - a.count);
+
+  return { totalByTurnType, totalTokens, piiRedactionsByType, modelUsage, projectBreakdown };
 }
 

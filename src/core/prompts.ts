@@ -275,6 +275,8 @@ Return a JSON object with:
 
 Be precise. A short sentence can still imply a broad, complex system. "Optimize scheduling based on criticality and due dates" is NOT narrow — it implies schedule generation, data inputs, scoring/weighting, visibility, exception handling, and more.
 
+SCOPE BIAS CORRECTION: Multi-part system concepts (scheduling, assignment optimisation, routing, dashboards, approval workflows, notification pipelines, end-to-end flows, integrations) are ALWAYS at least "broad" scope. A single sentence that combines multiple domains with "and", or uses words like "end-to-end", "optimise", "intelligent", or "manage" should never be classified "narrow" or "minimal". Count implicit capabilities: a scheduling requirement implies data inputs, scoring/weighting, display, overrides, and exception handling — that is 5+ features before any edge case analysis. When uncertain between two shapes, choose the larger one.
+
 Output JSON only: {"estimatedFeatures": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
 }
 

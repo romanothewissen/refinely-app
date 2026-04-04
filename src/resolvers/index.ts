@@ -15,6 +15,7 @@ import { entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import {
   appendComplianceAuditEvent,
+  getComplianceSummary,
   listComplianceAuditEvents,
   listTransparencyReports,
   maskPiiText,
@@ -877,9 +878,16 @@ resolver.define('listTransparencyReports', async ({ payload, context }) => {
   const reports = await listTransparencyReports({
     sessionId: payload?.sessionId,
     turnType: payload?.turnType,
-    limit: payload?.limit ?? 100,
+    projectKey: payload?.projectKey,
+    limit: payload?.limit ?? 250,
   });
   return { success: true, reports };
+});
+
+resolver.define('getComplianceSummary', async ({ context }) => {
+  await ensureAdmin(context);
+  const summary = await getComplianceSummary();
+  return { success: true, summary };
 });
 
 

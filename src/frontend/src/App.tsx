@@ -528,6 +528,11 @@ export default function App() {
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
       setBrandingLogoUrl(res?.branding?.logoUrl || null);
+      // Apply saved default project only when no Forge issue context has set one already
+      if (res.defaultProjectKey) {
+        setProjectKey(prev => (prev === '*' ? res.defaultProjectKey : prev));
+        setContextMode(prev => (prev === 'undecided' ? 'project' : prev));
+      }
     }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
   }, []);
