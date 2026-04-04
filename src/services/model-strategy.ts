@@ -176,12 +176,16 @@ function resolvePresetFamilyModel(
   savedFallback?: string,
 ): string {
   const catalogEntries = normalizeCatalogEntries(catalog);
+  const allowCatalogFallback = catalog?.source === 'discovered' || catalog?.source === 'manual';
   const strategyCandidates = PRESET_MODELS[provider][strategy][family];
   const primaryCandidate = strategyCandidates[0];
   const matchedCurrent = findCatalogModel(catalogEntries, strategyCandidates);
   if (matchedCurrent) return matchedCurrent;
 
   if (strategy === 'latest') {
+    if (!allowCatalogFallback) {
+      return primaryCandidate || savedFallback?.trim() || PRESET_MODELS[provider].stable[family][0];
+    }
     const stableCandidates = PRESET_MODELS[provider].stable[family];
     const matchedStable = findCatalogModel(catalogEntries, stableCandidates);
     if (matchedStable) return matchedStable;

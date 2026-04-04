@@ -52,10 +52,10 @@ test('supports per-bucket class overrides in latest mode', () => {
     maxTokens: 8192,
   });
 
-  assert.equal(resolved.decompositionModel, 'gpt-4o');
-  assert.equal(resolved.arModel, 'gpt-4o');
-  assert.equal(resolved.clarifyModel, 'gpt-4o-mini');
-  assert.equal(resolved.evaluateModel, 'gpt-4o-mini');
+  assert.equal(resolved.decompositionModel, 'gpt-5.4');
+  assert.equal(resolved.arModel, 'gpt-5.4');
+  assert.equal(resolved.clarifyModel, 'gpt-5.4-mini');
+  assert.equal(resolved.evaluateModel, 'gpt-5.4-mini');
   assert.equal(resolved.refineModel, 'gpt-4o');
 });
 
@@ -65,6 +65,17 @@ test('falls back from unavailable latest Gemini models to stable mappings before
     modelStrategy: 'latest',
     bucketClasses: DEFAULT_BUCKET_CLASSES,
     modelStrategyVersion: MODEL_STRATEGY_VERSION,
+    modelCatalogs: {
+      gemini: {
+        vendor: 'gemini',
+        source: 'discovered',
+        models: [
+          { id: 'gemini-2.5-pro', family: 'pro' },
+          { id: 'gemini-2.5-flash', family: 'flash' },
+          { id: 'gemini-2.5-flash-lite', family: 'lite' },
+        ],
+      },
+    },
     decompositionModel: 'saved-pro-model',
     arModel: 'saved-pro-model',
     clarifyModel: 'saved-flash-model',
@@ -115,6 +126,6 @@ test('applies free-tier downgrades after preset resolution', () => {
     maxTokens: 8192,
   });
 
-  assert.equal(getTierModel(resolved.decompositionModel, 'free'), 'gpt-4o-mini');
+  assert.equal(getTierModel(resolved.decompositionModel, 'free'), 'gpt-5.4-mini');
   assert.equal(getTierModel(resolved.refineModel, 'free'), 'gpt-4o-mini');
 });

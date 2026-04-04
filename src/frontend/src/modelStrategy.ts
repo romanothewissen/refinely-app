@@ -199,6 +199,9 @@ function resolvePresetFamilyModel(
   if (matched) return matched;
 
   if (strategy === 'latest') {
+    if (!allowCatalogResolution) {
+      return candidates[0] || savedFallback?.trim() || PRESET_MODELS[provider].stable[family][0];
+    }
     const stableCandidates = PRESET_MODELS[provider].stable[family];
     const matchedStable = findCatalogModel(entries, stableCandidates, allowCatalogResolution);
     if (matchedStable) return matchedStable;
