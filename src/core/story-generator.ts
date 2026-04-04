@@ -363,7 +363,7 @@ async function runParallelArPass(input: {
   });
 
   const model = getTierModel(input.generatorConfig.arModel, input.tier);
-  const maxTokens = 2048;
+  const maxTokens = 3072;
 
   // Build per-feature tasks
   const tasks = input.features.map((feature) => ({
@@ -490,7 +490,7 @@ async function backfillMissingAcceptanceRequirements(input: {
           process_code: feature.process_code,
         },
       }),
-      maxTokens: 2048,
+      maxTokens: 3072,
       reasoningEffort: 'medium',
       ...input.providerOpts,
     });
