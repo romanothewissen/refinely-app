@@ -181,116 +181,151 @@ export function ClarifyQuestionsView({
     .filter((section) => section.items.length > 0);
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden fade-in bg-transparent">
-      {/* Header */}
+    <div className="flex-1 flex min-w-0 flex-col h-full overflow-hidden fade-in bg-transparent">
       <motion.header
-        className="shrink-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl px-6 py-4 z-20 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)] flex items-center justify-between gap-4"
+        className="rf-pane-header rf-pane-header--canvas shrink-0 sticky top-0"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="flex items-center gap-3">
-          {!sidebarOpen && (
-            <motion.button
-              onClick={() => setSidebarOpen(true)}
-              className="p-2 -ml-2 rounded-xl hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] transition-colors"
-              title="Open Sidebar"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <Menu className="w-5 h-5" />
-            </motion.button>
-          )}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)] shadow-sm">
+        <div className="flex h-full w-full min-w-0 items-center justify-between gap-4">
+          <div className="rf-pane-header-cluster">
+            {!sidebarOpen && (
+              <motion.button
+                onClick={() => setSidebarOpen(true)}
+                className="p-2 -ml-2 rounded-xl hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] transition-colors"
+                title="Open Sidebar"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Menu className="w-5 h-5" />
+              </motion.button>
+            )}
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-muted)] shadow-sm">
               <Sparkles className="w-5 h-5 text-[var(--rf-brand)]" />
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Requirement Discovery</h1>
-              <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">
+            <div className="rf-pane-header-copy">
+              <div className="rf-pane-header-kicker">Discovery Flow</div>
+              <h1 className="rf-pane-header-title">Requirement Discovery</h1>
+              <p className="rf-pane-header-subtitle">
                 Round {round} of 2 · {answeredCount} of {questions.length} questions explored
               </p>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-4 flex-1 max-w-lg hidden md:flex">
-          <div className="flex-1 h-2 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden shadow-inner">
-            <div
-              className="h-full bg-[var(--rf-brand)] rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(43,89,74,0.35)]"
-              style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
-            />
+          <div className="hidden min-[980px]:flex min-w-[320px] max-w-[420px] flex-1 items-center gap-4">
+            <div className="flex-1">
+              <div className="mb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
+                <span>Coverage</span>
+                <span>{answeredCount}/{questions.length}</span>
+              </div>
+              <div className="h-2 rounded-full bg-[rgba(35,74,61,0.08)] overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))] transition-all duration-500"
+                  style={{ width: `${(answeredCount / Math.max(questions.length, 1)) * 100}%` }}
+                />
+              </div>
+            </div>
           </div>
-          <span className="text-xs font-bold text-[var(--rf-text-tertiary)] shrink-0">{answeredCount}/{questions.length}</span>
-        </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          <motion.button
-            onClick={onSkip}
-            disabled={isSubmitting}
-            className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)]"
-            whileTap={{ scale: 0.97 }}
-          >
-            {skipLabel ?? (round === 2 ? 'Skip follow-up' : 'Skip all')}
-          </motion.button>
-          {isBlocked ? (
+          <div className="flex items-center gap-3 shrink-0">
             <motion.button
-              onClick={onRetry}
-              disabled={isSubmitting || !onRetry}
-              className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20 disabled:opacity-60"
-              whileTap={{ scale: 0.98 }}
-            >
-              Retry discovery
-              <ArrowRight className="w-4 h-4" />
-            </motion.button>
-          ) : (
-            <motion.button
-              onClick={handleSubmit}
+              onClick={onSkip}
               disabled={isSubmitting}
-              className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
-              whileTap={{ scale: 0.98 }}
+              className="text-xs font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition px-3 py-2 rounded-lg hover:bg-[var(--rf-surface-soft)]"
+              whileTap={{ scale: 0.97 }}
             >
-              {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
-              <ArrowRight className="w-4 h-4" />
+              {skipLabel ?? (round === 2 ? 'Skip follow-up' : 'Skip all')}
             </motion.button>
-          )}
+            {isBlocked ? (
+              <motion.button
+                onClick={onRetry}
+                disabled={isSubmitting || !onRetry}
+                className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20 disabled:opacity-60"
+                whileTap={{ scale: 0.98 }}
+              >
+                Retry discovery
+                <ArrowRight className="w-4 h-4" />
+              </motion.button>
+            ) : (
+              <motion.button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="brainstorm-shimmer flex items-center gap-2 px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
+                whileTap={{ scale: 0.98 }}
+              >
+                {isSubmitting ? 'Checking sufficiency…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
+                <ArrowRight className="w-4 h-4" />
+              </motion.button>
+            )}
+          </div>
         </div>
       </motion.header>
 
-      {/* All questions */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-        <div className="max-w-3xl mx-auto space-y-8 pb-12">
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6">
+        <div className="mx-auto w-full max-w-6xl space-y-8 pb-12">
           {contextMeta && (
             <motion.div
-              className="rf-card p-5"
+              className="relative overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_32px_80px_-48px_rgba(15,23,42,0.3)]"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-sm">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="font-bold text-[var(--rf-text)] flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-[var(--rf-brand)]" />
-                    Discovery Context
+              <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
+                <div className="h-full w-full bg-[linear-gradient(90deg,rgba(43,89,74,0.16),rgba(43,89,74,0.55),rgba(179,94,48,0.28))]" />
+              </div>
+              <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-6 sm:px-7 py-6">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="max-w-3xl">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--rf-brand)]">Discovery Context</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.12)] bg-white shadow-sm">
+                        <AlertCircle className="w-5 h-5 text-[var(--rf-brand)]" />
+                      </div>
+                      <div>
+                        <div className="text-[24px] font-semibold tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>
+                          Discovery is grounding the requirement
+                        </div>
+                        <p className="mt-1 text-sm text-[var(--rf-text-secondary)]">
+                          Review the context pool, then answer only what meaningfully sharpens scope.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-[var(--rf-text-tertiary)] text-xs font-medium">
-                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Project: {contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}</span>
-                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Docs: {contextMeta.wiDocsCount ?? 0}</span>
-                    <span className="px-2 py-1 bg-[var(--rf-surface-soft)] rounded-md">Refs: {contextMeta.similarStoriesCount ?? 0}</span>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:min-w-[330px]">
+                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Project</div>
+                      <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}</div>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Docs</div>
+                      <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{contextMeta.wiDocsCount ?? 0}</div>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-4 py-3">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Refs</div>
+                      <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{contextMeta.similarStoriesCount ?? 0}</div>
+                    </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowContextDetails(v => !v)}
-                  className="text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
-                >
-                  {showContextDetails ? 'Hide details' : 'Show details'}
-                </button>
+              </div>
+              <div className="px-6 sm:px-7 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-xs font-medium text-[var(--rf-text-secondary)]">
+                    Sources used for this pass, plus the ambiguity signals behind the follow-up questions.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowContextDetails(v => !v)}
+                    className="text-xs font-bold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
+                  >
+                    {showContextDetails ? 'Hide details' : 'Show details'}
+                  </button>
+                </div>
               </div>
 
               {showContextDetails && (
                 <motion.div
-                  className="mt-4 pt-4 border-t border-[var(--rf-border)]/60 space-y-2 text-xs"
+                  className="border-t border-[var(--rf-border)]/60 px-6 sm:px-7 py-5 space-y-4 text-xs"
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                 >
@@ -300,7 +335,7 @@ export function ClarifyQuestionsView({
                       {contextMeta.ambiguityAssessment.reasons.join(' ')}
                     </div>
                   ) : null}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[var(--rf-text-secondary)] mt-2">
+                  <div className="grid grid-cols-1 gap-2 text-[var(--rf-text-secondary)] mt-2 md:grid-cols-3">
                     <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Domain guidance</div>
                       <div className="mt-1 text-xs font-medium text-[var(--rf-text)]">{contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</div>
@@ -319,7 +354,7 @@ export function ClarifyQuestionsView({
                   {(contextMeta.referencedSimilarStories?.length ?? 0) > 0 && (
                     <div>
                       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Similar backlog stories</div>
-                      <div className="space-y-2">
+                      <div className="grid gap-3 xl:grid-cols-2">
                         {contextMeta.referencedSimilarStories!.map((story, i) => (
                           <div key={`${story.key}-${i}`} className="rf-card p-3 ">
                             <div className="flex items-start justify-between gap-3">
@@ -366,7 +401,7 @@ export function ClarifyQuestionsView({
                       </div>
                     </div>
                     {(contextMeta.referencedWiSections?.length ?? 0) > 0 ? (
-                      <div className="space-y-2">
+                      <div className="grid gap-3 xl:grid-cols-2">
                         {contextMeta.referencedWiSections!.map((section, i) => (
                           <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rf-card p-3 ">
                             <div className="flex items-start justify-between gap-3">
@@ -468,7 +503,7 @@ export function ClarifyQuestionsView({
                 <div className="flex-1 h-px bg-[var(--rf-border)]" />
               </div>
 
-              <div className="space-y-4">
+              <div className="grid gap-4">
                 {items.map(({ idx, q }) => {
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
@@ -477,23 +512,40 @@ export function ClarifyQuestionsView({
                   return (
                     <div
                       key={idx}
-                      className={`rounded-2xl border bg-white shadow-sm transition-all duration-300 overflow-hidden ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-[var(--rf-brand)]/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
+                      className={`overflow-hidden rounded-[26px] border bg-white/88 shadow-sm transition-all duration-300 ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-[var(--rf-brand)]/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
                     >
-                      <div className="p-5 flex items-start gap-4">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
-                          {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
-                        </div>
-                        <div className="flex-1 space-y-4">
-                          <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug pt-1">
-                            {renderQuestionWithStoryLinks(q.question, storyLookup)}
-                          </p>
-
-                          {suggestions.length > 0 && (
-                            <div className="space-y-2">
-                              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
-                                Pick the closest answer or combine the ones that truly need to go together.
+                      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-start">
+                        <div className="space-y-4">
+                          <div className="flex items-start gap-4">
+                            <div className={`flex h-9 w-9 rounded-xl items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
+                              {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
+                            </div>
+                            <div className="space-y-2 min-w-0">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{label}</div>
+                              <p className="text-[16px] font-bold text-[var(--rf-text)] leading-snug">
+                                {renderQuestionWithStoryLinks(q.question, storyLookup)}
+                              </p>
+                              <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                                Choose the closest framing, then add only the nuance that matters.
                               </div>
-                              <div className="flex flex-wrap gap-2">
+                            </div>
+                          </div>
+                          <textarea
+                            value={ans.customAnswer}
+                            onChange={e => handleCustomChange(idx, e.target.value)}
+                            disabled={isSubmitting}
+                            placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything your chosen answer does not cover…' : 'Type your answer here…'}
+                            rows={4}
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
+                          />
+                        </div>
+
+                        {suggestions.length > 0 && (
+                          <div className="rounded-[22px] border border-[rgba(43,89,74,0.08)] bg-[linear-gradient(180deg,rgba(244,239,230,0.52),rgba(255,255,255,0.82))] p-4">
+                            <div className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
+                              Proposed answers
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                               {suggestions.map((sug, si) => {
                                 const sel = ans.selectedSuggestions.includes(sug);
                                 return (
@@ -501,51 +553,24 @@ export function ClarifyQuestionsView({
                                     key={si}
                                     onClick={() => toggleSuggestion(idx, sug)}
                                     disabled={isSubmitting}
-                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                                    className={`flex min-h-[92px] items-start rounded-2xl border px-4 py-3 text-left text-[13px] font-semibold leading-relaxed transition-all ${
                                       sel
-                                        ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] border-[var(--rf-brand-subtle)] shadow-sm'
-                                        : 'border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] bg-white hover:bg-[var(--rf-surface-soft)]'
+                                        ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] shadow-sm'
+                                        : 'border-[var(--rf-border)] bg-white/88 text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
                                     }`}
                                   >
-                                    <div className="flex items-center gap-1.5">
-                                      {sel && <Check className="w-3.5 h-3.5" />}
-                                      {sug}
+                                    <div className="flex w-full items-start gap-2.5">
+                                      <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${sel ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white' : 'border-[var(--rf-border-strong)] bg-white text-transparent'}`}>
+                                        <Check className="w-3 h-3" />
+                                      </div>
+                                      <span>{sug}</span>
                                     </div>
                                   </button>
                                 );
                               })}
-                              </div>
                             </div>
-                          )}
-
-                          {ans.selectedSuggestions.length > 0 && (
-                            <div className="rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]/60 px-4 py-3">
-                              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-brand-hover)]">
-                                {ans.selectedSuggestions.length === 1 ? 'Chosen answer' : 'Chosen answers'}
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {ans.selectedSuggestions.map((suggestion) => (
-                                  <span
-                                    key={suggestion}
-                                    className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-brand-subtle)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-brand-hover)]"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                    {suggestion}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <textarea
-                            value={ans.customAnswer}
-                            onChange={e => handleCustomChange(idx, e.target.value)}
-                            disabled={isSubmitting}
-                            placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything your chosen answer does not cover…' : 'Type your answer here…'}
-                            rows={3}
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
-                          />
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
