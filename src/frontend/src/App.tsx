@@ -165,6 +165,24 @@ function getLatestRequirementText(conversation: any): string {
   return '';
 }
 
+function getLatestClarifyContext(conversation: any): ClarifyContextMeta | null {
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const clarifyContext = turns[i]?.clarifyContext;
+    if (clarifyContext) return clarifyContext;
+  }
+  return null;
+}
+
+function getLatestGenerationContext(conversation: any): GenerationContextMeta | null {
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const generationContext = turns[i]?.generationContext;
+    if (generationContext) return generationContext;
+  }
+  return null;
+}
+
 function buildDiscoveryInputSignature(params: {
   requirement: string;
   projectKey: string;
@@ -301,6 +319,7 @@ export default function App() {
   const [workflowRunId, setWorkflowRunId] = useState(0);
   const [isWorking, setIsWorking] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationWarning, setGenerationWarning] = useState<string | null>(null);
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
   const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
@@ -471,6 +490,20 @@ export default function App() {
     [requirement, projectKey, projectKeys, contextMode, runAttachments],
   );
 
+  const hydrateConversationState = (conversation: any) => {
+    const latestFeatureTurn = getLatestFeatureBearingTurn(conversation);
+    const latestRequirement = getLatestRequirementText(conversation);
+    setFeatures(latestFeatureTurn?.features ?? []);
+    setRequirement(latestRequirement);
+    setGenerationContext(getLatestGenerationContext(conversation));
+    setClarifyContext(getLatestClarifyContext(conversation));
+    setWorkflowTokenUsage(sumWorkflowTokenUsage(conversation));
+    setPendingSessionId(null);
+    setPendingClarifySessionId(null);
+    setIsWorking(false);
+    setSidebarOpen(!((latestFeatureTurn?.features?.length ?? 0) > 0));
+  };
+
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
     if (!accountId) return;
@@ -480,7 +513,6 @@ export default function App() {
       if (cancelled) return;
 
       if (res?.success && res.conversation?.turns?.length > 0) {
-        const lastTurn = getLatestFeatureBearingTurn(res.conversation);
         const restoredSignature = buildConversationInputSignature(res.conversation, {
           projectKey,
           contextMode,
@@ -489,14 +521,7 @@ export default function App() {
           activeSessionInputSignatureRef.current ?? restoredSignature,
           restoredSignature,
         );
-        setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
-        setPendingSessionId(null);
-        setPendingClarifySessionId(null);
-        setIsWorking(false);
-        setFeatures(lastTurn?.features ?? []);
-        setGenerationContext(lastTurn?.generationContext ?? null);
-        setClarifyContext(lastTurn?.clarifyContext ?? null);
-        setSidebarOpen(!(lastTurn?.features?.length > 0));
+        hydrateConversationState(res.conversation);
       } else {
         setSessionSignatures(activeSessionInputSignatureRef.current, null);
         setWorkflowTokenUsage(null);
@@ -854,6 +879,7 @@ export default function App() {
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
+    setGenerationWarning(null);
     setFeatures([]);
     setGenerationContext(null);
     setGenerationProgressMeta(null);
@@ -1003,7 +1029,7 @@ export default function App() {
       }) as any;
 
       if (res?.success) {
-        // resolver confirmed OK — polling is already running
+        setGenerationWarning(res?.warning || null);
       } else {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setIsWorking(false);
@@ -1062,28 +1088,25 @@ export default function App() {
         setRunAttachmentParseState(null);
         setRunAttachmentError(null);
         setWorkflowStage('idle');
-        setSessionId(res.conversation.sessionId);
         const restoredSignature = buildConversationInputSignature(res.conversation, {
           projectKey,
           contextMode,
         });
+        setSessionId(res.conversation.sessionId);
         setSessionSignatures(restoredSignature, restoredSignature);
-        await persistSessionPointers(
+        hydrateConversationState(res.conversation);
+        setViewMode('generate');
+        void persistSessionPointers(
           res.conversation.sessionId,
           null,
           false,
-        );
-        const lastTurn = getLatestFeatureBearingTurn(res.conversation);
-        if (lastTurn) {
-          setFeatures(lastTurn.features ?? []);
-          setRequirement(getLatestRequirementText(res.conversation));
-          setGenerationContext(lastTurn.generationContext ?? null);
-          setClarifyContext(lastTurn.clarifyContext ?? null);
-        }
-        setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
-        setViewMode('generate');
+        ).catch((err) => {
+          console.error('Failed to persist restored session pointers:', err);
+        });
       }
-    } catch {}
+    } catch (err) {
+      console.error('Failed to restore session:', err);
+    }
   };
 
   const handleAddRunAttachments = async (files: File[]) => {
@@ -1264,6 +1287,18 @@ export default function App() {
               >
                 <span className="flex-1">{generationError}</span>
                 <button onClick={() => setGenerationError(null)} className="text-rose-500 hover:text-rose-800 font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition">&times;</button>
+              </motion.div>
+            )}
+            {generationWarning && !generationError && (
+              <motion.div
+                className="w-full bg-[var(--rf-warning-subtle)]/95 backdrop-blur-sm text-[var(--rf-warning)] border-b border-[rgba(179,94,48,0.18)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-40 shadow-sm"
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <span className="flex-1">{generationWarning}</span>
+                <button onClick={() => setGenerationWarning(null)} className="text-[var(--rf-warning)] hover:text-[var(--rf-text)] font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition">&times;</button>
               </motion.div>
             )}
           </AnimatePresence>
