@@ -113,14 +113,13 @@ export function Sidebar({
     >
       {/* ── Header ── */}
       <motion.header
-        className="relative z-[1] px-5 h-[68px] flex items-center justify-between shrink-0 border-b border-[rgba(43,89,74,0.08)] bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl"
+        className="rf-pane-header rf-pane-header--sidebar shrink-0"
         variants={fadeUp}
         initial="hidden"
         animate="visible"
         custom={0}
       >
-        {/* Brand */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="rf-pane-header-cluster">
           {brandingLogoUrl && !logoLoadFailed ? (
             <img
               src={brandingLogoUrl}
@@ -130,21 +129,21 @@ export function Sidebar({
               className="h-7 w-auto max-w-[100px] object-contain rounded-lg"
             />
           ) : null}
-          <button
-            onClick={() => setViewMode('generate')}
-            className="font-semibold text-[15px] text-[var(--rf-text)] tracking-tight hover:text-[var(--rf-brand)] transition-colors leading-none"
-            style={{ fontFamily: 'Fraunces, serif' }}
-          >
-            Refinely
-          </button>
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.12em] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.14)]">
-            <span className="h-1 w-1 rounded-full bg-[var(--rf-brand)]" />
-            {tierName}
-          </span>
+          <div className="rf-pane-header-copy">
+            <div className="rf-pane-header-kicker">Workspace Builder</div>
+            <button
+              onClick={() => setViewMode('generate')}
+              className="rf-pane-header-title text-left hover:text-[var(--rf-brand)] transition-colors"
+            >
+              Refinely
+            </button>
+          </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="rf-pane-header-badge hidden min-[360px]:inline-flex">
+            Tier <strong>{tierName}</strong>
+          </span>
           {isAdmin && (
             <button
               onClick={() => setViewMode('settings')}
@@ -180,15 +179,20 @@ export function Sidebar({
 
           {/* Project row */}
           <div className="px-4 pt-4 pb-3">
-            <div className="flex items-center justify-between mb-2.5">
-              <div className="flex items-center gap-2.5">
+            <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(43,89,74,0.1)] bg-[var(--rf-brand-subtle)] shadow-sm">
                   <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
                 </div>
-                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)]">Workspace</div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)]">Workspace</div>
+                  <div className="mt-1 truncate text-[13px] font-semibold text-[var(--rf-text)]">
+                    {projectTitle}
+                  </div>
+                </div>
               </div>
               {projectKey !== '*' && (
-                <div className="text-[11px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
+                <div className="shrink-0 text-[11px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
                   Project Active
                 </div>
               )}
@@ -258,11 +262,11 @@ export function Sidebar({
           </div>
 
           {/* Cache + Docs stats row */}
-          <div className="mx-4 mb-4 flex gap-2">
+          <div className="mx-4 mb-4 grid grid-cols-2 gap-2 min-[0px]:min-w-0">
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
               <Database className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
@@ -275,7 +279,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="group flex-1 flex items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
               <FileText className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">

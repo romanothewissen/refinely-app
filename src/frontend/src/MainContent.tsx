@@ -999,16 +999,15 @@ export function MainContent({
   };
 
   return (
-    <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-transparent">
-      {/* Header */}
+    <main className="flex-1 flex min-w-0 flex-col h-full relative overflow-hidden bg-transparent">
       <motion.header
-        className="shrink-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.6),rgba(255,255,255,0.3))] backdrop-blur-xl px-6 py-4 z-20 sticky top-0 shadow-[0_1px_0_rgba(43,89,74,0.08)]"
+        className="rf-pane-header rf-pane-header--canvas shrink-0 sticky top-0"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="flex min-h-[48px] w-full items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-h-[38px] w-full min-w-0 items-center justify-between gap-4">
+          <div className="rf-pane-header-cluster">
             {!sidebarOpen && (
               <motion.button
                 onClick={() => setSidebarOpen(true)}
@@ -1020,21 +1019,24 @@ export function MainContent({
                 <Menu className="w-5 h-5" />
               </motion.button>
             )}
-            <div className="min-w-0 flex items-center gap-3">
-              <h2 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Feature Canvas</h2>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rf-surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
-                <span className="text-[var(--rf-text-tertiary)]">Scope</span>
-                <span className="text-[var(--rf-text-secondary)]">
-                  {projectKey === '*' ? 'Global Workspace' : projectKey}
+            <div className="rf-pane-header-copy">
+              <div className="rf-pane-header-kicker">Output Surface</div>
+              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                <h2 className="rf-pane-header-title">Feature Canvas</h2>
+                <span className="rf-pane-header-badge max-w-full">
+                  Scope <strong>{projectKey === '*' ? 'Global Workspace' : projectKey}</strong>
                 </span>
-              </span>
+              </div>
+              <div className="rf-pane-header-subtitle">
+                Generated features, backlog detail, and review actions stay here.
+              </div>
             </div>
           </div>
           <div className="relative shrink-0">
             <motion.button
               type="button"
               onClick={() => setShowTokenDetails(prev => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] px-3 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] transition-colors border border-[var(--rf-border)] shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[rgba(255,255,255,0.72)] hover:bg-white px-3 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] transition-colors border border-[rgba(43,89,74,0.1)] shadow-sm"
               title="Workflow token usage"
               whileTap={{ scale: 0.97 }}
             >
