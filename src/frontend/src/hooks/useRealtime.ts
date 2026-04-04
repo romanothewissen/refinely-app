@@ -13,7 +13,7 @@ export interface GenerationProgress {
 
 export interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget: number; estimatedQuestions: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;

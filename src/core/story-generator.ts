@@ -517,6 +517,7 @@ async function backfillMissingAcceptanceRequirements(input: {
 
 export interface TriageResult {
   estimatedFeatures: number;
+  estimatedQuestions: number;
   shape: FeaturePlan['shape'];
   complexity: FeaturePlan['complexity'];
   arDepth: ArPlan['depth'];
@@ -537,36 +538,56 @@ function parseTriageResult(raw: unknown): TriageResult | null {
   const arDepth = typeof obj.arDepth === 'string' && VALID_AR_DEPTHS.has(obj.arDepth as ArPlan['depth'])
     ? obj.arDepth as ArPlan['depth'] : null;
   if (estimatedFeatures == null || !shape || !complexity || !arDepth) return null;
+  const estimatedQuestions = typeof obj.estimatedQuestions === 'number'
+    ? Math.min(15, Math.max(4, Math.round(obj.estimatedQuestions)))
+    : 10;
   return {
     estimatedFeatures: Math.min(MAX_EXECUTABLE_FEATURES, Math.max(1, Math.round(estimatedFeatures))),
+    estimatedQuestions,
     shape,
     complexity,
     arDepth,
   };
 }
 
-export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan } {
-  // Build feature plan from LLM's assessment
+export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan; questionPlan: ClarifyQuestionPlan } {
+  // Feature plan: LLM's estimate is the target; ceiling is target+2 to prevent runaway generation.
+  // No computed floor — the decomposition prompt instructs the LLM to reach the target.
   const est = Math.min(MAX_EXECUTABLE_FEATURES, triage.estimatedFeatures);
   const featurePlan: FeaturePlan = {
-    min: Math.max(1, est - Math.ceil(est * 0.3)),
-    max: Math.min(MAX_EXECUTABLE_FEATURES, est + Math.ceil(est * 0.2)),
+    min: 1,
+    max: Math.min(MAX_EXECUTABLE_FEATURES, est + 2),
     target: est,
     shape: triage.shape,
     complexity: triage.complexity,
   };
 
-  // Build AR plan from LLM's depth assessment
-  const arPlanMap: Record<ArPlan['depth'], Omit<ArPlan, 'depth'>> = {
-    minimal:       { min: 1, max: 2, target: 1 },
-    lean:          { min: 2, max: 3, target: 2 },
-    standard:      { min: 3, max: 5, target: 4 },
-    thorough:      { min: 4, max: 6, target: 5 },
-    comprehensive: { min: 5, max: 8, target: 6 },
+  // AR plan: LLM's depth drives target; ceiling is target+2.
+  const arTargetMap: Record<ArPlan['depth'], number> = {
+    minimal:       2,
+    lean:          3,
+    standard:      4,
+    thorough:      5,
+    comprehensive: 6,
   };
-  const arPlan: ArPlan = { ...arPlanMap[triage.arDepth], depth: triage.arDepth };
+  const arTarget = arTargetMap[triage.arDepth];
+  const arPlan: ArPlan = {
+    min: 1,
+    max: arTarget + 2,
+    target: arTarget,
+    depth: triage.arDepth,
+  };
 
-  return { featurePlan, arPlan };
+  // Question plan: LLM's estimate is the target; ceiling is target+2.
+  const q = triage.estimatedQuestions;
+  const questionPlan: ClarifyQuestionPlan = {
+    min: 4,
+    max: Math.min(15, q + 2),
+    target: q,
+    clarity: q >= 10 ? 'vague' : q >= 7 ? 'medium' : 'clear',
+  };
+
+  return { featurePlan, arPlan, questionPlan };
 }
 
 export function capAssessmentForExecution(assessment: RequirementAssessment): RequirementAssessment {
@@ -633,8 +654,8 @@ export async function assessRequirementWithLlm(input: {
       model: getTierModel(input.generatorConfig.triageModel, input.tier),
       systemPrompt: buildTriageSystemPrompt(),
       userMessage,
-      maxTokens: 400,
-      reasoningEffort: 'low',
+      maxTokens: 1000,
+      reasoningEffort: 'medium',
       ...input.providerOpts,
     });
     return parseTriageResult(result.data);
@@ -991,7 +1012,7 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   precomputedTriage?: TriageResult | null;
-  onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string }) => Promise<void>;
+  onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget: number; estimatedQuestions: number }) => Promise<void>;
   onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
   onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
@@ -1011,15 +1032,14 @@ export async function generateFeatures(opts: {
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
 
-  // ── Triage: fast LLM assessment of scope & complexity ──
-  // Falls back to heuristic if LLM triage fails.
-  const heuristicAssessment = assessRequirement({
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    similarStoriesText,
-  });
+  // ── Triage: LLM assessment of scope, complexity, feature count, AR depth ──
+  const TRIAGE_FALLBACK: RequirementAssessment = {
+    questionPlan: { min: 4, max: 12, target: 10, clarity: 'vague' },
+    featurePlan:  { min: 1, max: 7,  target: 5,  shape: 'balanced', complexity: 'medium' },
+    arPlan:       { min: 1, max: 6,  target: 4,  depth: 'standard' },
+    ambiguityScore: 3,
+    ambiguityReasons: ['Triage could not be completed; using conservative defaults.'],
+  };
 
   const triageResult = precomputedTriage !== undefined
     ? precomputedTriage
@@ -1032,11 +1052,8 @@ export async function generateFeatures(opts: {
       });
 
   const rawAssessment: RequirementAssessment = triageResult
-    ? {
-        ...heuristicAssessment,
-        ...triageToAssessment(triageResult),
-      }
-    : heuristicAssessment;
+    ? { ...TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
+    : TRIAGE_FALLBACK;
   const assessment = capAssessmentForExecution(rawAssessment);
 
   if (onTriageComplete) {
@@ -1045,6 +1062,8 @@ export async function generateFeatures(opts: {
       complexity: assessment.featurePlan.complexity,
       featureTarget: assessment.featurePlan.target,
       arDepth: assessment.arPlan.depth,
+      arTarget: assessment.arPlan.target,
+      estimatedQuestions: assessment.questionPlan.target,
     });
   }
 
@@ -1192,15 +1211,19 @@ export async function generateClarifyingQuestions(opts: {
 }): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config } = opts;
 
-  const assessment = assessRequirement({
+  const CLARIFY_QUESTION_FALLBACK: ClarifyQuestionPlan = { min: 4, max: 12, target: 10, clarity: 'vague' };
+
+  const clarifyTriageResult = await assessRequirementWithLlm({
     requirement,
-    attachmentText,
-    wiContextText,
-    similarStoriesText,
+    generatorConfig: config.generatorConfig,
+    tier: config.tier,
+    providerOpts: buildLlmProviderOpts(config),
   });
-  const questionPlan = assessment.questionPlan;
-  const desiredQuestionCount = Math.min(questionPlan.max, Math.max(questionPlan.min, questionPlan.target));
-  const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 6144), 4096);
+  const questionPlan = clarifyTriageResult
+    ? triageToAssessment(clarifyTriageResult).questionPlan
+    : CLARIFY_QUESTION_FALLBACK;
+  const desiredQuestionCount = questionPlan.target;
+  const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 8192), 6144);
   const domainSignals = extractDiscoverySignals([
     requirement,
     attachmentText.slice(0, 2200),

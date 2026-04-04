@@ -94,11 +94,11 @@ export function buildDecompositionSystemPrompt(opts: {
 
   const planningGuidance = (() => {
     if (!opts.featurePlan) return '';
-    const { shape, complexity, min, max, target } = opts.featurePlan;
+    const { shape, complexity, max, target } = opts.featurePlan;
     const base = `OUTPUT CALIBRATION:
 - The requirement shape appears: ${shape.toUpperCase()}
 - The requirement complexity appears: ${complexity.toUpperCase()}
-- Aim for ${min}-${max} features (target ${target})`;
+- Produce approximately ${target} features. Do not exceed ${max}.`;
 
     if (shape === 'minimal')
       return `${base}
@@ -109,13 +109,14 @@ export function buildDecompositionSystemPrompt(opts: {
 
     if (shape === 'narrow')
       return `${base}
-- This is a tightly scoped requirement. Keep features to ${min}-${max}.
+- This is a tightly scoped requirement. Aim for ${target} features.
 - Do NOT split into trivial or UI-level features.
-- Combine related concerns into a single feature rather than over-splitting.`;
+- Combine related concerns into a single feature rather than over-splitting.
+- Do not exceed ${max} features.`;
 
     if (shape === 'epic')
       return `${base}
-- This is a COMPLEX, multi-workflow requirement. It MUST produce ${min}-${max} features.
+- This is a COMPLEX, multi-workflow requirement. Produce approximately ${target} features.
 - Each distinct workflow, role-specific capability, or independently testable behavior MUST be its own feature.
 - DO NOT collapse multiple workflows into a single feature.
 - Keep the feature set practical for one generation run; prefer the most important independently deliverable capabilities first.
@@ -123,15 +124,15 @@ export function buildDecompositionSystemPrompt(opts: {
 
     if (shape === 'broad')
       return `${base}
-- This is a broad requirement covering multiple capabilities. Target ${target} features.
-- Include supporting capabilities only when they are independently deliverable.
+- This is a broad requirement covering multiple capabilities. Produce approximately ${target} features.
+- Work through the decomposition framework: what generates the output? What feeds into it? Who uses it? What can go wrong? What changes dynamically? Each independently deliverable answer is a feature.
 - Each distinct workflow or role-specific behavior should be its own feature.
 - Do not exceed ${max} features in a single response.`;
 
     // balanced (default)
     return `${base}
-- If the requirement is narrow, do NOT split into trivial or UI-level features.
-- If the requirement is broad, include supporting capabilities only when they are independently deliverable.`;
+- Produce approximately ${target} features. Work through the decomposition framework: what generates the output? What feeds into it? Who uses it? What can go wrong? What changes dynamically? Each independently deliverable answer is a feature.
+- Do NOT split into trivial or UI-level sub-tasks. Do not exceed ${max} features.`;
   })();
 
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
@@ -245,15 +246,21 @@ Output JSON: same features array with acceptance_requirements arrays filled in. 
 // ─── Requirement Triage (fast LLM-based assessment) ─────────────────────────
 
 export function buildTriageSystemPrompt(): string {
-  return `You are a senior business analyst doing a quick triage of a software requirement. Your job is to assess the scope and complexity so the decomposition step knows how many features to produce.
+  return `You are a senior business analyst doing a quick triage of a software requirement. Your job is to assess scope, complexity, and ambiguity so the pipeline knows how many features, acceptance requirements, and clarifying questions to produce.
 
 Think about what it actually takes to deliver the requirement:
 - What are the distinct capabilities, workflows, or independently deliverable pieces?
 - How many decision dimensions, business rules, or roles are involved?
-- Is this a small tweak (1 feature) or a multi-workflow epic (10+ features)?
+- How many of the 6 discovery categories are unresolved: actors, trigger/context, information, business rules, lifecycle, edge cases?
 
 Return a JSON object with:
 - "estimatedFeatures": number (1-15) — how many independent, deliverable features this requirement implies
+- "estimatedQuestions": number (4-15) — how many clarifying questions are needed to resolve ambiguity before implementation
+  - 4-6: most dimensions are explicit — actors, rules, constraints, and lifecycle are named
+  - 7-9: moderate ambiguity — several roles, rules, or edge cases remain unstated
+  - 10-12: high ambiguity — key decision logic, lifecycle stages, or role responsibilities are undefined
+  - 13-15: very high ambiguity — the requirement names a concept but specifies almost no constraints
+  Count unresolved discovery categories: each unresolved category adds ~2 questions. A single-sentence requirement that specifies almost no rules, no named exceptions, and no lifecycle almost always needs 10+.
 - "shape": one of "minimal", "narrow", "balanced", "broad", "epic"
   - minimal: a single small change or addition (1 feature)
   - narrow: a tightly scoped capability (1-3 features)
@@ -263,21 +270,24 @@ Return a JSON object with:
 - "complexity": one of "trivial", "low", "medium", "high", "very_high"
   - trivial: no business rules, single happy path
   - low: a few straightforward rules
-  - medium: multiple rules, some edge cases
-  - high: many rules, multiple roles, exception handling
+  - medium: multiple explicit rules, some edge cases stated
+  - high: many rules, multiple roles, exception handling — OR the requirement is short but implies all of these
   - very_high: cross-cutting concerns, complex orchestration, many roles and workflows
 - "arDepth": one of "minimal", "lean", "standard", "thorough", "comprehensive"
-  - minimal: 1-2 acceptance requirements per feature
-  - lean: 2-3 per feature
-  - standard: 3-5 per feature
-  - thorough: 4-6 per feature
-  - comprehensive: 5-8 per feature
+  - minimal: trivially simple, single happy path, no rules
+  - lean: a few explicit straightforward rules
+  - standard: rules and edge cases are explicitly stated in the requirement
+  - thorough: requirement is broad or multi-role; even if terse, implied behavior justifies deeper coverage
+  - comprehensive: short sentence implying deep multi-step logic, many roles, or complex orchestration
+  NOTE: "standard" depth is only appropriate when the rules ARE stated. A short requirement that clearly implies complex behavior but states few rules should be "thorough" or "comprehensive".
 
-Be precise. A short sentence can still imply a broad, complex system. "Optimize scheduling based on criticality and due dates" is NOT narrow — it implies schedule generation, data inputs, scoring/weighting, visibility, exception handling, and more.
+BIAS CORRECTIONS — apply before finalising:
+- Shape: A requirement naming an outcome without specifying HOW (words like "optimal", "best", "intelligent", "manage", "based on") implies inputs + processing + output + exceptions as separate deliverable capabilities. Count what must be built, not what was written. When uncertain between two shapes, choose the larger one.
+- Complexity: Implied complexity counts. A short requirement that implies prioritization, optimization, orchestration, or multi-step coordination has HIGH complexity even when rules are not yet stated. Assess what the system must do, not how many words were used. When uncertain, choose the higher level.
+- arDepth: "standard" requires that rules ARE stated. A short requirement implying complex behavior but stating few rules should be "thorough" or "comprehensive".
+- estimatedQuestions: Be liberal. A requirement that sounds simple but has unstated actors, rules, lifecycle, and exceptions typically needs 10+. Do not anchor to word count.
 
-SCOPE BIAS CORRECTION: Multi-part system concepts (scheduling, assignment optimisation, routing, dashboards, approval workflows, notification pipelines, end-to-end flows, integrations) are ALWAYS at least "broad" scope. A single sentence that combines multiple domains with "and", or uses words like "end-to-end", "optimise", "intelligent", or "manage" should never be classified "narrow" or "minimal". Count implicit capabilities: a scheduling requirement implies data inputs, scoring/weighting, display, overrides, and exception handling — that is 5+ features before any edge case analysis. When uncertain between two shapes, choose the larger one.
-
-Output JSON only: {"estimatedFeatures": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
+Output JSON only: {"estimatedFeatures": N, "estimatedQuestions": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
 }
 
 // ─── Per-Feature AR User Message (for parallel AR generation) ────────────────

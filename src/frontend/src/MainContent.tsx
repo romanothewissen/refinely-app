@@ -149,7 +149,7 @@ function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: str
 
 type GenerationProgressMeta = {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget: number; estimatedQuestions: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
@@ -190,71 +190,103 @@ function buildFeatureExcerpt(text: string, maxChars = 150) {
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
-function getTriageSupportCopy(triage?: GenerationProgressMeta['triage']) {
-  if (!triage) return 'Sizing the request so the pipeline knows how much depth to apply.';
-  const label = triage.complexity.replace('_', ' ');
-  return `Assessed as ${label} complexity. Targeting around ${triage.featureTarget} features with ${triage.arDepth} acceptance criteria — final count may vary based on the requirement.`;
-}
-
 const COMPLEXITY_LEVELS = [
-  { key: 'trivial', label: 'Trivial', features: '1', ar: 'Light' },
-  { key: 'low', label: 'Low', features: '2–4', ar: 'Standard' },
-  { key: 'medium', label: 'Medium', features: '5–7', ar: 'Thorough' },
-  { key: 'high', label: 'High', features: '8–12', ar: 'Deep' },
-  { key: 'very_high', label: 'Complex', features: '13+', ar: 'Epic' },
+  { key: 'trivial', label: 'Trivial' },
+  { key: 'low', label: 'Low' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'high', label: 'High' },
+  { key: 'very_high', label: 'Complex' },
 ];
 
-function ComplexityMeter({ current, compact = false }: { current: string; compact?: boolean }) {
-  const currentIndex = COMPLEXITY_LEVELS.findIndex(l => l.key === current);
-  const active = currentIndex >= 0 ? COMPLEXITY_LEVELS[currentIndex] : null;
+const AR_DEPTH_LABELS: Record<string, string> = {
+  minimal: 'Minimal', lean: 'Lean', standard: 'Standard', thorough: 'Thorough', comprehensive: 'Comprehensive',
+};
 
+const SHAPE_LABELS: Record<string, string> = {
+  minimal: 'Minimal', narrow: 'Narrow', balanced: 'Balanced', broad: 'Broad', epic: 'Epic',
+};
+
+function ComplexityBar({ current }: { current: string }) {
+  const currentIndex = COMPLEXITY_LEVELS.findIndex(l => l.key === current);
   return (
-    <div>
-      {!compact && (
+    <div className="flex gap-1">
+      {COMPLEXITY_LEVELS.map((level, idx) => {
+        const isActive = idx === currentIndex;
+        const isPast = idx < currentIndex;
+        return (
+          <div key={level.key} className="flex-1 flex flex-col gap-1">
+            <div className={`h-2 rounded-sm transition-colors duration-500 ${
+              isActive ? 'bg-[var(--rf-brand)]'
+              : isPast ? 'bg-[var(--rf-brand-subtle)]'
+              : 'bg-[var(--rf-border)]'
+            }`} />
+            <span className={`text-[10px] font-bold uppercase tracking-tight text-center transition-colors leading-tight ${
+              isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-40'
+            }`}>{level.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] }) {
+  if (!triage) {
+    return (
+      <div>
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
-          <span className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">Model assessment</span>
+          <span className="text-[12px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing…</span>
         </div>
-      )}
-      <div className="flex gap-1">
-        {COMPLEXITY_LEVELS.map((level, idx) => {
-          const isActive = idx === currentIndex;
-          const isPast = idx < currentIndex;
-          return (
-            <div key={level.key} className="flex-1 flex flex-col gap-1">
-              <div className={`h-2 rounded-sm transition-colors duration-500 ${
-                isActive ? 'bg-[var(--rf-brand)]'
-                : isPast ? 'bg-[var(--rf-brand-subtle)]'
-                : 'bg-[var(--rf-border)]'
-              }`} />
-              {!compact && (
-                <span className={`text-[11px] font-bold uppercase tracking-tight text-center transition-colors leading-tight ${
-                  isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-40'
-                }`}>{level.label}</span>
-              )}
+        <div className="flex gap-1 mb-1">
+          {[0, 1, 2, 3, 4].map(i => (
+            <div key={i} className="flex-1 h-2 rounded-sm shimmer" style={{ animationDelay: `${i * 0.12}s` }} />
+          ))}
+        </div>
+        <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+          {['Shape', 'Features', 'Questions', 'AR depth'].map(label => (
+            <div key={label}>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{label}</div>
+              <div className="h-4 w-12 shimmer rounded-sm" />
             </div>
-          );
-        })}
-      </div>
-      {active && !compact && (
-        <motion.div
-          initial={{ opacity: 0, y: 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-2.5 text-[13px] text-[var(--rf-text-secondary)]"
-        >
-          <span className="font-semibold text-[var(--rf-text)]">{active.features} features</span>
-          <span className="text-[var(--rf-text-tertiary)] mx-1.5">·</span>
-          <span className="font-semibold text-[var(--rf-text)]">{active.ar}</span>
-          <span className="text-[var(--rf-text-tertiary)]"> acceptance depth</span>
-        </motion.div>
-      )}
-      {active && compact && (
-        <div className="mt-1 flex gap-1.5 items-center">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{active.label}</span>
-          <span className="text-[11px] text-[var(--rf-text-tertiary)]">· {active.features} features · {active.ar} ARs</span>
+          ))}
         </div>
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  const complexityLabel = COMPLEXITY_LEVELS.find(l => l.key === triage.complexity)?.label ?? triage.complexity;
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <div className="flex items-center justify-between mb-2.5">
+        <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
+        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{complexityLabel}</span>
+      </div>
+      <ComplexityBar current={triage.complexity} />
+
+      <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
+
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Shape</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{SHAPE_LABELS[triage.shape] ?? triage.shape}</div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Features</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">~{triage.featureTarget}</div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions asked</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">~{triage.estimatedQuestions}</div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">ARs / feature</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">~{triage.arTarget} <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">({AR_DEPTH_LABELS[triage.arDepth] ?? triage.arDepth})</span></div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -278,7 +310,6 @@ function GeneratingPipeline({
   const featureProgress = meta?.featureProgress ?? [];
   const sources = meta?.sources ?? null;
   const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
-  const triageSupport = triage ? getTriageSupportCopy(triage) : 'Analyzing requirement\u2026';
   const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
 
   // Anchored progress: context=5%, triage=25%, features=50%, ARs=72→100%
@@ -374,26 +405,10 @@ function GeneratingPipeline({
           </div>
         </div>
 
-        {/* Complexity + Context */}
+        {/* Triage scores + Context */}
         <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
           <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
-            {triage ? (
-              <ComplexityMeter current={triage.complexity} />
-            ) : (
-              <div>
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
-                  <span className="text-[13px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing\u2026</span>
-                </div>
-                <div className="flex gap-1">
-                  {[0, 1, 2, 3, 4].map(i => (
-                    <div key={i} className="flex-1 h-2 rounded-sm shimmer" style={{ animationDelay: `${i * 0.12}s` }} />
-                  ))}
-                </div>
-                <div className="mt-2 h-2 w-20 shimmer rounded-sm" />
-              </div>
-            )}
-            <p className="mt-3 text-[12px] text-[var(--rf-text-tertiary)] italic border-t border-[rgba(0,0,0,0.05)] pt-2.5">{triageSupport}</p>
+            <TriageScoreCard triage={triage} />
           </div>
 
           <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">

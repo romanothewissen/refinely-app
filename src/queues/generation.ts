@@ -248,7 +248,7 @@ export async function handler(event: { body: GenerationEvent }) {
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
         if (!triageResult) {
-          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance requirements`, 1, {
+          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features, ~${triage.arTarget} ARs each`, 1, {
             stage: 'triage',
             triage,
             sources: progressSources,

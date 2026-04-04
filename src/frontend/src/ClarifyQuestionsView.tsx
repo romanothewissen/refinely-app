@@ -5,21 +5,25 @@ import { router } from '@forge/bridge';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
 
 const CLARIFY_COMPLEXITY_LEVELS = [
-  { key: 'trivial', label: 'Trivial', features: '1', ar: 'Light', minQ: 0 },
-  { key: 'low', label: 'Low', features: '2–4', ar: 'Standard', minQ: 2 },
-  { key: 'medium', label: 'Medium', features: '5–7', ar: 'Thorough', minQ: 4 },
-  { key: 'high', label: 'High', features: '8–12', ar: 'Deep', minQ: 6 },
-  { key: 'very_high', label: 'Complex', features: '13+', ar: 'Epic', minQ: 8 },
+  { key: 'trivial', label: 'Trivial' },
+  { key: 'low', label: 'Low' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'high', label: 'High' },
+  { key: 'very_high', label: 'Complex' },
 ];
 
-function questionCountToComplexityIndex(count: number): number {
-  if (count === 0) return -1;
-  if (count <= 2) return 0;
-  if (count <= 4) return 1;
-  if (count <= 6) return 2;
-  if (count <= 8) return 3;
-  return 4;
-}
+// DiscoveryProfile uses a 4-level complexity scale; map to 5-level for the bar
+const DISCOVERY_COMPLEXITY_MAP: Record<string, number> = {
+  low: 1, medium: 2, high: 3, very_high: 4,
+};
+
+const AMBIGUITY_LABELS: Record<string, string> = {
+  low: 'Low ambiguity', medium: 'Moderate ambiguity', high: 'High ambiguity',
+};
+
+const SCOPE_LABELS: Record<string, string> = {
+  narrow: 'Narrow scope', moderate: 'Moderate scope', broad: 'Broad scope', very_broad: 'Very broad scope',
+};
 
 const CATEGORY_ORDER: ClarifyCategoryKey[] = [
   'context_trigger',
@@ -287,20 +291,27 @@ export function ClarifyQuestionsView({
                 </div>
               </div>
 
-              {/* Complexity hint — derived from question count */}
+              {/* LLM scoring panel */}
               {questions.length > 0 && (() => {
-                const ci = questionCountToComplexityIndex(questions.length);
-                const level = CLARIFY_COMPLEXITY_LEVELS[ci];
+                const profile = contextMeta?.discoveryProfile;
+                const qPlan = contextMeta?.ambiguityAssessment?.questionPlan;
+                const complexityKey = profile?.complexity;
+                const ci = complexityKey ? (DISCOVERY_COMPLEXITY_MAP[complexityKey] ?? 2) : 2;
+
                 return (
                   <motion.div
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/70 px-4 py-2.5"
+                    className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/70 px-4 py-3"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity estimate</span>
-                      <span className="text-[13px] text-[var(--rf-text-tertiary)]">{level?.features} features · {level?.ar} ARs</span>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
+                      {complexityKey && (
+                        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">
+                          {CLARIFY_COMPLEXITY_LEVELS[ci]?.label ?? complexityKey}
+                        </span>
+                      )}
                     </div>
                     <div className="flex gap-1">
                       {CLARIFY_COMPLEXITY_LEVELS.map((l, idx) => (
@@ -310,12 +321,33 @@ export function ClarifyQuestionsView({
                             : idx < ci ? 'bg-[var(--rf-brand-subtle)]'
                             : 'bg-[var(--rf-border)]'
                           }`} />
-                          <span className={`text-[11px] font-bold uppercase tracking-tight text-center ${
+                          <span className={`text-[10px] font-bold uppercase tracking-tight text-center ${
                             idx === ci ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-40'
                           }`}>{l.label}</span>
                         </div>
                       ))}
                     </div>
+
+                    {(profile || qPlan) && (
+                      <div className="mt-3 pt-2.5 border-t border-[rgba(0,0,0,0.05)] grid grid-cols-3 gap-x-3 gap-y-2">
+                        {profile?.scope && (
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Scope</div>
+                            <div className="text-[12px] font-bold text-[var(--rf-text)]">{SCOPE_LABELS[profile.scope] ?? profile.scope}</div>
+                          </div>
+                        )}
+                        {profile?.ambiguity && (
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Ambiguity</div>
+                            <div className="text-[12px] font-bold text-[var(--rf-text)]">{AMBIGUITY_LABELS[profile.ambiguity] ?? profile.ambiguity}</div>
+                          </div>
+                        )}
+                        <div>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
+                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{qPlan?.target && qPlan.target !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> of ~{qPlan.target}</span> : ''}</div>
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 );
               })()}

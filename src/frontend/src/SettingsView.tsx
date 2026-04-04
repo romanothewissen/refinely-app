@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, BarChart3,
   FileText, ChevronRight, ChevronDown, Check, Trash, Layers, Zap, AlertCircle, Image,
-  ShieldCheck, ChevronUp, Filter
+  ShieldCheck, Filter
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
