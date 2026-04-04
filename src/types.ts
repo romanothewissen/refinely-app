@@ -378,6 +378,7 @@ export interface ClarifyAnswer {
 export interface ConversationTurn {
   turnType: 'generate' | 'refine' | 'clarify';
   requirement: string;
+  inputSignature?: string;
   features: Feature[];
   similarStories: SimilarStory[];
   generationContext?: GenerationContextMeta;
@@ -456,6 +457,7 @@ export interface ClarifyEvent {
   sessionId: string;
   accountId: string;
   requirement: string;
+  inputSignature?: string;
   attachmentText: string;
   config: TenantConfig;
   license?: any;

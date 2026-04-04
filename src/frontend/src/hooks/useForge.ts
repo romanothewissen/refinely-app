@@ -25,10 +25,20 @@ export const api = {
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)
-  startClarify: (sessionId: string, requirement: string, attachmentText?: string, projectKey?: string) =>
-    invoke('startClarify', { sessionId, requirement, attachmentText, projectKey }),
-  retryClarify: (sessionId: string, requirement: string, attachmentText?: string, projectKey?: string) =>
-    invoke('retryClarify', { sessionId, requirement, attachmentText, projectKey }),
+  startClarify: (
+    sessionId: string,
+    requirement: string,
+    attachmentText?: string,
+    projectKey?: string,
+    inputSignature?: string,
+  ) => invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, inputSignature }),
+  retryClarify: (
+    sessionId: string,
+    requirement: string,
+    attachmentText?: string,
+    projectKey?: string,
+    inputSignature?: string,
+  ) => invoke('retryClarify', { sessionId, requirement, attachmentText, projectKey, inputSignature }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
   evaluateSufficiency: (payload: {

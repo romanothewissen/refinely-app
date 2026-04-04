@@ -46,3 +46,23 @@ test('extractJson extracts the first balanced JSON object from surrounding prose
   assert.equal(parsed.ok, true);
   assert.equal(parsed.note, 'contains a brace like this: } inside a string');
 });
+
+test('extractJson repairs truncated fenced JSON when the model stops mid-string', () => {
+  const parsed = extractJson<{
+    features: Array<{ summary: string; description: string }>;
+  }>(`\
+\`\`\`json
+{
+  "features": [
+    {
+      "summary": "Work Order Criticality and Due Date Definition",
+      "description": "As FSE Management, I need to define and maintain the business rules for determining a Work Order's criticality (based on priority field, associated SLA, and customer tier/contract
+    }
+  ]
+}
+\`\`\``);
+
+  assert.equal(parsed.features.length, 1);
+  assert.equal(parsed.features[0]?.summary, 'Work Order Criticality and Due Date Definition');
+  assert.match(parsed.features[0]?.description ?? '', /customer tier\/contract$/);
+});

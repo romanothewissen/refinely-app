@@ -61,6 +61,85 @@ function extractBalancedJsonCandidate(text: string): string | null {
   return null;
 }
 
+function repairTruncatedJsonCandidate(text: string): string | null {
+  for (let start = 0; start < text.length; start++) {
+    const open = text[start];
+    if (open !== '{' && open !== '[') {
+      continue;
+    }
+
+    const stack: string[] = [open];
+    let inString = false;
+    let escaping = false;
+    let valid = true;
+
+    for (let index = start + 1; index < text.length; index++) {
+      const char = text[index];
+
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaping = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (char === '{' || char === '[') {
+        stack.push(char);
+        continue;
+      }
+
+      if (char === '}' || char === ']') {
+        const expected = char === '}' ? '{' : '[';
+        if (stack.at(-1) !== expected) {
+          valid = false;
+          break;
+        }
+        stack.pop();
+      }
+    }
+
+    if (!valid) {
+      continue;
+    }
+
+    let candidate = text.slice(start);
+    if (inString) {
+      const trailingTail = candidate.match(/[\s,}\]]+$/);
+      if (trailingTail && /[}\]]/.test(trailingTail[0])) {
+        candidate = candidate.slice(0, -trailingTail[0].length);
+      }
+      if (escaping) {
+        candidate += '\\';
+      }
+      candidate += '"';
+    }
+
+    while (stack.length) {
+      const expected = stack.pop();
+      candidate += expected === '{' ? '}' : ']';
+    }
+
+    if (tryParseJson(candidate) !== null) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Parse JSON from LLM output, tolerating Markdown fences and leading/trailing prose.
  */
@@ -80,6 +159,13 @@ export function extractJson<T = unknown>(text: string): T {
   if (strippedFenceParsed !== null) {
     return strippedFenceParsed;
   }
+  const strippedFenceRepaired = repairTruncatedJsonCandidate(strippedFence);
+  if (strippedFenceRepaired) {
+    const parsedStrippedFenceRepaired = tryParseJson<T>(strippedFenceRepaired);
+    if (parsedStrippedFenceRepaired !== null) {
+      return parsedStrippedFenceRepaired;
+    }
+  }
 
   const fencedBlockPattern = /```(?:json)?\s*([\s\S]*?)```/gi;
   for (const match of normalized.matchAll(fencedBlockPattern)) {
@@ -98,6 +184,13 @@ export function extractJson<T = unknown>(text: string): T {
         return parsedBalancedBlock;
       }
     }
+    const repairedBlock = repairTruncatedJsonCandidate(block);
+    if (repairedBlock) {
+      const parsedRepairedBlock = tryParseJson<T>(repairedBlock);
+      if (parsedRepairedBlock !== null) {
+        return parsedRepairedBlock;
+      }
+    }
   }
 
   const balanced = extractBalancedJsonCandidate(normalized);
@@ -105,6 +198,14 @@ export function extractJson<T = unknown>(text: string): T {
     const parsedBalanced = tryParseJson<T>(balanced);
     if (parsedBalanced !== null) {
       return parsedBalanced;
+    }
+  }
+
+  const repaired = repairTruncatedJsonCandidate(normalized);
+  if (repaired) {
+    const parsedRepaired = tryParseJson<T>(repaired);
+    if (parsedRepaired !== null) {
+      return parsedRepaired;
     }
   }
 

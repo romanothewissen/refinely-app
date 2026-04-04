@@ -141,6 +141,47 @@ function buildDiscoveryInputSignature(params: {
   });
 }
 
+function createSessionId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch (e) {
+    return `fallback_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+}
+
+function resolveContextModeForSignature(
+  projectKey: string,
+  fallback: 'undecided' | 'project' | 'global',
+): 'undecided' | 'project' | 'global' {
+  if (fallback !== 'undecided') return fallback;
+  return projectKey && projectKey !== '*' ? 'project' : 'global';
+}
+
+function buildConversationInputSignature(
+  conversation: any,
+  fallback: { projectKey: string; contextMode: 'undecided' | 'project' | 'global' },
+): string | null {
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const lastTurn = turns[turns.length - 1];
+  if (!lastTurn?.requirement) return null;
+  if (typeof lastTurn.inputSignature === 'string' && lastTurn.inputSignature.trim()) {
+    return lastTurn.inputSignature;
+  }
+
+  const restoredProjectKey =
+    lastTurn?.clarifyContext?.projectKey
+    || lastTurn?.generationContext?.projectKey
+    || fallback.projectKey
+    || '*';
+
+  return buildDiscoveryInputSignature({
+    requirement: String(lastTurn.requirement ?? ''),
+    projectKey: restoredProjectKey,
+    contextMode: resolveContextModeForSignature(restoredProjectKey, fallback.contextMode),
+    attachments: [],
+  });
+}
+
 function getDefaultSidebarWidth(viewportWidth?: number): number {
   const width =
     typeof viewportWidth === 'number'
@@ -178,10 +219,27 @@ export default function App() {
   const [clarifyContext, setClarifyContext] = useState<ClarifyContextMeta | null>(null);
   const [workflowTokenUsage, setWorkflowTokenUsage] = useState<WorkflowTokenUsage | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string>(() => {
-    try { return crypto.randomUUID(); } 
-    catch(e) { return `fallback_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
-  });
+  const [sessionId, setSessionIdState] = useState<string>(() => createSessionId());
+  const sessionIdRef = useRef(sessionId);
+  const [activeSessionInputSignature, setActiveSessionInputSignature] = useState<string | null>(null);
+  const activeSessionInputSignatureRef = useRef<string | null>(null);
+  const [restoredSessionInputSignature, setRestoredSessionInputSignature] = useState<string | null>(null);
+  const restoredSessionInputSignatureRef = useRef<string | null>(null);
+
+  const setSessionId = (nextSessionId: string) => {
+    sessionIdRef.current = nextSessionId;
+    setSessionIdState(nextSessionId);
+  };
+
+  const setSessionSignatures = (
+    nextActiveSignature: string | null,
+    nextRestoredSignature: string | null = nextActiveSignature,
+  ) => {
+    activeSessionInputSignatureRef.current = nextActiveSignature;
+    restoredSessionInputSignatureRef.current = nextRestoredSignature;
+    setActiveSessionInputSignature(nextActiveSignature);
+    setRestoredSessionInputSignature(nextRestoredSignature);
+  };
   
   // Realtime Integration
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[]>([]);
@@ -241,7 +299,6 @@ export default function App() {
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
   const [runAttachmentError, setRunAttachmentError] = useState<string | null>(null);
-  const activeDiscoveryInputSignatureRef = useRef<string | null>(null);
 
   // History
   const [conversations, setConversations] = useState<any[]>([]);
@@ -252,12 +309,22 @@ export default function App() {
     setTimeout(() => { setSidebarOpen(false); setSidebarExiting(false); }, 270);
   };
 
+  const persistSessionPointers = async (nextSessionId: string, issueKeyOverride?: string | null) => {
+    await Promise.all([
+      api.setLastSession(nextSessionId),
+      issueKeyOverride ? api.setIssueSession(issueKeyOverride, nextSessionId) : Promise.resolve(),
+    ]);
+  };
+
   // Fetch Atlassian account ID once on mount; detect issue context if launched via issueAction
   useEffect(() => {
+    let active = true;
+
     view.getContext().then(async (ctx: any) => {
       if (!ctx) return;
       const aid = ctx.accountId as string | undefined;
       if (!aid) return;
+      if (!active) return;
       setAccountId(aid);
 
       const issueKey = ctx.extension?.issue?.key as string | undefined;
@@ -266,40 +333,108 @@ export default function App() {
         (ctx.extension?.projectKey as string | undefined) ||
         (issueKey ? issueKey.split('-')[0] : undefined);
       if (ctxProjectKey) {
+        if (!active) return;
         setProjectKey(ctxProjectKey);
         setContextMode('project');
       }
 
-      if (issueKey) {
-        setOriginIssueKey(issueKey);
-        try {
-          const issueSidRes = await api.getIssueSession(issueKey) as any;
-          const issueSid = issueSidRes?.sessionId as string | null;
-          if (issueSid) {
-            setSessionId(issueSid);
-          } else {
-            const lastRes = await api.getLastSession() as any;
-            const sid = lastRes?.sessionId ?? sessionId;
-            await api.setIssueSession(issueKey, sid);
-            setSessionId(sid);
-          }
+      try {
+        const lastRes = await api.getLastSession() as any;
+        const lastSid = lastRes?.sessionId as string | null;
 
-          const res = await requestJira(`/rest/api/3/issue/${issueKey}?fields=summary,description`);
-          if (res.ok) {
-            const data = await res.json() as any;
+        if (issueKey) {
+          if (!active) return;
+          setOriginIssueKey(issueKey);
+
+          const [issueSidRes, issueRes] = await Promise.all([
+            api.getIssueSession(issueKey) as Promise<any>,
+            requestJira(`/rest/api/3/issue/${issueKey}?fields=summary,description`),
+          ]);
+
+          const issueSid = issueSidRes?.sessionId as string | null;
+          let requirementText = '';
+          if (issueRes.ok) {
+            const data = await issueRes.json() as any;
             const summary = data.fields?.summary ?? '';
             const description = extractAdfText(data.fields?.description);
-            const text = [summary, description].filter(Boolean).join('\n\n');
-            if (text) setRequirement(text);
+            requirementText = [summary, description].filter(Boolean).join('\n\n');
+            if (active && requirementText) setRequirement(requirementText);
           }
-        } catch (e) { console.error('Issue context error', e); }
-      } else {
-        try {
-          const lastRes = await api.getLastSession() as any;
-          if (lastRes?.sessionId) setSessionId(lastRes.sessionId);
-        } catch {}
+
+          const candidateSessionId = issueSid ?? lastSid;
+          const candidateConversationRes = candidateSessionId
+            ? await api.getConversation(candidateSessionId) as any
+            : null;
+          const candidateConversation = candidateConversationRes?.conversation;
+          const fallbackContextMode = ctxProjectKey ? 'project' : 'undecided';
+          const currentIssueSignature = requirementText.trim()
+            ? buildDiscoveryInputSignature({
+                requirement: requirementText,
+                projectKey: ctxProjectKey || '*',
+                contextMode: fallbackContextMode,
+                attachments: [],
+              })
+            : null;
+          const candidateSignature = candidateConversation
+            ? buildConversationInputSignature(candidateConversation, {
+                projectKey: ctxProjectKey || '*',
+                contextMode: fallbackContextMode,
+              })
+            : null;
+
+          if (
+            candidateSessionId
+            && candidateSignature
+            && currentIssueSignature
+            && candidateSignature === currentIssueSignature
+          ) {
+            if (!active) return;
+            setSessionId(candidateSessionId);
+            setSessionSignatures(candidateSignature, candidateSignature);
+            await persistSessionPointers(candidateSessionId, issueKey);
+            return;
+          }
+
+          if (requirementText.trim()) {
+            const freshSessionId = createSessionId();
+            if (!active) return;
+            setSessionId(freshSessionId);
+            setSessionSignatures(null, null);
+            await persistSessionPointers(freshSessionId, issueKey);
+            return;
+          }
+
+          if (candidateSessionId) {
+            if (!active) return;
+            setSessionId(candidateSessionId);
+            setSessionSignatures(candidateSignature, candidateSignature);
+            await persistSessionPointers(candidateSessionId, issueKey);
+          }
+          return;
+        }
+
+        if (lastSid) {
+          const lastConversationRes = await api.getConversation(lastSid) as any;
+          const lastConversation = lastConversationRes?.conversation;
+          const lastSignature = lastConversation
+            ? buildConversationInputSignature(lastConversation, {
+                projectKey: '*',
+                contextMode: 'global',
+              })
+            : null;
+          if (!active) return;
+          setSessionId(lastSid);
+          setSessionSignatures(lastSignature, lastSignature);
+          await persistSessionPointers(lastSid, null);
+        }
+      } catch (e) {
+        console.error('Context error', e);
       }
     }).catch(err => console.error('Context error', err));
+
+    return () => {
+      active = false;
+    };
   }, []); // eslint-disable-line
 
   useEffect(() => {
@@ -344,49 +479,21 @@ export default function App() {
     [requirement, projectKey, contextMode, runAttachments],
   );
 
-  useEffect(() => {
-    const activeSignature = activeDiscoveryInputSignatureRef.current;
-    if (!activeSignature || activeSignature === discoveryInputSignature) return;
-
-    const hasDiscoveryState =
-      clarifyQuestions.length > 0
-      || clarifyAnswers.length > 0
-      || Boolean(clarifyContext)
-      || Boolean(clarifyBlockingError)
-      || Boolean(clarifyEvaluationError)
-      || clarifyRound !== 1;
-
-    activeDiscoveryInputSignatureRef.current = null;
-
-    if (!hasDiscoveryState) return;
-
-    setPendingClarifySessionId(null);
-    setClarifyQuestions([]);
-    setClarifyAnswers([]);
-    setClarifyRound(1);
-    setClarifyContext(null);
-    setClarifyBlockingError(null);
-    setClarifyEvaluationError(null);
-    setIsEvaluatingDiscovery(false);
-  }, [
-    discoveryInputSignature,
-    clarifyQuestions.length,
-    clarifyAnswers.length,
-    clarifyContext,
-    clarifyBlockingError,
-    clarifyEvaluationError,
-    clarifyRound,
-  ]);
-
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
     if (!accountId) return;
-    // Persist session pointer cross-device
-    api.setLastSession(sessionId).catch(() => {});
     // Restore features from last conversation turn
     api.getConversation(sessionId).then((res: any) => {
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
+        const restoredSignature = buildConversationInputSignature(res.conversation, {
+          projectKey,
+          contextMode,
+        });
+        setSessionSignatures(
+          activeSessionInputSignatureRef.current ?? restoredSignature,
+          restoredSignature,
+        );
         setWorkflowTokenUsage(sumWorkflowTokenUsage(res.conversation));
         setPendingSessionId(null);
         setPendingClarifySessionId(null);
@@ -480,6 +587,7 @@ export default function App() {
     isClarifying,
   } = useClarifyRealtime(
     pendingClarifySessionId,
+    activeSessionInputSignature,
     workflowRunId,
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
@@ -629,7 +737,6 @@ export default function App() {
   };
 
   const handleClarifySkip = async () => {
-    activeDiscoveryInputSignatureRef.current = null;
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     if (clarifyRound === 2) {
@@ -653,7 +760,6 @@ export default function App() {
     setPendingClarifySessionId(null);
     setPendingSessionId(null);
     setGenerationProgressMeta(null);
-    activeDiscoveryInputSignatureRef.current = null;
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
@@ -667,6 +773,28 @@ export default function App() {
     if (generationActive) {
       await cancelGeneration();
     }
+  };
+
+  const resolveDiscoverySessionId = async () => {
+    const currentSessionId = sessionIdRef.current;
+    const boundSignature = activeSessionInputSignatureRef.current;
+    const shouldReuseCurrentSession =
+      !boundSignature || (
+        boundSignature === discoveryInputSignature
+        && (!restoredSessionInputSignature || restoredSessionInputSignature === discoveryInputSignature)
+      );
+
+    if (shouldReuseCurrentSession) {
+      setSessionSignatures(discoveryInputSignature, restoredSessionInputSignatureRef.current);
+      await persistSessionPointers(currentSessionId, originIssueKey);
+      return currentSessionId;
+    }
+
+    const freshSessionId = createSessionId();
+    setSessionId(freshSessionId);
+    setSessionSignatures(discoveryInputSignature, discoveryInputSignature);
+    await persistSessionPointers(freshSessionId, originIssueKey);
+    return freshSessionId;
   };
 
   const handleStartBrainstorm = async () => {
@@ -688,17 +816,18 @@ export default function App() {
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
-    activeDiscoveryInputSignatureRef.current = discoveryInputSignature;
-
-    // Bind this session to the originating issue so re-launching restores it
-    if (originIssueKey) {
-      api.setIssueSession(originIssueKey, sessionId).catch(() => {});
-    }
 
     try {
-      const res = await api.startClarify(sessionId, requirement, attachmentText, projectKey) as any;
+      const clarifySessionId = await resolveDiscoverySessionId();
+      const res = await api.startClarify(
+        clarifySessionId,
+        requirement,
+        attachmentText,
+        projectKey,
+        discoveryInputSignature,
+      ) as any;
       if (res.success) {
-        setPendingClarifySessionId(sessionId);
+        setPendingClarifySessionId(clarifySessionId);
       } else {
         setIsWorking(false);
         setClarifyContext({
@@ -740,10 +869,17 @@ export default function App() {
     setClarifyQuestions([]);
     setClarifyRound(1);
     setClarifyAnswers([]);
-    activeDiscoveryInputSignatureRef.current = discoveryInputSignature;
 
     try {
-      const res = await api.retryClarify(sessionId, requirement, attachmentText, projectKey) as any;
+      const clarifySessionId = await resolveDiscoverySessionId();
+      setPendingClarifySessionId(clarifySessionId);
+      const res = await api.retryClarify(
+        clarifySessionId,
+        requirement,
+        attachmentText,
+        projectKey,
+        discoveryInputSignature,
+      ) as any;
       if (!res?.success) {
         setPendingClarifySessionId(null);
         setIsWorking(false);
@@ -777,8 +913,6 @@ export default function App() {
   // Helpers to avoid stale closures in effects
   const requirementRef = useRef(requirement);
   requirementRef.current = requirement;
-  const sessionIdRef = useRef(sessionId);
-  sessionIdRef.current = sessionId;
   const startGeneration = async (reqText: string, clarifyAnswers: ClarifyAnswer[]) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
@@ -789,7 +923,6 @@ export default function App() {
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
-    activeDiscoveryInputSignatureRef.current = null;
     setClarifyQuestions([]);
     setClarifyAnswers([]);
     setClarifyRound(1);
@@ -797,12 +930,9 @@ export default function App() {
     setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
     setGenerationProgressMeta(null);
-    // CRITICAL: Stop clarify polling if it was active
     setPendingClarifySessionId(null);
 
     try {
-      // Set pending SID early so the polling hook starts immediately
-      // This ensures 'isGenerating' becomes true and shows the skeleton
       setPendingSessionId(sid);
 
       const res = await api.startGeneration({
@@ -852,7 +982,6 @@ export default function App() {
     try {
       const res = await api.getConversation(sid) as any;
       if (res.success && res.conversation) {
-        activeDiscoveryInputSignatureRef.current = null;
         setWorkflowRunId(prev => prev + 1);
         setPendingSessionId(null);
         setPendingClarifySessionId(null);
@@ -868,6 +997,12 @@ export default function App() {
         setRunAttachmentParseState(null);
         setRunAttachmentError(null);
         setSessionId(res.conversation.sessionId);
+        const restoredSignature = buildConversationInputSignature(res.conversation, {
+          projectKey,
+          contextMode,
+        });
+        setSessionSignatures(restoredSignature, restoredSignature);
+        await persistSessionPointers(res.conversation.sessionId, originIssueKey);
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
@@ -962,10 +1097,9 @@ export default function App() {
               onStartBrainstorm={() => { handleStartBrainstorm(); closeSidebar(); }}
               onNewSession={() => {
                 let newSid: string;
-                try { newSid = crypto.randomUUID(); }
-                catch(e) { newSid = `sid_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
+                newSid = createSessionId();
                 
-                activeDiscoveryInputSignatureRef.current = null;
+                setSessionSignatures(null, null);
                 setRequirement('');
                 setFeatures([]);
                 setGenerationContext(null);
@@ -984,6 +1118,7 @@ export default function App() {
                 setSidebarOpen(true);
                 setSidebarExiting(false);
                 setSessionId(newSid);
+                void persistSessionPointers(newSid, originIssueKey);
                 setProjectKey('*');
                 setContextMode('undecided');
               }}

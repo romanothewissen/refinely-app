@@ -96,6 +96,7 @@ export interface ClarifyBlockedPayload {
 
 export function useClarifyRealtime(
   sessionId: string | null,
+  expectedInputSignature: string | null,
   runId: number,
   onComplete: (payload: { questions: unknown[]; contextMeta?: unknown }) => void,
   onBlocked: (payload: ClarifyBlockedPayload) => void,
@@ -140,6 +141,7 @@ export function useClarifyRealtime(
           success: boolean;
           result?: {
             type: string;
+            inputSignature?: string;
             message?: string;
             error?: string;
             reasonCode?: ClarifyFailureReasonCode;
@@ -150,6 +152,14 @@ export function useClarifyRealtime(
         };
         if (!active) return;
         const result = res.result;
+
+        if (
+          expectedInputSignature
+          && result?.inputSignature
+          && result.inputSignature !== expectedInputSignature
+        ) {
+          return;
+        }
 
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
         if (!result || result.type === 'pending' || result.type === 'progress') {
@@ -237,7 +247,7 @@ export function useClarifyRealtime(
       setIsClarifying(false);
       setProgress('');
     };
-  }, [sessionId, runId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, expectedInputSignature, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { cancelClarify: stopClarify, progress, isClarifying };
 }

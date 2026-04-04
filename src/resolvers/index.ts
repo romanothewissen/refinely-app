@@ -342,17 +342,21 @@ async function cancelWorkflowProgress(
   const key = type === 'generation'
     ? KEYS.generationProgress(sessionId)
     : KEYS.clarifyProgress(sessionId);
+  const existing = type === 'clarify'
+    ? await entityGet<{ inputSignature?: string }>(key)
+    : null;
   await entitySet(key, {
     type: 'cancelled',
     sessionId,
     message,
+    ...(existing?.inputSignature ? { inputSignature: existing.inputSignature } : {}),
     updatedAt: Date.now(),
   });
   return { success: true };
 }
 
 async function enqueueClarifyWorkflow(
-  payload: { sessionId: string; requirement: string; attachmentText?: string; projectKey?: string },
+  payload: { sessionId: string; requirement: string; attachmentText?: string; projectKey?: string; inputSignature?: string },
   context: any,
 ) {
   const config = await getConfig();
@@ -362,6 +366,7 @@ async function enqueueClarifyWorkflow(
     sessionId: payload.sessionId,
     accountId,
     requirement: payload.requirement,
+    inputSignature: payload.inputSignature,
     attachmentText: payload.attachmentText ?? '',
     config,
     license: context?.license,
@@ -373,6 +378,7 @@ async function enqueueClarifyWorkflow(
   await entitySet(KEYS.clarifyProgress(payload.sessionId), {
     type: 'progress',
     sessionId: payload.sessionId,
+    ...(payload.inputSignature ? { inputSignature: payload.inputSignature } : {}),
     message: 'Analyzing requirement and gathering project context…',
     updatedAt: Date.now(),
   });
