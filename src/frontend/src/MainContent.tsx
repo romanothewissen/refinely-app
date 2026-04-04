@@ -695,8 +695,6 @@ export function MainContent({
   const liveSources = generationProgressMeta?.sources ?? generationContext ?? null;
   const liveArRatio = liveArProgress?.total ? Math.min(1, liveArProgress.completed / liveArProgress.total) : 0;
   const liveFeatureProgressById = new Map(liveFeatureProgress.map(item => [item.id, item.status]));
-  const triageSupportCopy = getTriageSupportCopy(liveTriage);
-
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
       .replace(/&/g, '&amp;')
