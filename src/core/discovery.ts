@@ -271,6 +271,17 @@ function sentenceCaseQuestion(value: string): string {
   return normalized.replace(/^[a-z]/, (letter) => letter.toUpperCase());
 }
 
+function isLikelyCompleteQuestion(value: string): boolean {
+  const normalized = cleanText(value);
+  if (!normalized) return false;
+
+  if (/['"`]\?$/.test(normalized)) {
+    return false;
+  }
+
+  return !/\b(a|an|the|and|or|but|to|for|of|with|from|in|on|at|by|as|into|onto|than|then|that|this|these|those|my|your|his|her|our|their|its)\?$/i.test(normalized);
+}
+
 function toSnakeCase(value: string): string {
   return cleanText(value)
     .toLowerCase()
@@ -863,7 +874,8 @@ function splitGroupedQuestion(question: string): string[] {
 }
 
 function normalizeQuestionText(question: string): string {
-  return sentenceCaseQuestion(question);
+  const normalized = sentenceCaseQuestion(question);
+  return isLikelyCompleteQuestion(normalized) ? normalized : '';
 }
 
 function normalizeQuestions(

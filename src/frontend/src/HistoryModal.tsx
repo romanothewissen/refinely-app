@@ -5,7 +5,7 @@ import { api } from './hooks/useForge';
 
 interface HistoryModalProps {
   onClose: () => void;
-  onRestore: (sessionId: string) => void;
+  onRestore: (sessionId: string) => Promise<void> | void;
   conversations: any[];
   currentSessionId: string;
   refreshHistory: () => Promise<void>;
@@ -75,18 +75,18 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
       />
 
       <motion.div 
-        className="relative rf-card w-full max-w-5xl h-[82vh] flex flex-col overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
+        className="relative rf-glass-card w-full max-w-5xl h-[82vh] flex flex-col overflow-hidden"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
         {/* Header */}
-        <div className="px-5 py-4 border-b border-[var(--rf-border-subtle)] flex items-center gap-4 bg-white/80 backdrop-blur-md sticky top-0 z-20">
+        <div className="px-5 py-4 border-b border-[var(--rf-border-subtle)] flex items-center gap-4 bg-white/50 backdrop-blur-xl sticky top-0 z-20">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Past Conversations</h2>
-              <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+              <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-1 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] backdrop-blur-sm">
                 {filtered.length} total
               </span>
             </div>
@@ -94,7 +94,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
           </div>
           <motion.button 
             onClick={onClose} 
-            className="p-2 hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] rounded-xl transition"
+            className="p-2 hover:bg-white/60 text-[var(--rf-text-tertiary)] rounded-xl transition"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
@@ -103,7 +103,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
         </div>
 
         {/* Search */}
-        <div className="px-5 py-3.5 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/50 z-10">
+        <div className="px-5 py-3.5 border-b border-[var(--rf-border-subtle)] bg-white/35 backdrop-blur-sm z-10">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--rf-text-tertiary)]" />
             <input
@@ -111,16 +111,16 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search sessions..."
-              className="w-full bg-white border border-[var(--rf-border)] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+              className="w-full bg-white/65 border border-[var(--rf-border)] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand-subtle)] focus:border-[var(--rf-brand)] transition backdrop-blur-sm"
             />
           </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-[var(--rf-surface-soft)]/50 p-4 sm:p-5">
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar bg-transparent p-4 sm:p-5">
           {filtered.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-[var(--rf-text-tertiary)] gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-white border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
+              <div className="w-16 h-16 rounded-2xl bg-white/65 border border-[var(--rf-border)] flex items-center justify-center backdrop-blur-sm">
                 <MessageSquare className="w-8 h-8 text-[var(--rf-border-strong)]" />
               </div>
               <p className="text-sm font-medium text-[var(--rf-text-tertiary)]">No conversations found.</p>
@@ -148,7 +148,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
                           editingId={editingId}
                           editTitle={editTitle}
                           setEditTitle={setEditTitle}
-                          onRestore={() => { onRestore(conv.sessionId); onClose(); }}
+                          onRestore={async () => { onClose(); await onRestore(conv.sessionId); }}
                           toggleBookmark={toggleBookmark}
                           startEdit={startEdit}
                           saveEdit={saveEdit}
@@ -181,7 +181,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
                           editingId={editingId}
                           editTitle={editTitle}
                           setEditTitle={setEditTitle}
-                          onRestore={() => { onRestore(conv.sessionId); onClose(); }}
+                          onRestore={async () => { onClose(); await onRestore(conv.sessionId); }}
                           toggleBookmark={toggleBookmark}
                           startEdit={startEdit}
                           saveEdit={saveEdit}
@@ -208,8 +208,8 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
   return (
     <motion.div 
       onClick={isEditing ? undefined : onRestore}
-      className={`group relative bg-white border rounded-2xl p-4 flex flex-col gap-3 h-full transition-all ${
-        isCurrent ? 'border-[var(--rf-brand)] shadow-md shadow-[var(--rf-brand)]/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
+      className={`group relative border rounded-[20px] p-4 flex flex-col gap-3 h-full transition-all backdrop-blur-sm ${
+        isCurrent ? 'border-[var(--rf-brand)] bg-white/85 shadow-[0_4px_20px_-4px_rgba(43,89,74,0.14)]' : 'bg-white/78 border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-[0_8px_24px_-4px_rgba(43,89,74,0.10)] cursor-pointer'
       }`}
       whileHover={!isCurrent && !isEditing ? { y: -2, scale: 1.01 } : {}}
       transition={{ duration: 0.2 }}
@@ -224,7 +224,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
                 onChange={e => setEditTitle(e.target.value)}
                 className="flex-1 bg-white border border-[var(--rf-brand)] rounded-lg outline-none px-3 py-1.5 text-sm font-bold text-[var(--rf-text)] w-full focus:ring-2 focus:ring-[var(--rf-brand)]/20"
               />
-              <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] px-2 py-1.5 rounded-lg transition">Cancel</button>
+              <button type="button" onClick={cancelEdit} className="text-xs font-semibold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] bg-white/55 hover:bg-white/70 px-2 py-1.5 rounded-lg transition">Cancel</button>
               <button type="submit" className="text-xs font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] px-2 py-1.5 rounded-md transition">Save</button>
             </form>
           ) : (
@@ -238,7 +238,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
           <button 
             onClick={(e) => toggleBookmark(e, conv.sessionId, conv.isPinned)}
             title={conv.isPinned ? "Unpin" : "Pin"}
-            className={`p-1.5 rounded-lg hover:bg-[var(--rf-surface-soft)] transition-colors ${conv.isPinned ? 'text-[var(--rf-brand)] opacity-100' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-brand)]'}`}
+            className={`p-1.5 rounded-lg hover:bg-white/60 transition-colors ${conv.isPinned ? 'text-[var(--rf-brand)] opacity-100' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-brand)]'}`}
           >
             <Pin className={`w-4 h-4 ${conv.isPinned ? 'fill-current' : ''}`} />
           </button>
@@ -259,7 +259,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
         <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </span>
-        <div className={`flex items-center gap-1.5 text-[12px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
+        <div className={`flex items-center gap-1.5 text-[12px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'bg-white/50 text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
           {isCurrent ? 'Active Now' : <><Play className="w-3 h-3" /> Resume</>}
         </div>
       </div>

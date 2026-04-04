@@ -8,7 +8,7 @@
  * Result is stored in Forge Storage; the frontend polls getClarifyResult.
  */
 
-import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode } from '../types';
+import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
 import { ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
@@ -49,7 +49,15 @@ export async function handler(event: { body: ClarifyEvent }) {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
-    await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and related stories…', inputSignature);
+    await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and related stories…', inputSignature, {
+      stage: 'context',
+      sources: {
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        projectCount: selectedProjectKeys.length,
+        attachmentIncluded: Boolean(attachmentText?.trim()),
+        domainContextApplied: Boolean(config.domainContext?.trim()),
+      },
+    });
     const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), 4, 20000, selectedProjectKeys)
@@ -70,7 +78,17 @@ export async function handler(event: { body: ClarifyEvent }) {
       return;
     }
 
-    await sendClarifyProgress(sessionId, 'Drafting clarifying questions from the gathered context…', inputSignature);
+    await sendClarifyProgress(sessionId, 'Assessing scope, ambiguity, and question budget…', inputSignature, {
+      stage: 'assessment',
+      sources: {
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        projectCount: selectedProjectKeys.length,
+        attachmentIncluded: Boolean(attachmentText?.trim()),
+        domainContextApplied: Boolean(config.domainContext?.trim()),
+        wiDocsCount: wiContext.docs.length,
+        similarStoriesCount: similarStories.length,
+      },
+    });
     const clarifyStartedAt = Date.now();
     const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
@@ -78,6 +96,26 @@ export async function handler(event: { body: ClarifyEvent }) {
       wiContextText: wiContext.text,
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
+      onTriageComplete: async (assessment) => {
+        const complexityLabel = assessment.complexity === 'very_high' ? 'complex' : assessment.complexity ?? 'medium';
+        await sendClarifyProgress(
+          sessionId,
+          `The requirement looks ${complexityLabel} with ${assessment.clarity} clarity, so discovery is targeting about ${assessment.questionPlan.target} questions…`,
+          inputSignature,
+          {
+            stage: 'question_generation',
+            assessment,
+            sources: {
+              projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+              projectCount: selectedProjectKeys.length,
+              attachmentIncluded: Boolean(attachmentText?.trim()),
+              domainContextApplied: Boolean(config.domainContext?.trim()),
+              wiDocsCount: wiContext.docs.length,
+              similarStoriesCount: similarStories.length,
+            },
+          },
+        );
+      },
     });
     const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
@@ -86,7 +124,22 @@ export async function handler(event: { body: ClarifyEvent }) {
       return;
     }
 
-    await sendClarifyProgress(sessionId, 'Finalizing discovery questions…', inputSignature);
+    await sendClarifyProgress(sessionId, 'Finalizing discovery questions and coverage gaps…', inputSignature, {
+      stage: 'finalize',
+      discoveryProfile,
+      ambiguityAssessment: {
+        ...ambiguityAssessment,
+        generatedQuestions: questions.length,
+      },
+      sources: {
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        projectCount: selectedProjectKeys.length,
+        attachmentIncluded: Boolean(attachmentText?.trim()),
+        domainContextApplied: Boolean(config.domainContext?.trim()),
+        wiDocsCount: wiContext.docs.length,
+        similarStoriesCount: similarStories.length,
+      },
+    });
     const clarifyContext: ClarifyContextMeta = {
       projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
       projectKeys: selectedProjectKeys,
@@ -194,12 +247,18 @@ export async function handler(event: { body: ClarifyEvent }) {
   }
 }
 
-async function sendClarifyProgress(sessionId: string, message: string, inputSignature?: string) {
+async function sendClarifyProgress(
+  sessionId: string,
+  message: string,
+  inputSignature?: string,
+  payload?: ClarifyProgressPayload,
+) {
   await entitySet(KEYS.clarifyProgress(sessionId), {
     type: 'progress',
     sessionId,
     ...(inputSignature ? { inputSignature } : {}),
     message,
+    ...(payload ? { payload } : {}),
     updatedAt: Date.now(),
   });
 }

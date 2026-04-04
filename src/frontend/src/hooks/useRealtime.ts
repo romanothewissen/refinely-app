@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyFailureReasonCode } from '../types';
+import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -94,6 +94,21 @@ export interface ClarifyBlockedPayload {
   contextMeta?: ClarifyContextMeta | null;
 }
 
+function mergeClarifyPayload(
+  previous: ClarifyProgressPayload | null,
+  next: ClarifyProgressPayload | null,
+): ClarifyProgressPayload | null {
+  if (!previous) return next;
+  if (!next) return previous;
+  return {
+    stage: next.stage ?? previous.stage,
+    assessment: next.assessment ?? previous.assessment,
+    discoveryProfile: next.discoveryProfile ?? previous.discoveryProfile,
+    ambiguityAssessment: next.ambiguityAssessment ?? previous.ambiguityAssessment,
+    sources: next.sources ?? previous.sources,
+  };
+}
+
 export function useClarifyRealtime(
   sessionId: string | null,
   expectedInputSignature: string | null,
@@ -103,6 +118,7 @@ export function useClarifyRealtime(
   onCancel?: () => void,
 ) {
   const [progress, setProgress] = useState('');
+  const [progressPayload, setProgressPayload] = useState<ClarifyProgressPayload | null>(null);
   const [isClarifying, setIsClarifying] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
@@ -133,6 +149,7 @@ export function useClarifyRealtime(
     startedAtRef.current = Date.now();
     setIsClarifying(true);
     setProgress('Analyzing requirement and gathering context…');
+    setProgressPayload(null);
 
     timerRef.current = setInterval(async () => {
       if (!active) return;
@@ -143,6 +160,7 @@ export function useClarifyRealtime(
             type: string;
             inputSignature?: string;
             message?: string;
+            payload?: ClarifyProgressPayload;
             error?: string;
             reasonCode?: ClarifyFailureReasonCode;
             questions?: unknown[];
@@ -164,6 +182,7 @@ export function useClarifyRealtime(
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
         if (!result || result.type === 'pending' || result.type === 'progress') {
           if (result?.message) setProgress(result.message);
+          setProgressPayload(previous => mergeClarifyPayload(previous, result?.payload ?? null));
           const updatedAt = result?.updatedAt ?? 0;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > CLARIFY_STALE_PROGRESS_MS) {
@@ -171,6 +190,7 @@ export function useClarifyRealtime(
             timerRef.current = null;
             setIsClarifying(false);
             setProgress('');
+            setProgressPayload(null);
             onBlockedRef.current({
               message: 'Discovery timed out while waiting for clarifying questions.',
               reasonCode: 'timeout',
@@ -183,6 +203,7 @@ export function useClarifyRealtime(
             timerRef.current = null;
             setIsClarifying(false);
             setProgress('');
+            setProgressPayload(null);
             onBlockedRef.current({
               message: 'Discovery timed out before clarifying questions were ready.',
               reasonCode: 'timeout',
@@ -198,6 +219,7 @@ export function useClarifyRealtime(
           cancelledRef.current = true;
           setIsClarifying(false);
           setProgress('');
+          setProgressPayload(null);
           onCancelRef.current?.();
           return;
         }
@@ -208,6 +230,7 @@ export function useClarifyRealtime(
           timerRef.current = null;
           setIsClarifying(false);
           setProgress('');
+          setProgressPayload(null);
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'complete') {
           console.warn('[useClarifyRealtime] complete but no questions found — blocking discovery');
@@ -215,6 +238,7 @@ export function useClarifyRealtime(
           timerRef.current = null;
           setIsClarifying(false);
           setProgress('');
+          setProgressPayload(null);
           onBlockedRef.current({
             message: 'Discovery completed without any questions. Please retry discovery.',
             reasonCode: 'invalid_empty_questions',
@@ -226,6 +250,7 @@ export function useClarifyRealtime(
           timerRef.current = null;
           setIsClarifying(false);
           setProgress('');
+          setProgressPayload(null);
           onBlockedRef.current({
             message: result.error || result.message || 'Discovery could not prepare clarifying questions.',
             reasonCode: result.reasonCode ?? 'queue_error',
@@ -246,10 +271,11 @@ export function useClarifyRealtime(
       cancelledRef.current = false;
       setIsClarifying(false);
       setProgress('');
+      setProgressPayload(null);
     };
   }, [sessionId, expectedInputSignature, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { cancelClarify: stopClarify, progress, isClarifying };
+  return { cancelClarify: stopClarify, progress, progressPayload, isClarifying };
 }
 
 export function useGenerationRealtime(

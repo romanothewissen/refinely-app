@@ -130,6 +130,12 @@ interface PiiPreviewResult {
 const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 type UiProvider = Exclude<LlmProvider, 'forge_llms'>;
+const DEFAULT_STRATEGY_STATE = resolveUiGeneratorStrategyState({
+  provider: 'anthropic',
+  modelStrategy: 'stable',
+  bucketClasses: DEFAULT_BUCKET_CLASSES,
+  hasStoredStrategy: true,
+});
 
 function getDisplayProvider(provider: LlmProvider): UiProvider {
   return provider === 'forge_llms' ? 'anthropic' : provider;
@@ -190,6 +196,15 @@ function getPreferredFamilyModel(entries: LlmModelCatalogEntry[], family: 'pro' 
   return getCatalogModelId(preferred);
 }
 
+function isProviderModel(provider: LlmProvider, modelId: string) {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return false;
+  if (provider === 'gemini') return normalized.startsWith('gemini-');
+  if (provider === 'openai') return normalized.startsWith('gpt-') || normalized.startsWith('o');
+  if (provider === 'azure_openai') return true;
+  return normalized.startsWith('claude-');
+}
+
 function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
   const rows = rawRows
     .map((row: any) => {
@@ -247,13 +262,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [provider, setProvider] = useState<LlmProvider>('anthropic');
   const [modelStrategy, setModelStrategy] = useState<GeneratorModelStrategy>('stable');
   const [bucketClasses, setBucketClasses] = useState<GeneratorBucketClasses>(DEFAULT_BUCKET_CLASSES);
-  const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-1-20250805');
-  const [arModel, setArModel] = useState('claude-opus-4-1-20250805');
-  const [clarifyModel, setClarifyModel] = useState('claude-3-5-sonnet-20241022');
-  const [evaluateModel, setEvaluateModel] = useState('claude-3-5-sonnet-20241022');
-  const [triageModel, setTriageModel] = useState('claude-3-5-sonnet-20241022');
-  const [refineModel, setRefineModel] = useState('claude-3-5-sonnet-20241022');
-  const [themeModel, setThemeModel] = useState('claude-3-5-sonnet-20241022');
+  const [decompositionModel, setDecompositionModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.decompositionModel);
+  const [arModel, setArModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.arModel);
+  const [clarifyModel, setClarifyModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.clarifyModel);
+  const [evaluateModel, setEvaluateModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.evaluateModel);
+  const [triageModel, setTriageModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.triageModel);
+  const [refineModel, setRefineModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.refineModel);
+  const [themeModel, setThemeModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.themeModel);
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
@@ -960,24 +975,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     const proModel = getPreferredFamilyModel(currentCatalogEntries, 'pro');
     const flashModel = getPreferredFamilyModel(currentCatalogEntries, 'flash');
     const liteModel = getPreferredFamilyModel(currentCatalogEntries, 'lite');
+    const liteOrFlashModel = liteModel || flashModel;
 
-    if (provider === 'gemini') {
-      if (!decompositionModel.startsWith('gemini-')) setDecompositionModel(proModel || 'gemini-2.5-pro');
-      if (!arModel.startsWith('gemini-')) setArModel(proModel || 'gemini-2.5-pro');
-      if (!clarifyModel.startsWith('gemini-')) setClarifyModel(flashModel || 'gemini-2.5-flash');
-      if (!evaluateModel.startsWith('gemini-')) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
-      if (!triageModel.startsWith('gemini-')) setTriageModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
-      if (!refineModel.startsWith('gemini-')) setRefineModel(flashModel || 'gemini-2.5-flash');
-      if (!themeModel.startsWith('gemini-')) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
-    } else if (provider === 'openai') {
-      if ((!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o'))) setDecompositionModel(proModel || 'gpt-5.4');
-      if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o'))) setArModel(proModel || 'gpt-5.4');
-      if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o'))) setClarifyModel(flashModel || 'gpt-4o');
-      if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o'))) setEvaluateModel(liteModel || 'gpt-4o-mini');
-      if ((!triageModel.startsWith('gpt-') && !triageModel.startsWith('o'))) setTriageModel(liteModel || 'gpt-4o-mini');
-      if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o'))) setRefineModel(flashModel || 'gpt-4o');
-      if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o'))) setThemeModel(liteModel || 'gpt-4o-mini');
-    } else if (provider === 'azure_openai') {
+    if (provider === 'azure_openai') {
       const shouldResetAzureModel = (modelId: string) =>
         !modelId.trim()
         || modelId.startsWith('gemini-')
@@ -987,18 +987,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (shouldResetAzureModel(decompositionModel) && proModel) setDecompositionModel(proModel);
       if (shouldResetAzureModel(arModel) && proModel) setArModel(proModel);
       if (shouldResetAzureModel(clarifyModel) && flashModel) setClarifyModel(flashModel);
-      if (shouldResetAzureModel(evaluateModel) && (liteModel || flashModel)) setEvaluateModel(liteModel || flashModel);
-      if (shouldResetAzureModel(triageModel) && (liteModel || flashModel)) setTriageModel(liteModel || flashModel);
+      if (shouldResetAzureModel(evaluateModel) && liteOrFlashModel) setEvaluateModel(liteOrFlashModel);
+      if (shouldResetAzureModel(triageModel) && liteOrFlashModel) setTriageModel(liteOrFlashModel);
       if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
-      if (shouldResetAzureModel(themeModel) && (liteModel || flashModel)) setThemeModel(liteModel || flashModel);
+      if (shouldResetAzureModel(themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     } else {
-      if (!decompositionModel.startsWith('claude-')) setDecompositionModel(proModel || 'claude-opus-4-1-20250805');
-      if (!arModel.startsWith('claude-')) setArModel(proModel || 'claude-opus-4-1-20250805');
-      if (!clarifyModel.startsWith('claude-')) setClarifyModel(flashModel || 'claude-3-5-sonnet-20241022');
-      if (!evaluateModel.startsWith('claude-')) setEvaluateModel(liteModel || 'claude-3-5-haiku-20241022');
-      if (!triageModel.startsWith('claude-')) setTriageModel(liteModel || 'claude-3-5-haiku-20241022');
-      if (!refineModel.startsWith('claude-')) setRefineModel(flashModel || 'claude-3-5-sonnet-20241022');
-      if (!themeModel.startsWith('claude-')) setThemeModel(liteModel || 'claude-3-5-haiku-20241022');
+      if (!isProviderModel(provider, decompositionModel) && proModel) setDecompositionModel(proModel);
+      if (!isProviderModel(provider, arModel) && proModel) setArModel(proModel);
+      if (!isProviderModel(provider, clarifyModel) && flashModel) setClarifyModel(flashModel);
+      if (!isProviderModel(provider, evaluateModel) && liteOrFlashModel) setEvaluateModel(liteOrFlashModel);
+      if (!isProviderModel(provider, triageModel) && liteOrFlashModel) setTriageModel(liteOrFlashModel);
+      if (!isProviderModel(provider, refineModel) && flashModel) setRefineModel(flashModel);
+      if (!isProviderModel(provider, themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     }
   }, [provider, modelStrategy, currentCatalogEntries, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
 
@@ -2491,7 +2491,7 @@ function ProjectConfigurationManager({
                      </p>
                    </div>
                  </div>
-                 <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                 <div className="mt-4 grid grid-cols-1 gap-4">
                    <FieldMappingEditor
                      title="Input mapping"
                      description="Fields used when reading or grounding existing Jira content."

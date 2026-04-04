@@ -17,6 +17,7 @@ import type {
 } from '../types';
 import { maskPiiText } from '../services/compliance';
 import { extractJson } from './json';
+import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
 export interface LlmResponse {
   text: string;
@@ -309,54 +310,20 @@ function buildCatalog(
   };
 }
 
+function getStrategyCatalogEntries(provider: LlmProvider): LlmModelCatalogEntry[] {
+  if (provider === 'forge_llms') return [];
+  return strategyCatalog.providers[provider].catalog.map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    family: model.family as ConcreteModelFamily,
+  }));
+}
+
 export function getFallbackModelCatalog(provider: LlmProvider): LlmVendorModelCatalog {
   if (provider === 'forge_llms') {
     return buildCatalog(provider, [], 'fallback');
   }
-  if (provider === 'anthropic') {
-    return buildCatalog(provider, [
-      { id: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', family: 'pro' },
-      { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', family: 'flash' },
-      { id: 'claude-haiku-4-5-20251001', displayName: 'Claude Haiku 4.5', family: 'lite' },
-      { id: 'claude-opus-4-1-20250805', displayName: 'Claude Opus 4.1', family: 'pro' },
-      { id: 'claude-opus-4-20250514', displayName: 'Claude Opus 4', family: 'pro' },
-      { id: 'claude-sonnet-4-20250514', displayName: 'Claude Sonnet 4', family: 'flash' },
-      { id: 'claude-3-7-sonnet-20250219', displayName: 'Claude Sonnet 3.7', family: 'flash' },
-      { id: 'claude-3-5-sonnet-20241022', displayName: 'Claude Sonnet 3.5', family: 'flash' },
-      { id: 'claude-3-5-haiku-20241022', displayName: 'Claude Haiku 3.5', family: 'lite' },
-      { id: 'claude-3-haiku-20240307', displayName: 'Claude Haiku 3', family: 'lite' },
-    ], 'fallback');
-  }
-  if (provider === 'gemini') {
-    return buildCatalog(provider, [
-      { id: 'gemini-3.1-pro', displayName: 'Gemini 3.1 Pro', family: 'pro' },
-      { id: 'gemini-3-flash', displayName: 'Gemini 3 Flash', family: 'flash' },
-      { id: 'gemini-3.1-flash-lite', displayName: 'Gemini 3.1 Flash-Lite', family: 'lite' },
-      { id: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', family: 'pro' },
-      { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', family: 'flash' },
-      { id: 'gemini-2.5-flash-lite', displayName: 'Gemini 2.5 Flash-Lite', family: 'lite' },
-      { id: 'gemini-2.0-flash', displayName: 'Gemini 2.0 Flash', family: 'flash' },
-      { id: 'gemini-2.0-flash-lite', displayName: 'Gemini 2.0 Flash-Lite', family: 'lite' },
-    ], 'fallback');
-  }
-  if (provider === 'openai') {
-    return buildCatalog(provider, [
-      { id: 'gpt-5.4', displayName: 'GPT-5.4', family: 'pro' },
-      { id: 'gpt-5.4-mini', displayName: 'GPT-5.4 Mini', family: 'lite' },
-      { id: 'gpt-5.4-nano', displayName: 'GPT-5.4 Nano', family: 'lite' },
-      { id: 'gpt-5', displayName: 'GPT-5', family: 'pro' },
-      { id: 'gpt-5-mini', displayName: 'GPT-5 Mini', family: 'lite' },
-      { id: 'gpt-5-nano', displayName: 'GPT-5 Nano', family: 'lite' },
-      { id: 'gpt-4.1', displayName: 'GPT-4.1', family: 'flash' },
-      { id: 'gpt-4.1-mini', displayName: 'GPT-4.1 Mini', family: 'lite' },
-      { id: 'gpt-4.1-nano', displayName: 'GPT-4.1 Nano', family: 'lite' },
-      { id: 'gpt-4o', displayName: 'GPT-4o', family: 'flash' },
-      { id: 'gpt-4o-mini', displayName: 'GPT-4o Mini', family: 'lite' },
-      { id: 'o3', displayName: 'o3', family: 'pro' },
-      { id: 'o4-mini', displayName: 'o4-mini', family: 'lite' },
-    ], 'fallback');
-  }
-  return buildCatalog(provider, [], 'fallback');
+  return buildCatalog(provider, getStrategyCatalogEntries(provider), 'fallback');
 }
 
 function isChatCapableOpenAiModel(id: string): boolean {
@@ -544,8 +511,7 @@ export async function discoverLlmModelCatalog(opts: {
 function mapModelForGemini(model: string): string {
   if (model.startsWith('gemini-')) return model;
   if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
-  // Reasonable default for the Claude-first config in this app.
-  return 'gemini-2.5-flash';
+  return strategyCatalog.providers.gemini.presets.stable.flash[0];
 }
 
 async function callGemini(opts: {

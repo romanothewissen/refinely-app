@@ -1,5 +1,4 @@
 import type {
-  ConcreteModelFamily,
   GeneratorBucketClass,
   GeneratorBucketClasses,
   GeneratorConfig,
@@ -8,6 +7,7 @@ import type {
   LlmProvider,
   LlmVendorModelCatalog,
 } from '../types';
+import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
 export type GeneratorBucketKey = keyof GeneratorBucketClasses;
 export type GeneratorRoleModelField =
@@ -20,9 +20,10 @@ export type GeneratorRoleModelField =
   | 'themeModel';
 
 type PresetProvider = 'anthropic' | 'gemini' | 'openai';
-type StrategyPresetMap = Record<PresetProvider, Record<Exclude<GeneratorModelStrategy, 'custom'>, Record<GeneratorBucketClass, string[]>>>;
+type StrategyCatalogData = typeof strategyCatalog;
+type StrategyCatalogProvider = keyof StrategyCatalogData['providers'];
 
-export const MODEL_STRATEGY_VERSION = '2026-04-04';
+export const MODEL_STRATEGY_VERSION = strategyCatalog.version;
 export const DEFAULT_BUCKET_CLASSES: GeneratorBucketClasses = {
   discovery: 'flash',
   generation: 'pro',
@@ -49,53 +50,23 @@ export const GENERATOR_ROLE_TO_BUCKET: Record<GeneratorRoleModelField, Generator
   refineModel: 'refinement',
 };
 
-const PRESET_MODELS: StrategyPresetMap = {
-  anthropic: {
-    stable: {
-      pro: ['claude-opus-4-1-20250805', 'claude-opus-4-20250514'],
-      flash: ['claude-3-5-sonnet-20241022', 'claude-3-7-sonnet-20250219', 'claude-sonnet-4-20250514'],
-      lite: ['claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
-    },
-    latest: {
-      pro: ['claude-opus-4-6', 'claude-opus-4-1-20250805'],
-      flash: ['claude-sonnet-4-6', 'claude-sonnet-4-20250514'],
-      lite: ['claude-haiku-4-5-20251001', 'claude-3-5-haiku-20241022'],
-    },
-  },
-  gemini: {
-    stable: {
-      pro: ['gemini-2.5-pro'],
-      flash: ['gemini-2.5-flash'],
-      lite: ['gemini-2.5-flash-lite', 'gemini-2.0-flash-lite'],
-    },
-    latest: {
-      pro: ['gemini-3.1-pro', 'gemini-3-pro'],
-      flash: ['gemini-3-flash', 'gemini-3.0-flash'],
-      lite: ['gemini-3.1-flash-lite', 'gemini-3-flash-lite'],
-    },
-  },
-  openai: {
-    stable: {
-      pro: ['gpt-4o'],
-      flash: ['gpt-4o', 'gpt-4.1'],
-      lite: ['gpt-4o-mini', 'gpt-4.1-mini'],
-    },
-    latest: {
-      pro: ['gpt-5.4', 'gpt-5'],
-      flash: ['gpt-4o', 'gpt-4.1'],
-      lite: ['gpt-5.4-mini', 'gpt-4o-mini', 'gpt-4.1-mini'],
-    },
-  },
-};
+function getPresetProvider(provider: LlmProvider): StrategyCatalogProvider {
+  if (provider === 'forge_llms') return 'anthropic';
+  return provider;
+}
+
+function getProviderCatalogData(provider: LlmProvider) {
+  return strategyCatalog.providers[getPresetProvider(provider)];
+}
 
 const DEFAULT_RESOLVED_MODELS: Pick<GeneratorConfig, GeneratorRoleModelField> = {
-  decompositionModel: 'claude-opus-4-1-20250805',
-  arModel: 'claude-opus-4-1-20250805',
-  clarifyModel: 'claude-3-5-sonnet-20241022',
-  refineModel: 'claude-3-5-sonnet-20241022',
-  evaluateModel: 'claude-3-5-sonnet-20241022',
-  triageModel: 'claude-3-5-sonnet-20241022',
-  themeModel: 'claude-3-5-sonnet-20241022',
+  decompositionModel: getProviderCatalogData('anthropic').presets.stable.pro[0],
+  arModel: getProviderCatalogData('anthropic').presets.stable.pro[0],
+  clarifyModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  refineModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  evaluateModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  triageModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  themeModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
 };
 
 export interface ResolvedGeneratorStrategyState {
@@ -177,16 +148,17 @@ function resolvePresetFamilyModel(
 ): string {
   const catalogEntries = normalizeCatalogEntries(catalog);
   const allowCatalogFallback = catalog?.source === 'discovered' || catalog?.source === 'manual';
-  const strategyCandidates = PRESET_MODELS[provider][strategy][family];
+  const providerData = getProviderCatalogData(provider);
+  const strategyCandidates = providerData.presets[strategy][family];
   const primaryCandidate = strategyCandidates[0];
   const matchedCurrent = findCatalogModel(catalogEntries, strategyCandidates);
   if (matchedCurrent) return matchedCurrent;
 
   if (strategy === 'latest') {
     if (!allowCatalogFallback) {
-      return primaryCandidate || savedFallback?.trim() || PRESET_MODELS[provider].stable[family][0];
+      return primaryCandidate || savedFallback?.trim() || providerData.presets.stable[family][0];
     }
-    const stableCandidates = PRESET_MODELS[provider].stable[family];
+    const stableCandidates = providerData.presets.stable[family];
     const matchedStable = findCatalogModel(catalogEntries, stableCandidates);
     if (matchedStable) return matchedStable;
     return stableCandidates[0] || savedFallback?.trim() || primaryCandidate;

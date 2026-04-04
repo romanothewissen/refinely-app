@@ -3,6 +3,7 @@ import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDow
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
+import type { ClarifyContextMeta, ClarifyProgressPayload } from './types';
 
 // ─── Word-level diff utility ──────────────────────────────────────────────────
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
@@ -181,11 +182,22 @@ type GenerationProgressMeta = {
   };
 };
 
+type DiscoveryProgressMeta = ClarifyProgressPayload;
+
 const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: string; shortLabel: string }> = [
   { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
   { key: 'triage', label: 'Assessing scope', shortLabel: 'Triage' },
   { key: 'decomposition', label: 'Sketching features', shortLabel: 'Features' },
   { key: 'acceptance_requirements', label: 'Writing acceptance requirements', shortLabel: 'ARs' },
+];
+
+const DISCOVERY_STEPS: Array<{ key: NonNullable<DiscoveryProgressMeta['stage']>; label: string; shortLabel: string }> = [
+  { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
+  { key: 'assessment', label: 'Assessing the ask', shortLabel: 'Assess' },
+  { key: 'question_generation', label: 'Planning discovery questions', shortLabel: 'Plan' },
+  { key: 'finalize', label: 'Finalizing the first round', shortLabel: 'Round 1' },
+  { key: 'sufficiency', label: 'Checking sufficiency', shortLabel: 'Check' },
+  { key: 'followup', label: 'Preparing follow-up', shortLabel: 'Follow-up' },
 ];
 
 function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?: string) {
@@ -197,6 +209,21 @@ function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?:
   if (text.includes('acceptance requirement')) return 3;
   if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
   if (text.includes('planning feature') || text.includes('feature structure')) return 2;
+  return 0;
+}
+
+function getDiscoveryStageIndex(meta: DiscoveryProgressMeta | null, workflowStage?: string, progress?: string) {
+  if (workflowStage === 'clarify_round_2') return DISCOVERY_STEPS.findIndex((step) => step.key === 'followup');
+  if (workflowStage === 'sufficiency_check') return DISCOVERY_STEPS.findIndex((step) => step.key === 'sufficiency');
+  if (meta?.stage) {
+    const idx = DISCOVERY_STEPS.findIndex((step) => step.key === meta.stage);
+    if (idx >= 0) return idx;
+  }
+  const text = (progress || '').toLowerCase();
+  if (text.includes('sufficiency') || text.includes('covered well enough') || text.includes('follow-up questions are still needed')) return 4;
+  if (text.includes('targeting about') || text.includes('question budget')) return 2;
+  if (text.includes('finalizing')) return 3;
+  if (text.includes('assessing scope') || text.includes('ambiguity')) return 1;
   return 0;
 }
 
@@ -214,6 +241,25 @@ const AR_DEPTH_LABELS: Record<string, string> = {
 
 const SHAPE_LABELS: Record<string, string> = {
   minimal: 'Minimal', narrow: 'Narrow', balanced: 'Balanced', broad: 'Broad', epic: 'Epic',
+};
+
+const DISCOVERY_SCOPE_LABELS: Record<string, string> = {
+  narrow: 'Narrow scope',
+  moderate: 'Moderate scope',
+  broad: 'Broad scope',
+  very_broad: 'Very broad scope',
+};
+
+const DISCOVERY_AMBIGUITY_LABELS: Record<string, string> = {
+  low: 'Low ambiguity',
+  medium: 'Moderate ambiguity',
+  high: 'High ambiguity',
+};
+
+const DISCOVERY_CLARITY_LABELS: Record<string, string> = {
+  clear: 'Clear ask',
+  medium: 'Some ambiguity',
+  vague: 'Vague ask',
 };
 
 function ComplexityBar({ current }: { current: string }) {
@@ -300,6 +346,237 @@ function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] 
   );
 }
 
+function DiscoveryScoreCard({
+  meta,
+  context,
+}: {
+  meta: DiscoveryProgressMeta | null;
+  context?: ClarifyContextMeta | null;
+}) {
+  const discoveryProfile = meta?.discoveryProfile ?? context?.discoveryProfile;
+  const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
+  const assessment = meta?.assessment ?? null;
+  const complexityKey = discoveryProfile?.complexity ?? assessment?.complexity;
+  const complexityLabel = complexityKey ? (COMPLEXITY_LEVELS.find((level) => level.key === complexityKey)?.label ?? complexityKey) : null;
+  const plannedQuestions = ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
+
+  if (!discoveryProfile && !assessment && !ambiguityAssessment) {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2.5">
+          <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
+          <span className="text-[12px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing…</span>
+        </div>
+        <div className="flex gap-1 mb-1">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex-1 h-2 rounded-sm shimmer" style={{ animationDelay: `${i * 0.12}s` }} />
+          ))}
+        </div>
+        <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+          {['Scope', 'Ambiguity', 'Questions', 'Follow-up cap'].map((label) => (
+            <div key={label}>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{label}</div>
+              <div className="h-4 w-16 shimmer rounded-sm" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <div className="flex items-center justify-between mb-2.5">
+        <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
+        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{complexityLabel ?? 'Assessing'}</span>
+      </div>
+      <ComplexityBar current={complexityKey ?? 'medium'} />
+
+      <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
+
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{discoveryProfile ? 'Scope' : 'Ask shape'}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">
+            {discoveryProfile
+              ? (DISCOVERY_SCOPE_LABELS[discoveryProfile.scope] ?? discoveryProfile.scope)
+              : (assessment?.shape ? (SHAPE_LABELS[assessment.shape] ?? assessment.shape) : 'Assessing')}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{discoveryProfile ? 'Ambiguity' : 'Clarity'}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">
+            {discoveryProfile
+              ? (DISCOVERY_AMBIGUITY_LABELS[discoveryProfile.ambiguity] ?? discoveryProfile.ambiguity)
+              : (assessment?.clarity ? (DISCOVERY_CLARITY_LABELS[assessment.clarity] ?? assessment.clarity) : 'Assessing')}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions planned</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">
+            {plannedQuestions ? `~${plannedQuestions}` : 'Assessing'}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Follow-up cap</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">
+            {typeof discoveryProfile?.followupCap === 'number' ? discoveryProfile.followupCap : 'Pending'}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function DiscoveryPipeline({
+  meta,
+  context,
+  progress,
+  title,
+  workflowStage,
+  onCancel,
+  canCancel,
+  projectKey,
+}: {
+  meta: DiscoveryProgressMeta | null;
+  context?: ClarifyContextMeta | null;
+  progress?: string;
+  title?: string;
+  workflowStage?: string;
+  onCancel?: () => void;
+  canCancel?: boolean;
+  projectKey: string;
+}) {
+  const stageIndex = Math.max(0, getDiscoveryStageIndex(meta, workflowStage, progress));
+  const pct = [8, 24, 46, 66, 82, 96][stageIndex] ?? 8;
+  const sources = meta?.sources ?? (context
+    ? {
+        projectKey: context.projectKey,
+        projectCount: context.projectCount,
+        domainContextApplied: context.domainContextApplied,
+        attachmentIncluded: context.attachmentIncluded,
+        wiDocsCount: context.wiDocsCount,
+        similarStoriesCount: context.similarStoriesCount,
+      }
+    : null);
+
+  return (
+    <motion.div
+      className="w-full flex flex-col items-center py-8 px-4"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <div className="w-full max-w-3xl rounded-[22px] border border-[var(--rf-border)] backdrop-blur-2xl p-6 space-y-4" style={{ background: 'var(--rf-glass-card)', boxShadow: 'var(--rf-shadow-lg)' }}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-[0.2em] text-[var(--rf-brand)] mb-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+              Discovery Running
+            </div>
+            <h2 className="text-[20px] font-black text-[var(--rf-text)] tracking-tight" style={{ fontFamily: 'Fraunces, serif' }}>
+              {title || 'Exploring the requirement'}
+            </h2>
+            <p className="mt-1.5 text-[14px] font-medium text-[var(--rf-text-secondary)] flex items-center gap-2">
+              <span className="dot-bounce flex gap-0.5"><span /><span /><span /></span>
+              {normalizeDisplayText(progress || 'Processing...')}
+            </p>
+          </div>
+          {canCancel && onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="shrink-0 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--rf-text-secondary)] hover:text-[var(--rf-danger)] transition px-3 py-1.5 rounded-lg border border-[var(--rf-border)] bg-white/70"
+            >
+              <X className="w-3.5 h-3.5" /> Stop
+            </button>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
+          <div className="flex items-center gap-1">
+            {DISCOVERY_STEPS.map((step, idx) => {
+              const isDone = idx < stageIndex;
+              const isCurrent = idx === stageIndex;
+              return (
+                <React.Fragment key={step.key}>
+                  <div className="flex items-center gap-2 min-w-0 shrink">
+                    <div className={`shrink-0 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all duration-300 ${
+                      isDone ? 'bg-[var(--rf-brand)] border-[var(--rf-brand)]'
+                      : isCurrent ? 'border-[var(--rf-brand)] bg-white'
+                      : 'border-[var(--rf-border)] bg-white'
+                    }`}>
+                      {isDone
+                        ? <CheckCircle2 className="w-3 h-3 text-white" />
+                        : isCurrent
+                          ? <span className="h-2 w-2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                          : <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-border-strong)]" />
+                      }
+                    </div>
+                    <span className={`text-[12px] font-semibold truncate transition-colors hidden sm:block ${
+                      isCurrent ? 'text-[var(--rf-brand)]'
+                      : isDone ? 'text-[var(--rf-text-tertiary)]'
+                      : 'text-[var(--rf-text-tertiary)] opacity-40'
+                    }`}>{step.shortLabel}</span>
+                  </div>
+                  {idx < DISCOVERY_STEPS.length - 1 && (
+                    <div className={`flex-1 h-px min-w-[8px] transition-colors duration-500 ${isDone ? 'bg-[var(--rf-brand-subtle)]' : 'bg-[var(--rf-border)]'}`} />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          <div className="mt-3.5 h-1.5 overflow-hidden rounded-full bg-[rgba(35,74,61,0.07)]">
+            <motion.div
+              className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.max(pct, 8)}%` }}
+              transition={{ type: 'spring', damping: 30, stiffness: 80 }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-[12px] text-[var(--rf-text-tertiary)]">
+              {normalizeDisplayText(DISCOVERY_STEPS[stageIndex]?.label ?? 'Starting discovery')}
+            </span>
+            <span className="text-[12px] font-bold text-[var(--rf-brand)]">{pct}%</span>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
+          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
+            <DiscoveryScoreCard meta={meta} context={context} />
+          </div>
+
+          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Context</div>
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-baseline">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">Backlog</span>
+                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.similarStoriesCount ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">Instructions</span>
+                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.wiDocsCount ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">Attachment</span>
+                <span className="text-[13px] font-bold text-[var(--rf-text)]">{sources?.attachmentIncluded ? 'Included' : 'None'}</span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">Workspace</span>
+                <span className="text-[13px] font-bold text-[var(--rf-text)]">{sources?.projectKey || projectKey}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pipeline Loading Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -336,7 +613,7 @@ function GeneratingPipeline({
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-3xl rounded-2xl border border-[rgba(43,89,74,0.10)] backdrop-blur-xl shadow-[0_24px_64px_-24px_rgba(31,30,29,0.18),0_8px_24px_-12px_rgba(31,30,29,0.10)] p-6 space-y-4" style={{ background: 'rgba(252,252,251,0.70)' }}>
+      <div className="w-full max-w-3xl rounded-[22px] border border-[var(--rf-border)] backdrop-blur-2xl p-6 space-y-4" style={{ background: 'var(--rf-glass-card)', boxShadow: 'var(--rf-shadow-lg)' }}>
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
@@ -365,7 +642,7 @@ function GeneratingPipeline({
         </div>
 
         {/* Step tracker + progress bar */}
-        <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
+        <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
           <div className="flex items-center gap-1">
             {GENERATION_STEPS.map((step, idx) => {
               const isDone = idx < stageIndex;
@@ -417,11 +694,11 @@ function GeneratingPipeline({
 
         {/* Triage scores + Context */}
         <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
-          <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
+          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
             <TriageScoreCard triage={triage} />
           </div>
 
-          <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
+          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
             <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Context</div>
             <div className="space-y-2.5">
               <div className="flex justify-between items-baseline">
@@ -451,7 +728,7 @@ function GeneratingPipeline({
             {draftFeatures.slice(0, 6).map((f, i) => {
               const status = featureProgressById.get(f.id) || (i === 0 ? 'active' : 'pending');
               return (
-                <div key={f.id} className="rounded-lg border border-[var(--rf-border)] bg-white/80 px-3 py-2.5 flex items-center gap-2.5">
+                <div key={f.id} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 flex items-center gap-2.5 backdrop-blur-sm">
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
                     status === 'active' ? 'bg-[var(--rf-brand)] animate-pulse'
                     : status === 'complete' ? 'bg-[var(--rf-success)]'
@@ -475,7 +752,7 @@ function GeneratingPipeline({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5">
                     <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Backlog signal</div>
             {sources.referencedSimilarStories.slice(0, 2).map((s, i) => (
-              <div key={s.key || i} className="rounded-lg border border-[var(--rf-border)] bg-white/80 px-3 py-2.5">
+              <div key={s.key || i} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 backdrop-blur-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">Pattern {i + 1}</span>
                   <span className="text-[13px] text-[var(--rf-text-tertiary)]">{Math.round((s.relevanceScore || 0) * 100)}% match</span>
@@ -780,6 +1057,9 @@ interface MainContentProps {
     tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
   } | null;
   generationProgressMeta?: GenerationProgressMeta | null;
+  clarifyContext?: ClarifyContextMeta | null;
+  clarifyProgressMeta?: DiscoveryProgressMeta | null;
+  workflowStage?: 'idle' | 'clarify_round_1' | 'sufficiency_check' | 'clarify_round_2' | 'generation' | 'blocked';
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
@@ -789,7 +1069,7 @@ interface MainContentProps {
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  generationContext, generationProgressMeta, projectKey, workflowTokenUsage, onWorkflowTokenUsage
+  generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1255,7 +1535,7 @@ export function MainContent({
   return (
     <main className="flex-1 flex min-w-0 flex-col h-full relative overflow-hidden bg-transparent">
       <motion.header
-        className="rf-pane-header rf-pane-header--canvas shrink-0 sticky top-0"
+        className="rf-pane-header rf-pane-header--canvas shrink-0 sticky top-0 z-10"
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
@@ -1265,7 +1545,7 @@ export function MainContent({
             {!sidebarOpen && (
               <motion.button
                 onClick={() => setSidebarOpen(true)}
-                className="p-2 -ml-2 rounded-xl hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] transition-colors"
+                className="p-2 -ml-2 rounded-xl hover:bg-white/60 text-[var(--rf-text-secondary)] transition-all"
                 title="Open Sidebar"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -1282,7 +1562,7 @@ export function MainContent({
 
       {/* Canvas toolbar — stats + actions, only when features exist */}
       {hasFeatures && !isGenerating && (
-        <div className="shrink-0 border-b border-[var(--rf-border)] bg-[rgba(252,252,251,0.82)] px-5 py-3 backdrop-blur-md">
+        <div className="shrink-0 border-b border-[var(--rf-border-subtle)] bg-white/55 px-5 py-3 backdrop-blur-md">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               {[
@@ -1292,7 +1572,7 @@ export function MainContent({
                   ? [{ label: 'Accepted', value: features.filter(f => f.isAccepted).length }]
                   : []),
               ].map((chip) => (
-                <span key={chip.label} className="inline-flex items-center gap-2 rounded-full border border-[var(--rf-border)] bg-white px-3 py-1.5 text-[12px] font-semibold text-[var(--rf-text-secondary)] shadow-sm">
+                <span key={chip.label} className="inline-flex items-center gap-2 rounded-full border border-[var(--rf-border)] bg-white/70 px-3 py-1.5 text-[12px] font-semibold text-[var(--rf-text-secondary)] backdrop-blur-sm">
                   <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{chip.label}</span>
                   <span className="text-[13px] font-black text-[var(--rf-text)]">{chip.value}</span>
                 </span>
@@ -1302,13 +1582,13 @@ export function MainContent({
             <div className="flex flex-wrap items-center gap-2">
               {features.some(f => f.pendingRefinement || f.pendingRemoval || f.pendingAddition) && (
                 <>
-                  <motion.button onClick={discardAllProposed} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
-                  <motion.button onClick={acceptAllProposed} className="rounded-xl border border-[rgba(16,185,129,0.18)] bg-[var(--rf-success-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-success)] shadow-sm transition hover:brightness-[0.98]" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
+                  <motion.button onClick={discardAllProposed} className="rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
+                  <motion.button onClick={acceptAllProposed} className="rounded-xl border border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-success)] transition hover:brightness-[0.96]" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
                 </>
               )}
               <motion.button
                 onClick={exportFeaturesToExcel}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
                 whileTap={{ scale: 0.97 }}
                 title="Export to Excel"
               >
@@ -1317,7 +1597,7 @@ export function MainContent({
               </motion.button>
               <motion.button
                 onClick={() => setShowBulkRefine(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[rgba(43,89,74,0.16)] bg-[var(--rf-brand-muted)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand-hover)] shadow-sm transition hover:border-[var(--rf-brand)] hover:bg-white"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/70"
                 whileTap={{ scale: 0.97 }}
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -1332,14 +1612,27 @@ export function MainContent({
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         <AnimatePresence mode="wait">
           {isGenerating ? (
-            <GeneratingPipeline 
-              meta={generationProgressMeta || null} 
-              progress={progress} 
-              title={loadingTitle} 
-              onCancel={onCancelLoading} 
-              canCancel={canCancelLoading}
-              projectKey={projectKey}
-            />
+            workflowStage === 'generation' ? (
+              <GeneratingPipeline 
+                meta={generationProgressMeta || null} 
+                progress={progress} 
+                title={loadingTitle} 
+                onCancel={onCancelLoading} 
+                canCancel={canCancelLoading}
+                projectKey={projectKey}
+              />
+            ) : (
+              <DiscoveryPipeline
+                meta={clarifyProgressMeta || null}
+                context={clarifyContext}
+                progress={progress}
+                title={loadingTitle}
+                workflowStage={workflowStage}
+                onCancel={onCancelLoading}
+                canCancel={canCancelLoading}
+                projectKey={projectKey}
+              />
+            )
           ) : !hasFeatures ? (
             <motion.div
               key="empty-state"
@@ -1349,11 +1642,11 @@ export function MainContent({
               exit={{ opacity: 0, y: -12, scale: 0.98 }}
               transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
             >
-              <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white shadow-xl shadow-[var(--rf-shadow-sm)] border border-[var(--rf-border)]">
+              <div className="levitate w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-white/80 shadow-[0_8px_32px_-8px_rgba(43,89,74,0.15)] border border-[var(--rf-border)] backdrop-blur-sm">
                 <Sparkles className="w-7 h-7 text-[var(--rf-brand)]" />
               </div>
               <h2 className="text-2xl font-bold text-[var(--rf-text)] mb-3 tracking-tight">Ready to generate</h2>
-              <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed font-medium">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
+              <p className="text-[var(--rf-text-tertiary)] text-sm leading-relaxed">Describe your requirement in the sidebar, answer the clarifying questions, and your polished features will appear here.</p>
             </motion.div>
           ) : (
             <motion.div
@@ -1371,7 +1664,7 @@ export function MainContent({
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
                 {/* Slim source stack strip */}
-                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-2.5">
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--rf-border)] bg-white/65 px-4 py-2.5 backdrop-blur-sm">
                   <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Source stack</span>
                   <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
                     <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
@@ -1404,7 +1697,7 @@ export function MainContent({
                 <AnimatePresence initial={false}>
                   {showContextDetails && (
                     <motion.div
-                      className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/80 overflow-hidden"
+                      className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/65 overflow-hidden backdrop-blur-sm"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
@@ -1504,16 +1797,36 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`group overflow-hidden rounded-2xl border bg-white ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)]' : feature.pendingAddition ? 'border-[var(--rf-success-subtle)]' : feature.isAccepted ? 'border-[var(--rf-success-subtle)]' : 'border-[var(--rf-border)]'}`}
+                  className={`group overflow-hidden rounded-[20px] border ${
+                    feature.pendingRemoval
+                      ? 'opacity-80 border-[var(--rf-danger-subtle)] bg-white'
+                      : feature.pendingAddition
+                        ? 'border-[rgba(46,125,86,0.30)] bg-white'
+                        : feature.isAccepted
+                          ? 'border-[rgba(46,125,86,0.22)] bg-white'
+                          : 'border-[rgba(43,89,74,0.14)] bg-white'
+                  }`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  style={{ boxShadow: feature.pendingAddition || feature.isAccepted ? '0 4px 20px -4px rgba(16,185,129,0.15)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(15,23,42,0.05)' }}
-                  whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 30px -4px rgba(16,185,129,0.2)' : '0 8px 24px -4px rgba(15,23,42,0.08)' }}
+                  style={{
+                    boxShadow: feature.pendingAddition || feature.isAccepted
+                      ? '0 6px 28px -4px rgba(46,125,86,0.18), 0 2px 8px -2px rgba(46,125,86,0.10)'
+                      : feature.pendingRemoval
+                        ? '0 4px 20px -4px rgba(155,53,69,0.14)'
+                        : '0 4px 24px -4px rgba(43,89,74,0.13), 0 1px 6px -1px rgba(43,89,74,0.07)'
+                  }}
+                  whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 28px -4px rgba(46,125,86,0.18)' : '0 8px 24px -4px rgba(43,89,74,0.12)' }}
                 >
                   <div className="flex flex-col sm:flex-row">
                     {/* Left Accent Strip */}
-                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]' : feature.pendingAddition || feature.isAccepted ? 'bg-[var(--rf-success-subtle)]' : 'bg-[var(--rf-brand-muted)]'}`} />
+                    <div className={`h-1.5 sm:h-auto sm:w-1.5 shrink-0 ${
+                      feature.pendingRemoval
+                        ? 'bg-[var(--rf-danger)]'
+                        : feature.pendingAddition || feature.isAccepted
+                          ? 'bg-[var(--rf-success)]'
+                          : 'bg-[var(--rf-brand)]'
+                    } opacity-30`} />
 
                     <div className="flex-1 p-4">
                       {/* Header Row */}
@@ -1531,7 +1844,7 @@ export function MainContent({
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
                             <div className="shrink-0 flex items-center gap-2">
-                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[12px] font-bold tracking-widest border border-[var(--rf-border)]">
+                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-white/60 text-[var(--rf-text-secondary)] text-[12px] font-semibold tracking-widest border border-[var(--rf-border)]">
                                 {feature.acceptanceRequirements?.length || 0} ARs
                               </span>
                               <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
@@ -1547,12 +1860,16 @@ export function MainContent({
                             </>
                           ) : (
                             <>
-                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[13px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
-                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[13px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
-                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[13px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
+                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-text-tertiary)] hover:bg-white/70 hover:text-[var(--rf-text)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
+                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
+                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[13px] font-semibold rounded-xl transition border flex items-center gap-1.5 ${
+                                feature.isAccepted
+                                  ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]'
+                                  : 'text-[var(--rf-text-secondary)] bg-white/60 border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'
+                              }`} whileTap={{ scale: 0.97 }}>
                                 <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
                               </motion.button>
-                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[13px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
+                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
                               {feature.jiraIssueKey ? (
                                 <div className="flex items-center gap-1">
                                   <motion.button
@@ -1656,7 +1973,7 @@ export function MainContent({
                               </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="bg-white p-4 rounded-xl border border-[var(--rf-border)] shadow-sm">
+                              <div className="bg-white p-4 rounded-xl border border-[var(--rf-border-strong)] shadow-sm">
                                 <div className="text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
                                 {isAddedFeature ? (
                                   <div className="text-xs italic text-[var(--rf-text-tertiary)] mb-4">No original feature. This would be added to the canvas.</div>
@@ -1668,7 +1985,7 @@ export function MainContent({
                                 )}
                                 <div className="space-y-2">
                                   {(isAddedFeature ? [] : feature.acceptanceRequirements).map((ar, i) => (
-                                    <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[13px] text-[var(--rf-text-secondary)]">
+                                    <div key={i} className="bg-[#f8faf9] border border-[var(--rf-border)] p-2.5 rounded-lg text-[13px] text-[var(--rf-text-secondary)]">
                                       {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
                                       {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
                                       <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
@@ -1695,7 +2012,7 @@ export function MainContent({
                                     const ar = row.type !== 'removed' ? row.proposed : row.oldAr;
                                     const oldAr = row.type === 'matched' ? row.oldAr : undefined;
                                     return (
-                                      <div key={`${i}-${row.type === 'removed' ? row.oldIndex : row.type === 'added' ? row.newIndex : row.oldIndex}`} className={`p-2.5 rounded-lg text-[13px] border shadow-sm ${isRemoved ? 'bg-[var(--rf-danger-subtle)] border-[var(--rf-danger-subtle)] text-[var(--rf-danger)]' : isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)] text-[var(--rf-text)]' : 'bg-white border-[rgba(43,89,74,0.12)] text-[var(--rf-text)]'}`}>
+                                      <div key={`${i}-${row.type === 'removed' ? row.oldIndex : row.type === 'added' ? row.newIndex : row.oldIndex}`} className={`p-2.5 rounded-lg text-[13px] border ${isRemoved ? 'bg-[var(--rf-danger-subtle)] border-[var(--rf-danger-subtle)] text-[var(--rf-danger)]' : isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)] text-[var(--rf-text)]' : 'bg-[#f8faf9] border-[rgba(43,89,74,0.12)] text-[var(--rf-text)]'}`}>
                                         {isNew && <div className="text-[12px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
                                         {isRemoved && <div className="text-[12px] font-bold text-[var(--rf-danger)] uppercase tracking-widest mb-2">Removed AR</div>}
                                         {ar.given && <div className="mb-1"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Given</strong>{' '}<DiffText oldText={oldAr?.given || ar.given} newText={isRemoved ? '' : ar.given} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
@@ -1737,7 +2054,7 @@ export function MainContent({
                               </div>
                               <div className="space-y-2.5">
                                 {(isEditing ? draft!.acceptanceRequirements : feature.acceptanceRequirements).map((ar, i) => (
-                                  <div key={i} className="bg-[var(--rf-surface-soft)]/50 rounded-xl p-4 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)]">
+                                  <div key={i} className="bg-white/50 rounded-xl p-4 border border-[var(--rf-border-subtle)] relative group transition hover:border-[var(--rf-border)] backdrop-blur-sm">
                                     {isEditing && (
                                       <button onClick={() => deleteDraftAr(i)} className="absolute top-3 right-3 p-1.5 text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
                                     )}
@@ -1801,13 +2118,13 @@ export function MainContent({
               exit={{ opacity: 0 }}
             />
             <motion.div
-              className="relative rf-card w-full max-w-lg overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
+              className="relative rf-glass-card w-full max-w-lg overflow-hidden"
               initial={{ opacity: 0, y: 18, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 18, scale: 0.98 }}
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             >
-              <div className="border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/50 px-5 py-4">
+              <div className="border-b border-[var(--rf-border-subtle)] bg-white/40 px-5 py-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
@@ -1835,7 +2152,7 @@ export function MainContent({
                       handleBulkRefine();
                     }
                   }}
-                  className="min-h-[132px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                  className="min-h-[132px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
                 />
 
                 <div className="flex items-center justify-between gap-3">

@@ -8,6 +8,7 @@ import type {
   LlmModelCatalogEntry,
   LlmProvider,
 } from './types';
+import strategyCatalog from './modelStrategyCatalog.json';
 
 export type GeneratorBucketKey = keyof GeneratorBucketClasses;
 export type GeneratorRoleModelField =
@@ -21,7 +22,7 @@ export type GeneratorRoleModelField =
 
 type PresetProvider = 'anthropic' | 'gemini' | 'openai';
 
-export const MODEL_STRATEGY_VERSION = '2026-04-04';
+export const MODEL_STRATEGY_VERSION = strategyCatalog.version;
 export const DEFAULT_BUCKET_CLASSES: GeneratorBucketClasses = {
   discovery: 'flash',
   generation: 'pro',
@@ -44,93 +45,26 @@ export const ROLE_TO_BUCKET: Record<GeneratorRoleModelField, GeneratorBucketKey>
   refineModel: 'refinement',
 };
 
-const CLAUDE_MODELS = [
-  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 · Latest flagship' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 · Latest balanced' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 · Latest fast' },
-  { id: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1 · Proven deep reasoning' },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4 · Prior flagship' },
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 · Balanced' },
-  { id: 'claude-3-7-sonnet-20250219', label: 'Claude Sonnet 3.7 · Prior balanced' },
-  { id: 'claude-3-5-sonnet-20241022', label: 'Claude Sonnet 3.5 · Proven balanced' },
-  { id: 'claude-3-5-haiku-20241022', label: 'Claude Haiku 3.5 · Proven fast' },
-  { id: 'claude-3-haiku-20240307', label: 'Claude Haiku 3 · Legacy fast' },
-];
+type StrategyCatalogData = typeof strategyCatalog;
+type StrategyCatalogProvider = keyof StrategyCatalogData['providers'];
 
-const GEMINI_MODELS = [
-  { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro · Latest deep reasoning' },
-  { id: 'gemini-3-flash', label: 'Gemini 3 Flash · Latest balanced' },
-  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite · Latest fast' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro · Proven deep reasoning' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash · Proven balanced' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite · Proven fast' },
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash · Prior balanced' },
-  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash-Lite · Prior fast' },
-];
+function getPresetProvider(provider: LlmProvider): StrategyCatalogProvider {
+  if (provider === 'forge_llms') return 'anthropic';
+  return provider;
+}
 
-const OPENAI_MODELS = [
-  { id: 'gpt-5.4', label: 'GPT-5.4 · Latest deep reasoning' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini · Latest fast' },
-  { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano · Latest nano' },
-  { id: 'gpt-5', label: 'GPT-5 · Prior deep reasoning' },
-  { id: 'gpt-5-mini', label: 'GPT-5 Mini · Prior fast' },
-  { id: 'gpt-5-nano', label: 'GPT-5 Nano · Prior nano' },
-  { id: 'gpt-4.1', label: 'GPT-4.1 · Strong general model' },
-  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini · Lightweight' },
-  { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano · Smallest 4.1 model' },
-  { id: 'gpt-4o', label: 'GPT-4o · Proven balanced' },
-  { id: 'gpt-4o-mini', label: 'GPT-4o Mini · Proven fast' },
-  { id: 'o3', label: 'o3 · Heavy reasoning' },
-  { id: 'o4-mini', label: 'o4-mini · Efficient reasoning' },
-];
-
-const PRESET_MODELS: Record<PresetProvider, Record<Exclude<GeneratorModelStrategy, 'custom'>, Record<GeneratorBucketClass, string[]>>> = {
-  anthropic: {
-    stable: {
-      pro: ['claude-opus-4-1-20250805', 'claude-opus-4-20250514'],
-      flash: ['claude-3-5-sonnet-20241022', 'claude-3-7-sonnet-20250219', 'claude-sonnet-4-20250514'],
-      lite: ['claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
-    },
-    latest: {
-      pro: ['claude-opus-4-6', 'claude-opus-4-1-20250805'],
-      flash: ['claude-sonnet-4-6', 'claude-sonnet-4-20250514'],
-      lite: ['claude-haiku-4-5-20251001', 'claude-3-5-haiku-20241022'],
-    },
-  },
-  gemini: {
-    stable: {
-      pro: ['gemini-2.5-pro'],
-      flash: ['gemini-2.5-flash'],
-      lite: ['gemini-2.5-flash-lite', 'gemini-2.0-flash-lite'],
-    },
-    latest: {
-      pro: ['gemini-3.1-pro', 'gemini-3-pro'],
-      flash: ['gemini-3-flash', 'gemini-3.0-flash'],
-      lite: ['gemini-3.1-flash-lite', 'gemini-3-flash-lite'],
-    },
-  },
-  openai: {
-    stable: {
-      pro: ['gpt-4o'],
-      flash: ['gpt-4o', 'gpt-4.1'],
-      lite: ['gpt-4o-mini', 'gpt-4.1-mini'],
-    },
-    latest: {
-      pro: ['gpt-5.4', 'gpt-5'],
-      flash: ['gpt-4o', 'gpt-4.1'],
-      lite: ['gpt-5.4-mini', 'gpt-4o-mini', 'gpt-4.1-mini'],
-    },
-  },
-};
+function getProviderCatalogData(provider: LlmProvider) {
+  return strategyCatalog.providers[getPresetProvider(provider)];
+}
 
 const DEFAULT_MODELS: Record<GeneratorRoleModelField, string> = {
-  decompositionModel: 'claude-opus-4-1-20250805',
-  arModel: 'claude-opus-4-1-20250805',
-  clarifyModel: 'claude-3-5-sonnet-20241022',
-  refineModel: 'claude-3-5-sonnet-20241022',
-  evaluateModel: 'claude-3-5-sonnet-20241022',
-  triageModel: 'claude-3-5-sonnet-20241022',
-  themeModel: 'claude-3-5-sonnet-20241022',
+  decompositionModel: getProviderCatalogData('anthropic').presets.stable.pro[0],
+  arModel: getProviderCatalogData('anthropic').presets.stable.pro[0],
+  clarifyModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  refineModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  evaluateModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  triageModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  themeModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
 };
 
 export interface UiGeneratorStrategyState {
@@ -194,15 +128,15 @@ function resolvePresetFamilyModel(
   allowCatalogResolution: boolean,
   savedFallback?: string,
 ): string {
-  const candidates = PRESET_MODELS[provider][strategy][family];
+  const candidates = getProviderCatalogData(provider).presets[strategy][family];
   const matched = findCatalogModel(entries, candidates, allowCatalogResolution);
   if (matched) return matched;
 
   if (strategy === 'latest') {
     if (!allowCatalogResolution) {
-      return candidates[0] || savedFallback?.trim() || PRESET_MODELS[provider].stable[family][0];
+      return candidates[0] || savedFallback?.trim() || getProviderCatalogData(provider).presets.stable[family][0];
     }
-    const stableCandidates = PRESET_MODELS[provider].stable[family];
+    const stableCandidates = getProviderCatalogData(provider).presets.stable[family];
     const matchedStable = findCatalogModel(entries, stableCandidates, allowCatalogResolution);
     if (matchedStable) return matchedStable;
     return stableCandidates[0] || savedFallback?.trim() || candidates[0];
@@ -281,16 +215,12 @@ export function inferModelFamily(modelId: string): ConcreteModelFamily | undefin
 }
 
 export function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
-  if (provider === 'anthropic' || provider === 'forge_llms') {
-    return CLAUDE_MODELS.map((model) => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-  }
-  if (provider === 'gemini') {
-    return GEMINI_MODELS.map((model) => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-  }
-  if (provider === 'openai') {
-    return OPENAI_MODELS.map((model) => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
-  }
-  return [];
+  return getProviderCatalogData(provider).catalog.map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    family: model.family as GeneratorBucketClass | undefined,
+    source: 'fallback' as const,
+  }));
 }
 
 export function getCatalogEntriesForProvider(

@@ -1208,8 +1208,14 @@ export async function generateClarifyingQuestions(opts: {
   wiContextText: string;
   similarStoriesText: string;
   config: TenantConfig;
+  onTriageComplete?: (assessment: {
+    shape?: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
+    complexity?: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+    clarity: 'clear' | 'medium' | 'vague';
+    questionPlan: { min: number; max: number; target: number };
+  }) => Promise<void>;
 }): Promise<ClarifyDiscoveryResult> {
-  const { requirement, attachmentText, wiContextText, similarStoriesText, config } = opts;
+  const { requirement, attachmentText, wiContextText, similarStoriesText, config, onTriageComplete } = opts;
 
   const CLARIFY_QUESTION_FALLBACK: ClarifyQuestionPlan = { min: 4, max: 12, target: 10, clarity: 'vague' };
 
@@ -1222,6 +1228,18 @@ export async function generateClarifyingQuestions(opts: {
   const questionPlan = clarifyTriageResult
     ? triageToAssessment(clarifyTriageResult).questionPlan
     : CLARIFY_QUESTION_FALLBACK;
+  if (onTriageComplete) {
+    await onTriageComplete({
+      shape: clarifyTriageResult?.shape,
+      complexity: clarifyTriageResult?.complexity,
+      clarity: questionPlan.clarity,
+      questionPlan: {
+        min: questionPlan.min,
+        max: questionPlan.max,
+        target: questionPlan.target,
+      },
+    });
+  }
   const desiredQuestionCount = questionPlan.target;
   const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 8192), 6144);
   const domainSignals = extractDiscoverySignals([

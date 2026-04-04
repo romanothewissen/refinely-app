@@ -89,16 +89,16 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
       />
 
       <motion.div 
-        className="relative rf-card w-full max-w-md flex flex-col overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
+        className="relative rf-glass-card w-full max-w-md flex flex-col overflow-hidden"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
         {/* Header */}
-        <div className="px-6 py-5 border-b border-[var(--rf-border-subtle)] flex items-center justify-between bg-[var(--rf-surface-soft)]/50">
+        <div className="px-6 py-5 border-b border-[var(--rf-border-subtle)] flex items-center justify-between bg-white/40 backdrop-blur-sm">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.12)] shadow-sm flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] flex items-center justify-center">
               <Activity className="w-5 h-5 text-[var(--rf-brand)]" />
             </div>
             <div>
@@ -108,7 +108,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
           {state !== 'creating' && (
             <motion.button 
               onClick={onClose} 
-              className="p-2 hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] rounded-xl transition"
+              className="p-2 hover:bg-white/60 text-[var(--rf-text-tertiary)] rounded-xl transition"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -124,7 +124,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
           {state === 'form' && (
             <div className="space-y-6">
               {/* Feature preview */}
-              <div className="bg-[var(--rf-surface-soft)] rounded-xl p-4 border border-[var(--rf-border)] shadow-inner">
+              <div className="bg-white/55 rounded-xl p-4 border border-[var(--rf-border)] backdrop-blur-sm">
                 <p className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Feature to Create</p>
                 <p className="text-sm font-bold text-[var(--rf-text)] line-clamp-2 leading-snug">{feature?.title || feature?.summary}</p>
               </div>
@@ -149,7 +149,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                       value={projectKey}
                       onChange={e => setProjectKey(e.target.value)}
                       placeholder="e.g. PROJ"
-                      className="w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+                      className="w-full bg-white/65 border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand-subtle)] focus:border-[var(--rf-brand)] transition backdrop-blur-sm"
                     />
                   )}
                 </div>
@@ -163,7 +163,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                     <select
                       value={issueType}
                       onChange={e => setIssueType(e.target.value)}
-                      className="appearance-none pr-7 w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+                      className="appearance-none pr-7 w-full bg-white/65 border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand-subtle)] focus:border-[var(--rf-brand)] transition backdrop-blur-sm"
                     >
                       <option>Story</option>
                       <option>Task</option>
@@ -186,7 +186,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               animate={{ opacity: 1, scale: 1 }}
             >
               <div className="relative">
-                <div className="w-16 h-16 rounded-2xl bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.12)] flex items-center justify-center shadow-inner">
+                <div className="w-16 h-16 rounded-2xl bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] flex items-center justify-center">
                   <div className="w-8 h-8 border-[3px] border-[rgba(43,89,74,0.12)] border-t-[var(--rf-brand)] rounded-full spin-slow" />
                 </div>
                 <div className="absolute -inset-2 bg-[var(--rf-brand-muted)]/10 rounded-3xl animate-pulse" />
@@ -205,7 +205,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
             >
-              <div className="w-16 h-16 rounded-2xl bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] flex items-center justify-center shadow-inner shadow-[var(--rf-success)]/10">
+              <div className="w-16 h-16 rounded-2xl bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] flex items-center justify-center">
                 <CheckCircle className="w-8 h-8 text-[var(--rf-success)]" />
               </div>
               <div className="text-center">
@@ -213,7 +213,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                 <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-2">Jira issue <span className="font-mono font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] px-1.5 py-0.5 rounded">{result.key}</span> is ready</p>
               </div>
 
-              <div className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl p-5 text-sm space-y-3 shadow-inner">
+              <div className="w-full bg-white/55 border border-[var(--rf-border)] rounded-2xl p-5 text-sm space-y-3 backdrop-blur-sm">
                 <div className="flex justify-between items-center pb-3 border-b border-[var(--rf-border)]">
                   <span className="text-[var(--rf-text-tertiary)] font-semibold">Issue Key</span>
                   <button
@@ -279,7 +279,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
               </div>
               <button
                 onClick={() => setState('form')}
-                className="mt-2 px-6 py-2.5 text-sm font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border-strong)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-xl transition shadow-sm"
+                className="mt-2 px-6 py-2.5 text-sm font-bold text-[var(--rf-text-secondary)] bg-white/70 border border-[var(--rf-border)] hover:bg-white/90 hover:text-[var(--rf-text)] rounded-xl transition backdrop-blur-sm"
               >
                 Try Again
               </button>
@@ -289,8 +289,8 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
 
         {/* Footer */}
         {state === 'form' && (
-          <div className="px-6 py-5 border-t border-[var(--rf-border-subtle)] flex items-center justify-end gap-3 bg-[var(--rf-surface-soft)]/50">
-            <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-xl transition shadow-sm">
+          <div className="px-6 py-5 border-t border-[var(--rf-border-subtle)] flex items-center justify-end gap-3 bg-white/35 backdrop-blur-sm">
+            <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-[var(--rf-text-secondary)] bg-white/70 border border-[var(--rf-border)] hover:bg-white/90 rounded-xl transition backdrop-blur-sm">
               Cancel
             </button>
             <motion.button
@@ -304,7 +304,7 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
           </div>
         )}
         {state === 'success' && result && (
-          <div className="px-6 py-5 border-t border-[var(--rf-border-subtle)] flex justify-end bg-[var(--rf-surface-soft)]/50">
+          <div className="px-6 py-5 border-t border-[var(--rf-border-subtle)] flex justify-end bg-white/35 backdrop-blur-sm">
             <motion.button 
               onClick={() => { onCreate(result); onClose(); }} 
               className="px-8 py-2.5 text-sm font-bold text-white bg-[var(--rf-text)] hover:bg-black rounded-xl transition shadow-md"

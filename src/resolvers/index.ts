@@ -425,6 +425,14 @@ async function enqueueClarifyWorkflow(
     sessionId: payload.sessionId,
     ...(payload.inputSignature ? { inputSignature: payload.inputSignature } : {}),
     message: 'Analyzing requirement and gathering project context…',
+    payload: {
+      stage: 'context',
+      sources: {
+        projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+        projectCount: selectedProjectKeys.length,
+        attachmentIncluded: Boolean(payload.attachmentText?.trim()),
+      },
+    },
     updatedAt: Date.now(),
   });
   await clarifyQueue.push({ body: event });

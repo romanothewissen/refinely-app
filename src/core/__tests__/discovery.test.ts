@@ -421,6 +421,25 @@ test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when 
   assert.match(followups[0].question, /phone|whatsapp|case/i);
 });
 
+test('finalizeFollowupDiscoveryQuestions drops obviously truncated follow-up questions', () => {
+  const followups = finalizeFollowupDiscoveryQuestions([
+    {
+      categoryKey: 'user_personas',
+      category: 'User Personas',
+      intent: 'permissions_scope',
+      question: "When a Field Service Manager or Dispatcher overrides an FSE'",
+      suggestions: ['Managers can override', 'Dispatch can override', 'Only admins can override', 'No override path'],
+    },
+  ], {
+    askedQuestions: [],
+    missingCategoryKeys: ['user_personas'],
+    followupCap: 1,
+    initialQuestionCount: 8,
+  });
+
+  assert.deepEqual(followups, []);
+});
+
 test('finalizeFollowupDiscoveryQuestions does not invent a generic fallback question when follow-up candidates are empty', () => {
   const followups = finalizeFollowupDiscoveryQuestions([], {
     askedQuestions: [],

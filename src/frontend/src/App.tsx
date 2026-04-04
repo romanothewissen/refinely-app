@@ -14,6 +14,7 @@ import type {
   ClarifyCategoryKey,
   ClarifyContextMeta,
   ClarifyFailureReasonCode,
+  ClarifyProgressPayload,
   ClarifyQuestion,
   GenerationContextMeta,
   TokenUsageSummary,
@@ -121,6 +122,64 @@ function mergeTokenUsageSummary(
     total: base.total + next.total,
     byStage: Object.keys(mergedStages).length ? mergedStages : undefined,
   };
+}
+
+function buildClarifyLoadingMeta(
+  livePayload: ClarifyProgressPayload | null,
+  clarifyContext: ClarifyContextMeta | null,
+  workflowStage: WorkflowStage,
+): ClarifyProgressPayload | null {
+  const contextSources = clarifyContext
+    ? {
+        projectKey: clarifyContext.projectKey,
+        projectCount: clarifyContext.projectCount,
+        domainContextApplied: clarifyContext.domainContextApplied,
+        attachmentIncluded: clarifyContext.attachmentIncluded,
+        wiDocsCount: clarifyContext.wiDocsCount,
+        similarStoriesCount: clarifyContext.similarStoriesCount,
+      }
+    : undefined;
+
+  const basePayload: ClarifyProgressPayload | null = livePayload || clarifyContext
+    ? {
+        ...livePayload,
+        discoveryProfile: livePayload?.discoveryProfile ?? clarifyContext?.discoveryProfile,
+        ambiguityAssessment: livePayload?.ambiguityAssessment ?? clarifyContext?.ambiguityAssessment,
+        sources: livePayload?.sources ?? contextSources,
+      }
+    : null;
+
+  if (workflowStage === 'sufficiency_check') {
+    return {
+      ...basePayload,
+      stage: 'sufficiency',
+    };
+  }
+
+  if (workflowStage === 'clarify_round_2') {
+    return {
+      ...basePayload,
+      stage: 'followup',
+    };
+  }
+
+  return basePayload;
+}
+
+function buildSufficiencyProgressMessage(
+  tick: number,
+  context: ClarifyContextMeta | null,
+): string {
+  const answered = context?.initialQuestionCount ?? 0;
+  const followupCap = context?.discoveryProfile?.followupCap;
+  const messages = [
+    `Reviewing the ${answered || 'current'} discovery answers against the requirement…`,
+    'Checking which business dimensions are now covered well enough…',
+    followupCap
+      ? `Deciding whether any focused follow-up questions are still needed, up to ${followupCap} more…`
+      : 'Deciding whether any focused follow-up questions are still needed…',
+  ];
+  return messages[tick % messages.length] ?? messages[0];
 }
 
 function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
@@ -323,6 +382,7 @@ export default function App() {
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
   const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
+  const [sufficiencyProgressTick, setSufficiencyProgressTick] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
@@ -632,6 +692,7 @@ export default function App() {
   const {
     cancelClarify,
     progress: clarifyProgress,
+    progressPayload: liveClarifyPayload,
     isClarifying,
   } = useClarifyRealtime(
     pendingClarifySessionId,
@@ -677,6 +738,19 @@ export default function App() {
     }
   );
 
+  useEffect(() => {
+    if (workflowStage !== 'sufficiency_check') {
+      setSufficiencyProgressTick(0);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setSufficiencyProgressTick((tick) => tick + 1);
+    }, 2400);
+
+    return () => window.clearInterval(timer);
+  }, [workflowStage]);
+
   const isCanvasLoading = Boolean(
     pendingClarifySessionId
     || pendingSessionId
@@ -692,8 +766,13 @@ export default function App() {
       ? 'Crafting features'
       : 'Exploring the requirement';
 
+  const clarifyLoadingMeta = useMemo(
+    () => buildClarifyLoadingMeta(liveClarifyPayload, clarifyContext, workflowStage),
+    [liveClarifyPayload, clarifyContext, workflowStage],
+  );
+
   const loadingProgress = workflowStage === 'sufficiency_check'
-    ? (clarifyProgress || 'Evaluating whether the first round is enough…')
+    ? buildSufficiencyProgressMessage(sufficiencyProgressTick, clarifyContext)
     : workflowStage === 'clarify_round_2'
       ? (clarifyProgress || 'Preparing follow-up discovery questions…')
       : workflowStage === 'generation'
@@ -1279,7 +1358,7 @@ export default function App() {
           <AnimatePresence>
             {generationError && (
               <motion.div
-                className="w-full bg-[var(--rf-danger-subtle)]/95 backdrop-blur-sm text-[var(--rf-danger)] border-b border-[var(--rf-danger-subtle)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-50 shadow-sm"
+                className="w-full bg-[var(--rf-danger-subtle)]/80 backdrop-blur-md text-[var(--rf-danger)] border-b border-[var(--rf-danger-subtle)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-50"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
@@ -1291,7 +1370,7 @@ export default function App() {
             )}
             {generationWarning && !generationError && (
               <motion.div
-                className="w-full bg-[var(--rf-warning-subtle)]/95 backdrop-blur-sm text-[var(--rf-warning)] border-b border-[rgba(179,94,48,0.18)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-40 shadow-sm"
+                className="w-full bg-[var(--rf-warning-subtle)] backdrop-blur-sm text-[var(--rf-warning)] border-b border-[rgba(160,81,30,0.12)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-40"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
@@ -1354,6 +1433,9 @@ export default function App() {
                   requirement={requirement}
                   generationContext={generationContext}
                   generationProgressMeta={generationProgressMeta}
+                  clarifyContext={clarifyContext}
+                  clarifyProgressMeta={clarifyLoadingMeta}
+                  workflowStage={workflowStage}
                   projectKey={projectKey}
                   workflowTokenUsage={workflowTokenUsage}
                   onWorkflowTokenUsage={(usageDelta) => {

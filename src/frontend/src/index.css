@@ -6,59 +6,68 @@
 
 @layer base {
   :root {
-    /* Refined Editorial Light Theme */
-    --rf-bg: #FCFCFB;
-    --rf-bg-canvas: #F8F7F4;
-    
-    /* Warm, light airy sidebar */
-    --rf-bg-sidebar: #F4F2EC;
-    --rf-bg-sidebar-deep: #EBE8E0;
-    --rf-sidebar-text: #2D2C2A;
-    --rf-sidebar-text-muted: #6E6B65;
-    --rf-sidebar-border: rgba(0, 0, 0, 0.06);
-    --rf-sidebar-card: #FFFFFF;
-    --rf-sidebar-card-hover: #FCFCFB;
+    /* ── Brand ──────────────────────────────────────────────────── */
+    --rf-brand:          #2B594A;
+    --rf-brand-hover:    #1E4035;
+    --rf-brand-light:    #3A7062;
+    --rf-brand-subtle:   rgba(43, 89, 74, 0.10);
+    --rf-brand-muted:    rgba(43, 89, 74, 0.06);
 
-    /* Main canvas light */
-    --rf-bg-main: #FCFCFB;
-    --rf-bg-main-deep: #F8F7F4;
-    
-    --rf-surface: #FFFFFF;
-    --rf-surface-soft: #F8F7F4;
-    
-    --rf-border: #E8E5DD;
-    --rf-border-subtle: #F0EEE9;
-    --rf-border-strong: #D1CEC5;
-    
-    --rf-text: #1F1E1D;
-    --rf-text-secondary: #575550;
-    --rf-text-tertiary: #8C8A82;
-    
-    /* Sophisticated Forest Green */
-    --rf-brand: #2B594A;
-    --rf-brand-hover: #1E4035;
-    --rf-brand-subtle: #E6EFEC;
-    --rf-brand-muted: #F2F7F5;
-    
-    --rf-success: #3A6B53;
-    --rf-success-subtle: #E8F2ED;
-    
-    --rf-warning: #B35E30;
-    --rf-warning-subtle: #F9EBE3;
-    
-    --rf-danger: #9E3E47;
-    --rf-danger-subtle: #F7E5E7;
-    
-    /* Editorial Soft Shadows */
-    --rf-shadow-sm: 0 2px 8px -2px rgba(31, 30, 29, 0.04);
-    --rf-shadow-md: 0 8px 24px -4px rgba(31, 30, 29, 0.06), 0 4px 12px -4px rgba(31, 30, 29, 0.04);
-    --rf-shadow-lg: 0 16px 40px -8px rgba(31, 30, 29, 0.08), 0 8px 16px -8px rgba(31, 30, 29, 0.04);
-    --rf-header-shadow: 0 1px 0 rgba(31, 30, 29, 0.06);
-    
-    --rf-radius-sm: 4px;
-    --rf-radius-md: 8px;
-    --rf-radius-lg: 12px;
-    --rf-radius-xl: 16px;
+    /* ── Text ───────────────────────────────────────────────────── */
+    --rf-text:           #1C1F1E;
+    --rf-text-secondary: #2E3A35;
+    --rf-text-tertiary:  #4E6058;
+
+    /* ── Glass surfaces ─────────────────────────────────────────── */
+    --rf-glass:          rgba(255, 255, 255, 0.78);
+    --rf-glass-soft:     rgba(255, 255, 255, 0.58);
+    --rf-glass-sidebar:  rgba(255, 255, 255, 0.55);
+    --rf-glass-card:     rgba(255, 255, 255, 0.82);
+    --rf-glass-hover:    rgba(255, 255, 255, 0.90);
+
+    /* ── Borders ────────────────────────────────────────────────── */
+    --rf-border:         rgba(43, 89, 74, 0.10);
+    --rf-border-subtle:  rgba(43, 89, 74, 0.06);
+    --rf-border-strong:  rgba(43, 89, 74, 0.22);
+
+    /* ── Legacy surface aliases (used by older inline styles) ───── */
+    --rf-surface:        rgba(255, 255, 255, 0.82);
+    --rf-surface-soft:   rgba(255, 255, 255, 0.55);
+    --rf-bg:             #f5f8f6;
+    --rf-bg-canvas:      #f2f6f4;
+    --rf-bg-sidebar:     #f4f7f5;
+
+    /* ── Semantic colours ───────────────────────────────────────── */
+    --rf-success:        #2E7D56;
+    --rf-success-subtle: rgba(46, 125, 86, 0.10);
+
+    --rf-warning:        #A0511E;
+    --rf-warning-subtle: rgba(160, 81, 30, 0.08);
+
+    --rf-danger:         #9B3545;
+    --rf-danger-subtle:  rgba(155, 53, 69, 0.08);
+
+    /* ── Shadows ────────────────────────────────────────────────── */
+    --rf-shadow-sm: 0 2px 12px -2px rgba(43, 89, 74, 0.10), 0 1px 3px -1px rgba(43, 89, 74, 0.06);
+    --rf-shadow-md: 0 8px 32px -6px rgba(43, 89, 74, 0.14), 0 2px 10px -2px rgba(43, 89, 74, 0.08);
+    --rf-shadow-lg: 0 16px 52px -10px rgba(43, 89, 74, 0.16), 0 6px 20px -6px rgba(43, 89, 74, 0.09);
+
+    /* ── Radius ─────────────────────────────────────────────────── */
+    --rf-radius-sm:  4px;
+    --rf-radius-md:  8px;
+    --rf-radius-lg:  12px;
+    --rf-radius-xl:  18px;
+    --rf-radius-2xl: 22px;
+
+    /* ── Sidebar ────────────────────────────────────────────────── */
+    --rf-sidebar-text:        var(--rf-text);
+    --rf-sidebar-text-muted:  var(--rf-text-tertiary);
+    --rf-sidebar-border:      var(--rf-border);
+    --rf-sidebar-card:        var(--rf-glass-card);
+    --rf-sidebar-card-hover:  var(--rf-glass-hover);
+
+    /* ── Header shadow ──────────────────────────────────────────── */
+    --rf-header-shadow: 0 1px 0 rgba(43, 89, 74, 0.07);
   }
 
   html, body {
@@ -79,6 +88,7 @@
     letter-spacing: -0.01em;
   }
 
+  /* ── Root: living gradient mesh background ───────────────────── */
   #root {
     position: relative;
     display: flex;
@@ -86,51 +96,67 @@
     height: 100%;
     min-height: 0;
     background:
-      radial-gradient(circle at 18% 0%, rgba(43, 89, 74, 0.11), transparent 44%),
-      radial-gradient(circle at 82% 100%, rgba(43, 89, 74, 0.07), transparent 42%),
-      linear-gradient(160deg, #f8f7f4 0%, #ede9e0 100%);
+      /* Forest-green wash — top-left anchor */
+      radial-gradient(ellipse 72% 58% at 8% 4%,  rgba(43, 89, 74, 0.12), transparent 62%),
+      /* Warm peach/sand — bottom-right lift */
+      radial-gradient(ellipse 65% 52% at 93% 96%, rgba(210, 168, 125, 0.09), transparent 58%),
+      /* Sage/mint — centre-right breath */
+      radial-gradient(ellipse 55% 48% at 88% 32%, rgba(100, 172, 140, 0.07), transparent 52%),
+      /* Soft lavender — bottom-left whisper */
+      radial-gradient(ellipse 48% 42% at 12% 82%, rgba(145, 148, 190, 0.05), transparent 48%),
+      /* Warm green — mid anchor */
+      radial-gradient(ellipse 60% 50% at 50% 50%, rgba(43, 89, 74, 0.04), transparent 70%),
+      /* Base: clean off-white with the lightest green tint */
+      linear-gradient(165deg, #f6f9f7 0%, #f2f5f3 55%, #f5f3ef 100%);
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   Utility classes
+═══════════════════════════════════════════════════════════════════ */
 @layer utilities {
+
+  /* ── Glass card ──────────────────────────────────────────────── */
   .rf-card {
     position: relative;
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(43, 89, 74, 0.08);
-    border-radius: 22px;
-    box-shadow:
-      0 18px 44px -34px rgba(31, 30, 29, 0.18),
-      0 8px 18px -16px rgba(31, 30, 29, 0.1);
-    backdrop-filter: blur(14px);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    background: var(--rf-glass-card);
+    border: 1px solid var(--rf-border);
+    border-radius: var(--rf-radius-2xl);
+    box-shadow: var(--rf-shadow-md);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  
+
   .rf-card::before {
     content: '';
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(180deg, rgba(255,255,255,0.26), transparent 18%);
+    background: linear-gradient(180deg, rgba(255,255,255,0.46) 0%, transparent 42%);
     pointer-events: none;
+    z-index: 0;
   }
 
-  .rf-card:hover, .rf-card-hover:hover {
-    border-color: rgba(43, 89, 74, 0.16);
-    box-shadow:
-      0 24px 60px -36px rgba(31, 30, 29, 0.26),
-      0 10px 20px -16px rgba(31, 30, 29, 0.16);
+  .rf-card > * { position: relative; z-index: 1; }
+
+  .rf-card:hover,
+  .rf-card-hover:hover {
+    border-color: var(--rf-border-strong);
+    box-shadow: var(--rf-shadow-lg);
+    background: var(--rf-glass-hover);
   }
 
+  /* ── Glass card (alias) ──────────────────────────────────────── */
   .rf-glass-card {
     position: relative;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(43, 89, 74, 0.08);
-    border-radius: 22px;
-    box-shadow:
-      0 18px 44px -34px rgba(31, 30, 29, 0.18),
-      0 8px 18px -16px rgba(31, 30, 29, 0.1);
-    backdrop-filter: blur(14px);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    background: var(--rf-glass-card);
+    border: 1px solid var(--rf-border);
+    border-radius: var(--rf-radius-2xl);
+    box-shadow: var(--rf-shadow-md);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .rf-glass-card::before {
@@ -138,36 +164,41 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(180deg, rgba(255,255,255,0.22), transparent 16%);
+    background: linear-gradient(180deg, rgba(255,255,255,0.42) 0%, transparent 40%);
     pointer-events: none;
+    z-index: 0;
   }
+
+  .rf-glass-card > * { position: relative; z-index: 1; }
 
   .rf-glass-card:hover {
-    border-color: rgba(43, 89, 74, 0.16);
-    box-shadow:
-      0 24px 60px -36px rgba(31, 30, 29, 0.26),
-      0 10px 20px -16px rgba(31, 30, 29, 0.16);
+    border-color: var(--rf-border-strong);
+    box-shadow: var(--rf-shadow-lg);
   }
 
-  /* Sidebar styling overrides */
+  /* ── Sidebar shell ───────────────────────────────────────────── */
   .rf-sidebar-shell {
     position: relative;
-    background: rgba(248, 246, 240, 0.64);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-right: 1px solid rgba(43, 89, 74, 0.13);
+    background: var(--rf-glass-sidebar);
+    backdrop-filter: blur(32px) saturate(140%);
+    -webkit-backdrop-filter: blur(32px) saturate(140%);
+    border-right: 1px solid var(--rf-border);
+    /* Subtle inner highlight on right edge */
+    box-shadow: inset -1px 0 0 rgba(255,255,255,0.55);
   }
 
+  /* ── Sidebar card ────────────────────────────────────────────── */
   .rf-sidebar-card {
     position: relative;
-    background: rgba(255, 255, 255, 0.94);
-    border: 1px solid rgba(43, 89, 74, 0.08);
-    border-radius: 22px;
+    background: var(--rf-glass-card);
+    border: 1px solid var(--rf-border);
+    border-radius: var(--rf-radius-2xl);
     box-shadow:
-      0 18px 44px -34px rgba(31, 30, 29, 0.18),
-      0 8px 18px -16px rgba(31, 30, 29, 0.1);
-    backdrop-filter: blur(14px);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      0 4px 16px -6px rgba(43, 89, 74, 0.08),
+      0 1px 4px -1px rgba(43, 89, 74, 0.05);
+    backdrop-filter: blur(20px) saturate(120%);
+    -webkit-backdrop-filter: blur(20px) saturate(120%);
+    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .rf-sidebar-card::before {
@@ -175,17 +206,19 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(180deg, rgba(255,255,255,0.24), transparent 16%);
+    background: linear-gradient(180deg, rgba(255,255,255,0.44) 0%, transparent 38%);
     pointer-events: none;
   }
 
   .rf-sidebar-card:hover {
-    border-color: rgba(43, 89, 74, 0.14);
+    border-color: var(--rf-border-strong);
+    background: var(--rf-glass-hover);
     box-shadow:
-      0 18px 44px -34px rgba(31, 30, 29, 0.22),
-      0 8px 18px -16px rgba(31, 30, 29, 0.12);
+      0 6px 22px -6px rgba(43, 89, 74, 0.11),
+      0 2px 6px -2px rgba(43, 89, 74, 0.06);
   }
 
+  /* ── Pane header ─────────────────────────────────────────────── */
   .rf-pane-header {
     position: relative;
     z-index: 1;
@@ -195,16 +228,17 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    border-bottom: 1px solid rgba(43, 89, 74, 0.08);
-    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--rf-border-subtle);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
   }
 
   .rf-pane-header--sidebar {
-    background: rgba(245, 242, 234, 0.82);
+    background: rgba(255, 255, 255, 0.68);
   }
 
   .rf-pane-header--canvas {
-    background: rgba(252, 252, 251, 0.82);
+    background: rgba(255, 255, 255, 0.72);
   }
 
   .rf-pane-header-cluster {
@@ -226,7 +260,7 @@
   .rf-pane-header-kicker {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--rf-text-tertiary);
   }
@@ -259,17 +293,19 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 11px;
+    padding: 5px 11px;
     border-radius: 999px;
-    border: 1px solid rgba(43, 89, 74, 0.12);
-    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid var(--rf-border);
+    background: rgba(255, 255, 255, 0.70);
     color: var(--rf-text-secondary);
     font-size: 11px;
-    font-weight: 800;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.14em;
-    box-shadow: 0 8px 20px -18px rgba(31, 30, 29, 0.4);
+    letter-spacing: 0.13em;
+    box-shadow: 0 2px 8px -4px rgba(43, 89, 74, 0.12);
     white-space: nowrap;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .rf-pane-header-badge strong {
@@ -277,36 +313,38 @@
     font-weight: 800;
   }
 
+  /* ── Main shell ──────────────────────────────────────────────── */
   .rf-main-shell {
     background: transparent;
     position: relative;
     min-width: 0;
   }
 
-  /* Subtle dot grid on main canvas — keep very faint */
+  /* No dot-grid — the gradient does the visual work */
   .rf-main-shell::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image: radial-gradient(circle, rgba(139,136,128,0.18) 1px, transparent 1px);
-    background-size: 24px 24px;
-    opacity: 0.6;
-    pointer-events: none;
-    z-index: 0;
+    display: none;
   }
 
+  /* ── Pane seam — subtle, no heavy shadow ─────────────────────── */
   .rf-pane-seam {
-    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.5), -4px 0 16px rgba(0, 0, 0, 0.05);
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.60);
   }
 
+  /* ── Scrollbars ──────────────────────────────────────────────── */
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-  .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-  .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(43, 89, 74, 0.18);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(43, 89, 74, 0.30);
+  }
 
+  /* ── Animations ──────────────────────────────────────────────── */
   .fade-in { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
@@ -326,7 +364,11 @@
   }
 
   .shimmer {
-    background: linear-gradient(90deg, var(--rf-surface-soft) 25%, var(--rf-border-subtle) 50%, var(--rf-surface-soft) 75%);
+    background: linear-gradient(90deg,
+      rgba(255,255,255,0.55) 25%,
+      rgba(220,235,228,0.75) 50%,
+      rgba(255,255,255,0.55) 75%
+    );
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite linear;
   }
@@ -351,6 +393,7 @@
   .spin-slow { animation: spin 1.5s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ── Brainstorm button shimmer ───────────────────────────────── */
   .brainstorm-shimmer {
     position: relative;
     overflow: hidden;
@@ -362,9 +405,9 @@
     background: linear-gradient(
       105deg,
       transparent 30%,
-      rgba(255, 255, 255, 0.2) 45%,
-      rgba(255, 255, 255, 0.3) 50%,
-      rgba(255, 255, 255, 0.2) 55%,
+      rgba(255, 255, 255, 0.18) 45%,
+      rgba(255, 255, 255, 0.28) 50%,
+      rgba(255, 255, 255, 0.18) 55%,
       transparent 70%
     );
     background-size: 250% 100%;
@@ -372,14 +415,13 @@
     pointer-events: none;
     border-radius: inherit;
   }
-  .brainstorm-shimmer:disabled::after {
-    display: none;
-  }
+  .brainstorm-shimmer:disabled::after { display: none; }
   @keyframes brainstormShimmer {
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
 
+  /* ── Levitate ────────────────────────────────────────────────── */
   .levitate {
     animation: levitate 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
   }
@@ -387,13 +429,26 @@
     0%, 100% { transform: translateY(0); }
     50%      { transform: translateY(-6px); }
   }
+
+  /* ── Glass button base ───────────────────────────────────────── */
+  .rf-glass-btn {
+    background: rgba(255, 255, 255, 0.70);
+    border: 1px solid var(--rf-border);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .rf-glass-btn:hover {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: var(--rf-border-strong);
+  }
 }
 
+/* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .rf-pane-header {
     padding-inline: 14px;
   }
-
   .rf-pane-header-title {
     font-size: 18px;
   }

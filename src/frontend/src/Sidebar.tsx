@@ -144,7 +144,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden text-[var(--rf-sidebar-text)]"
+      className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden"
       style={{ width: width ?? 400 }}
     >
       {/* ── Header ── */}
@@ -185,7 +185,11 @@ export function Sidebar({
           {isAdmin && (
             <button
               onClick={() => setViewMode('settings')}
-              className={`p-2 rounded-lg transition-colors ${viewMode === 'settings' ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'text-[var(--rf-sidebar-text-muted)] hover:bg-white/70 hover:text-[var(--rf-text)]'}`}
+              className={`p-2 rounded-xl transition-all border ${
+                viewMode === 'settings'
+                  ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-border-strong)]'
+                  : 'text-[var(--rf-text-secondary)] bg-white/50 border-[var(--rf-border)] hover:bg-white/80 hover:text-[var(--rf-brand)]'
+              }`}
               title="Settings"
             >
               <Settings className="w-4 h-4" />
@@ -193,7 +197,7 @@ export function Sidebar({
           )}
           <button
             onClick={onToggleSidebar}
-            className="p-2 rounded-lg transition-colors text-[var(--rf-sidebar-text-muted)] hover:bg-white/70 hover:text-[var(--rf-text)]"
+            className="p-2 rounded-xl transition-all text-[var(--rf-text-tertiary)] hover:bg-white/60 hover:text-[var(--rf-text)]"
             title="Collapse sidebar"
           >
             <PanelLeftClose className="w-4 h-4" />
@@ -216,29 +220,29 @@ export function Sidebar({
           <div className="px-3 pt-3 pb-2.5">
             <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2.5">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(43,89,74,0.1)] bg-[var(--rf-brand-subtle)] shadow-sm">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[var(--rf-border)] bg-white/70 shadow-sm">
                   <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[13px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)]">Workspace</div>
-                  <div className="mt-1 truncate text-[13px] font-semibold text-[var(--rf-text)]">
+                  <div className="text-[11px] font-700 uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Workspace</div>
+                  <div className="mt-0.5 truncate text-[13px] font-semibold text-[var(--rf-text)]">
                     {projectTitle}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 {selectedProjects.length > 0 && (
-                  <div className="shrink-0 text-[13px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
+                  <div className="shrink-0 text-[12px] font-semibold text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-full border border-[var(--rf-border)]">
                     {selectedProjects.length > 1 ? 'Projects Active' : 'Project Active'}
                   </div>
                 )}
                 <button
                   type="button"
                   onClick={() => setWorkspaceExpanded((prev) => !prev)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[rgba(43,89,74,0.1)] bg-white/80 text-[var(--rf-text-tertiary)] transition hover:border-[rgba(43,89,74,0.2)] hover:text-[var(--rf-text)]"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-text)] hover:bg-white/90"
                   title={workspaceExpanded ? 'Collapse workspace' : 'Expand workspace'}
                 >
-                  <ChevronDown className={`h-4 w-4 transition-transform ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${workspaceExpanded ? 'rotate-180' : ''}`} />
                 </button>
               </div>
             </div>
@@ -249,7 +253,7 @@ export function Sidebar({
                   selectedProjects.map((project) => (
                     <span
                       key={project.key}
-                      className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-[12px] font-bold text-[var(--rf-brand)]"
+                      className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]"
                     >
                       <span className="max-w-[120px] truncate">
                         {project.key}{project.name ? ` · ${project.name}` : ''}
@@ -257,11 +261,11 @@ export function Sidebar({
                     </span>
                   ))
                 ) : (
-                  <span className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                  <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-0.5 text-[12px] font-medium text-[var(--rf-text-secondary)]">
                     Workspace-wide
                   </span>
                 )}
-                <span className="text-[12px] font-medium text-[var(--rf-sidebar-text-muted)]">
+                <span className="text-[12px] text-[var(--rf-text-tertiary)]">
                   {activeWiDocs.length > 0 ? `${activeWiDocs.length} docs linked` : 'No docs linked'}
                 </span>
               </div>
@@ -276,15 +280,15 @@ export function Sidebar({
                   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                   className="overflow-hidden"
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-2 pt-1">
                     <div className="relative">
                       <input
                         value={projectFilter}
                         onChange={(e) => setProjectFilter(e.target.value)}
                         placeholder="Search projects"
-                        className="w-full rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/80 px-3.5 py-2.5 pr-10 text-[13px] font-semibold text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/10"
+                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2.5 pr-10 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
                       />
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--rf-sidebar-text-muted)]" />
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--rf-text-tertiary)]" />
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
@@ -294,16 +298,16 @@ export function Sidebar({
                             key={project.key}
                             type="button"
                             onClick={() => toggleProject(project.key)}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-[12px] font-bold text-[var(--rf-brand)] transition hover:bg-[var(--rf-brand-muted)]"
+                            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)] transition hover:bg-white/70"
                           >
                             <span className="max-w-[120px] truncate">
                               {project.key}{project.name ? ` · ${project.name}` : ''}
                             </span>
-                            <X className="h-3 w-3" />
+                            <X className="h-2.5 w-2.5" />
                           </button>
                         ))
                       ) : (
-                        <span className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                        <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-0.5 text-[12px] font-medium text-[var(--rf-text-secondary)]">
                           Workspace-wide
                         </span>
                       )}
@@ -313,17 +317,17 @@ export function Sidebar({
                           setProjectKeys([]);
                           setContextMode('global');
                         }}
-                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[12px] font-bold transition ${
+                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[12px] font-semibold transition ${
                           projectKeys.length === 0
                             ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white'
-                            : 'border-[rgba(43,89,74,0.12)] bg-white/70 text-[var(--rf-text-secondary)] hover:border-[rgba(43,89,74,0.22)] hover:text-[var(--rf-text)]'
+                            : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-text)]'
                         }`}
                       >
                         Workspace-wide
                       </button>
                     </div>
 
-                    <div className="max-h-36 overflow-y-auto rounded-xl border border-[rgba(43,89,74,0.08)] bg-white/70 p-1 custom-scrollbar">
+                    <div className="max-h-36 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar backdrop-blur-sm">
                       {filteredProjects.length ? filteredProjects.map((project) => {
                         const selected = projectKeys.includes(project.key);
                         const disabled = !selected && projectKeys.length >= 2;
@@ -336,26 +340,26 @@ export function Sidebar({
                             className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
                               selected
                                 ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
-                                : 'hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)]'
+                                : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
                             } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                           >
                             <span className="min-w-0">
                               <span className="block truncate text-[13px] font-semibold">{project.key}</span>
-                              <span className="block truncate text-[11px] font-medium text-[var(--rf-sidebar-text-muted)]">{project.name}</span>
+                              <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{project.name}</span>
                             </span>
-                            <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                            <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
                               {selected ? 'Selected' : 'Add'}
                             </span>
                           </button>
                         );
                       }) : (
-                        <div className="px-3 py-2 text-[13px] font-medium text-[var(--rf-sidebar-text-muted)]">
+                        <div className="px-3 py-2 text-[13px] text-[var(--rf-text-tertiary)]">
                           No projects match the search.
                         </div>
                       )}
                     </div>
 
-                    <p className="text-[13px] text-[var(--rf-sidebar-text-muted)]">
+                    <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
                       Select up to two projects. The workspace will union backlog, WI, and guidance from both.
                     </p>
                   </div>
@@ -365,15 +369,15 @@ export function Sidebar({
           </div>
 
           {/* Cache + Docs stats row */}
-          <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5 min-[0px]:min-w-0">
+          <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5">
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
-              className="group flex min-w-0 items-center gap-2 rounded-lg border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
             >
-              <Database className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
-                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Cache</div>
                 <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
                   {primaryProjectKey !== '*' ? 'Project' : 'Select project'}
                 </div>
@@ -382,11 +386,11 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
-              className="group flex min-w-0 items-center gap-2 rounded-lg border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
             >
-              <FileText className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
+              <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
-                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Docs</div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Docs</div>
                 <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
                   {activeWiDocs.length > 0 ? `${activeWiDocs.length} stored` : 'None stored'}
                 </div>
@@ -396,7 +400,7 @@ export function Sidebar({
 
           {/* Context not ready warning */}
           {!contextReady && (
-            <div className="mx-3 mb-3 rounded-lg bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.14)] px-3 py-2 text-[13px] font-medium text-[var(--rf-warning)]">
+            <div className="mx-3 mb-3 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(160,81,30,0.14)] px-3 py-2 text-[13px] font-medium text-[var(--rf-warning)]">
               Choose a context scope to continue.
             </div>
           )}
@@ -404,21 +408,21 @@ export function Sidebar({
 
         {/* ── Input card ── */}
         <motion.div
-          className="rf-sidebar-card flex-1 flex flex-col min-h-0 overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/20 transition-shadow"
+          className="rf-sidebar-card flex-1 flex flex-col min-h-0 overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
           custom={2}
         >
           {/* Card header */}
-          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-[rgba(43,89,74,0.06)] bg-[rgba(255,255,255,0.7)]">
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-[var(--rf-border-subtle)] bg-white/40">
             <div className="flex items-center gap-2 min-w-0">
               {originIssueKey && (
-                <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.14)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
+                <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
                   {originIssueKey}
                 </span>
               )}
-              <span className="text-[13px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">
+              <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
                 Requirement
               </span>
             </div>
@@ -427,7 +431,7 @@ export function Sidebar({
               onClick={() => runAttachmentInputRef.current?.click()}
               disabled={isWorking}
               title="Attach supporting files for this run only"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white px-2.5 py-1.5 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)] shadow-sm transition-all hover:border-[rgba(43,89,74,0.28)] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
               whileTap={{ scale: 0.97 }}
             >
               <Paperclip className="w-3 h-3" />
@@ -450,11 +454,11 @@ export function Sidebar({
               {runAttachments.map((attachment) => (
                 <div
                   key={attachment.id}
-                  className="flex items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5"
+                  className="flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/65 px-2.5 py-1.5"
                 >
                   <div className="min-w-0">
                     <div className="max-w-[140px] truncate text-[13px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
-                    <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
+                    <div className="text-[11px] text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
                   </div>
                   <button
                     type="button"
@@ -479,14 +483,14 @@ export function Sidebar({
           />
 
           {/* Card footer */}
-          <div className="flex items-center justify-between gap-3 border-t border-[rgba(43,89,74,0.06)] px-3 py-2 bg-[rgba(248,247,244,0.6)]">
-            <span className="text-[13px] font-medium text-[var(--rf-text-tertiary)]">
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-3 py-2 bg-white/30">
+            <span className="text-[12px] text-[var(--rf-text-tertiary)]">
               {wordCount > 0 ? `${wordCount} word${wordCount !== 1 ? 's' : ''}` : 'No input yet'}
             </span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.14em] border transition-all ${
+            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] border transition-all ${
               hasPromptInput
-                ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[rgba(43,89,74,0.14)]'
-                : 'bg-white/60 text-[var(--rf-text-tertiary)] border-[rgba(0,0,0,0.06)]'
+                ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-border)]'
+                : 'bg-white/50 text-[var(--rf-text-tertiary)] border-[var(--rf-border-subtle)]'
             }`}>
               {hasPromptInput ? 'Ready' : 'Add input'}
             </span>
@@ -496,7 +500,7 @@ export function Sidebar({
         {/* ── Attachment parse state / error ── */}
         {(runAttachmentParseState || runAttachmentError) && (
           <motion.div
-            className={`rf-sidebar-card px-4 py-3 ${runAttachmentError ? 'border-[rgba(158,62,71,0.2)] bg-[var(--rf-danger-subtle)]' : ''}`}
+            className={`rf-sidebar-card px-4 py-3 ${runAttachmentError ? 'border-[rgba(155,53,69,0.2)] bg-[var(--rf-danger-subtle)]' : ''}`}
             variants={fadeUp}
             initial="hidden"
             animate="visible"
@@ -521,7 +525,7 @@ export function Sidebar({
 
         {/* ── Actions ── */}
         <motion.div
-          className="shrink-0 space-y-2.5 mt-0.5"
+          className="shrink-0 space-y-2 mt-0.5"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
@@ -532,7 +536,7 @@ export function Sidebar({
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Included monthly usage has been reached. Generation is still available.' : ''}
-            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[11px] rounded-[16px] transition-all flex items-center justify-center gap-2 shadow-[0_12px_28px_-16px_rgba(43,89,74,0.6)] border border-white/10"
+            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.05] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[11px] rounded-[18px] transition-all flex items-center justify-center gap-2 shadow-[0_10px_32px_-12px_rgba(43,89,74,0.55)] border border-white/10"
             whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
@@ -569,7 +573,7 @@ export function Sidebar({
           <div className="grid grid-cols-2 gap-2">
             <motion.button
               onClick={onNewSession}
-              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[13px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
+              className="rf-glass-btn py-2.5 rounded-[18px] text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[12px] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-all"
               whileTap={{ scale: 0.97 }}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -577,7 +581,7 @@ export function Sidebar({
             </motion.button>
             <motion.button
               onClick={onOpenHistory}
-              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[13px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
+              className="rf-glass-btn py-2.5 rounded-[18px] text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[12px] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-all"
               whileTap={{ scale: 0.97 }}
             >
               <Clock className="w-3.5 h-3.5" />
@@ -590,15 +594,15 @@ export function Sidebar({
       {/* ── Usage footer ── */}
       {!hasUnlimitedUsage && showUsage && (
         <motion.div
-          className="px-4 pb-4 pt-1 shrink-0"
+          className="px-3 pb-3 pt-1 shrink-0"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="rf-sidebar-card relative overflow-hidden px-3 py-3">
+          <div className="relative overflow-hidden rounded-[18px] border border-[var(--rf-border)] bg-white/75 backdrop-blur-xl px-3 py-3">
             <button
               onClick={() => setShowUsage(false)}
-              className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/80 hover:text-[var(--rf-text)]"
+              className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/70 hover:text-[var(--rf-text)]"
             >
               <X className="w-3 h-3" />
             </button>

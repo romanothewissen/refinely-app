@@ -1,5 +1,8 @@
 // ─── Constants ───────────────────────────────────────────────────────────────
+import strategyCatalog from './modelStrategyCatalog.json';
+
 export const REDACTED = '•••••••• (Encrypted)';
+const DEFAULT_ANTHROPIC_STABLE = strategyCatalog.providers.anthropic.presets.stable;
 
 // ─── Tenant Configuration ────────────────────────────────────────────────────
 
@@ -160,14 +163,14 @@ export const DEFAULT_CONFIG: TenantConfig = {
       generation: 'pro',
       refinement: 'flash',
     },
-    modelStrategyVersion: '2026-04-04',
-    decompositionModel: 'claude-opus-4-1-20250805',
-    arModel: 'claude-opus-4-1-20250805',
-    clarifyModel: 'claude-3-5-sonnet-20241022',
-    refineModel: 'claude-3-5-sonnet-20241022',
-    evaluateModel: 'claude-3-5-sonnet-20241022',
-    triageModel: 'claude-3-5-sonnet-20241022',
-    themeModel: 'claude-3-5-sonnet-20241022',
+    modelStrategyVersion: strategyCatalog.version,
+    decompositionModel: DEFAULT_ANTHROPIC_STABLE.pro[0],
+    arModel: DEFAULT_ANTHROPIC_STABLE.pro[0],
+    clarifyModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
+    refineModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
+    evaluateModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
+    triageModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
+    themeModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     maxTokens: 8192,
   },
   domainContext: '',
@@ -301,6 +304,28 @@ export interface DiscoverySufficiencyResult {
   roundEvaluated: number;
   missingCategoryKeys: ClarifyCategoryKey[];
   reasonCodes: string[];
+}
+
+export interface ClarifyAssessmentSummary {
+  shape?: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
+  complexity?: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+  clarity?: 'clear' | 'medium' | 'vague';
+  questionPlan?: { min: number; max: number; target: number };
+}
+
+export interface ClarifyProgressPayload {
+  stage?: 'context' | 'assessment' | 'question_generation' | 'finalize' | 'sufficiency' | 'followup';
+  assessment?: ClarifyAssessmentSummary;
+  discoveryProfile?: DiscoveryProfile;
+  ambiguityAssessment?: ClarifyContextMeta['ambiguityAssessment'];
+  sources?: {
+    projectKey: string;
+    projectCount?: number;
+    domainContextApplied?: boolean;
+    attachmentIncluded?: boolean;
+    wiDocsCount?: number;
+    similarStoriesCount?: number;
+  };
 }
 
 export interface ContextSourceMeta {
