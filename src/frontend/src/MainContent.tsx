@@ -192,79 +192,80 @@ function buildFeatureExcerpt(text: string, maxChars = 150) {
 
 function getTriageSupportCopy(triage?: GenerationProgressMeta['triage']) {
   if (!triage) return 'Sizing the request so the pipeline knows how much depth to apply.';
-  return `The AI has determined this is a ${triage.complexity.replace('_', ' ')} complexity request, targeting ~${triage.featureTarget} features with ${triage.arDepth} acceptance depth.`;
+  const label = triage.complexity.replace('_', ' ');
+  return `Assessed as ${label} complexity. Targeting around ${triage.featureTarget} features with ${triage.arDepth} acceptance criteria — final count may vary based on the requirement.`;
 }
 
-function ComplexityMeter({ current }: { current: string }) {
-  const levels = [
-    { key: 'trivial', label: 'Trivial', features: '1', ar: 'Light' },
-    { key: 'low', label: 'Low', features: '2-4', ar: 'Standard' },
-    { key: 'medium', label: 'Medium', features: '5-7', ar: 'Thorough' },
-    { key: 'high', label: 'High', features: '8-12', ar: 'Deep' },
-    { key: 'very_high', label: 'Complex', features: '13+', ar: 'Epic' },
-  ];
+const COMPLEXITY_LEVELS = [
+  { key: 'trivial', label: 'Trivial', features: '1', ar: 'Light' },
+  { key: 'low', label: 'Low', features: '2–4', ar: 'Standard' },
+  { key: 'medium', label: 'Medium', features: '5–7', ar: 'Thorough' },
+  { key: 'high', label: 'High', features: '8–12', ar: 'Deep' },
+  { key: 'very_high', label: 'Complex', features: '13+', ar: 'Epic' },
+];
 
-  const currentIndex = levels.findIndex(l => l.key === current);
+function ComplexityMeter({ current, compact = false }: { current: string; compact?: boolean }) {
+  const currentIndex = COMPLEXITY_LEVELS.findIndex(l => l.key === current);
+  const active = currentIndex >= 0 ? COMPLEXITY_LEVELS[currentIndex] : null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between px-1">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity Analysis</span>
-        <span className="text-[10px] font-bold py-0.5 px-2 bg-[var(--rf-brand)] text-white rounded-full uppercase tracking-widest shadow-sm">Decided by Model</span>
-      </div>
-      <div className="relative pt-2 pb-8">
-        {/* Scale Line */}
-        <div className="absolute top-4 left-0 right-0 h-1 bg-[var(--rf-surface-soft)] rounded-full border border-[rgba(0,0,0,0.03)]" />
-        
-        <div className="flex justify-between relative z-10">
-          {levels.map((level, idx) => {
-            const isActive = idx === currentIndex;
-            const isPast = idx < currentIndex;
-            
-            return (
-              <div key={level.key} className="flex flex-col items-center gap-2 group">
-                <div 
-                  className={`w-4 h-4 rounded-full border-2 transition-all duration-500 scale-100 ${
-                    isActive 
-                      ? 'bg-[var(--rf-brand)] border-[var(--rf-brand)] scale-125 shadow-[0_0_12px_rgba(43,89,74,0.4)]' 
-                      : isPast
-                        ? 'bg-[var(--rf-brand-muted)] border-[var(--rf-brand-subtle)]'
-                        : 'bg-white border-[var(--rf-border)]'
-                  }`} 
-                />
-                <div className="absolute top-8 flex flex-col items-center whitespace-nowrap">
-                  <span className={`text-[10px] font-bold uppercase tracking-tighter transition-colors ${isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-60'}`}>
-                    {level.label}
-                  </span>
-                  {isActive && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mt-1 flex flex-col items-center"
-                    >
-                      <span className="text-[9px] font-black text-[var(--rf-text)] bg-white/90 border border-[rgba(0,0,0,0.05)] px-1.5 py-0.5 rounded-md shadow-sm">
-                        {level.features} features · {level.ar} ARs
-                      </span>
-                    </motion.div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+    <div>
+      {!compact && (
+        <div className="flex items-center justify-between mb-2.5">
+          <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
+          <span className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">Model assessment</span>
         </div>
+      )}
+      <div className="flex gap-1">
+        {COMPLEXITY_LEVELS.map((level, idx) => {
+          const isActive = idx === currentIndex;
+          const isPast = idx < currentIndex;
+          return (
+            <div key={level.key} className="flex-1 flex flex-col gap-1">
+              <div className={`h-2 rounded-sm transition-colors duration-500 ${
+                isActive ? 'bg-[var(--rf-brand)]'
+                : isPast ? 'bg-[var(--rf-brand-subtle)]'
+                : 'bg-[var(--rf-border)]'
+              }`} />
+              {!compact && (
+                <span className={`text-[11px] font-bold uppercase tracking-tight text-center transition-colors leading-tight ${
+                  isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-40'
+                }`}>{level.label}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
+      {active && !compact && (
+        <motion.div
+          initial={{ opacity: 0, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-2.5 text-[13px] text-[var(--rf-text-secondary)]"
+        >
+          <span className="font-semibold text-[var(--rf-text)]">{active.features} features</span>
+          <span className="text-[var(--rf-text-tertiary)] mx-1.5">·</span>
+          <span className="font-semibold text-[var(--rf-text)]">{active.ar}</span>
+          <span className="text-[var(--rf-text-tertiary)]"> acceptance depth</span>
+        </motion.div>
+      )}
+      {active && compact && (
+        <div className="mt-1 flex gap-1.5 items-center">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">{active.label}</span>
+          <span className="text-[11px] text-[var(--rf-text-tertiary)]">· {active.features} features · {active.ar} ARs</span>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Refactored Pipeline Component for Stability
+// Pipeline Loading Component
 // ─────────────────────────────────────────────────────────────────────────────
-function GeneratingPipeline({ 
-  meta, progress, title, onCancel, canCancel, projectKey 
-}: { 
-  meta: GenerationProgressMeta | null; 
-  progress?: string; 
+function GeneratingPipeline({
+  meta, progress, title, onCancel, canCancel, projectKey
+}: {
+  meta: GenerationProgressMeta | null;
+  progress?: string;
   title?: string;
   onCancel?: () => void;
   canCancel?: boolean;
@@ -277,150 +278,189 @@ function GeneratingPipeline({
   const featureProgress = meta?.featureProgress ?? [];
   const sources = meta?.sources ?? null;
   const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
-  const triageSupport = triage ? getTriageSupportCopy(triage) : 'Analyzing complexities...';
+  const triageSupport = triage ? getTriageSupportCopy(triage) : 'Analyzing requirement\u2026';
   const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
 
+  // Anchored progress: context=5%, triage=25%, features=50%, ARs=72→100%
+  const STAGE_PCT = [5, 25, 50, 72];
+  const pct = stageIndex < 3
+    ? STAGE_PCT[stageIndex]
+    : Math.round(72 + liveArRatio * 28);
+
   return (
-    <motion.div 
-      className="w-full flex flex-col items-center py-8"
-      initial={{ opacity: 0, y: 12 }}
+    <motion.div
+      className="w-full flex flex-col items-center py-8 px-4"
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -12 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="w-full max-w-5xl overflow-hidden rounded-[40px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_40px_100px_-40px_rgba(15,23,42,0.4)] relative">
-        <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
-          <motion.div 
-            className="h-full bg-[linear-gradient(90deg,transparent,var(--rf-brand),transparent)] w-1/3 absolute"
-            animate={{ x: ['-100%', '300%'] }}
-            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-          />
+      <div className="w-full max-w-3xl rounded-2xl border border-[rgba(43,89,74,0.10)] backdrop-blur-xl shadow-[0_24px_64px_-24px_rgba(31,30,29,0.18),0_8px_24px_-12px_rgba(31,30,29,0.10)] p-6 space-y-4" style={{ background: 'rgba(252,252,251,0.70)' }}>
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-[0.2em] text-[var(--rf-brand)] mb-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+              Pipeline Running
+            </div>
+            <h2 className="text-[20px] font-black text-[var(--rf-text)] tracking-tight" style={{ fontFamily: 'Fraunces, serif' }}>
+              {title || 'Crafting features'}
+            </h2>
+            <p className="mt-1.5 text-[14px] font-medium text-[var(--rf-text-secondary)] flex items-center gap-2">
+              <span className="dot-bounce flex gap-0.5"><span /><span /><span /></span>
+              {progress || 'Processing\u2026'}
+            </p>
+          </div>
+          {canCancel && onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="shrink-0 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--rf-text-secondary)] hover:text-[var(--rf-danger)] transition px-3 py-1.5 rounded-lg border border-[var(--rf-border)] bg-white/70"
+            >
+              <X className="w-3.5 h-3.5" /> Stop
+            </button>
+          )}
         </div>
 
-        <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-8 sm:px-10 pt-10 sm:pt-12 pb-10">
-          <div className="relative flex flex-col gap-10">
-             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-6">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--rf-border)] bg-white shadow-sm relative overflow-hidden p-3.5">
-                     <div className="absolute inset-0 bg-[var(--rf-brand)]/5 rounded-[28px] animate-pulse" />
-                     <img src="/logo.png" alt="Refinely" className="w-full h-full object-contain relative z-10" style={{ mixBlendMode: 'multiply' }} />
-                  </div>
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(35,74,61,0.14)] bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)] shadow-sm mb-3">
-                      Pipeline Running <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+        {/* Step tracker + progress bar */}
+        <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
+          <div className="flex items-center gap-1">
+            {GENERATION_STEPS.map((step, idx) => {
+              const isDone = idx < stageIndex;
+              const isCurrent = idx === stageIndex;
+              return (
+                <React.Fragment key={step.key}>
+                  <div className="flex items-center gap-2 min-w-0 shrink">
+                    <div className={`shrink-0 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all duration-300 ${
+                      isDone ? 'bg-[var(--rf-brand)] border-[var(--rf-brand)]'
+                      : isCurrent ? 'border-[var(--rf-brand)] bg-white'
+                      : 'border-[var(--rf-border)] bg-white'
+                    }`}>
+                      {isDone
+                        ? <CheckCircle2 className="w-3 h-3 text-white" />
+                        : isCurrent
+                          ? <span className="h-2 w-2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                          : <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-border-strong)]" />
+                      }
                     </div>
-                    <h2 className="text-2xl sm:text-3xl font-black text-[var(--rf-text)] tracking-tight">{title || 'Crafting features'}</h2>
-                    <p className="mt-1 text-sm font-semibold text-[var(--rf-text-tertiary)] flex items-center gap-2">
-                       <span className="dot-bounce flex gap-1"><span /><span /><span /></span>
-                       {progress || 'Processing\u2026'}
-                    </p>
+                    <span className={`text-[12px] font-semibold truncate transition-colors hidden sm:block ${
+                      isCurrent ? 'text-[var(--rf-brand)]'
+                      : isDone ? 'text-[var(--rf-text-tertiary)]'
+                      : 'text-[var(--rf-text-tertiary)] opacity-40'
+                    }`}>{step.shortLabel}</span>
                   </div>
-                </div>
-                {canCancel && onCancel && (
-                  <button type="button" onClick={onCancel} className="rf-card px-5 py-2.5 text-xs font-bold text-[var(--rf-text-secondary)] hover:text-[var(--rf-danger)] flex items-center gap-2 transition bg-white/80">
-                    <X className="w-3.5 h-3.5" /> Stop Run
-                  </button>
-                )}
-             </div>
+                  {idx < GENERATION_STEPS.length - 1 && (
+                    <div className={`flex-1 h-px min-w-[8px] transition-colors duration-500 ${isDone ? 'bg-[var(--rf-brand-subtle)]' : 'bg-[var(--rf-border)]'}`} />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
 
-             <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-                <div className="space-y-6">
-                  <div className="rf-card p-6 bg-white/40 border-[rgba(0,0,0,0.04)]">
-                    {triage ? <ComplexityMeter current={triage.complexity} /> : <div className="h-20 shimmer rounded-2xl" />}
-                    <p className="mt-6 text-[11px] font-medium text-[var(--rf-text-tertiary)] italic border-t border-[rgba(0,0,0,0.03)] pt-4">{triageSupport}</p>
-                  </div>
-
-                  <div className="rf-card p-6 border-[rgba(0,0,0,0.04)]">
-                    <div className="flex items-center justify-between mb-5">
-                      <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Runway</span>
-                      {arProgress?.total && <span className="text-[10px] font-black text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] px-3 py-1 rounded-full">{arProgress.completed}/{arProgress.total}</span>}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-4">
-                      {GENERATION_STEPS.map((step, idx) => {
-                        const isDone = idx < stageIndex;
-                        const isCurrent = idx === stageIndex;
-                        return (
-                          <div key={step.key} className={`rounded-2xl border p-4 transition-all ${isCurrent ? 'border-[var(--rf-brand)] bg-[rgba(53,113,95,0.04)]' : isDone ? 'border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)]/10' : 'border-[var(--rf-border)] opacity-60'}`}>
-                             <div className="flex items-center justify-between mb-3">
-                               {isDone ? <CheckCircle2 className="h-3.5 w-3.5 text-[var(--rf-success)]" /> : isCurrent ? <Clock3 className="h-3.5 w-3.5 text-[var(--rf-brand)]" /> : <div className="h-3.5 w-3.5 rounded-full border border-[var(--rf-border)]" />}
-                               <span className="text-[9px] font-black uppercase tracking-widest text-[var(--rf-text-tertiary)]">Step {idx + 1}</span>
-                             </div>
-                             <div className="text-xs font-bold">{step.label}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-6 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.06)]">
-                      <motion.div 
-                        className="h-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.max(((stageIndex + liveArRatio) / GENERATION_STEPS.length) * 100, 8)}%` }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 120 }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rf-card p-6 bg-[rgba(244,239,230,0.3)] border-[rgba(0,0,0,0.04)]">
-                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-6">Evidence Ingested</div>
-                   <div className="space-y-4">
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white/40 border border-[rgba(0,0,0,0.03)]">
-                        <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Backlog Items</span>
-                        <span className="text-sm font-black text-[var(--rf-text)]">{sources?.similarStoriesCount ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white/40 border border-[rgba(0,0,0,0.03)]">
-                        <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Wiki Snippets</span>
-                        <span className="text-sm font-black text-[var(--rf-text)]">{sources?.referencedWiSections?.length ?? 0}</span>
-                      </div>
-                      <div className="pt-6 mt-6 border-t border-[rgba(0,0,0,0.03)] flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Scope</span>
-                          <span className="text-[11px] font-black text-[var(--rf-brand)] uppercase">{sources?.projectKey === '*' ? 'Global' : sources?.projectKey || projectKey}</span>
-                      </div>
-                   </div>
-                </div>
-             </div>
+          <div className="mt-3.5 h-1.5 overflow-hidden rounded-full bg-[rgba(35,74,61,0.07)]">
+            <motion.div
+              className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.max(pct, 5)}%` }}
+              transition={{ type: 'spring', damping: 30, stiffness: 80 }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-[12px] text-[var(--rf-text-tertiary)]">
+              {arProgress?.total ? `${arProgress.completed} of ${arProgress.total} ARs written` : (GENERATION_STEPS[stageIndex]?.label ?? 'Starting\u2026')}
+            </span>
+            <span className="text-[12px] font-bold text-[var(--rf-brand)]">{pct}%</span>
           </div>
         </div>
 
-        <div className="grid gap-4 px-8 py-8 lg:grid-cols-[1.2fr_0.8fr] bg-[rgba(244,239,230,0.1)]">
-           <div className="space-y-4">
-              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-2">Refined Shapes</div>
-              {draftFeatures.length > 0 ? draftFeatures.map((f, i) => {
-                const status = featureProgressById.get(f.id) || (i === 0 ? 'active' : 'pending');
-                return (
-                  <div key={f.id} className="rf-card p-4 flex gap-4 bg-white/60">
-                    <div className={`w-1 rounded-full ${status === 'active' ? 'bg-[var(--rf-brand)]' : status === 'complete' ? 'bg-[var(--rf-success)]' : 'bg-[var(--rf-surface-soft)]'}`} />
-                    <div className="flex-1">
-                      <div className="text-sm font-bold truncate">{f.summary}</div>
-                      <div className="mt-4 h-1.5 w-full bg-[rgba(0,0,0,0.04)] rounded-full overflow-hidden">
-                        <div className={`h-full bg-[var(--rf-brand)] transition-all duration-700 ${status === 'active' ? 'w-[60%] animate-pulse' : status === 'complete' ? 'w-full bg-[var(--rf-success)]' : 'w-[10%]'}`} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              }) : (
-                <div className="space-y-4">
-                  <div className="rf-card h-20 shimmer opacity-40 rounded-2xl" />
-                  <div className="rf-card h-20 shimmer opacity-40 rounded-2xl" />
+        {/* Complexity + Context */}
+        <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
+          <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
+            {triage ? (
+              <ComplexityMeter current={triage.complexity} />
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
+                  <span className="text-[13px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing\u2026</span>
                 </div>
-              )}
-           </div>
-
-           <div className="space-y-4">
-              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)] mb-2">Backlog Signal</div>
-              <div className="rf-card p-4 min-h-[200px]">
-                 {sources?.referencedSimilarStories && sources.referencedSimilarStories.length > 0 ? sources.referencedSimilarStories.slice(0, 3).map((s, i) => (
-                   <div key={s.key || i} className="mb-3 p-3 rounded-xl border border-[var(--rf-border)] bg-white/40 last:mb-0">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-tight">{s.key}</span>
-                        <span className="text-[10px] font-black">{Math.min(100, Math.round((s.relevanceScore || 0) * 100))}%</span>
-                      </div>
-                      <div className="text-[11px] text-[var(--rf-text-secondary)] truncate">{s.summary}</div>
-                   </div>
-                 )) : <div className="text-xs italic text-[var(--rf-text-tertiary)] py-10 text-center">Awaiting context ingestion...</div>}
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <div key={i} className="flex-1 h-2 rounded-sm shimmer" style={{ animationDelay: `${i * 0.12}s` }} />
+                  ))}
+                </div>
+                <div className="mt-2 h-2 w-20 shimmer rounded-sm" />
               </div>
-           </div>
+            )}
+            <p className="mt-3 text-[12px] text-[var(--rf-text-tertiary)] italic border-t border-[rgba(0,0,0,0.05)] pt-2.5">{triageSupport}</p>
+          </div>
+
+          <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-3.5">
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Context</div>
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-baseline">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">Backlog</span>
+                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.similarStoriesCount ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">WI snippets</span>
+                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.referencedWiSections?.length ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-baseline pt-2 border-t border-[var(--rf-border-subtle)]">
+                <span className="text-[13px] text-[var(--rf-text-secondary)]">Scope</span>
+                <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">{sources?.projectKey === '*' ? 'Global' : sources?.projectKey || projectKey}</span>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Features list (once sketched) */}
+        {draftFeatures.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-1.5"
+          >
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Features</div>
+            {draftFeatures.slice(0, 6).map((f, i) => {
+              const status = featureProgressById.get(f.id) || (i === 0 ? 'active' : 'pending');
+              return (
+                <div key={f.id} className="rounded-lg border border-[var(--rf-border)] bg-white/80 px-3 py-2.5 flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
+                    status === 'active' ? 'bg-[var(--rf-brand)] animate-pulse'
+                    : status === 'complete' ? 'bg-[var(--rf-success)]'
+                    : 'bg-[var(--rf-border-strong)]'
+                  }`} />
+                  <span className="text-[13px] font-medium text-[var(--rf-text)] truncate flex-1">{f.summary}</span>
+                  {status === 'complete' && <CheckCircle2 className="w-3.5 h-3.5 text-[var(--rf-success)] shrink-0" />}
+                  {status === 'active' && (
+                    <div className="w-10 h-1 bg-[rgba(0,0,0,0.05)] rounded-full overflow-hidden shrink-0">
+                      <div className="h-full w-3/5 bg-[var(--rf-brand)] animate-pulse rounded-full" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </motion.div>
+        )}
+
+        {/* Backlog signal (once ingested) */}
+        {sources?.referencedSimilarStories && sources.referencedSimilarStories.length > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5">
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Backlog signal</div>
+            {sources.referencedSimilarStories.slice(0, 2).map((s, i) => (
+              <div key={s.key || i} className="rounded-lg border border-[var(--rf-border)] bg-white/80 px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">{s.key}</span>
+                  <span className="text-[13px] text-[var(--rf-text-tertiary)]">{Math.round((s.relevanceScore || 0) * 100)}% match</span>
+                </div>
+                <div className="text-[12px] text-[var(--rf-text-secondary)] truncate mt-0.5">{s.summary}</div>
+              </div>
+            ))}
+          </motion.div>
+        )}
+
       </div>
     </motion.div>
   );
@@ -472,7 +512,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
       if (res.success && res.feature) {
         onResult(res.feature, res.tokenUsage);
       } else {
-        setError('Refinement failed \u2014 please try again.');
+        setError('Refinement failed — please try again.');
         setLoading(false);
       }
     } catch (e: any) {
@@ -500,7 +540,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" />
             <span className="font-bold text-[var(--rf-text)] text-sm">AI Refine</span>
-            <span className="text-[var(--rf-text-tertiary)] text-xs ml-1 line-clamp-1 max-w-[200px]">\u2014 {feature.title || feature.summary}</span>
+            <span className="text-[var(--rf-text-tertiary)] text-xs ml-1 line-clamp-1 max-w-[200px]">— {feature.title || feature.summary}</span>
           </div>
           {!loading && (
             <button onClick={onClose} className="p-1.5 hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] rounded-lg transition"><X className="w-4 h-4" /></button>
@@ -520,7 +560,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-xs text-[var(--rf-text-secondary)]">Describe what you want changed \u2014 e.g. "Add an AR for invalid password", "Tighten the scope to mobile only"</p>
+              <p className="text-xs text-[var(--rf-text-secondary)]">Describe what you want changed — e.g. "Add an AR for invalid password", "Tighten the scope to mobile only"</p>
               <textarea
                 rows={4}
                 value={input}
@@ -537,7 +577,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
 
         {!loading && (
           <div className="px-5 py-4 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-3 bg-[var(--rf-surface-soft)]/50">
-            <span className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to send</span>
+            <span className="text-[13px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to send</span>
             <div className="flex gap-2">
               <motion.button onClick={onClose} className="px-4 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] border border-[var(--rf-border)] rounded-lg hover:bg-[var(--rf-surface-soft)] transition bg-white" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
               <motion.button
@@ -1006,7 +1046,7 @@ export function MainContent({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="flex h-full w-full min-w-0 items-center justify-between gap-4">
+        <div className="flex h-full w-full min-w-0 items-center gap-4">
           <div className="rf-pane-header-cluster">
             {!sidebarOpen && (
               <motion.button
@@ -1020,155 +1060,107 @@ export function MainContent({
               </motion.button>
             )}
             <div className="rf-pane-header-copy">
-              <div className="rf-pane-header-kicker">Output Surface</div>
-              <div className="flex min-w-0 items-center gap-2.5">
-                <h2 className="rf-pane-header-title">Feature Canvas</h2>
-                <span className="rf-pane-header-badge max-w-full">
-                  Scope <strong>{projectKey === '*' ? 'Global Workspace' : projectKey}</strong>
-                </span>
-              </div>
-              <div className="rf-pane-header-subtitle">
-                Generated features, backlog detail, and review actions stay here.
-              </div>
+              <h2 className="rf-pane-header-title">Feature Canvas</h2>
             </div>
-          </div>
-          <div className="relative shrink-0">
-            <motion.button
-              type="button"
-              onClick={() => setShowTokenDetails(prev => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[rgba(255,255,255,0.72)] hover:bg-white px-3 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] transition-colors border border-[rgba(43,89,74,0.1)] shadow-sm"
-              title="Workflow token usage"
-              whileTap={{ scale: 0.97 }}
-            >
-              <Coins className="w-4 h-4 text-[var(--rf-text-tertiary)]" />
-              Tokens
-            </motion.button>
-            <AnimatePresence>
-              {showTokenDetails && (
-                <motion.div
-                  className="absolute right-0 top-full mt-3 w-[260px] rf-card p-4  z-50"
-                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                  transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Workflow tokens</div>
-                  <div className="mt-1.5 text-2xl font-black text-[var(--rf-text)] tracking-tight">
-                    {(workflowTokenUsage?.total ?? 0).toLocaleString()}
-                  </div>
-                  <div className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
-                    {(workflowTokenUsage?.input ?? 0).toLocaleString()} in / {(workflowTokenUsage?.output ?? 0).toLocaleString()} out
-                  </div>
-                  <div className="mt-3 pt-3 border-t border-[var(--rf-border-subtle)] text-[11px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                    Includes clarify, generation, and all iterative refinements.
-                  </div>
-                  {lastAiTokenUsage && (
-                    <div className="mt-2 text-[11px] font-medium text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] rounded-lg p-2 border border-[var(--rf-border-subtle)]">
-                      Last: {lastAiTokenUsage.label} ({lastAiTokenUsage.total.toLocaleString()})
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         </div>
+      </motion.header>
 
-        {hasFeatures && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--rf-border)] pt-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="inline-flex items-center rounded-lg bg-[var(--rf-text)] text-white px-3.5 py-1.5 text-xs font-bold shadow-sm">
-                  {features.length} Features
-                  <span className="mx-2 opacity-40">·</span>
-                  {totalArCount} ARs
-              </span>
-              <span className="text-xs font-semibold text-[var(--rf-text-tertiary)] whitespace-nowrap bg-[var(--rf-surface-soft)] px-3 py-1.5 rounded-lg border border-[var(--rf-border)]">
-                <span className="text-[var(--rf-success)] mr-1.5">{features.filter(f => f.isAccepted).length}</span> accepted
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-end gap-2.5">
-              {features.some(f => f.pendingRefinement) && (
-                <>
-                  <motion.button onClick={discardAllProposed} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-lg hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
-                  <motion.button onClick={acceptAllProposed} className="px-3 py-1.5 bg-[var(--rf-success)] hover:bg-[var(--rf-success)] text-white text-xs font-bold rounded-lg transition shadow-sm shadow-[var(--rf-success)]/20" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
-                </>
-              )}
-
+      {/* Canvas toolbar — stats + actions, only when features exist */}
+      {hasFeatures && !isGenerating && (
+        <div className="shrink-0 flex items-center justify-between gap-3 px-5 border-b border-[var(--rf-border)] bg-[rgba(252,252,251,0.82)] backdrop-blur-md" style={{ height: 44 }}>
+          {/* Left: stats */}
+          <div className="flex items-center gap-2.5 text-[13px]">
+            <span className="font-semibold text-[var(--rf-text)]">{features.length} features</span>
+            <span className="text-[var(--rf-border-strong)] select-none">·</span>
+            <span className="font-semibold text-[var(--rf-text)]">{totalArCount} ARs</span>
+            {features.filter(f => f.isAccepted).length > 0 && (
+              <>
+                <span className="text-[var(--rf-border-strong)] select-none">·</span>
+                <span className="font-semibold text-[var(--rf-success)]">{features.filter(f => f.isAccepted).length} accepted</span>
+              </>
+            )}
+          </div>
+          {/* Right: actions */}
+          <div className="flex items-center gap-2">
+            {features.some(f => f.pendingRefinement) && (
+              <>
+                <motion.button onClick={discardAllProposed} className="px-2.5 py-1 text-[12px] font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-lg hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
+                <motion.button onClick={acceptAllProposed} className="px-2.5 py-1 bg-[var(--rf-success)] text-white text-[12px] font-bold rounded-lg transition shadow-sm" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
+              </>
+            )}
+            <motion.button
+              onClick={exportFeaturesToExcel}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[var(--rf-border)] bg-white text-[12px] font-bold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] shadow-sm"
+              whileTap={{ scale: 0.97 }}
+              title="Export to Excel"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </motion.button>
+            <div className="relative">
               <motion.button
-                onClick={exportFeaturesToExcel}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--rf-border)] bg-white text-xs font-bold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] shadow-sm"
+                onClick={() => setShowBulkRefine(!showBulkRefine)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-bold transition shadow-sm ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'}`}
                 whileTap={{ scale: 0.97 }}
-                title="Export features and acceptance requirements to Excel"
               >
-                <Download className="w-4 h-4" />
-                Export
+                <Sparkles className="w-3.5 h-3.5" />
+                Refine All
               </motion.button>
-
-              <div className="relative">
-                <motion.button
-                  onClick={() => setShowBulkRefine(!showBulkRefine)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition shadow-sm ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'}`}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Refine All
-                </motion.button>
-
-                <AnimatePresence>
-                  {showBulkRefine && (
-                    <motion.div
-                      className="absolute right-0 top-full mt-3 w-[400px] bg-white rounded-2xl border border-[var(--rf-border)] p-5 z-50 shadow-2xl"
-                      initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                    >
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-xs font-bold text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2">
-                           <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" /> Bulk Refine
-                        </h4>
-                        <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-surface-soft)] rounded-lg transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
-                      </div>
-                      <textarea
-                        autoFocus
-                        placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
-                        value={bulkInput}
-                        onChange={(e) => setBulkInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                            handleBulkRefine();
-                          }
-                        }}
-                        className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm min-h-[120px] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none mb-4"
-                      />
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
-                        <motion.button
-                          onClick={handleBulkRefine}
-                          disabled={!bulkInput.trim() || isBulkRefining}
-                          className="px-5 py-2 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-xs font-bold rounded-lg transition disabled:opacity-40 flex items-center gap-2 shadow-sm shadow-[var(--rf-brand)]/20"
-                          whileTap={{ scale: 0.98 }}
-                        >
-                          {isBulkRefining ? (
-                            <>
-                              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                              Refining...
-                            </>
-                          ) : (
-                            <>
-                              <Send className="w-3.5 h-3.5" /> Apply to All
-                            </>
-                          )}
-                        </motion.button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              <AnimatePresence>
+                {showBulkRefine && (
+                  <motion.div
+                    className="absolute right-0 top-full mt-3 w-[400px] bg-white rounded-2xl border border-[var(--rf-border)] p-5 z-50 shadow-2xl"
+                    initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-[13px] font-bold text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" /> Bulk Refine
+                      </h4>
+                      <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-surface-soft)] rounded-lg transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
+                    </div>
+                    <textarea
+                      autoFocus
+                      placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
+                      value={bulkInput}
+                      onChange={(e) => setBulkInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          handleBulkRefine();
+                        }
+                      }}
+                      className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm min-h-[120px] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none mb-4"
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
+                      <motion.button
+                        onClick={handleBulkRefine}
+                        disabled={!bulkInput.trim() || isBulkRefining}
+                        className="px-5 py-2 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-[13px] font-bold rounded-lg transition disabled:opacity-40 flex items-center gap-2 shadow-sm shadow-[var(--rf-brand)]/20"
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        {isBulkRefining ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Refining...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" /> Apply to All
+                          </>
+                        )}
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
-        )}
-      </motion.header>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
@@ -1200,7 +1192,7 @@ export function MainContent({
           ) : (
             <motion.div
               key="features-canvas"
-              className="w-full max-w-[900px] mx-auto space-y-5 pb-12"
+              className="w-full max-w-[900px] mx-auto space-y-3 pb-10"
               initial={{ opacity: 0, y: 16, scale: 0.99 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -12, scale: 0.99 }}
@@ -1208,58 +1200,56 @@ export function MainContent({
             >
             {generationContext && (
               <motion.div
-                className="overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.97),rgba(248,244,236,0.94))] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.12),transparent_40%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,239,230,0.88))] px-5 py-5 sm:px-6">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-brand)]">Source stack</div>
-                      <div className="mt-1 text-lg font-bold tracking-tight text-[var(--rf-text)]">What informed this canvas</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowContextDetails(prev => !prev)}
-                      className="inline-flex items-center gap-1.5 self-start rounded-xl border border-[rgba(35,74,61,0.12)] bg-white/85 px-3.5 py-2 text-xs font-bold text-[var(--rf-brand)] shadow-sm transition hover:text-[var(--rf-brand-hover)]"
-                    >
-                      <ChevronDown className={`w-4 h-4 transition-transform ${showContextDetails ? 'rotate-180' : ''}`} />
-                      {showContextDetails ? 'Hide sources' : 'Show sources'}
-                    </button>
+                {/* Slim source stack strip */}
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--rf-border)] bg-white/80 px-4 py-2.5">
+                  <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Source stack</span>
+                  <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+                    <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
+                      {generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}
+                    </span>
+                    {(generationContext.similarStoriesCount ?? 0) > 0 && (
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
+                        {generationContext.similarStoriesCount} backlog refs
+                      </span>
+                    )}
+                    {(generationContext.referencedWiSections?.length ?? 0) > 0 && (
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
+                        {generationContext.referencedWiSections!.length} WI sections
+                      </span>
+                    )}
+                    {generationContext.domainContextApplied && (
+                      <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
+                        Guidance on
+                      </span>
+                    )}
                   </div>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Project</div>
-                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}</div>
-                    </div>
-                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Backlog refs</div>
-                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.similarStoriesCount ?? 0}</div>
-                    </div>
-                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">WI sections</div>
-                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.referencedWiSections?.length ?? 0}</div>
-                    </div>
-                    <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-white/82 px-4 py-3">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Guidance</div>
-                      <div className="mt-1.5 text-lg font-black tracking-tight text-[var(--rf-text)]">{generationContext.domainContextApplied ? 'On' : 'Off'}</div>
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowContextDetails(prev => !prev)}
+                    className="text-[13px] font-semibold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors shrink-0"
+                  >
+                    {showContextDetails ? 'Hide' : 'Details'}
+                  </button>
                 </div>
                 <AnimatePresence initial={false}>
                   {showContextDetails && (
                     <motion.div
-                      className="space-y-4 px-5 py-5 sm:px-6"
+                      className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/80 overflow-hidden"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
                     >
+                    <div className="space-y-4 p-4">
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
+                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
+                            <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
                               {generationContext.referencedSimilarStories?.length || 0}
                             </div>
                           </div>
@@ -1284,7 +1274,7 @@ export function MainContent({
                                         <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
                                       )}
                                       {typeof story.relevanceScore === 'number' && (
-                                        <div className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-full px-2 py-1">
+                                        <div className="shrink-0 text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-full px-2 py-1">
                                           {Math.min(100, Math.round(story.relevanceScore * 100))}% match
                                         </div>
                                       )}
@@ -1303,8 +1293,8 @@ export function MainContent({
 
                         <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
+                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
+                            <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
                               {generationContext.referencedWiSections?.length || 0}
                             </div>
                           </div>
@@ -1314,8 +1304,8 @@ export function MainContent({
                                 <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
-                                      <div className="text-[11px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
-                                      <div className="mt-1 inline-flex items-center rounded-full border border-[var(--rf-border-subtle)] bg-white px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                                      <div className="text-[13px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
+                                      <div className="mt-1 inline-flex items-center rounded-full border border-[var(--rf-border-subtle)] bg-white px-2.5 py-0.5 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
                                         Section {section.chunkIndex + 1}
                                       </div>
                                     </div>
@@ -1332,26 +1322,27 @@ export function MainContent({
                         </div>
 
                         <div className="rf-card p-4">
-                          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
+                          <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
                           <div className="mt-3 space-y-2.5">
                             <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Attachment context</div>
+                              <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Attachment context</div>
                               <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.attachmentIncluded ? 'Included in reasoning' : 'No attachment used'}</div>
                             </div>
                             <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Work instruction docs</div>
+                              <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Work instruction docs</div>
                               <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.wiDocsCount ?? 0} document{(generationContext.wiDocsCount ?? 0) !== 1 ? 's' : ''} scanned</div>
                             </div>
                             <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Token usage</div>
+                              <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Token usage</div>
                               <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{(generationContext.tokenUsage?.total ?? 0).toLocaleString()} tokens total</div>
-                              <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">
+                              <div className="mt-1 text-[13px] text-[var(--rf-text-tertiary)]">
                                 {(generationContext.tokenUsage?.input ?? 0).toLocaleString()} in / {(generationContext.tokenUsage?.output ?? 0).toLocaleString()} out
                               </div>
                             </div>
                           </div>
                         </div>
                       </div>
+                    </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1376,7 +1367,7 @@ export function MainContent({
                     {/* Left Accent Strip */}
                     <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]' : 'bg-[var(--rf-brand-muted)]'}`} />
 
-                    <div className="flex-1 p-5 sm:p-6">
+                    <div className="flex-1 p-4">
                       {/* Header Row */}
                       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
                         {isEditing ? (
@@ -1392,7 +1383,7 @@ export function MainContent({
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
                             <div className="shrink-0 flex items-center gap-2">
-                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[10px] font-bold tracking-widest border border-[var(--rf-border)]">
+                              <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)] text-[12px] font-bold tracking-widest border border-[var(--rf-border)]">
                                 {feature.acceptanceRequirements?.length || 0} ARs
                               </span>
                               <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
@@ -1408,17 +1399,17 @@ export function MainContent({
                             </>
                           ) : (
                             <>
-                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
-                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
-                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
+                              <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[13px] font-bold text-[var(--rf-text-tertiary)] hover:bg-[var(--rf-surface-soft)] hover:text-[var(--rf-text)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
+                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[13px] font-bold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-muted)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
+                              <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[13px] font-bold rounded-lg transition border flex items-center gap-1.5 shadow-sm ${feature.isAccepted ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'text-[var(--rf-text-secondary)] bg-white border-[var(--rf-border)] hover:bg-[var(--rf-success-subtle)] hover:text-[var(--rf-success)] hover:border-[var(--rf-success-subtle)]'}`} whileTap={{ scale: 0.97 }}>
                                 <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
                               </motion.button>
-                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[11px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
+                              <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[13px] font-bold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
                               {feature.jiraIssueKey ? (
                                 <div className="flex items-center gap-1">
                                   <motion.button
                                     onClick={() => feature.jiraIssueUrl ? router.navigate(feature.jiraIssueUrl) : null}
-                                    className="px-3 py-1.5 text-[11px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-[var(--rf-brand-subtle)] shadow-sm"
+                                    className="px-3 py-1.5 text-[13px] font-bold text-[var(--rf-brand-hover)] bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] rounded-lg transition flex items-center gap-1.5 hover:bg-[var(--rf-brand-subtle)] shadow-sm"
                                     whileTap={{ scale: 0.97 }}
                                   >
                                     <Check className="w-3.5 h-3.5" /> {feature.jiraIssueKey}
@@ -1441,7 +1432,7 @@ export function MainContent({
                                   onClick={() => onPushFeature(idx)}
                                   disabled={!feature.isAccepted}
                                   title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
-                                  className="px-3 py-1.5 text-[11px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
+                                  className="px-3 py-1.5 text-[13px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
                                   whileTap={{ scale: 0.97 }}
                                 >
                                   <Upload className="w-3.5 h-3.5" /> Push
@@ -1484,13 +1475,13 @@ export function MainContent({
                                 <div className="flex items-center bg-white p-1 rounded-lg border border-[rgba(179,94,48,0.18)] shadow-sm">
                                   <button
                                     onClick={() => setDiffMode('redline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                                    className={`px-3 py-1 text-[12px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'redline' ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
                                   >
                                     Redline
                                   </button>
                                   <button
                                     onClick={() => setDiffMode('blackline')}
-                                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
+                                    className={`px-3 py-1 text-[12px] font-bold rounded-md transition uppercase tracking-wider ${diffMode === 'blackline' ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}
                                   >
                                     Blackline
                                   </button>
@@ -1504,12 +1495,12 @@ export function MainContent({
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="bg-white p-4 rounded-xl border border-[var(--rf-border)] shadow-sm">
-                                <div className="text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
+                                <div className="text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
                                 <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2">{origTitle}</h4>
                                 <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
                                 <div className="space-y-2">
                                   {feature.acceptanceRequirements.map((ar, i) => (
-                                    <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[11px] text-[var(--rf-text-secondary)]">
+                                    <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[13px] text-[var(--rf-text-secondary)]">
                                       {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
                                       {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
                                       <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
@@ -1518,7 +1509,7 @@ export function MainContent({
                                 </div>
                               </div>
                               <div className="bg-[var(--rf-brand-muted)]/50 p-4 rounded-xl border border-[var(--rf-brand-subtle)] shadow-sm">
-                                <div className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
+                                <div className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
                                 <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
                                 <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
                                 <div className="space-y-2">
@@ -1527,8 +1518,8 @@ export function MainContent({
                                     const oldAr = row.oldAr;
                                     const isNew = row.isNew;
                                     return (
-                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[11px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-[rgba(43,89,74,0.12)]'}`}>
-                                        {isNew && <div className="text-[10px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
+                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[13px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-[rgba(43,89,74,0.12)]'}`}>
+                                        {isNew && <div className="text-[12px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
                                         {ar.given && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
                                         {ar.when && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
                                         <div><strong className="text-[var(--rf-brand-hover)]">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
@@ -1561,7 +1552,7 @@ export function MainContent({
                           {((isEditing && draft?.acceptanceRequirements) || (!isEditing && feature.acceptanceRequirements?.length > 0)) && (
                             <div className="mt-2 text-sm">
                               <div className="flex items-center justify-between mb-4 pb-2">
-                                <h4 className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Acceptance Criteria</h4>
+                                <h4 className="text-[13px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Acceptance Criteria</h4>
                                 {isEditing && (
                                   <motion.button onClick={addDraftAr} className="text-xs font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-3 py-1.5 rounded-lg transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Plus className="w-3.5 h-3.5" /> Add AR</motion.button>
                                 )}
@@ -1576,7 +1567,7 @@ export function MainContent({
                                       <div className="space-y-3 pr-8">
                                         {(['given', 'when', 'then'] as const).map(field => (
                                           <div key={field} className="flex items-start gap-3">
-                                            <strong className="text-[var(--rf-text-tertiary)] w-12 pt-2 text-[10px] font-bold uppercase tracking-widest">{field}</strong>
+                                            <strong className="text-[var(--rf-text-tertiary)] w-12 pt-2 text-[12px] font-bold uppercase tracking-widest">{field}</strong>
                                             {field === 'then'
                                               ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] resize-none transition" />
                                               : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition" />
@@ -1588,18 +1579,18 @@ export function MainContent({
                                       <div className="space-y-1.5 text-[13px] sm:text-sm">
                                         {ar.given?.trim() && (
                                           <div className="flex gap-4">
-                                            <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>
+                                            <div className="w-12 shrink-0 text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>
                                             <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.given}</div>
                                           </div>
                                         )}
                                         {ar.when?.trim() && (
                                           <div className="flex gap-4">
-                                            <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">When</div>
+                                            <div className="w-12 shrink-0 text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">When</div>
                                             <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.when}</div>
                                           </div>
                                         )}
                                         <div className="flex gap-4">
-                                          <div className="w-12 shrink-0 text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-widest pt-0.5">Then</div>
+                                          <div className="w-12 shrink-0 text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-widest pt-0.5">Then</div>
                                           <div className="text-[var(--rf-text)] leading-relaxed whitespace-pre-wrap font-medium">{ar.then}</div>
                                         </div>
                                       </div>

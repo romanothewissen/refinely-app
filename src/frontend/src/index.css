@@ -66,11 +66,11 @@
     margin: 0;
     overflow: hidden;
     font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: var(--rf-bg-main);
+    background: transparent;
     color: var(--rf-text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-weight: 300;
+    font-weight: 400;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -85,6 +85,10 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(43, 89, 74, 0.11), transparent 44%),
+      radial-gradient(circle at 82% 100%, rgba(43, 89, 74, 0.07), transparent 42%),
+      linear-gradient(160deg, #f8f7f4 0%, #ede9e0 100%);
   }
 }
 
@@ -115,7 +119,6 @@
     box-shadow:
       0 24px 60px -36px rgba(31, 30, 29, 0.26),
       0 10px 20px -16px rgba(31, 30, 29, 0.16);
-    transform: translateY(-1px);
   }
 
   .rf-glass-card {
@@ -144,37 +147,15 @@
     box-shadow:
       0 24px 60px -36px rgba(31, 30, 29, 0.26),
       0 10px 20px -16px rgba(31, 30, 29, 0.16);
-    transform: translateY(-1px);
   }
 
   /* Sidebar styling overrides */
   .rf-sidebar-shell {
     position: relative;
-    background:
-      radial-gradient(circle at top left, rgba(43, 89, 74, 0.12), transparent 34%),
-      radial-gradient(circle at 85% 0%, rgba(179, 94, 48, 0.08), transparent 26%),
-      linear-gradient(180deg, #f5f2ea 0%, #ece7dc 100%);
-    border-right: 1px solid rgba(43, 89, 74, 0.08);
-  }
-
-  .rf-sidebar-shell::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(rgba(232, 229, 221, 0.5) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(232, 229, 221, 0.45) 1px, transparent 1px);
-    background-size: 30px 30px;
-    opacity: 0.34;
-    pointer-events: none;
-  }
-
-  .rf-sidebar-shell::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(255,255,255,0.42), transparent 18%, transparent 82%, rgba(255,255,255,0.18));
-    pointer-events: none;
+    background: rgba(248, 246, 240, 0.64);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-right: 1px solid rgba(43, 89, 74, 0.13);
   }
 
   .rf-sidebar-card {
@@ -199,48 +180,31 @@
   }
 
   .rf-sidebar-card:hover {
-    border-color: rgba(43, 89, 74, 0.16);
+    border-color: rgba(43, 89, 74, 0.14);
     box-shadow:
-      0 24px 60px -36px rgba(31, 30, 29, 0.26),
-      0 10px 20px -16px rgba(31, 30, 29, 0.16);
-    transform: translateY(-1px);
+      0 18px 44px -34px rgba(31, 30, 29, 0.22),
+      0 8px 18px -16px rgba(31, 30, 29, 0.12);
   }
 
   .rf-pane-header {
     position: relative;
     z-index: 1;
-    height: 104px;
-    padding: 16px 20px;
+    height: 56px;
+    padding: 10px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
     border-bottom: 1px solid rgba(43, 89, 74, 0.08);
     backdrop-filter: blur(20px);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55) inset;
-  }
-
-  .rf-pane-header::after {
-    content: '';
-    position: absolute;
-    left: 20px;
-    right: 20px;
-    bottom: -1px;
-    height: 1px;
-    background: linear-gradient(90deg, rgba(43, 89, 74, 0.16), rgba(43, 89, 74, 0.02));
-    pointer-events: none;
   }
 
   .rf-pane-header--sidebar {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(247, 243, 235, 0.44)),
-      radial-gradient(circle at top left, rgba(43, 89, 74, 0.08), transparent 55%);
+    background: rgba(245, 242, 234, 0.82);
   }
 
   .rf-pane-header--canvas {
-    background:
-      linear-gradient(180deg, rgba(252, 252, 251, 0.88), rgba(248, 247, 244, 0.58)),
-      radial-gradient(circle at top right, rgba(43, 89, 74, 0.05), transparent 52%);
+    background: rgba(252, 252, 251, 0.82);
   }
 
   .rf-pane-header-cluster {
@@ -256,12 +220,11 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
-    min-height: 56px;
+    gap: 2px;
   }
 
   .rf-pane-header-kicker {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
@@ -270,16 +233,16 @@
 
   .rf-pane-header-title {
     font-family: 'Fraunces', serif;
-    font-size: 24px;
+    font-size: 21px;
     line-height: 1;
     font-weight: 500;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.025em;
     color: var(--rf-text);
     white-space: nowrap;
   }
 
   .rf-pane-header-subtitle {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: var(--rf-text-secondary);
     line-height: 1.35;
@@ -301,7 +264,7 @@
     border: 1px solid rgba(43, 89, 74, 0.12);
     background: rgba(255, 255, 255, 0.7);
     color: var(--rf-text-secondary);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.14em;
@@ -315,20 +278,19 @@
   }
 
   .rf-main-shell {
-    background: linear-gradient(180deg, var(--rf-bg-main) 0%, var(--rf-bg-main-deep) 100%);
+    background: transparent;
     position: relative;
     min-width: 0;
   }
 
-  /* Add a subtle modern grid to the background of main */
+  /* Subtle dot grid on main canvas — keep very faint */
   .rf-main-shell::before {
     content: '';
     position: absolute;
     inset: 0;
-    background-image: linear-gradient(var(--rf-border-subtle) 1px, transparent 1px),
-                      linear-gradient(90deg, var(--rf-border-subtle) 1px, transparent 1px);
-    background-size: 32px 32px;
-    opacity: 0.5;
+    background-image: radial-gradient(circle, rgba(139,136,128,0.18) 1px, transparent 1px);
+    background-size: 24px 24px;
+    opacity: 0.6;
     pointer-events: none;
     z-index: 0;
   }
@@ -429,16 +391,11 @@
 
 @media (max-width: 1100px) {
   .rf-pane-header {
-    padding-inline: 16px;
-  }
-
-  .rf-pane-header::after {
-    left: 16px;
-    right: 16px;
+    padding-inline: 14px;
   }
 
   .rf-pane-header-title {
-    font-size: 21px;
+    font-size: 18px;
   }
 }
 

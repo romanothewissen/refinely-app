@@ -126,11 +126,10 @@ export function Sidebar({
               alt="Workspace logo"
               loading="lazy"
               onError={() => setLogoLoadFailed(true)}
-              className="h-7 w-auto max-w-[100px] object-contain rounded-lg"
+              className="h-6 w-auto max-w-[80px] object-contain rounded"
             />
           ) : null}
           <div className="rf-pane-header-copy">
-            <div className="rf-pane-header-kicker">Workspace Builder</div>
             <button
               onClick={() => setViewMode('generate')}
               className="rf-pane-header-title text-left hover:text-[var(--rf-brand)] transition-colors"
@@ -138,7 +137,7 @@ export function Sidebar({
               Refinely
             </button>
             <div className="rf-pane-header-subtitle rf-pane-header-subtitle--muted">
-              Configure scope, evidence, and inputs before generating.
+              Workspace Builder
             </div>
           </div>
         </div>
@@ -167,7 +166,7 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Scrollable body ── */}
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-3 overflow-y-auto custom-scrollbar">
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-3 py-3 gap-2.5 overflow-y-auto custom-scrollbar">
 
         {/* ── Workspace card ── */}
         <motion.div
@@ -177,25 +176,22 @@ export function Sidebar({
           animate="visible"
           custom={1}
         >
-          {/* Top shine */}
-          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.2),transparent)]" />
-
           {/* Project row */}
-          <div className="px-4 pt-4 pb-3">
+          <div className="px-3 pt-3 pb-2.5">
             <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2.5">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[rgba(43,89,74,0.1)] bg-[var(--rf-brand-subtle)] shadow-sm">
                   <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)]">Workspace</div>
+                  <div className="text-[13px] font-bold uppercase tracking-[0.14em] text-[var(--rf-sidebar-text-muted)]">Workspace</div>
                   <div className="mt-1 truncate text-[13px] font-semibold text-[var(--rf-text)]">
                     {projectTitle}
                   </div>
                 </div>
               </div>
               {projectKey !== '*' && (
-                <div className="shrink-0 text-[11px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
+                <div className="shrink-0 text-[13px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
                   Project Active
                 </div>
               )}
@@ -231,30 +227,30 @@ export function Sidebar({
 
             {/* Hint text */}
             {projectKey === '*' && availableProjects.length > 0 && (
-              <p className="mt-2.5 text-[11px] text-[var(--rf-sidebar-text-muted)] leading-relaxed bg-[var(--rf-brand-muted)]/50 p-2 rounded-lg border border-[rgba(43,89,74,0.06)]">
-                Select a project to unlock project-scoped backlog context and instructions.
+              <p className="mt-2 text-[13px] text-[var(--rf-sidebar-text-muted)]">
+                Select a project for scoped context.
               </p>
             )}
           </div>
 
           {/* Context mode toggles */}
-          <div className="px-4 pb-3 flex gap-2">
+          <div className="px-3 pb-2.5 flex gap-2">
             <button
               type="button"
               onClick={() => { if (projectKey !== '*') setContextMode('project'); }}
               disabled={projectKey === '*'}
-              className={`flex-1 rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
+              className={`flex-1 rounded-xl px-3 py-1.5 text-[13px] font-bold uppercase tracking-[0.12em] transition-all border ${
                 contextMode === 'project'
                   ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
                   : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
-              Use project
+              Project
             </button>
             <button
               type="button"
               onClick={() => { setProjectKey('*'); setContextMode('global'); }}
-              className={`flex-1 rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all border ${
+              className={`flex-1 rounded-xl px-3 py-1.5 text-[13px] font-bold uppercase tracking-[0.12em] transition-all border ${
                 contextMode === 'global'
                   ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
                   : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
@@ -265,29 +261,29 @@ export function Sidebar({
           </div>
 
           {/* Cache + Docs stats row */}
-          <div className="mx-4 mb-4 grid grid-cols-2 gap-2 min-[0px]:min-w-0">
+          <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5 min-[0px]:min-w-0">
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex min-w-0 items-center gap-2 rounded-lg border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
               <Database className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
-                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
-                <div className="text-[11px] font-semibold text-[var(--rf-text)] truncate">
-                  {projectKey !== '*' ? 'Project cache' : 'Select project'}
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
+                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
+                  {projectKey !== '*' ? 'Project' : 'Select project'}
                 </div>
               </div>
             </button>
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', projectKey)}
-              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-3 py-2 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
+              className="group flex min-w-0 items-center gap-2 rounded-lg border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
               <FileText className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
-                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Docs</div>
-                <div className="text-[11px] font-semibold text-[var(--rf-text)] truncate">
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Docs</div>
+                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
                   {activeWiDocs.length > 0 ? `${activeWiDocs.length} stored` : 'None stored'}
                 </div>
               </div>
@@ -296,39 +292,38 @@ export function Sidebar({
 
           {/* Context not ready warning */}
           {!contextReady && (
-            <div className="mx-4 mb-4 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.14)] px-3 py-2.5 text-[11px] font-medium text-[var(--rf-warning)] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
-              Choose project-specific or global context before entering your requirement.
+            <div className="mx-3 mb-3 rounded-lg bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.14)] px-3 py-2 text-[13px] font-medium text-[var(--rf-warning)]">
+              Choose a context scope to continue.
             </div>
           )}
         </motion.div>
 
         {/* ── Input card ── */}
         <motion.div
-          className="rf-sidebar-card flex flex-col overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/20 transition-shadow"
+          className="rf-sidebar-card flex-1 flex flex-col min-h-0 overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand)]/20 transition-shadow"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
           custom={2}
         >
           {/* Card header */}
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[rgba(43,89,74,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,247,244,0.7))]">
-            <div className="flex items-center gap-2">
-              {originIssueKey ? (
-                <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.14)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-[rgba(43,89,74,0.06)] bg-[rgba(255,255,255,0.7)]">
+            <div className="flex items-center gap-2 min-w-0">
+              {originIssueKey && (
+                <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[rgba(43,89,74,0.14)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
                   {originIssueKey}
                 </span>
-              ) : (
-                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">
-                  Requirement
-                </span>
               )}
+              <span className="text-[13px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">
+                Requirement
+              </span>
             </div>
             <motion.button
               type="button"
               onClick={() => runAttachmentInputRef.current?.click()}
               disabled={isWorking}
               title="Attach supporting files for this run only"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)] shadow-sm transition-all hover:border-[rgba(43,89,74,0.28)] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-white px-2.5 py-1.5 text-[13px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)] shadow-sm transition-all hover:border-[rgba(43,89,74,0.28)] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
               whileTap={{ scale: 0.97 }}
             >
               <Paperclip className="w-3 h-3" />
@@ -354,8 +349,8 @@ export function Sidebar({
                   className="flex items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5"
                 >
                   <div className="min-w-0">
-                    <div className="max-w-[140px] truncate text-[11px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
-                    <div className="text-[9px] font-medium text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
+                    <div className="max-w-[140px] truncate text-[13px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
+                    <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
                   </div>
                   <button
                     type="button"
@@ -374,17 +369,17 @@ export function Sidebar({
           <textarea
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
-            placeholder="Type your requirement here, or leave blank and attach a file. You can also do both."
+            placeholder="Type your requirement here, or leave blank and attach a file."
             disabled={isWorking || !contextReady}
-            className="min-h-[160px] h-[clamp(160px,28vh,340px)] w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-4 pt-3 pb-2 custom-scrollbar"
+            className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-3 pt-2.5 pb-2 custom-scrollbar"
           />
 
           {/* Card footer */}
-          <div className="flex items-center justify-between gap-3 border-t border-[rgba(43,89,74,0.06)] px-4 py-2.5 bg-[linear-gradient(180deg,rgba(248,247,244,0.7),rgba(236,231,220,0.5))]">
-            <span className="text-[10px] font-medium text-[var(--rf-text-tertiary)]">
+          <div className="flex items-center justify-between gap-3 border-t border-[rgba(43,89,74,0.06)] px-3 py-2 bg-[rgba(248,247,244,0.6)]">
+            <span className="text-[13px] font-medium text-[var(--rf-text-tertiary)]">
               {wordCount > 0 ? `${wordCount} word${wordCount !== 1 ? 's' : ''}` : 'No input yet'}
             </span>
-            <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] border transition-all ${
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.14em] border transition-all ${
               hasPromptInput
                 ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[rgba(43,89,74,0.14)]'
                 : 'bg-white/60 text-[var(--rf-text-tertiary)] border-[rgba(0,0,0,0.06)]'
@@ -405,16 +400,16 @@ export function Sidebar({
           >
             {runAttachmentParseState && (
               <div className="space-y-1">
-                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
                   {runAttachmentParseState.stage === 'reading' ? 'Reading file' : 'Parsing file'}
                 </div>
-                <div className="text-[12px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentParseState.filename}</div>
+                <div className="text-[13px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentParseState.filename}</div>
               </div>
             )}
             {runAttachmentError && (
               <div className="space-y-1">
-                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--rf-danger)]">Attachment failed</div>
-                <div className="text-[12px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentError}</div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-danger)]">Attachment failed</div>
+                <div className="text-[13px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentError}</div>
               </div>
             )}
           </motion.div>
@@ -433,7 +428,7 @@ export function Sidebar({
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Monthly generation limit reached.' : ''}
-            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[14px] rounded-[18px] transition-all flex items-center justify-center gap-2 shadow-[0_16px_36px_-20px_rgba(43,89,74,0.6)] border border-white/10"
+            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[11px] rounded-[16px] transition-all flex items-center justify-center gap-2 shadow-[0_12px_28px_-16px_rgba(43,89,74,0.6)] border border-white/10"
             whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
@@ -470,7 +465,7 @@ export function Sidebar({
           <div className="grid grid-cols-2 gap-2">
             <motion.button
               onClick={onNewSession}
-              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[11px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
+              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[13px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
               whileTap={{ scale: 0.97 }}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -478,7 +473,7 @@ export function Sidebar({
             </motion.button>
             <motion.button
               onClick={onOpenHistory}
-              className="rf-sidebar-card py-3 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[11px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
+              className="rf-sidebar-card py-2.5 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)] text-[13px] font-bold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors"
               whileTap={{ scale: 0.97 }}
             >
               <Clock className="w-3.5 h-3.5" />
@@ -496,8 +491,7 @@ export function Sidebar({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="rf-sidebar-card relative overflow-hidden px-4 py-3.5">
-            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.18),transparent)]" />
+          <div className="rf-sidebar-card relative overflow-hidden px-3 py-3">
             <button
               onClick={() => setShowUsage(false)}
               className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/80 hover:text-[var(--rf-text)]"

@@ -67,7 +67,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       <motion.div 
-        className="absolute inset-0 bg-[var(--rf-text)]/40 backdrop-blur-sm" 
+        className="absolute inset-0 bg-[rgba(30,40,35,0.35)] backdrop-blur-md"
         onClick={onClose} 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -86,11 +86,11 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-[var(--rf-text)] tracking-tight">Past Conversations</h2>
-              <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+              <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
                 {filtered.length} total
               </span>
             </div>
-            <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1.5">Review, rename, pin, or resume previous sessions faster.</p>
+            <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1.5">Rename, pin, or resume past sessions.</p>
           </div>
           <motion.button 
             onClick={onClose} 
@@ -131,7 +131,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               {/* Pinned Section */}
               {pinned.length > 0 && (
                 <div className="space-y-4 fade-in">
-                  <h3 className="text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2">
+                  <h3 className="text-[13px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2">
                     <Pin className="w-3.5 h-3.5 text-[var(--rf-brand)] fill-[var(--rf-brand)]" /> Pinned
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -164,7 +164,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
               {/* Recent Section */}
               {recent.length > 0 && (
                 <div className="space-y-4 fade-in">
-                  <h3 className={`text-[10px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2 ${pinned.length > 0 ? 'mt-4' : ''}`}>
+                  <h3 className={`text-[13px] font-black text-[var(--rf-text-tertiary)] uppercase tracking-[0.25em] flex items-center gap-2 ${pinned.length > 0 ? 'mt-4' : ''}`}>
                     <Clock className="w-3.5 h-3.5" /> Recent
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -208,7 +208,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
   return (
     <motion.div 
       onClick={isEditing ? undefined : onRestore}
-      className={`group relative bg-white border rounded-xl p-4 flex flex-col gap-3 h-full transition-all ${
+      className={`group relative bg-white border rounded-2xl p-4 flex flex-col gap-3 h-full transition-all ${
         isCurrent ? 'border-[var(--rf-brand)] shadow-md shadow-[var(--rf-brand)]/10 bg-[var(--rf-brand-muted)]/30' : 'border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:shadow-lg cursor-pointer'
       }`}
       whileHover={!isCurrent && !isEditing ? { y: -2, scale: 1.01 } : {}}
@@ -259,7 +259,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
         <span className="text-xs font-medium text-[var(--rf-text-tertiary)]">
           {new Date(conv.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
         </span>
-        <div className={`flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
+        <div className={`flex items-center gap-1.5 text-[12px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg transition-colors ${isCurrent ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand-hover)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] group-hover:bg-[var(--rf-brand)] group-hover:text-white'}`}>
           {isCurrent ? 'Active Now' : <><Play className="w-3 h-3" /> Resume</>}
         </div>
       </div>
