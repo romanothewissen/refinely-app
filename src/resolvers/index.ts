@@ -144,6 +144,7 @@ function normalizeProjectArMapping(arMapping: any, projectKey?: string) {
 
   return {
     projectKey: arMapping?.projectKey || projectKey || '*',
+    issueType: arMapping?.issueType || '*',
     mode: outputMappings.arFieldIds.length > 1 ? 'iterative' : (arMapping?.mode || 'consolidated'),
     consolidatedFieldId: outputMappings.arFieldIds[0] || outputMappings.descriptionFieldId || 'description',
     iterativeFieldIds: outputMappings.arFieldIds,

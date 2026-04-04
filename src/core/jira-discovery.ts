@@ -67,7 +67,7 @@ export async function discoverProjects(): Promise<JiraProject[]> {
 }
 
 export async function discoverIssueTypes(projectKey: string): Promise<JiraIssueType[]> {
-  const response = await asUser().requestJira(assumeTrustedRoute(`/rest/api/3/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes`));
+  const response = await asUser().requestJira(assumeTrustedRoute(`/rest/api/3/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes.fields`));
   const data = await response.json() as { projects?: Array<{ issuetypes?: JiraIssueType[] }> };
   return data.projects?.[0]?.issuetypes ?? [];
 }

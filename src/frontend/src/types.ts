@@ -102,7 +102,8 @@ export interface Branding {
 }
 
 export interface ProjectArMapping {
-  projectKey: string;
+  projectKey: string;   // e.g. "MYPROJ" or "*" for default
+  issueType?: string;   // e.g. "Story" or "*"
   mode: 'consolidated' | 'iterative';
   consolidatedFieldId: string;
   iterativeFieldIds: string[];

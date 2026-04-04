@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Model Strategy Matrix</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f2eb;
+        --panel: #fffdf8;
+        --surface: #f6f4ee;
+        --border: #ddd3c3;
+        --border-strong: #bcae98;
+        --text: #1f2721;
+        --muted: #667065;
+        --brand: #2c5e4b;
+        --brand-soft: #e5efe9;
+        --danger: #b6463d;
+        --danger-soft: #faece9;
+        --shadow: 0 16px 40px rgba(32, 28, 22, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Inter", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(44, 94, 75, 0.12), transparent 30%),
+          linear-gradient(180deg, #faf8f3 0%, var(--bg) 100%);
+      }
+
+      button, input, select { font: inherit; }
+
+      .page {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 28px 20px 40px;
+      }
+
+      .hero {
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      h1 {
+        margin: 8px 0 10px;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 920px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 18px 20px 0;
+      }
+
+      .toolbar-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        padding: 18px 20px 18px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: white;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .pill strong {
+        color: var(--text);
+      }
+
+      .version-input {
+        width: 140px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: white;
+        padding: 8px 10px;
+      }
+
+      .button {
+        appearance: none;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 11px 14px;
+        background: white;
+        color: var(--text);
+        cursor: pointer;
+        font-weight: 700;
+        transition: 140ms ease;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        border-color: var(--border-strong);
+      }
+
+      .button.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+        color: white;
+      }
+
+      .button.soft {
+        background: var(--brand-soft);
+        color: var(--brand);
+      }
+
+      .button.danger {
+        background: var(--danger-soft);
+        border-color: rgba(182, 70, 61, 0.18);
+        color: var(--danger);
+      }
+
+      .note {
+        margin: 0 20px 20px;
+        border-radius: 18px;
+        border: 1px solid rgba(44, 94, 75, 0.14);
+        background: var(--brand-soft);
+        color: var(--brand);
+        padding: 14px 16px;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .stack {
+        display: grid;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .vendor-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .vendor-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: start;
+        padding: 18px 20px 16px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .vendor-header h2 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      .vendor-header p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .vendor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: end;
+      }
+
+      .vendor-body {
+        padding: 18px 20px 20px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .matrix {
+        display: grid;
+        gap: 10px;
+      }
+
+      .matrix-row,
+      .matrix-header {
+        display: grid;
+        grid-template-columns: 140px repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        align-items: center;
+      }
+
+      .matrix-header {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 0 4px;
+      }
+
+      .strategy-label {
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .matrix-cell {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 12px;
+        background: var(--surface);
+        display: grid;
+        gap: 8px;
+      }
+
+      .matrix-cell select,
+      .matrix-cell input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: white;
+        padding: 10px 12px;
+        color: var(--text);
+      }
+
+      .resolved {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--brand);
+      }
+
+      .family-sub {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .catalog-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .catalog-head,
+      .catalog-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) 110px 44px;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .catalog-head {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 0 4px;
+      }
+
+      .catalog-row {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .catalog-row input,
+      .catalog-row select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: white;
+        padding: 10px 12px;
+      }
+
+      .icon-button {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: white;
+        cursor: pointer;
+        font-weight: 800;
+        color: var(--muted);
+      }
+
+      .credentials {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .field input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: white;
+        padding: 10px 12px;
+      }
+
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .status.ok {
+        color: var(--brand);
+      }
+
+      .collapsed {
+        display: none;
+      }
+
+      @media (max-width: 980px) {
+        .matrix-header,
+        .matrix-row,
+        .catalog-head,
+        .catalog-row {
+          grid-template-columns: 1fr;
+        }
+
+        .vendor-header {
+          flex-direction: column;
+        }
+
+        .vendor-actions {
+          justify-content: start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="hero">
+        <div class="eyebrow">Global Default Policy</div>
+        <h1>Model Strategy Matrix</h1>
+        <p>
+          This is the same mental model as Settings, but organized per vendor. Refresh a provider to pull its current model list, map those models into
+          <strong>Stable</strong> and <strong>Latest</strong>, then save back to
+          <code>modelStrategyCatalog.json</code> for deployment.
+        </p>
+      </div>
+
+      <section class="panel">
+        <div class="toolbar">
+          <button id="open-catalog" class="button" type="button">Open catalog file</button>
+          <button id="save-catalog" class="button primary" type="button">Save catalog</button>
+          <button id="download-catalog" class="button soft" type="button">Download JSON</button>
+          <button id="reset-catalog" class="button danger" type="button">Reset to bundled defaults</button>
+        </div>
+        <div class="toolbar-meta">
+          <label class="pill">
+            <span>Version</span>
+            <input id="version-input" class="version-input" type="text" />
+          </label>
+          <div class="pill"><span>Loaded file</span><strong id="loaded-file">Bundled defaults</strong></div>
+          <div class="pill"><span>Status</span><strong id="global-status">Ready</strong></div>
+        </div>
+        <div class="note">
+          Use <strong>Refresh models</strong> when you want the latest list for a vendor. Then adjust the matrix by choosing which refreshed model should back
+          <strong>Deep reasoning</strong>, <strong>Balanced</strong>, and <strong>Fast</strong> for both <strong>Stable</strong> and <strong>Latest</strong>.
+        </div>
+      </section>
+
+      <div id="vendors" class="stack"></div>
+    </div>
+
+    <input id="catalog-file-input" type="file" accept=".json,application/json" style="display:none" />
+
+    <script>
+      const PROVIDERS = ["anthropic", "gemini", "openai", "azure_openai"];
+      const STRATEGIES = ["stable", "latest"];
+      const FAMILIES = ["pro", "flash", "lite"];
+      const PROVIDER_LABELS = {
+        anthropic: "Anthropic",
+        gemini: "Gemini",
+        openai: "OpenAI",
+        azure_openai: "Azure OpenAI"
+      };
+      const PROVIDER_HINTS = {
+        anthropic: "Good for Claude family defaults and fallbacks.",
+        gemini: "Use refresh if you want the current Gemini catalog before remapping presets.",
+        openai: "Choose the global OpenAI defaults for stable and latest.",
+        azure_openai: "Catalog is manual because deployment names differ by tenant."
+      };
+      const FAMILY_LABELS = {
+        pro: "Deep reasoning",
+        flash: "Balanced",
+        lite: "Fast"
+      };
+
+      let state = null;
+      let fileHandle = null;
+      let loadedFileName = "";
+
+      const els = {
+        vendors: document.getElementById("vendors"),
+        versionInput: document.getElementById("version-input"),
+        loadedFile: document.getElementById("loaded-file"),
+        globalStatus: document.getElementById("global-status"),
+        openCatalog: document.getElementById("open-catalog"),
+        saveCatalog: document.getElementById("save-catalog"),
+        downloadCatalog: document.getElementById("download-catalog"),
+        resetCatalog: document.getElementById("reset-catalog"),
+        fileInput: document.getElementById("catalog-file-input")
+      };
+
+      function clone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function setGlobalStatus(text) {
+        els.globalStatus.textContent = text;
+      }
+
+      function familyLabel(family) {
+        return FAMILY_LABELS[family] || family;
+      }
+
+      function inferFamily(modelId) {
+        const normalized = String(modelId || "").trim().toLowerCase();
+        if (normalized.includes("flash")) return "flash";
+        if (normalized.startsWith("gpt-4.1") || normalized.startsWith("gpt-4o") || normalized.startsWith("o4") || normalized.includes("sonnet")) {
+          return normalized.includes("mini") ? "lite" : "flash";
+        }
+        if (normalized.includes("lite") || normalized.includes("mini") || normalized.includes("nano") || normalized.includes("haiku")) return "lite";
+        if (normalized.includes("pro") || normalized.includes("opus") || normalized.startsWith("gpt-5") || normalized.startsWith("o1") || normalized.startsWith("o3")) return "pro";
+        return "";
+      }
+
+      function normalizeCatalog(catalog) {
+        const next = clone(catalog);
+        for (const provider of PROVIDERS) {
+          const providerConfig = next.providers[provider];
+          providerConfig.catalog = (providerConfig.catalog || [])
+            .map((model) => ({
+              id: String(model.id || "").trim(),
+              displayName: String(model.displayName || model.id || "").trim(),
+              family: FAMILIES.includes(model.family) ? model.family : inferFamily(model.id)
+            }))
+            .filter((model) => model.id);
+          for (const strategy of STRATEGIES) {
+            for (const family of FAMILIES) {
+              providerConfig.presets[strategy][family] = (providerConfig.presets[strategy][family] || [])
+                .map((value) => String(value || "").trim())
+                .filter(Boolean);
+            }
+          }
+        }
+        return next;
+      }
+
+      async function fetchCatalog() {
+        const response = await fetch("/api/catalog");
+        if (!response.ok) throw new Error("Could not load catalog");
+        return normalizeCatalog(await response.json());
+      }
+
+      async function saveCatalog() {
+        const response = await fetch("/api/catalog", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(state)
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.success === false) {
+          throw new Error(payload.error || "Could not save catalog");
+        }
+        setGlobalStatus("Saved");
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      function escapeAttribute(value) {
+        return escapeHtml(value).replace(/"/g, "&quot;");
+      }
+
+      function getOptions(provider, currentValue) {
+        const models = state.providers[provider].catalog.slice().sort((a, b) => {
+          const rank = (entry) => entry.family === "pro" ? 0 : entry.family === "flash" ? 1 : entry.family === "lite" ? 2 : 3;
+          return rank(a) - rank(b) || (a.displayName || a.id).localeCompare(b.displayName || b.id);
+        });
+        if (currentValue && !models.some((model) => model.id === currentValue)) {
+          models.unshift({ id: currentValue, displayName: currentValue, family: inferFamily(currentValue) });
+        }
+        return models.map((model) => {
+          const suffix = model.family ? ` (${familyLabel(model.family)})` : "";
+          return `<option value="${escapeAttribute(model.id)}">${escapeHtml(model.displayName || model.id)}${escapeHtml(suffix)}</option>`;
+        }).join("");
+      }
+
+      function countMissing(provider) {
+        const ids = new Set(state.providers[provider].catalog.map((model) => model.id));
+        let count = 0;
+        for (const strategy of STRATEGIES) {
+          for (const family of FAMILIES) {
+            for (const candidate of state.providers[provider].presets[strategy][family]) {
+              if (!ids.has(candidate)) count += 1;
+            }
+          }
+        }
+        return count;
+      }
+
+      function renderVendor(provider) {
+        const config = state.providers[provider];
+        const missing = countMissing(provider);
+        return `
+          <section class="vendor-card" data-provider="${provider}">
+            <div class="vendor-header">
+              <div>
+                <div class="eyebrow">Provider</div>
+                <h2>${PROVIDER_LABELS[provider]}</h2>
+                <p>${PROVIDER_HINTS[provider]}</p>
+              </div>
+              <div class="vendor-actions">
+                <button class="button soft" type="button" data-toggle-catalog="${provider}">Toggle catalog</button>
+                <button class="button" type="button" data-add-model="${provider}">Add model</button>
+                <button class="button primary" type="button" data-refresh="${provider}">Refresh models</button>
+              </div>
+            </div>
+            <div class="vendor-body">
+              <div class="credentials">
+                <div class="field">
+                  <label>API Key</label>
+                  <input type="password" data-credential="${provider}:apiKey" placeholder="Optional, or use env vars on the server" />
+                </div>
+                <div class="field">
+                  <label>Base URL</label>
+                  <input type="text" data-credential="${provider}:baseUrl" placeholder="Optional override" />
+                </div>
+                ${provider === "azure_openai" ? `
+                  <div class="field">
+                    <label>API Version</label>
+                    <input type="text" data-credential="${provider}:apiVersion" placeholder="2024-06-01" />
+                  </div>
+                ` : ""}
+              </div>
+              <div class="status ${missing ? "error" : "ok"}" id="status-${provider}">
+                ${config.catalog.length} models in catalog.${missing ? ` ${missing} preset reference(s) are missing from the current list.` : " Preset references are aligned."}
+              </div>
+              <div class="matrix">
+                <div class="matrix-header">
+                  <div></div>
+                  <div>Deep reasoning</div>
+                  <div>Balanced</div>
+                  <div>Fast</div>
+                </div>
+                ${STRATEGIES.map((strategy) => `
+                  <div class="matrix-row">
+                    <div class="strategy-label">${strategy}</div>
+                    ${FAMILIES.map((family) => `
+                      <div class="matrix-cell">
+                        <div class="family-sub">${familyLabel(family)}</div>
+                        <select data-preset="${provider}:${strategy}:${family}:0">
+                          ${getOptions(provider, config.presets[strategy][family][0] || "")}
+                        </select>
+                        <div class="resolved">${escapeHtml(config.presets[strategy][family][0] || "Not set")}</div>
+                      </div>
+                    `).join("")}
+                  </div>
+                `).join("")}
+              </div>
+              <div class="catalog-grid collapsed" id="catalog-${provider}">
+                <div class="catalog-head">
+                  <div>Model ID</div>
+                  <div>Label</div>
+                  <div>Family</div>
+                  <div></div>
+                </div>
+                ${config.catalog.map((model, index) => `
+                  <div class="catalog-row">
+                    <input value="${escapeAttribute(model.id)}" data-model="${provider}:${index}:id" />
+                    <input value="${escapeAttribute(model.displayName)}" data-model="${provider}:${index}:displayName" />
+                    <select data-model="${provider}:${index}:family">
+                      <option value="">Unspecified</option>
+                      ${FAMILIES.map((family) => `<option value="${family}"${model.family === family ? " selected" : ""}>${familyLabel(family)}</option>`).join("")}
+                    </select>
+                    <button class="icon-button" type="button" data-delete-model="${provider}:${index}">x</button>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          </section>
+        `;
+      }
+
+      function wireEvents() {
+        document.querySelectorAll("[data-toggle-catalog]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const provider = button.getAttribute("data-toggle-catalog");
+            document.getElementById(`catalog-${provider}`).classList.toggle("collapsed");
+          });
+        });
+
+        document.querySelectorAll("[data-preset]").forEach((select) => {
+          select.addEventListener("change", (event) => {
+            const [provider, strategy, family] = event.currentTarget.getAttribute("data-preset").split(":");
+            state.providers[provider].presets[strategy][family][0] = event.currentTarget.value;
+            render();
+          });
+        });
+
+        document.querySelectorAll("[data-model]").forEach((input) => {
+          input.addEventListener("input", (event) => {
+            const [provider, index, field] = event.currentTarget.getAttribute("data-model").split(":");
+            state.providers[provider].catalog[Number(index)][field] = event.currentTarget.value;
+          });
+          input.addEventListener("change", () => render());
+        });
+
+        document.querySelectorAll("[data-delete-model]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const [provider, index] = button.getAttribute("data-delete-model").split(":");
+            state.providers[provider].catalog.splice(Number(index), 1);
+            render();
+          });
+        });
+
+        document.querySelectorAll("[data-add-model]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const provider = button.getAttribute("data-add-model");
+            state.providers[provider].catalog.push({ id: "", displayName: "", family: "" });
+            render();
+          });
+        });
+
+        document.querySelectorAll("[data-refresh]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const provider = button.getAttribute("data-refresh");
+            const status = document.getElementById(`status-${provider}`);
+            status.className = "status";
+            status.textContent = "Refreshing model list...";
+            try {
+              const apiKey = document.querySelector(`[data-credential="${provider}:apiKey"]`)?.value || "";
+              const baseUrl = document.querySelector(`[data-credential="${provider}:baseUrl"]`)?.value || "";
+              const apiVersion = document.querySelector(`[data-credential="${provider}:apiVersion"]`)?.value || "";
+              const response = await fetch("/api/refresh-models", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ provider, apiKey, baseUrl, apiVersion })
+              });
+              const payload = await response.json();
+              if (!response.ok || payload.success === false) {
+                throw new Error(payload.error || "Refresh failed");
+              }
+              state.providers[provider].catalog = (payload.catalog || []).map((model) => ({
+                id: model.id,
+                displayName: model.displayName || model.id,
+                family: model.family || inferFamily(model.id)
+              }));
+              status.className = "status ok";
+              status.textContent = `Loaded ${state.providers[provider].catalog.length} models from provider discovery.`;
+              render();
+            } catch (error) {
+              status.className = "status error";
+              status.textContent = error.message || String(error);
+            }
+          });
+        });
+      }
+
+      function render() {
+        els.loadedFile.textContent = loadedFileName || "Server catalog";
+        els.versionInput.value = state.version;
+        els.vendors.innerHTML = PROVIDERS.map(renderVendor).join("");
+        wireEvents();
+      }
+
+      async function downloadCatalog() {
+        const blob = new Blob([JSON.stringify(state, null, 2) + "\n"], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "modelStrategyCatalog.json";
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      async function openCatalogFile() {
+        if (!window.showOpenFilePicker) {
+          els.fileInput.click();
+          return;
+        }
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            types: [{ description: "JSON", accept: { "application/json": [".json"] } }],
+            multiple: false
+          });
+          const file = await handle.getFile();
+          const text = await file.text();
+          state = normalizeCatalog(JSON.parse(text));
+          fileHandle = handle;
+          loadedFileName = file.name;
+          setGlobalStatus("Loaded");
+          render();
+        } catch (error) {
+          if (error && error.name !== "AbortError") {
+            alert(error.message || String(error));
+          }
+        }
+      }
+
+      els.openCatalog.addEventListener("click", openCatalogFile);
+      els.saveCatalog.addEventListener("click", async () => {
+        state.version = els.versionInput.value.trim() || state.version;
+        try {
+          await saveCatalog();
+        } catch (error) {
+          alert(error.message || String(error));
+          setGlobalStatus("Save failed");
+        }
+      });
+      els.downloadCatalog.addEventListener("click", downloadCatalog);
+      els.resetCatalog.addEventListener("click", async () => {
+        if (!window.confirm("Reset back to the server's bundled catalog?")) return;
+        state = await fetchCatalog();
+        fileHandle = null;
+        loadedFileName = "";
+        setGlobalStatus("Reset");
+        render();
+      });
+      els.versionInput.addEventListener("input", (event) => {
+        state.version = event.currentTarget.value;
+      });
+      els.fileInput.addEventListener("change", async (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        const text = await file.text();
+        state = normalizeCatalog(JSON.parse(text));
+        loadedFileName = file.name;
+        setGlobalStatus("Loaded");
+        render();
+        event.target.value = "";
+      });
+
+      fetchCatalog()
+        .then((catalog) => {
+          state = catalog;
+          render();
+        })
+        .catch((error) => {
+          alert(error.message || String(error));
+        });
+    </script>
+  </body>
+</html>
