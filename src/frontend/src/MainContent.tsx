@@ -1006,7 +1006,7 @@ export function MainContent({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="flex min-h-[38px] w-full min-w-0 items-center justify-between gap-4">
+        <div className="flex h-full w-full min-w-0 items-center justify-between gap-4">
           <div className="rf-pane-header-cluster">
             {!sidebarOpen && (
               <motion.button
@@ -1021,7 +1021,7 @@ export function MainContent({
             )}
             <div className="rf-pane-header-copy">
               <div className="rf-pane-header-kicker">Output Surface</div>
-              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <h2 className="rf-pane-header-title">Feature Canvas</h2>
                 <span className="rf-pane-header-badge max-w-full">
                   Scope <strong>{projectKey === '*' ? 'Global Workspace' : projectKey}</strong>

@@ -137,6 +137,9 @@ export function Sidebar({
             >
               Refinely
             </button>
+            <div className="rf-pane-header-subtitle rf-pane-header-subtitle--muted">
+              Configure scope, evidence, and inputs before generating.
+            </div>
           </div>
         </div>
 
@@ -168,7 +171,7 @@ export function Sidebar({
 
         {/* ── Workspace card ── */}
         <motion.div
-          className="rf-sidebar-card overflow-hidden"
+          className="rf-sidebar-card"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
@@ -293,7 +296,7 @@ export function Sidebar({
 
           {/* Context not ready warning */}
           {!contextReady && (
-            <div className="mx-4 mb-4 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.14)] px-3 py-2 text-[11px] font-medium text-[var(--rf-warning)]">
+            <div className="mx-4 mb-4 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(179,94,48,0.14)] px-3 py-2.5 text-[11px] font-medium text-[var(--rf-warning)] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
               Choose project-specific or global context before entering your requirement.
             </div>
           )}
