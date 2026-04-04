@@ -84,7 +84,7 @@ export function Sidebar({
   const primaryProjectKey = projectKeys[0] ?? '*';
   const contextReady = contextMode === 'global' || (contextMode === 'project' && primaryProjectKey !== '*');
   const hasPromptInput = Boolean(requirement.trim() || runAttachments.length);
-  const brainstormDisabled = !contextReady || !hasPromptInput || isWorking || isAtLimit;
+  const brainstormDisabled = !contextReady || !hasPromptInput || isWorking;
   const [showUsage, setShowUsage] = React.useState(true);
   const [projectFilter, setProjectFilter] = React.useState('');
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
@@ -100,7 +100,7 @@ export function Sidebar({
   const projectTitle = selectedProjects.length
     ? selectedProjects.map(project => project.name ? `${project.key} · ${project.name}` : project.key).join(' + ')
     : 'Global Workspace';
-  const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
+  const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Standard';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() => (width ?? 400) >= 430);
@@ -531,7 +531,7 @@ export function Sidebar({
           <motion.button
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
-            title={isAtLimit ? 'Monthly generation limit reached.' : ''}
+            title={isAtLimit ? 'Included monthly usage has been reached. Generation is still available.' : ''}
             className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[11px] rounded-[16px] transition-all flex items-center justify-center gap-2 shadow-[0_12px_28px_-16px_rgba(43,89,74,0.6)] border border-white/10"
             whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
@@ -559,7 +559,7 @@ export function Sidebar({
                   className="flex items-center gap-2"
                 >
                   <Zap className={`w-3.5 h-3.5 ${requirement.trim() ? 'fill-white' : ''}`} />
-                  <span>{isAtLimit ? 'Limit Reached' : originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
+                  <span>{originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
                 </motion.div>
               )}
             </AnimatePresence>

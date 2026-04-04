@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, TrendingUp, ShieldCheck, AlertCircle, ExternalLink } from 'lucide-react';
+import { Zap, TrendingUp, AlertCircle, ExternalLink } from 'lucide-react';
 
 interface UsageMeterProps {
   usage: { currentMonth: number } | null;
@@ -25,14 +25,14 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
     return (
       <div className={`flex items-center gap-2.5 px-3 py-2 bg-[var(--rf-brand-muted)]/50 rounded-xl border border-[rgba(43,89,74,0.08)] ${className}`}>
         <div className="flex items-center gap-2">
-          <Zap className={`w-3.5 h-3.5 ${isAtLimit ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand)]'}`} />
+          <Zap className={`w-3.5 h-3.5 ${isAtLimit ? 'text-[var(--rf-warning)]' : 'text-[var(--rf-brand)]'}`} />
           <span className="text-[10px] font-bold text-[var(--rf-text-secondary)] uppercase tracking-widest">{tierName}</span>
         </div>
         {!isUnlimited && (
           <div className="flex items-center gap-2.5">
             <div className="w-16 h-1.5 bg-white/60 rounded-full overflow-hidden border border-[rgba(0,0,0,0.04)]">
               <div
-                className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-danger)]' : isNearLimit ? 'bg-[var(--rf-warning)]' : 'bg-[var(--rf-brand)]'}`}
+                className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-warning)]' : isNearLimit ? 'bg-[var(--rf-warning)]' : 'bg-[var(--rf-brand)]'}`}
                 style={{ width: `${percentage}%` }}
               />
             </div>
@@ -49,15 +49,15 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
     <div className={`space-y-4 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className={`p-1.5 rounded-lg shadow-sm ${(tier === 'premium' || tier === 'enterprise') ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.1)]' : tier === 'standard' ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.1)]' : 'bg-white/70 text-[var(--rf-text-tertiary)] border border-[rgba(0,0,0,0.06)]'}`}>
-            {(tier === 'premium' || tier === 'enterprise') ? <ShieldCheck className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
+          <div className={`p-1.5 rounded-lg shadow-sm ${tier === 'standard' ? 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] border border-[rgba(43,89,74,0.1)]' : 'bg-white/70 text-[var(--rf-text-tertiary)] border border-[rgba(0,0,0,0.06)]'}`}>
+            <TrendingUp className="w-4 h-4" />
           </div>
           <div>
             <h4 className="text-[13px] font-bold text-[var(--rf-text)] tracking-tight">{tierName} Plan</h4>
             <p className="text-[10px] font-medium text-[var(--rf-sidebar-text-muted)] uppercase tracking-widest mt-0.5">Current Usage</p>
           </div>
         </div>
-        {isAtLimit && <AlertCircle className="w-4 h-4 text-rose-500" />}
+        {isAtLimit && <AlertCircle className="w-4 h-4 text-[var(--rf-warning)]" />}
       </div>
 
       <div className="space-y-2">
@@ -71,13 +71,18 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
           <div className="w-full h-2 bg-white/60 border border-[rgba(0,0,0,0.04)] rounded-full overflow-hidden shadow-inner">
             <div
               className={`h-full transition-all duration-500 rounded-full ${
-                isAtLimit ? 'bg-[var(--rf-danger)] shadow-[0_0_8px_rgba(158,62,71,0.2)]' :
+                isAtLimit ? 'bg-[var(--rf-warning)] shadow-[0_0_8px_rgba(179,94,48,0.2)]' :
                 isNearLimit ? 'bg-[var(--rf-warning)] shadow-[0_0_8px_rgba(179,94,48,0.2)]' :
                 'bg-[var(--rf-brand)] shadow-[0_0_8px_rgba(43,89,74,0.2)]'
               }`}
               style={{ width: `${percentage}%` }}
             />
           </div>
+        )}
+        {isAtLimit && (
+          <p className="text-[11px] font-medium text-[var(--rf-warning)]">
+            Included monthly usage reached. Generation remains available while you coordinate higher limits with support.
+          </p>
         )}
       </div>
 

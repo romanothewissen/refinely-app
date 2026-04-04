@@ -124,7 +124,7 @@ export interface TenantConfig {
     topKChunks: number;
     maxChars: number;
   };
-  tier: 'free' | 'standard' | 'premium' | 'enterprise';
+  tier: 'free' | 'standard';
   compliance: {
     enabled: boolean;
     transparencyReportsEnabled: boolean;
@@ -489,54 +489,25 @@ export interface GenerationEvent {
 
 export interface TierLimits {
   generationsPerMonth: number;   // -1 = unlimited
-  maxGoldSources: number;
   maxWiDocs: number;
+  maxConfiguredProjects: number;
   similarStories: boolean;
   exportExcel: boolean;
-  customBranding: boolean;
-  processTaxonomy: boolean;
-  maxUsers: number;
 }
 
 export const TIER_LIMITS: Record<TenantConfig['tier'], TierLimits> = {
   free: {
     generationsPerMonth: 5,
-    maxGoldSources: 1,
     maxWiDocs: 2,
+    maxConfiguredProjects: 1,
     similarStories: false,
     exportExcel: false,
-    customBranding: false,
-    processTaxonomy: false,
-    maxUsers: 5,
   },
   standard: {
-    generationsPerMonth: 250,
-    maxGoldSources: 5,
-    maxWiDocs: 15,
-    similarStories: false,
-    exportExcel: true,
-    customBranding: false,
-    processTaxonomy: false,
-    maxUsers: 50,
-  },
-  premium: {
-    generationsPerMonth: -1,
-    maxGoldSources: -1,
-    maxWiDocs: -1,
+    generationsPerMonth: 150,
+    maxWiDocs: 25,
+    maxConfiguredProjects: 10,
     similarStories: true,
     exportExcel: true,
-    customBranding: true,
-    processTaxonomy: true,
-    maxUsers: -1,
-  },
-  enterprise: {
-    generationsPerMonth: -1,
-    maxGoldSources: -1,
-    maxWiDocs: -1,
-    similarStories: true,
-    exportExcel: true,
-    customBranding: true,
-    processTaxonomy: true,
-    maxUsers: -1,
   },
 };

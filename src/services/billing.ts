@@ -13,28 +13,23 @@ export function getLimits(tier: TenantConfig['tier']): TierLimits {
 
 export function getEffectiveTier(config: TenantConfig, context?: any): TenantConfig['tier'] {
   // If no license info, allow what's in config (for dev/staging)
-  if (!context?.license) return config.tier;
+  if (!context?.license) return config.tier === 'free' ? 'free' : 'standard';
 
   const license = context.license;
   if (!license.active) return 'free';
 
-  // If active, they are at least 'standard'.
-  if (config.tier === 'enterprise') return 'enterprise';
-  if (config.tier === 'premium') return 'premium';
   return 'standard';
 }
 
 /**
  * Returns the recommended model for a given role based on the tier.
- * This prevents Free users from using expensive/high-perf models.
+ * This prevents inactive/unlicensed users from using expensive models.
  */
 export function getTierModel(
   requestedModel: string,
   tier: TenantConfig['tier']
 ): string {
-  if (tier === 'premium' || tier === 'enterprise') return requestedModel; // Top tiers can use anything
-
-  // Define "Safe/Mini" models for Free/Standard
+  // Define "Safe/Mini" models for the limited free fallback.
   const MINI_MODELS: Record<string, string> = {
     'claude-opus-4-6': 'claude-sonnet-4-6',
     'claude-opus-4-1-20250805': 'claude-sonnet-4-20250514',
@@ -54,8 +49,6 @@ export function getTierModel(
     return MINI_MODELS[requestedModel] || 'claude-3-haiku-20240307';
   }
 
-  // Standard can use Pro models but maybe not the "Ultra" ones?
-  // For now, let's just allow standard to use what's requested unless it's explicitly blocked.
   return requestedModel;
 }
 
@@ -67,13 +60,12 @@ export async function checkGenerationAllowed(
   const limits = getLimits(effectiveTier);
   
   if (limits.generationsPerMonth === -1) return { allowed: true };
-  if (limits.generationsPerMonth === -1) return { allowed: true };
 
   const usage = await getUsage();
   if (usage.generations >= limits.generationsPerMonth) {
     return {
-      allowed: false,
-      reason: `You've used all ${limits.generationsPerMonth} generations for this month on the ${config.tier} plan. Please upgrade to continue.`,
+      allowed: true,
+      reason: `Your workspace has used the ${limits.generationsPerMonth} generations included in the Standard plan this month. You can keep going for now, and contact support if you need higher limits.`,
     };
   }
   return { allowed: true };

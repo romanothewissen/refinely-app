@@ -152,6 +152,27 @@ function normalizeProjectArMapping(arMapping: any, projectKey?: string) {
   };
 }
 
+function countConfiguredProjects(config: { arMappings?: any[]; domainContexts?: any[]; backlogStatusScopes?: any[] }) {
+  const keys = new Set<string>();
+
+  (config.arMappings ?? []).forEach((mapping) => {
+    const key = String(mapping?.projectKey ?? '').trim();
+    if (key && key !== '*') keys.add(key);
+  });
+
+  (config.domainContexts ?? []).forEach((entry) => {
+    const key = String(entry?.projectKey ?? '').trim();
+    if (key && key !== '*') keys.add(key);
+  });
+
+  (config.backlogStatusScopes ?? []).forEach((scope) => {
+    const key = String(scope?.projectKey ?? '').trim();
+    if (key && key !== '*') keys.add(key);
+  });
+
+  return keys.size;
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 resolver.define('checkIsAdmin', async ({ context, payload }) => {
@@ -322,9 +343,6 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const config = await getConfig();
 
   const check = await checkGenerationAllowed(config, context);
-  if (!check.allowed) {
-    return { success: false, error: check.reason };
-  }
 
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
@@ -353,7 +371,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
 
   const generationQueue = new Queue({ key: 'generation-queue' });
   await generationQueue.push({ body: event });
-  return { success: true, sessionId: payload.sessionId };
+  return { success: true, sessionId: payload.sessionId, warning: check.reason };
 });
 
 async function cancelWorkflowProgress(
@@ -827,7 +845,7 @@ resolver.define('uploadWi', async ({ payload, context }) => {
     if (existing.length >= limits.maxWiDocs) {
       return {
         success: false,
-        error: `Your plan allows up to ${limits.maxWiDocs} reference document(s) for this project. Remove one to upload another.`,
+        error: `Your Standard plan allows up to ${limits.maxWiDocs} reference documents per project. Contact support if you need higher limits.`,
       };
     }
   }
@@ -880,26 +898,34 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
   await ensureAdmin(context, projectKey);
   
   const current = await getConfig();
+  const effectiveTier = getEffectiveTier(current, context);
+  const limits = getLimits(effectiveTier);
+  const nextConfig = {
+    ...current,
+    arMappings: [...(current.arMappings ?? [])],
+    domainContexts: [...(current.domainContexts ?? [])],
+    backlogStatusScopes: [...(current.backlogStatusScopes ?? [])],
+  };
   
   // AR Mappings
   if (arMapping) {
-    const idx = current.arMappings.findIndex(m => m.projectKey === projectKey);
+    const idx = nextConfig.arMappings.findIndex(m => m.projectKey === projectKey);
     const normalizedMapping = normalizeProjectArMapping(arMapping, projectKey);
     // Note: the normalized mapping preserves both the new and legacy shapes.
-    if (idx >= 0) current.arMappings[idx] = normalizedMapping;
-    else current.arMappings.push(normalizedMapping);
+    if (idx >= 0) nextConfig.arMappings[idx] = normalizedMapping;
+    else nextConfig.arMappings.push(normalizedMapping);
   }
   
   // Domain Contexts
   if (domainContext !== undefined) {
-    const idx = current.domainContexts.findIndex(c => c.projectKey === projectKey);
-    if (idx >= 0) current.domainContexts[idx] = { projectKey, context: domainContext };
-    else current.domainContexts.push({ projectKey, context: domainContext });
+    const idx = nextConfig.domainContexts.findIndex(c => c.projectKey === projectKey);
+    if (idx >= 0) nextConfig.domainContexts[idx] = { projectKey, context: domainContext };
+    else nextConfig.domainContexts.push({ projectKey, context: domainContext });
   }
   
   if (Array.isArray(backlogStatuses)) {
-    const otherScopes = (current.backlogStatusScopes || []).filter(scope => scope.projectKey !== projectKey);
-    current.backlogStatusScopes = [
+    const otherScopes = (nextConfig.backlogStatusScopes || []).filter(scope => scope.projectKey !== projectKey);
+    nextConfig.backlogStatusScopes = [
       ...otherScopes,
       {
         projectKey,
@@ -907,8 +933,15 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
       },
     ];
   }
+
+  if (limits.maxConfiguredProjects !== -1 && countConfiguredProjects(nextConfig) > limits.maxConfiguredProjects) {
+    return {
+      success: false,
+      error: `Your Standard plan supports up to ${limits.maxConfiguredProjects} configured projects. Contact support if you need higher limits or want early access to Advanced.`,
+    };
+  }
   
-  const result = await saveConfig(current);
+  await saveConfig(nextConfig);
   await appendComplianceAuditEvent({
     actorAccountId: (context as { accountId?: string })?.accountId ?? 'unknown',
     category: 'config',
@@ -921,9 +954,9 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
         backlogStatuses: Array.isArray(backlogStatuses),
       },
     },
-    enabled: Boolean(current.compliance?.auditTrailEnabled),
+    enabled: Boolean(nextConfig.compliance?.auditTrailEnabled),
   });
-  return { success: result };
+  return { success: true };
 });
 
 resolver.define('listComplianceAuditEvents', async ({ payload, context }) => {
@@ -1174,8 +1207,9 @@ resolver.define('setIssueSession', async ({ payload, context }) => {
 
 resolver.define('getUsage', async ({ context }) => {
   const config = await getConfig();
+  const effectiveTier = getEffectiveTier(config, context);
   const usage = await getUsage();
-  const limits = getLimits(config.tier);
+  const limits = getLimits(effectiveTier);
   const license = context?.license ?? { active: true, licenseType: 'COMMERCIAL' }; // Default to active for dev/staging
   return {
     success: true,
@@ -1184,7 +1218,7 @@ resolver.define('getUsage', async ({ context }) => {
       month: usage.month,
     },
     limits,
-    tier: config.tier,
+    tier: effectiveTier,
     license,
   };
 });

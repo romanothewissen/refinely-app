@@ -429,7 +429,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [defaultProjectKey, setDefaultProjectKey] = useState('');
   const [domainContext, setDomainContext] = useState('');
   const [roleGuidanceRows, setRoleGuidanceRows] = useState<RoleGuidanceRow[]>([{ role: '', activities: '' }]);
-  const [tier, setTier] = useState<'free' | 'standard' | 'premium' | 'enterprise'>('standard');
+  const [tier, setTier] = useState<'free' | 'standard'>('standard');
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
   const [piiMaskingEnabled, setPiiMaskingEnabled] = useState(false);
@@ -462,6 +462,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const workspaceTokenUsage = useMemo(() => {
     return transparencyReports.reduce((sum, report) => sum + (report.tokenUsage?.total ?? 0), 0);
   }, [transparencyReports]);
+  const configuredProjectCount = useMemo(() => {
+    const keys = new Set<string>();
+    arMappings.forEach((mapping) => {
+      if (mapping?.projectKey && mapping.projectKey !== '*') keys.add(mapping.projectKey);
+    });
+    domainContexts.forEach((context) => {
+      if (context?.projectKey && context.projectKey !== '*') keys.add(context.projectKey);
+    });
+    backlogStatusScopes.forEach((scope) => {
+      if (scope?.projectKey && scope.projectKey !== '*') keys.add(scope.projectKey);
+    });
+    return keys.size;
+  }, [arMappings, domainContexts, backlogStatusScopes]);
 
   const projectUsageBreakdown = useMemo(() => {
     return projectActivityRows
@@ -651,6 +664,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       const usageRes = await api.getUsage() as any;
       if (usageRes?.usage) setUsage(usageRes.usage);
       if (usageRes?.limits) setLimits(usageRes.limits);
+      if (usageRes?.tier) setTier(usageRes.tier);
       const jiraRes = await api.discoverJira() as any;
       if (jiraRes?.success !== false) {
         setProjects(jiraRes.projects ?? []);
@@ -903,7 +917,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         backlogStatusScopes,
         backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
         defaultProjectKey: defaultProjectKey || undefined,
-        tier,
+        tier: 'standard',
       });
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
       if (anthropicApiKey.trim()) setExistingAnthropicApiKey(REDACTED);
@@ -1140,8 +1154,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         ? 'Uploading document'
         : 'Indexing for retrieval'
     : null;
-  const canEditBranding = Boolean(isAdmin && (tier === 'premium' || tier === 'enterprise'));
-
   return (
     <div className="flex-1 flex flex-col h-full bg-transparent relative overflow-hidden font-sans">
       <header className="shrink-0 h-14 border-b border-[rgba(43,89,74,0.08)] bg-[rgba(252,252,251,0.82)] backdrop-blur-xl flex items-center justify-between px-6 z-30 sticky top-0">
@@ -1771,7 +1783,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     {[
                       { label: 'Generations', value: usage?.currentMonth ?? 0, sub: `of ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0}` },
                       { label: 'Tokens', value: workspaceTokenUsage.toLocaleString(), sub: 'approx.' },
-                      { label: 'Projects', value: projects.length, sub: 'configured' },
+                      { label: 'Projects', value: configuredProjectCount, sub: 'configured' },
                       { label: 'Records', value: transparencyReports.length + complianceEvents.length, sub: 'audit + transparency' },
                     ].map(card => (
                       <div key={card.label} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2.5">
@@ -1849,8 +1861,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="rf-card p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Company branding</div>
-                    <span className={`text-[12px] font-bold px-2 py-0.5 rounded border ${canEditBranding ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border-[var(--rf-border)]'}`}>
-                      {canEditBranding ? 'Editable' : 'Enterprise only'}
+                    <span className="text-[12px] font-bold px-2 py-0.5 rounded border bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border-[var(--rf-border)]">
+                      Advanced later
                     </span>
                   </div>
                   <div className="flex gap-3 items-start">
@@ -1860,7 +1872,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         value={brandingLogoUrl}
                         onChange={e => setBrandingLogoUrl(e.target.value)}
                         placeholder="https://example.com/logo.svg"
-                        disabled={!canEditBranding}
+                        disabled
                         className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none disabled:opacity-60"
                       />
                     </div>
@@ -2233,12 +2245,15 @@ function ProjectConfigurationManager({
           backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
         });
       }
-      await api.saveProjectConfig({
+      const saveRes = await api.saveProjectConfig({
         projectKey: activeArProj,
         arMapping: currentMapping,
         domainContext: currentContext.context,
         backlogStatuses: effectiveBacklogStatuses,
       });
+      if ((saveRes as any)?.success === false) {
+        throw new Error((saveRes as any)?.error || 'Project configuration could not be saved.');
+      }
       setProjectNotice('Project configuration saved.');
     } catch (e: any) { alert(e.message); }
     finally { setIsSavingProject(false); }
@@ -2253,12 +2268,15 @@ function ProjectConfigurationManager({
           backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
         });
       }
-      await api.saveProjectConfig({
+      const saveRes = await api.saveProjectConfig({
         projectKey: activeArProj,
         arMapping: currentMapping,
         domainContext: currentContext.context,
         backlogStatuses: effectiveBacklogStatuses,
       });
+      if ((saveRes as any)?.success === false) {
+        throw new Error((saveRes as any)?.error || 'Project configuration could not be saved.');
+      }
       setProjectNotice('Backlog cache rebuild queued. This can take a little while on larger projects.');
       const refreshed = await onRefreshBacklogCache(activeArProj);
       if (refreshed) {
