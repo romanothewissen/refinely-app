@@ -171,7 +171,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     topKChunks: 8,
     maxChars: 100000,
   },
-  tier: 'free',
+  tier: 'standard',
   compliance: {
     enabled: false,
     transparencyReportsEnabled: false,

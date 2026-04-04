@@ -32,6 +32,8 @@ export interface Feature {
   jiraIssueKey?: string;
   jiraIssueUrl?: string;
   pendingRefinement?: Feature;
+  pendingRemoval?: boolean;
+  pendingAddition?: boolean;
 }
 
 
@@ -284,7 +286,7 @@ export default function App() {
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [tier, setTier] = useState('free');
+  const [tier, setTier] = useState('standard');
   const [sidebarWidth, setSidebarWidth] = useState(() => getDefaultSidebarWidth());
   const isResizing = useRef(false);
   const resolvedSidebarWidth = Number.isFinite(sidebarWidth) && sidebarWidth >= 300
@@ -373,19 +375,11 @@ export default function App() {
       }
 
       try {
-        const lastRes = await api.getLastSession() as any;
-        const lastSid = lastRes?.sessionId as string | null;
-
         if (issueKey) {
           if (!active) return;
           setOriginIssueKey(issueKey);
 
-          const [issueSidRes, issueRes] = await Promise.all([
-            api.getIssueSession(issueKey) as Promise<any>,
-            requestJira(`/rest/api/3/issue/${issueKey}?fields=summary,description`),
-          ]);
-
-          const issueSid = issueSidRes?.sessionId as string | null;
+          const issueRes = await requestJira(`/rest/api/3/issue/${issueKey}?fields=summary,description`);
           let requirementText = '';
           if (issueRes.ok) {
             const data = await issueRes.json() as any;
@@ -394,73 +388,6 @@ export default function App() {
             requirementText = [summary, description].filter(Boolean).join('\n\n');
             if (active && requirementText) setRequirement(requirementText);
           }
-
-          const candidateSessionId = issueSid ?? lastSid;
-          const candidateConversationRes = candidateSessionId
-            ? await api.getConversation(candidateSessionId) as any
-            : null;
-          const candidateConversation = candidateConversationRes?.conversation;
-          const fallbackContextMode = ctxProjectKey ? 'project' : 'undecided';
-          const currentIssueSignature = requirementText.trim()
-            ? buildDiscoveryInputSignature({
-                requirement: requirementText,
-                projectKey: ctxProjectKey || '*',
-                projectKeys: ctxProjectKey ? [ctxProjectKey] : [],
-                contextMode: fallbackContextMode,
-                attachments: [],
-              })
-            : null;
-          const candidateSignature = candidateConversation
-            ? buildConversationInputSignature(candidateConversation, {
-                projectKey: ctxProjectKey || '*',
-                contextMode: fallbackContextMode,
-              })
-            : null;
-
-          if (
-            candidateSessionId
-            && candidateSignature
-            && currentIssueSignature
-            && candidateSignature === currentIssueSignature
-          ) {
-            if (!active) return;
-            setSessionId(candidateSessionId);
-            setSessionSignatures(candidateSignature, candidateSignature);
-            await persistSessionPointers(candidateSessionId, issueKey);
-            return;
-          }
-
-          if (requirementText.trim()) {
-            const freshSessionId = createSessionId();
-            if (!active) return;
-            setSessionId(freshSessionId);
-            setSessionSignatures(null, null);
-            await persistSessionPointers(freshSessionId, issueKey);
-            return;
-          }
-
-          if (candidateSessionId) {
-            if (!active) return;
-            setSessionId(candidateSessionId);
-            setSessionSignatures(candidateSignature, candidateSignature);
-            await persistSessionPointers(candidateSessionId, issueKey);
-          }
-          return;
-        }
-
-        if (lastSid) {
-          const lastConversationRes = await api.getConversation(lastSid) as any;
-          const lastConversation = lastConversationRes?.conversation;
-          const lastSignature = lastConversation
-            ? buildConversationInputSignature(lastConversation, {
-                projectKey: '*',
-                contextMode: 'global',
-              })
-            : null;
-          if (!active) return;
-          setSessionId(lastSid);
-          setSessionSignatures(lastSignature, lastSignature);
-          await persistSessionPointers(lastSid, null);
         }
       } catch (e) {
         console.error('Context error', e);
@@ -525,8 +452,11 @@ export default function App() {
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
     if (!accountId) return;
-    // Restore features from last conversation turn
+    let cancelled = false;
+
     api.getConversation(sessionId).then((res: any) => {
+      if (cancelled) return;
+
       if (res?.success && res.conversation?.turns?.length > 0) {
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         const restoredSignature = buildConversationInputSignature(res.conversation, {
@@ -541,16 +471,33 @@ export default function App() {
         setPendingSessionId(null);
         setPendingClarifySessionId(null);
         setIsWorking(false);
-        if (lastTurn?.features?.length > 0) {
-          setFeatures(lastTurn.features);
-          setGenerationContext(lastTurn.generationContext ?? null);
-          setSidebarOpen(false);
-        }
+        setFeatures(lastTurn?.features ?? []);
+        setGenerationContext(lastTurn?.generationContext ?? null);
+        setClarifyContext(lastTurn?.clarifyContext ?? null);
+        setSidebarOpen(!(lastTurn?.features?.length > 0));
       } else {
+        setSessionSignatures(activeSessionInputSignatureRef.current, null);
         setWorkflowTokenUsage(null);
+        setPendingSessionId(null);
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
+        setFeatures([]);
+        setGenerationContext(null);
+        setClarifyContext(null);
+        setSidebarOpen(true);
       }
-    }).catch(() => {});
+    }).catch(() => {
+      if (cancelled) return;
+      setWorkflowTokenUsage(null);
+      setFeatures([]);
+      setGenerationContext(null);
+      setClarifyContext(null);
+      setSidebarOpen(true);
+    });
     loadHistory();
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, accountId]); // eslint-disable-line
 
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
@@ -1071,6 +1018,10 @@ export default function App() {
 
   const restoreSession = async (sid: string) => {
     try {
+      if (sid === sessionIdRef.current && features.length > 0) {
+        setViewMode('generate');
+        return;
+      }
       const res = await api.getConversation(sid) as any;
       if (res.success && res.conversation) {
         setWorkflowRunId(prev => prev + 1);
@@ -1089,22 +1040,15 @@ export default function App() {
         setRunAttachmentError(null);
         setWorkflowStage('idle');
         setSessionId(res.conversation.sessionId);
-        const currentActiveSignature = activeSessionInputSignatureRef.current;
         const restoredSignature = buildConversationInputSignature(res.conversation, {
           projectKey,
           contextMode,
         });
         setSessionSignatures(restoredSignature, restoredSignature);
-        const shouldBindIssueSession = Boolean(
-          originIssueKey
-          && restoredSignature
-          && currentActiveSignature
-          && restoredSignature === currentActiveSignature,
-        );
         await persistSessionPointers(
           res.conversation.sessionId,
-          shouldBindIssueSession ? originIssueKey : null,
-          shouldBindIssueSession,
+          null,
+          false,
         );
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {

@@ -19,7 +19,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
   const isNearLimit = !isUnlimited && percentage >= 80;
   const isAtLimit = !isUnlimited && current >= max;
 
-  const tierName = tier.charAt(0) ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Free';
+  const tierName = tier.charAt(0) ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Standard';
 
   if (isCompact) {
     return (
@@ -81,14 +81,14 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
         )}
       </div>
 
-      {tier === 'free' && (
+      {!isUnlimited && (
         <a
-          href="https://marketplace.atlassian.com"
+          href="mailto:support@smartif.ai?subject=Refinely%20higher%20limits"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-2 w-full py-2.5 bg-[var(--rf-brand)]/10 text-blue-400 rounded-xl text-[11px] font-bold uppercase tracking-wider hover:bg-[var(--rf-brand)]/20 transition-colors border border-[var(--rf-brand)]/20"
         >
-          Upgrade for More
+          Need Higher Limits?
           <ExternalLink className="w-3 h-3" />
         </a>
       )}

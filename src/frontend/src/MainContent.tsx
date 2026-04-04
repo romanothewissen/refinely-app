@@ -7,6 +7,10 @@ import { router } from '@forge/bridge';
 // ─── Word-level diff utility ──────────────────────────────────────────────────
 type DiffToken = { text: string; type: 'same' | 'added' | 'removed' };
 type AcceptanceRequirement = { given: string; when: string; then: string };
+type ArDiffRow =
+  | { type: 'matched'; proposed: AcceptanceRequirement; oldAr: AcceptanceRequirement; oldIndex: number; newIndex: number }
+  | { type: 'added'; proposed: AcceptanceRequirement; newIndex: number }
+  | { type: 'removed'; oldAr: AcceptanceRequirement; oldIndex: number };
 
 function tokenizeDiffText(text: string): string[] {
   return (text || '').match(/\s+|[^\s]+/g) ?? [];
@@ -81,11 +85,11 @@ function arSimilarity(left: AcceptanceRequirement, right: AcceptanceRequirement)
   return Math.max(wholeScore, ((givenScore + whenScore + thenScore) / 3) * 0.8 + wholeScore * 0.2);
 }
 
-function alignAcceptanceRequirements(
+function alignAcceptanceRequirementsDetailed(
   original: AcceptanceRequirement[],
   proposed: AcceptanceRequirement[],
-): Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> {
-  const rows: Array<{ proposed: AcceptanceRequirement; oldAr?: AcceptanceRequirement; oldIndex?: number; isNew: boolean }> = [];
+): ArDiffRow[] {
+  const rows: ArDiffRow[] = [];
   const m = original.length;
   const n = proposed.length;
   const gapCost = 0.55;
@@ -108,28 +112,31 @@ function alignAcceptanceRequirements(
 
   let i = 0;
   let j = 0;
-  while (j < n) {
-    const advanceOriginalCost = i < m ? gapCost + dp[i + 1][j] : Number.POSITIVE_INFINITY;
-    const advanceProposedCost = gapCost + dp[i][j + 1];
-    const similarity = i < m ? arSimilarity(original[i], proposed[j]) : 0;
-    const matchCost = i < m
+  while (i < m || j < n) {
+    const removeCost = i < m ? gapCost + dp[i + 1][j] : Number.POSITIVE_INFINITY;
+    const addCost = j < n ? gapCost + dp[i][j + 1] : Number.POSITIVE_INFINITY;
+    const similarity = i < m && j < n ? arSimilarity(original[i], proposed[j]) : 0;
+    const matchCost = i < m && j < n
       ? (similarity >= matchThreshold ? (1 - similarity) * 0.9 : lowSimilarityPenalty) + dp[i + 1][j + 1]
       : Number.POSITIVE_INFINITY;
 
-    if (i < m && matchCost <= advanceProposedCost && matchCost <= advanceOriginalCost) {
-      rows.push({ proposed: proposed[j], oldAr: original[i], oldIndex: i, isNew: false });
+    if (i < m && j < n && matchCost <= addCost && matchCost <= removeCost) {
+      rows.push({ type: 'matched', proposed: proposed[j], oldAr: original[i], oldIndex: i, newIndex: j });
       i += 1;
       j += 1;
       continue;
     }
 
-    if (advanceProposedCost <= advanceOriginalCost || i >= m) {
-      rows.push({ proposed: proposed[j], isNew: true });
-      j += 1;
+    if (i < m && removeCost <= addCost) {
+      rows.push({ type: 'removed', oldAr: original[i], oldIndex: i });
+      i += 1;
       continue;
     }
 
-    i += 1;
+    if (j < n) {
+      rows.push({ type: 'added', proposed: proposed[j], newIndex: j });
+      j += 1;
+    }
   }
 
   return rows;
@@ -485,29 +492,6 @@ function GeneratingPipeline({
 }
 
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-
-  const runWorker = async () => {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await worker(items[currentIndex], currentIndex);
-    }
-  };
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()),
-  );
-
-  return results;
-}
-
 // ─── AI Refine Popup ──────────────────────────────────────────────────────────
 function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
   feature: Feature;
@@ -622,11 +606,152 @@ interface Feature {
   description: string;
   markdown?: string;
   acceptanceRequirements: AcceptanceRequirement[];
+  storyPoints?: number;
+  processCode?: string;
   isAccepted?: boolean;
   pendingRefinement?: Feature;
   pendingRemoval?: boolean;
+  pendingAddition?: boolean;
   jiraIssueKey?: string;
   jiraIssueUrl?: string;
+}
+
+type FeatureDiffRow =
+  | { type: 'matched'; original: Feature; proposed: Feature; oldIndex: number; newIndex: number }
+  | { type: 'added'; proposed: Feature; newIndex: number }
+  | { type: 'removed'; original: Feature; oldIndex: number };
+
+function featureNarrative(feature: Feature): string {
+  return [
+    feature.title || feature.summary || '',
+    feature.description || feature.markdown || '',
+    ...(feature.acceptanceRequirements || []).flatMap(ar => [ar.given || '', ar.when || '', ar.then || '']),
+  ].join(' ');
+}
+
+function featureSimilarity(left: Feature, right: Feature): number {
+  const titleScore = jaccard(tokenSet(left.title || left.summary || ''), tokenSet(right.title || right.summary || ''));
+  const descScore = jaccard(tokenSet(left.description || left.markdown || ''), tokenSet(right.description || right.markdown || ''));
+  const narrativeScore = jaccard(tokenSet(featureNarrative(left)), tokenSet(featureNarrative(right)));
+  const roleScore = jaccard(tokenSet(left.description || ''), tokenSet(right.description || ''));
+  return (titleScore * 0.25) + (descScore * 0.25) + (narrativeScore * 0.35) + (roleScore * 0.15);
+}
+
+function featureArsEquivalent(left: AcceptanceRequirement[], right: AcceptanceRequirement[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((ar, idx) => {
+    const other = right[idx];
+    return Boolean(other)
+      && normaliseWhitespace(ar.given) === normaliseWhitespace(other.given)
+      && normaliseWhitespace(ar.when) === normaliseWhitespace(other.when)
+      && normaliseWhitespace(ar.then) === normaliseWhitespace(other.then);
+  });
+}
+
+function featuresEquivalent(left: Feature, right: Feature): boolean {
+  return normaliseWhitespace(left.title || left.summary || '') === normaliseWhitespace(right.title || right.summary || '')
+    && normaliseWhitespace(left.description || left.markdown || '') === normaliseWhitespace(right.description || right.markdown || '')
+    && featureArsEquivalent(left.acceptanceRequirements || [], right.acceptanceRequirements || [])
+    && (left.storyPoints ?? null) === (right.storyPoints ?? null)
+    && normaliseWhitespace(left.processCode || '') === normaliseWhitespace(right.processCode || '');
+}
+
+function alignFeaturesDetailed(original: Feature[], proposed: Feature[]): FeatureDiffRow[] {
+  const rows: FeatureDiffRow[] = [];
+  const m = original.length;
+  const n = proposed.length;
+  const gapCost = 0.7;
+  const matchThreshold = 0.18;
+  const lowSimilarityPenalty = 1.45;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array.from({ length: n + 1 }, () => Number.POSITIVE_INFINITY));
+
+  dp[m][n] = 0;
+  for (let i = m; i >= 0; i -= 1) {
+    for (let j = n; j >= 0; j -= 1) {
+      if (i < m) dp[i][j] = Math.min(dp[i][j], gapCost + dp[i + 1][j]);
+      if (j < n) dp[i][j] = Math.min(dp[i][j], gapCost + dp[i][j + 1]);
+      if (i < m && j < n) {
+        const similarity = featureSimilarity(original[i], proposed[j]);
+        const matchCost = similarity >= matchThreshold ? (1 - similarity) * 0.9 : lowSimilarityPenalty;
+        dp[i][j] = Math.min(dp[i][j], matchCost + dp[i + 1][j + 1]);
+      }
+    }
+  }
+
+  let i = 0;
+  let j = 0;
+  while (i < m || j < n) {
+    const removeCost = i < m ? gapCost + dp[i + 1][j] : Number.POSITIVE_INFINITY;
+    const addCost = j < n ? gapCost + dp[i][j + 1] : Number.POSITIVE_INFINITY;
+    const similarity = i < m && j < n ? featureSimilarity(original[i], proposed[j]) : 0;
+    const matchCost = i < m && j < n
+      ? (similarity >= matchThreshold ? (1 - similarity) * 0.9 : lowSimilarityPenalty) + dp[i + 1][j + 1]
+      : Number.POSITIVE_INFINITY;
+
+    if (i < m && j < n && matchCost <= addCost && matchCost <= removeCost) {
+      rows.push({ type: 'matched', original: original[i], proposed: proposed[j], oldIndex: i, newIndex: j });
+      i += 1;
+      j += 1;
+      continue;
+    }
+
+    if (i < m && removeCost <= addCost) {
+      rows.push({ type: 'removed', original: original[i], oldIndex: i });
+      i += 1;
+      continue;
+    }
+
+    if (j < n) {
+      rows.push({ type: 'added', proposed: proposed[j], newIndex: j });
+      j += 1;
+    }
+  }
+
+  return rows;
+}
+
+function annotateBulkRefinementResults(original: Feature[], proposed: Feature[]): Feature[] {
+  return alignFeaturesDetailed(original, proposed).map((row) => {
+    if (row.type === 'removed') {
+      return {
+        ...row.original,
+        pendingRefinement: undefined,
+        pendingAddition: false,
+        pendingRemoval: true,
+      };
+    }
+
+    if (row.type === 'added') {
+      return {
+        ...row.proposed,
+        pendingRefinement: undefined,
+        pendingRemoval: false,
+        pendingAddition: true,
+      };
+    }
+
+    if (featuresEquivalent(row.original, row.proposed)) {
+      return {
+        ...row.original,
+        pendingRefinement: undefined,
+        pendingAddition: false,
+        pendingRemoval: false,
+      };
+    }
+
+    return {
+      ...row.original,
+      pendingAddition: false,
+      pendingRemoval: false,
+      pendingRefinement: {
+        ...row.proposed,
+        id: row.original.id,
+        pendingAddition: false,
+        pendingRemoval: false,
+        pendingRefinement: undefined,
+      },
+    };
+  });
 }
 
 interface MainContentProps {
@@ -745,6 +870,8 @@ export function MainContent({
         const jiraUrl = feature.jiraIssueUrl || '';
         const status = feature.pendingRemoval
           ? 'Pending removal'
+          : feature.pendingAddition
+            ? 'Pending addition'
           : feature.pendingRefinement
             ? 'Pending refinement'
             : feature.isAccepted
@@ -903,15 +1030,29 @@ export function MainContent({
     }
     setFeatures(prev => {
       const n = [...prev];
-      if (n[idx].pendingRefinement) n[idx] = { ...n[idx].pendingRefinement!, pendingRefinement: undefined, pendingRemoval: undefined };
+      if (n[idx].pendingAddition) {
+        n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined };
+      } else if (n[idx].pendingRefinement) {
+        n[idx] = {
+          ...n[idx].pendingRefinement!,
+          id: n[idx].id,
+          pendingAddition: undefined,
+          pendingRefinement: undefined,
+          pendingRemoval: undefined,
+        };
+      }
       api.updateConversationFeatures(sessionId, n);
       return n;
     });
   };
   const rejectRefinement = (idx: number) => {
+    if (features[idx]?.pendingAddition) {
+      removeFeatureAt(idx);
+      return;
+    }
     setFeatures(prev => {
       const n = [...prev];
-      n[idx] = { ...n[idx], pendingRefinement: undefined, pendingRemoval: undefined };
+      n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined };
       api.updateConversationFeatures(sessionId, n);
       return n;
     });
@@ -969,41 +1110,16 @@ export function MainContent({
 
     try {
       const feedback = bulkInput.trim();
-      const results = await mapWithConcurrency(features, 2, async (feature) => {
-        const res = await api.refineSingleFeature(feature, feedback, requirement, sessionId) as any;
-        if (!res.success || !res.feature) {
-          throw new Error(res.error || `Refinement failed for "${feature.summary}"`);
-        }
-        return {
-          original: feature,
-          refined: res.feature,
-          tokenUsage: res.tokenUsage as { input: number; output: number; total: number } | undefined,
-        };
-      });
-
-      const aggregateUsage = results.reduce((acc, item) => ({
-        input: acc.input + (item.tokenUsage?.input ?? 0),
-        output: acc.output + (item.tokenUsage?.output ?? 0),
-        total: acc.total + (item.tokenUsage?.total ?? 0),
-      }), { input: 0, output: 0, total: 0 });
-
-      if (aggregateUsage.total > 0) {
-        onWorkflowTokenUsage?.(aggregateUsage);
+      const res = await api.refineFeatures(sessionId, requirement, features, feedback) as any;
+      if (!res.success || !Array.isArray(res.features)) {
+        throw new Error(res.error || 'Bulk refinement failed');
       }
 
-      setFeatures(prev => prev.map((f, i) => {
-        const refined = results[i]?.refined;
-        if (!refined) return f;
-        return {
-          ...f,
-          pendingRemoval: false,
-          pendingRefinement: {
-            ...f,
-            ...refined,
-            acceptanceRequirements: refined.acceptanceRequirements || f.acceptanceRequirements,
-          },
-        };
-      }));
+      if (res.tokenUsage?.total) {
+        onWorkflowTokenUsage?.(res.tokenUsage as { input: number; output: number; total: number });
+      }
+
+      setFeatures(prev => annotateBulkRefinementResults(prev, res.features as Feature[]));
       setShowBulkRefine(false);
       setBulkInput('');
     } catch (err: any) {
@@ -1017,7 +1133,9 @@ export function MainContent({
   const discardAllProposed = () => {
     if (window.confirm('Discard all pending AI improvements?')) {
       setFeatures(prev => {
-        const next = prev.map(f => ({ ...f, pendingRefinement: undefined, pendingRemoval: undefined }));
+        const next = prev
+          .filter(f => !f.pendingAddition)
+          .map(f => ({ ...f, pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined }));
         api.updateConversationFeatures(sessionId, next);
         return next;
       });
@@ -1029,10 +1147,20 @@ export function MainContent({
       const next = prev
         .filter(f => !f.pendingRemoval)
         .map(f => {
+          if (f.pendingAddition) {
+            return {
+              ...f,
+              pendingAddition: undefined,
+              pendingRefinement: undefined,
+              pendingRemoval: undefined,
+            };
+          }
           if (!f.pendingRefinement) return f;
           return {
             ...f,
             ...f.pendingRefinement,
+            id: f.id,
+            pendingAddition: undefined,
             pendingRefinement: undefined,
             pendingRemoval: undefined,
             isAccepted: true
@@ -1091,7 +1219,7 @@ export function MainContent({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {features.some(f => f.pendingRefinement) && (
+              {features.some(f => f.pendingRefinement || f.pendingRemoval || f.pendingAddition) && (
                 <>
                   <motion.button onClick={discardAllProposed} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
                   <motion.button onClick={acceptAllProposed} className="rounded-xl border border-[rgba(16,185,129,0.18)] bg-[var(--rf-success-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-success)] shadow-sm transition hover:brightness-[0.98]" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
@@ -1295,16 +1423,16 @@ export function MainContent({
               return (
                 <motion.div
                   key={feature.id || idx}
-                  className={`group overflow-hidden rounded-2xl border bg-white ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'border-[var(--rf-success-subtle)]' : 'border-[var(--rf-border)]'}`}
+                  className={`group overflow-hidden rounded-2xl border bg-white ${feature.pendingRemoval ? 'opacity-70 border-[var(--rf-danger-subtle)]' : feature.pendingAddition ? 'border-[var(--rf-success-subtle)]' : feature.isAccepted ? 'border-[var(--rf-success-subtle)]' : 'border-[var(--rf-border)]'}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  style={{ boxShadow: feature.isAccepted ? '0 4px 20px -4px rgba(16,185,129,0.15)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(15,23,42,0.05)' }}
+                  style={{ boxShadow: feature.pendingAddition || feature.isAccepted ? '0 4px 20px -4px rgba(16,185,129,0.15)' : feature.pendingRemoval ? '0 4px 20px -4px rgba(244,63,94,0.15)' : '0 4px 12px -4px rgba(15,23,42,0.05)' }}
                   whileHover={{ y: -2, boxShadow: feature.isAccepted ? '0 8px 30px -4px rgba(16,185,129,0.2)' : '0 8px 24px -4px rgba(15,23,42,0.08)' }}
                 >
                   <div className="flex flex-col sm:flex-row">
                     {/* Left Accent Strip */}
-                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]' : feature.isAccepted ? 'bg-[var(--rf-success-subtle)]' : 'bg-[var(--rf-brand-muted)]'}`} />
+                    <div className={`h-1.5 sm:h-auto sm:w-2 shrink-0 ${feature.pendingRemoval ? 'bg-[var(--rf-danger-subtle)]' : feature.pendingAddition || feature.isAccepted ? 'bg-[var(--rf-success-subtle)]' : 'bg-[var(--rf-brand-muted)]'}`} />
 
                     <div className="flex-1 p-4">
                       {/* Header Row */}
@@ -1394,21 +1522,35 @@ export function MainContent({
                         </div>
                       )}
 
+                      {feature.pendingAddition && (
+                        <div className="mb-4 p-4 rounded-xl bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                           <div className="flex items-center gap-2 text-[var(--rf-success)] font-bold text-sm">
+                             <Plus className="w-4 h-4" /> Proposed as New Feature
+                           </div>
+                           <div className="flex items-center gap-2">
+                             <motion.button onClick={() => rejectRefinement(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
+                             <motion.button onClick={() => acceptRefinement(idx)} className="px-4 py-2 text-xs font-bold text-white bg-[var(--rf-success)] hover:bg-[var(--rf-success)] rounded-lg shadow-sm shadow-[var(--rf-success)]/20" whileTap={{ scale: 0.97 }}>Accept Addition</motion.button>
+                           </div>
+                        </div>
+                      )}
+
                       {/* Pending refinement diff view */}
-                      {feature.pendingRefinement && (() => {
-                        const proposed = feature.pendingRefinement!;
-                        const origTitle = feature.title || feature.summary || '';
-                        const propTitle = proposed.title || proposed.summary || '';
-                        const origDesc = feature.description || feature.markdown || '';
-                        const propDesc = proposed.description || proposed.markdown || '';
-                        const arDiffRows = alignAcceptanceRequirements(
-                          feature.acceptanceRequirements || [],
-                          proposed.acceptanceRequirements || [],
+                      {(feature.pendingRefinement || feature.pendingAddition || feature.pendingRemoval) && (() => {
+                        const isAddedFeature = Boolean(feature.pendingAddition);
+                        const isRemovedFeature = Boolean(feature.pendingRemoval);
+                        const proposed = isAddedFeature ? feature : feature.pendingRefinement;
+                        const origTitle = isAddedFeature ? '' : (feature.title || feature.summary || '');
+                        const propTitle = proposed ? (proposed.title || proposed.summary || '') : '';
+                        const origDesc = isAddedFeature ? '' : (feature.description || feature.markdown || '');
+                        const propDesc = proposed ? (proposed.description || proposed.markdown || '') : '';
+                        const arDiffRows = alignAcceptanceRequirementsDetailed(
+                          isAddedFeature ? [] : (feature.acceptanceRequirements || []),
+                          proposed?.acceptanceRequirements || [],
                         );
                         return (
                           <div className="mb-5 p-4 rounded-2xl bg-[var(--rf-warning-subtle)]/40 border border-[rgba(179,94,48,0.18)]">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                              <h4 className="text-[var(--rf-warning)] font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> AI Suggested Refinements</h4>
+                              <h4 className="text-[var(--rf-warning)] font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> {isAddedFeature ? 'AI Suggested New Feature' : isRemovedFeature ? 'AI Suggested Feature Removal' : 'AI Suggested Refinements'}</h4>
 
                               <div className="flex flex-wrap items-center gap-3">
                                 <div className="flex items-center bg-white p-1 rounded-lg border border-[rgba(179,94,48,0.18)] shadow-sm">
@@ -1435,10 +1577,16 @@ export function MainContent({
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="bg-white p-4 rounded-xl border border-[var(--rf-border)] shadow-sm">
                                 <div className="text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest mb-2">Original</div>
-                                <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2">{origTitle}</h4>
-                                <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
+                                {isAddedFeature ? (
+                                  <div className="text-xs italic text-[var(--rf-text-tertiary)] mb-4">No original feature. This would be added to the canvas.</div>
+                                ) : (
+                                  <>
+                                    <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2">{origTitle}</h4>
+                                    <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed">{origDesc}</div>
+                                  </>
+                                )}
                                 <div className="space-y-2">
-                                  {feature.acceptanceRequirements.map((ar, i) => (
+                                  {(isAddedFeature ? [] : feature.acceptanceRequirements).map((ar, i) => (
                                     <div key={i} className="bg-[var(--rf-surface-soft)] border border-[var(--rf-border-subtle)] p-2.5 rounded-lg text-[13px] text-[var(--rf-text-secondary)]">
                                       {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
                                       {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
@@ -1448,20 +1596,30 @@ export function MainContent({
                                 </div>
                               </div>
                               <div className="bg-[var(--rf-brand-muted)]/50 p-4 rounded-xl border border-[var(--rf-brand-subtle)] shadow-sm">
-                                <div className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">Proposed ({diffMode === 'redline' ? 'Diff' : 'Result'})</div>
-                                <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2"><DiffText oldText={origTitle} newText={propTitle} mode={diffMode} /></h4>
-                                <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} mode={diffMode} /></div>
+                                <div className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">{isRemovedFeature ? 'Proposed Removal' : `Proposed (${diffMode === 'redline' ? 'Diff' : 'Result'})`}</div>
+                                {isRemovedFeature ? (
+                                  <div className="rounded-lg border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)] p-3 text-[13px] font-semibold text-[var(--rf-danger)]">
+                                    This feature would be removed from the canvas.
+                                  </div>
+                                ) : (
+                                  <>
+                                    <h4 className="text-sm font-bold text-[var(--rf-text)] mb-2"><DiffText oldText={origTitle} newText={propTitle} fullHighlight={isAddedFeature} mode={diffMode} /></h4>
+                                    <div className="text-xs text-[var(--rf-text-secondary)] mb-4 whitespace-pre-wrap leading-relaxed"><DiffText oldText={origDesc} newText={propDesc} fullHighlight={isAddedFeature} mode={diffMode} /></div>
+                                  </>
+                                )}
                                 <div className="space-y-2">
                                   {arDiffRows.map((row, i) => {
-                                    const ar = row.proposed;
-                                    const oldAr = row.oldAr;
-                                    const isNew = row.isNew;
+                                    const isNew = row.type === 'added';
+                                    const isRemoved = row.type === 'removed';
+                                    const ar = row.type !== 'removed' ? row.proposed : row.oldAr;
+                                    const oldAr = row.type === 'matched' ? row.oldAr : undefined;
                                     return (
-                                      <div key={`${i}-${row.oldIndex ?? 'new'}`} className={`p-2.5 rounded-lg text-[13px] text-[var(--rf-text)] border shadow-sm ${isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]' : 'bg-white border-[rgba(43,89,74,0.12)]'}`}>
+                                      <div key={`${i}-${row.type === 'removed' ? row.oldIndex : row.type === 'added' ? row.newIndex : row.oldIndex}`} className={`p-2.5 rounded-lg text-[13px] border shadow-sm ${isRemoved ? 'bg-[var(--rf-danger-subtle)] border-[var(--rf-danger-subtle)] text-[var(--rf-danger)]' : isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)] text-[var(--rf-text)]' : 'bg-white border-[rgba(43,89,74,0.12)] text-[var(--rf-text)]'}`}>
                                         {isNew && <div className="text-[12px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
-                                        {ar.given && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">Given</strong>{' '}<DiffText oldText={oldAr?.given || ''} newText={ar.given} fullHighlight={isNew} mode={diffMode} /></div>}
-                                        {ar.when && <div className="mb-1"><strong className="text-[var(--rf-brand-hover)]">When</strong>{' '}<DiffText oldText={oldAr?.when || ''} newText={ar.when} fullHighlight={isNew} mode={diffMode} /></div>}
-                                        <div><strong className="text-[var(--rf-brand-hover)]">Then</strong>{' '}<DiffText oldText={oldAr?.then || ''} newText={ar.then} fullHighlight={isNew} mode={diffMode} /></div>
+                                        {isRemoved && <div className="text-[12px] font-bold text-[var(--rf-danger)] uppercase tracking-widest mb-2">Removed AR</div>}
+                                        {ar.given && <div className="mb-1"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Given</strong>{' '}<DiffText oldText={oldAr?.given || ar.given} newText={isRemoved ? '' : ar.given} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
+                                        {ar.when && <div className="mb-1"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>When</strong>{' '}<DiffText oldText={oldAr?.when || ar.when} newText={isRemoved ? '' : ar.when} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
+                                        <div><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Then</strong>{' '}<DiffText oldText={oldAr?.then || ar.then} newText={isRemoved ? '' : ar.then} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>
                                       </div>
                                     );
                                   })}

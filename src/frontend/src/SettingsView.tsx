@@ -115,23 +115,38 @@ interface PiiPreviewResult {
 }
 
 const CLAUDE_MODELS = [
-  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 · Best reasoning' },
-  { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5 · Balanced' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 · Fast' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 · Latest flagship' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 · Latest balanced' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 · Latest fast' },
+  { id: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1 · Best reasoning' },
+  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4 · Prior flagship' },
+  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 · Balanced' },
+  { id: 'claude-3-7-sonnet-20250219', label: 'Claude Sonnet 3.7 · Prior balanced' },
+  { id: 'claude-3-5-sonnet-20241022', label: 'Claude Sonnet 3.5 · Legacy balanced' },
+  { id: 'claude-3-5-haiku-20241022', label: 'Claude Haiku 3.5 · Fast' },
+  { id: 'claude-3-haiku-20240307', label: 'Claude Haiku 3 · Legacy fast' },
 ];
 const GEMINI_MODELS = [
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro · Deep reasoning' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash · Balanced speed' },
   { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite · Lowest cost' },
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash · Fast multimodal text' },
+  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash-Lite · Lean fallback' },
 ];
 const OPENAI_MODELS = [
+  { id: 'gpt-5.4', label: 'GPT-5.4 · Latest flagship' },
+  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini · Latest mini' },
+  { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano · Latest nano' },
   { id: 'gpt-5', label: 'GPT-5 · Highest capability' },
+  { id: 'gpt-5-mini', label: 'GPT-5 Mini · Strong lighter-weight GPT' },
+  { id: 'gpt-5-nano', label: 'GPT-5 Nano · Fastest low-cost GPT' },
   { id: 'gpt-4.1', label: 'GPT-4.1 · Strong general model' },
   { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini · Lightweight' },
+  { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano · Smallest 4.1 model' },
   { id: 'gpt-4o', label: 'GPT-4o · Balanced' },
   { id: 'gpt-4o-mini', label: 'GPT-4o Mini · Fast and economical' },
-  { id: 'o1', label: 'o1 · Reasoning focused' },
-  { id: 'o1-mini', label: 'o1 Mini · Lean reasoning' },
+  { id: 'o3', label: 'o3 · Heavy reasoning' },
+  { id: 'o4-mini', label: 'o4-mini · Efficient reasoning' },
 ];
 const AZURE_OPENAI_MODELS: Array<{ id: string; label: string }> = [];
 const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
@@ -213,6 +228,93 @@ function getPreferredFamilyModel(entries: LlmModelCatalogEntry[], family: Concre
   return getCatalogModelId(preferred);
 }
 
+function getRecommendedModelSet(provider: LlmProvider, entries: LlmModelCatalogEntry[]) {
+  const pro = getPreferredFamilyModel(entries, 'pro');
+  const flash = getPreferredFamilyModel(entries, 'flash');
+  const lite = getPreferredFamilyModel(entries, 'lite');
+
+  if (provider === 'gemini') {
+    return {
+      simple: {
+        discovery: flash || lite || 'gemini-2.5-flash',
+        generation: pro || 'gemini-2.5-pro',
+        refinement: flash || 'gemini-2.5-flash',
+      },
+      advanced: {
+        clarify: flash || 'gemini-2.5-flash',
+        evaluate: lite || flash || 'gemini-2.5-flash-lite',
+        triage: lite || flash || 'gemini-2.5-flash-lite',
+        decomposition: pro || 'gemini-2.5-pro',
+        acceptanceRequirements: pro || 'gemini-2.5-pro',
+        theme: lite || flash || 'gemini-2.5-flash-lite',
+        refine: flash || 'gemini-2.5-flash',
+      },
+    };
+  }
+
+  if (provider === 'openai') {
+    return {
+      simple: {
+        discovery: flash || lite || 'gpt-4.1',
+        generation: pro || 'gpt-5.4',
+        refinement: flash || lite || 'gpt-4.1',
+      },
+      advanced: {
+        clarify: flash || lite || 'gpt-4.1',
+        evaluate: lite || 'gpt-5.4-mini',
+        triage: lite || 'gpt-5.4-mini',
+        decomposition: pro || 'gpt-5.4',
+        acceptanceRequirements: pro || 'gpt-5.4',
+        theme: lite || 'gpt-5.4-mini',
+        refine: flash || lite || 'gpt-4.1',
+      },
+    };
+  }
+
+  if (provider === 'azure_openai') {
+    return {
+      simple: {
+        discovery: flash || lite || 'latest-flash',
+        generation: pro || flash || 'latest-pro',
+        refinement: flash || lite || 'latest-flash',
+      },
+      advanced: {
+        clarify: flash || lite || 'latest-flash',
+        evaluate: lite || flash || 'latest-lite',
+        triage: lite || flash || 'latest-lite',
+        decomposition: pro || flash || 'latest-pro',
+        acceptanceRequirements: pro || flash || 'latest-pro',
+        theme: lite || flash || 'latest-lite',
+        refine: flash || lite || 'latest-flash',
+      },
+    };
+  }
+
+  return {
+    simple: {
+      discovery: flash || lite || 'claude-sonnet-4-20250514',
+      generation: pro || 'claude-opus-4-1-20250805',
+      refinement: flash || 'claude-sonnet-4-20250514',
+    },
+    advanced: {
+      clarify: flash || 'claude-sonnet-4-20250514',
+      evaluate: lite || 'claude-3-5-haiku-20241022',
+      triage: lite || 'claude-3-5-haiku-20241022',
+      decomposition: pro || 'claude-opus-4-1-20250805',
+      acceptanceRequirements: pro || 'claude-opus-4-1-20250805',
+      theme: lite || 'claude-3-5-haiku-20241022',
+      refine: flash || 'claude-sonnet-4-20250514',
+    },
+  };
+}
+
+function recommendationBlurbForProvider(provider: LlmProvider) {
+  if (provider === 'gemini') return 'Recommended baseline: Pro for generation quality, Flash for discovery and iterative refinement, Flash-Lite for triage and low-cost utility phases.';
+  if (provider === 'openai') return 'Recommended baseline: GPT-5.4 for generation quality, GPT-4.1 or GPT-5.4 Mini for discovery and refinement, and a Mini/Nano tier for lightweight routing phases.';
+  if (provider === 'azure_openai') return 'Recommended baseline: use your strongest GPT deployment for generation, a faster GPT deployment for refinement, and your lightest deployment for triage and sufficiency.';
+  return 'Recommended baseline: Opus 4.6 for generation quality, Sonnet 4.6 for discovery and refinement, and Haiku 4.5 for fast utility phases like triage, sufficiency, and theme analysis.';
+}
+
 function isLatestAlias(modelId: string) {
   return modelId.trim().toLowerCase().startsWith('latest');
 }
@@ -274,16 +376,16 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [provider, setProvider] = useState<LlmProvider>('anthropic');
   const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-6');
   const [arModel, setArModel] = useState('claude-opus-4-6');
-  const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-5-20250929');
+  const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-6');
   const [evaluateModel, setEvaluateModel] = useState('claude-haiku-4-5-20251001');
   const [triageModel, setTriageModel] = useState('claude-haiku-4-5-20251001');
-  const [refineModel, setRefineModel] = useState('claude-sonnet-4-5-20250929');
+  const [refineModel, setRefineModel] = useState('claude-sonnet-4-6');
   const [themeModel, setThemeModel] = useState('claude-haiku-4-5-20251001');
 
   const [advancedModelMode, setAdvancedModelMode] = useState(false);
   const [qualityModel, setQualityModel] = useState('claude-opus-4-6');
   const [speedModel, setSpeedModel] = useState('claude-haiku-4-5-20251001');
-  const [refinementModel, setRefinementModel] = useState('claude-sonnet-4-5-20250929');
+  const [refinementModel, setRefinementModel] = useState('claude-sonnet-4-6');
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
@@ -327,7 +429,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [defaultProjectKey, setDefaultProjectKey] = useState('');
   const [domainContext, setDomainContext] = useState('');
   const [roleGuidanceRows, setRoleGuidanceRows] = useState<RoleGuidanceRow[]>([{ role: '', activities: '' }]);
-  const [tier, setTier] = useState<'free' | 'standard' | 'premium' | 'enterprise'>('free');
+  const [tier, setTier] = useState<'free' | 'standard' | 'premium' | 'enterprise'>('standard');
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
   const [piiMaskingEnabled, setPiiMaskingEnabled] = useState(false);
@@ -488,7 +590,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         const triage = gc.triageModel || 'claude-haiku-4-5-20251001';
         const evaluate = gc.evaluateModel || 'claude-haiku-4-5-20251001';
         const theme = gc.themeModel || 'claude-haiku-4-5-20251001';
-        const refine = gc.refineModel || 'claude-sonnet-4-5-20250929';
+        const refine = gc.refineModel || 'claude-sonnet-4-6';
         const qualityUniform = decomp === ar;
         const speedUniform = clarify === triage && clarify === evaluate && clarify === theme;
         if (qualityUniform && speedUniform) {
@@ -870,18 +972,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (!decompositionModel.startsWith('gemini-') || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gemini-2.5-pro');
       if (!arModel.startsWith('gemini-') || isLatestAlias(arModel)) setArModel(proModel || 'gemini-2.5-pro');
       if (!clarifyModel.startsWith('gemini-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gemini-2.5-flash');
-      if (!evaluateModel.startsWith('gemini-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash');
-      if (!triageModel.startsWith('gemini-') || isLatestAlias(triageModel)) setTriageModel(liteModel || flashModel || 'gemini-2.5-flash');
+      if (!evaluateModel.startsWith('gemini-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
+      if (!triageModel.startsWith('gemini-') || isLatestAlias(triageModel)) setTriageModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
       if (!refineModel.startsWith('gemini-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gemini-2.5-flash');
-      if (!themeModel.startsWith('gemini-') || isLatestAlias(themeModel)) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash');
+      if (!themeModel.startsWith('gemini-') || isLatestAlias(themeModel)) setThemeModel(liteModel || flashModel || 'gemini-2.5-flash-lite');
     } else if (provider === 'openai') {
-      if ((!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o')) || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gpt-4o');
-      if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o')) || isLatestAlias(arModel)) setArModel(proModel || 'gpt-4o');
-      if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o')) || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gpt-4o');
-      if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o')) || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'gpt-4o-mini');
-      if ((!triageModel.startsWith('gpt-') && !triageModel.startsWith('o')) || isLatestAlias(triageModel)) setTriageModel(liteModel || 'gpt-4o-mini');
-      if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o')) || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gpt-4o');
-      if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o')) || isLatestAlias(themeModel)) setThemeModel(liteModel || 'gpt-4o-mini');
+      if ((!decompositionModel.startsWith('gpt-') && !decompositionModel.startsWith('o')) || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'gpt-5.4');
+      if ((!arModel.startsWith('gpt-') && !arModel.startsWith('o')) || isLatestAlias(arModel)) setArModel(proModel || 'gpt-5.4');
+      if ((!clarifyModel.startsWith('gpt-') && !clarifyModel.startsWith('o')) || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'gpt-4.1');
+      if ((!evaluateModel.startsWith('gpt-') && !evaluateModel.startsWith('o')) || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'gpt-5.4-mini');
+      if ((!triageModel.startsWith('gpt-') && !triageModel.startsWith('o')) || isLatestAlias(triageModel)) setTriageModel(liteModel || 'gpt-5.4-mini');
+      if ((!refineModel.startsWith('gpt-') && !refineModel.startsWith('o')) || isLatestAlias(refineModel)) setRefineModel(flashModel || 'gpt-4.1');
+      if ((!themeModel.startsWith('gpt-') && !themeModel.startsWith('o')) || isLatestAlias(themeModel)) setThemeModel(liteModel || 'gpt-5.4-mini');
     } else if (provider === 'azure_openai') {
       const shouldResetAzureModel = (modelId: string) =>
         !modelId.trim()
@@ -900,10 +1002,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     } else {
       if (!decompositionModel.startsWith('claude-') || isLatestAlias(decompositionModel)) setDecompositionModel(proModel || 'claude-opus-4-6');
       if (!arModel.startsWith('claude-') || isLatestAlias(arModel)) setArModel(proModel || 'claude-opus-4-6');
-      if (!clarifyModel.startsWith('claude-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'claude-sonnet-4-5-20250929');
+      if (!clarifyModel.startsWith('claude-') || isLatestAlias(clarifyModel)) setClarifyModel(flashModel || 'claude-sonnet-4-6');
       if (!evaluateModel.startsWith('claude-') || isLatestAlias(evaluateModel)) setEvaluateModel(liteModel || 'claude-haiku-4-5-20251001');
       if (!triageModel.startsWith('claude-') || isLatestAlias(triageModel)) setTriageModel(liteModel || 'claude-haiku-4-5-20251001');
-      if (!refineModel.startsWith('claude-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'claude-sonnet-4-5-20250929');
+      if (!refineModel.startsWith('claude-') || isLatestAlias(refineModel)) setRefineModel(flashModel || 'claude-sonnet-4-6');
       if (!themeModel.startsWith('claude-') || isLatestAlias(themeModel)) setThemeModel(liteModel || 'claude-haiku-4-5-20251001');
     }
   }, [provider, modelCatalogs, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
@@ -1016,6 +1118,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     return options;
   }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel]);
 
+  const recommendedModels = useMemo(
+    () => getRecommendedModelSet(provider, currentCatalogEntries),
+    [provider, currentCatalogEntries],
+  );
+
   const showComplianceTab = true;
   const settingsNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
@@ -1033,7 +1140,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         ? 'Uploading document'
         : 'Indexing for retrieval'
     : null;
-  const canEditBranding = Boolean(isAdmin && tier === 'enterprise');
+  const canEditBranding = Boolean(isAdmin && (tier === 'premium' || tier === 'enterprise'));
 
   return (
     <div className="flex-1 flex flex-col h-full bg-transparent relative overflow-hidden font-sans">
@@ -1198,6 +1305,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
+                  <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Recommendation</div>
+                    <div className="mt-1.5 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
+                      {recommendationBlurbForProvider(provider)}
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Model assignments</span>
                     <button
@@ -1211,13 +1325,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   {advancedModelMode ? (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
                       {[
-                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: 'Round 1 discovery and follow-ups' },
-                        { label: 'Sufficiency Check', val: evaluateModel, set: (v: string) => { setEvaluateModel(v); setThemeModel(v); }, sub: 'Gate before generation continues' },
-                        { label: 'Triage', val: triageModel, set: setTriageModel, sub: 'Scope, complexity, and routing' },
-                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel, sub: 'Draft feature structure' },
-                        { label: 'Acceptance Requirements', val: arModel, set: setArModel, sub: 'Write Given / When / Then' },
-                        { label: 'Theme Analysis & Titles', val: themeModel, set: setThemeModel, sub: 'Cluster themes and title features' },
-                        { label: 'Refinement', val: refineModel, set: setRefineModel, sub: 'Interactive edits on a single feature' },
+                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: `Round 1 discovery and follow-ups · Recommended: ${recommendedModels.advanced.clarify}` },
+                        { label: 'Sufficiency Check', val: evaluateModel, set: (v: string) => { setEvaluateModel(v); setThemeModel(v); }, sub: `Gate before generation continues · Recommended: ${recommendedModels.advanced.evaluate}` },
+                        { label: 'Triage', val: triageModel, set: setTriageModel, sub: `Scope, complexity, and routing · Recommended: ${recommendedModels.advanced.triage}` },
+                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel, sub: `Draft feature structure · Recommended: ${recommendedModels.advanced.decomposition}` },
+                        { label: 'Acceptance Requirements', val: arModel, set: setArModel, sub: `Write Given / When / Then · Recommended: ${recommendedModels.advanced.acceptanceRequirements}` },
+                        { label: 'Theme Analysis & Titles', val: themeModel, set: setThemeModel, sub: `Cluster themes and title features · Recommended: ${recommendedModels.advanced.theme}` },
+                        { label: 'Refinement', val: refineModel, set: setRefineModel, sub: `Interactive edits on a single feature · Recommended: ${recommendedModels.advanced.refine}` },
                       ].map((item, i) => (
                         <div key={i} className="flex items-center justify-between gap-4 py-2.5">
                           <div>
@@ -1236,9 +1350,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   ) : (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
                       {[
-                        { label: 'Discovery', sub: 'Clarifying questions, sufficiency check, triage', val: speedModel, set: setSpeedModel },
-                        { label: 'Generation', sub: 'Feature breakdown, AR writing, theme analysis', val: qualityModel, set: setQualityModel },
-                        { label: 'Refinement', sub: 'Interactive iteration on existing features', val: refinementModel, set: setRefinementModel },
+                        { label: 'Discovery', sub: `Clarifying questions, sufficiency check, triage · Recommended: ${recommendedModels.simple.discovery}`, val: speedModel, set: setSpeedModel },
+                        { label: 'Generation', sub: `Feature breakdown, AR writing, theme analysis · Recommended: ${recommendedModels.simple.generation}`, val: qualityModel, set: setQualityModel },
+                        { label: 'Refinement', sub: `Interactive iteration on existing features · Recommended: ${recommendedModels.simple.refinement}`, val: refinementModel, set: setRefinementModel },
                       ].map((item, i) => (
                         <div key={i} className="flex items-center justify-between gap-4 py-2.5">
                           <div>
@@ -1616,8 +1730,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               >
                 <div className="rf-card p-4 flex items-center justify-between gap-6">
                   <div>
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Current plan</div>
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Launch plan</div>
                     <div className="text-xl font-black text-[var(--rf-brand)] capitalize mt-0.5">{tier}</div>
+                    <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-1">Refinely is launching with a single paid Standard tier and a 30-day Marketplace trial.</div>
                   </div>
                   <div className="flex-1 max-w-xs space-y-1.5">
                     <div className="flex justify-between text-[13px] font-semibold text-[var(--rf-text-secondary)]">
@@ -1633,6 +1748,20 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div className="rf-card p-4 flex items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Need more headroom?</div>
+                    <div className="text-sm font-semibold text-[var(--rf-text)]">Larger teams can contact support for higher limits and early access to advanced packaging.</div>
+                    <div className="text-[12px] text-[var(--rf-text-tertiary)]">We are keeping the launch offer simple, then expanding into larger-organization controls based on customer demand.</div>
+                  </div>
+                  <a
+                    href="mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry"
+                    className="shrink-0 inline-flex items-center justify-center rounded-lg border border-[var(--rf-text)] bg-[var(--rf-text)] px-3 py-2 text-[12px] font-bold text-white transition hover:bg-black"
+                  >
+                    Contact support
+                  </a>
                 </div>
 
                 <div className="rf-card p-4 space-y-4">
@@ -1677,14 +1806,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    { key: 'free', name: 'Free', price: 'Try it out', highlights: ['Core generation', 'Limited volume', 'Basic setup'] },
-                    { key: 'standard', name: 'Standard', price: 'Growing teams', highlights: ['Higher volume', 'Backlog context', 'Project controls'] },
-                    { key: 'premium', name: 'Premium', price: 'Advanced workflows', highlights: ['Unlimited gens', 'Full automation', 'Enterprise fit'] },
-                    { key: 'enterprise', name: 'Enterprise', price: 'Regulated', highlights: ['Compliance Pack', 'PII masking', 'Audit trail'] },
+                    { key: 'standard', name: 'Standard', price: 'Marketplace launch tier', highlights: ['Full core workflow', 'Shared workspace setup', 'Moderate usage limits'], cta: 'Included in trial', href: 'https://marketplace.atlassian.com' },
+                    { key: 'advanced', name: 'Advanced', price: 'Later / contact us', highlights: ['Higher limits', 'Larger-team controls', 'Priority roadmap input'], cta: 'Talk to support', href: 'mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry' },
                   ].map(plan => {
-                    const isCurrent = tier === plan.key;
+                    const isCurrent = plan.key === 'standard' && tier === 'standard';
                     return (
                       <div key={plan.key} className={`rounded-xl border bg-white p-4 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-[var(--rf-brand)] shadow-sm shadow-[var(--rf-brand)]/10' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}>
                         <div className="mb-3">
@@ -1703,7 +1830,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           ))}
                         </ul>
                         <a
-                          href="https://marketplace.atlassian.com"
+                          href={plan.href}
                           target="_blank"
                           rel="noopener noreferrer"
                           className={`mt-auto inline-flex w-full items-center justify-center rounded-lg border px-2 py-1.5 text-[12px] font-bold transition ${
@@ -1712,7 +1839,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                               : 'border-[var(--rf-text)] bg-[var(--rf-text)] text-white hover:bg-black'
                           }`}
                         >
-                          {isCurrent ? 'Manage' : 'Upgrade'}
+                          {isCurrent ? 'Manage' : plan.cta}
                         </a>
                       </div>
                     );

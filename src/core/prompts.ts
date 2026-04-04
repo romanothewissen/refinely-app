@@ -493,6 +493,14 @@ export function buildRefineSystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 YOUR JOB: Given existing features and user feedback, refine the feature set and write complete acceptance requirements.
 
+PRESERVATION AND STRUCTURE RULES:
+- Return the COMPLETE final feature set after applying the feedback, not just the changed fragments
+- Every returned feature must be fully written out with a complete description and complete acceptance_requirements
+- If the feedback implies consolidating, splitting, adding, or removing features, do that explicitly in the returned final feature set
+- Do not silently drop still-relevant business rules, edge cases, or outcomes from the existing features during consolidation
+- Preserve unchanged business meaning and coverage unless the feedback explicitly narrows or removes it
+- Never output partial AR text, truncated THEN statements, or placeholder rewrites
+
 FEATURE RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
