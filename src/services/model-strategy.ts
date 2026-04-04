@@ -108,7 +108,8 @@ export interface ResolvedGeneratorStrategyState {
 }
 
 function normalizeCatalogEntries(catalog?: LlmVendorModelCatalog): LlmModelCatalogEntry[] {
-  return Array.isArray(catalog?.models) ? catalog.models : [];
+  const models = catalog?.models;
+  return Array.isArray(models) ? models : [];
 }
 
 function normalizeProvider(provider?: LlmProvider): LlmProvider {
