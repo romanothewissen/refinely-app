@@ -1,0 +1,186 @@
+import type {
+  ConcreteModelFamily,
+  GeneratorBucketClasses,
+  GeneratorConfig,
+  GeneratorModelStrategy,
+  LlmModelCatalogByVendor,
+  LlmModelCatalogEntry,
+  LlmProvider,
+} from './types';
+import strategyCatalog from './modelStrategyCatalog.json';
+
+export type GeneratorBucketKey = keyof GeneratorBucketClasses;
+export type GeneratorRoleModelField =
+  | 'decompositionModel'
+  | 'arModel'
+  | 'clarifyModel'
+  | 'refineModel'
+  | 'evaluateModel'
+  | 'triageModel'
+  | 'themeModel';
+
+type StrategyCatalogData = typeof strategyCatalog;
+type StrategyCatalogProvider = keyof StrategyCatalogData['providers'];
+
+export type SimpleBucketModels = Record<GeneratorBucketKey, string>;
+
+export const MODEL_STRATEGY_VERSION = strategyCatalog.version;
+export const DEFAULT_BUCKET_CLASSES: GeneratorBucketClasses = {
+  discovery: 'flash',
+  generation: 'pro',
+  refinement: 'flash',
+};
+
+export const SIMPLE_BUCKET_LABELS: Record<GeneratorBucketKey, string> = {
+  discovery: 'Discovery',
+  generation: 'Generation',
+  refinement: 'Refinement',
+};
+
+export const SIMPLE_BUCKET_DESCRIPTIONS: Record<GeneratorBucketKey, string> = {
+  discovery: 'Clarifying questions, sufficiency checks, triage, and themes',
+  generation: 'Feature breakdown and acceptance requirements',
+  refinement: 'Interactive edits on existing features',
+};
+
+function getPresetProvider(provider: LlmProvider): StrategyCatalogProvider {
+  if (provider === 'forge_llms') return 'anthropic';
+  return provider;
+}
+
+function getProviderCatalogData(provider: LlmProvider) {
+  return strategyCatalog.providers[getPresetProvider(provider)];
+}
+
+const DEFAULT_MODELS: Record<GeneratorRoleModelField, string> = {
+  decompositionModel: getProviderCatalogData('anthropic').presets.stable.pro[0],
+  arModel: getProviderCatalogData('anthropic').presets.stable.pro[0],
+  clarifyModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  refineModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  evaluateModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  triageModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+  themeModel: getProviderCatalogData('anthropic').presets.stable.flash[0],
+};
+
+export interface UiGeneratorStrategyState {
+  provider: LlmProvider;
+  modelStrategy: 'simple' | 'advanced';
+  bucketClasses: GeneratorBucketClasses;
+  resolvedModels: Record<GeneratorRoleModelField, string>;
+  resolvedBucketModels: SimpleBucketModels;
+  inferredFromLegacyModels: boolean;
+  matchedPreset: boolean;
+}
+
+function normalizeProvider(provider?: LlmProvider): LlmProvider {
+  if (!provider || provider === 'forge_llms') return 'anthropic';
+  return provider;
+}
+
+function normalizeBucketClasses(value?: Partial<GeneratorBucketClasses>): GeneratorBucketClasses {
+  return {
+    discovery: value?.discovery ?? DEFAULT_BUCKET_CLASSES.discovery,
+    generation: value?.generation ?? DEFAULT_BUCKET_CLASSES.generation,
+    refinement: value?.refinement ?? DEFAULT_BUCKET_CLASSES.refinement,
+  };
+}
+
+function normalizeStrategy(value?: string): 'simple' | 'advanced' {
+  if (value === 'advanced' || value === 'custom') return 'advanced';
+  return 'simple';
+}
+
+function getSavedModels(config?: Partial<GeneratorConfig>): Record<GeneratorRoleModelField, string> {
+  return {
+    decompositionModel: config?.decompositionModel || DEFAULT_MODELS.decompositionModel,
+    arModel: config?.arModel || DEFAULT_MODELS.arModel,
+    clarifyModel: config?.clarifyModel || DEFAULT_MODELS.clarifyModel,
+    refineModel: config?.refineModel || DEFAULT_MODELS.refineModel,
+    evaluateModel: config?.evaluateModel || DEFAULT_MODELS.evaluateModel,
+    triageModel: config?.triageModel || DEFAULT_MODELS.triageModel,
+    themeModel: config?.themeModel || DEFAULT_MODELS.themeModel,
+  };
+}
+
+function buildResolvedModelsFromBuckets(bucketModels: SimpleBucketModels): Record<GeneratorRoleModelField, string> {
+  return {
+    clarifyModel: bucketModels.discovery,
+    evaluateModel: bucketModels.discovery,
+    triageModel: bucketModels.discovery,
+    themeModel: bucketModels.discovery,
+    decompositionModel: bucketModels.generation,
+    arModel: bucketModels.generation,
+    refineModel: bucketModels.refinement,
+  };
+}
+
+function getBucketModelsFromSavedModels(savedModels: Record<GeneratorRoleModelField, string>): SimpleBucketModels {
+  return {
+    discovery: savedModels.clarifyModel,
+    generation: savedModels.decompositionModel,
+    refinement: savedModels.refineModel,
+  };
+}
+
+export function inferModelFamily(modelId: string): ConcreteModelFamily | undefined {
+  const normalized = modelId.trim().toLowerCase();
+  if (normalized.includes('flash')) return 'flash';
+  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4') || normalized.includes('sonnet')) return normalized.includes('mini') ? 'lite' : 'flash';
+  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano') || normalized.includes('haiku')) return 'lite';
+  if (normalized.includes('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
+  return undefined;
+}
+
+export function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
+  return getProviderCatalogData(provider).catalog.map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    family: model.family as ConcreteModelFamily | undefined,
+    source: 'fallback' as const,
+  }));
+}
+
+export function getCatalogEntriesForProvider(
+  provider: LlmProvider,
+  modelCatalogs: LlmModelCatalogByVendor,
+): { entries: LlmModelCatalogEntry[]; allowCatalogResolution: boolean } {
+  const normalizedProvider = normalizeProvider(provider);
+  const catalog = normalizedProvider === 'anthropic'
+    ? modelCatalogs.anthropic ?? modelCatalogs.forge_llms
+    : modelCatalogs[normalizedProvider];
+  if (catalog?.models?.length) {
+    return {
+      entries: catalog.models,
+      allowCatalogResolution: catalog.source === 'discovered' || catalog.source === 'manual',
+    };
+  }
+  return { entries: buildStaticCatalog(normalizedProvider), allowCatalogResolution: false };
+}
+
+export function resolveUiGeneratorStrategyState(opts: {
+  config?: Partial<GeneratorConfig>;
+  provider?: LlmProvider;
+  modelStrategy?: GeneratorModelStrategy;
+  bucketModels?: Partial<SimpleBucketModels>;
+}): UiGeneratorStrategyState {
+  const provider = normalizeProvider(opts.provider ?? opts.config?.provider);
+  const savedModels = getSavedModels(opts.config);
+  const modelStrategy = normalizeStrategy(opts.modelStrategy ?? opts.config?.modelStrategy);
+  const bucketClasses = normalizeBucketClasses(opts.config?.bucketClasses);
+  const fallbackBuckets = getBucketModelsFromSavedModels(savedModels);
+  const resolvedBucketModels: SimpleBucketModels = {
+    discovery: opts.bucketModels?.discovery ?? fallbackBuckets.discovery,
+    generation: opts.bucketModels?.generation ?? fallbackBuckets.generation,
+    refinement: opts.bucketModels?.refinement ?? fallbackBuckets.refinement,
+  };
+
+  return {
+    provider,
+    modelStrategy,
+    bucketClasses,
+    resolvedBucketModels,
+    resolvedModels: modelStrategy === 'advanced' ? savedModels : buildResolvedModelsFromBuckets(resolvedBucketModels),
+    inferredFromLegacyModels: Boolean(opts.config?.modelStrategy && ['stable', 'latest', 'custom'].includes(String(opts.config.modelStrategy))),
+    matchedPreset: false,
+  };
+}

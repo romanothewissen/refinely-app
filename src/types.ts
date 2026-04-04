@@ -26,7 +26,7 @@ export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'az
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
-export type GeneratorModelStrategy = 'stable' | 'latest' | 'custom';
+export type GeneratorModelStrategy = 'simple' | 'advanced' | 'stable' | 'latest' | 'custom';
 export type GeneratorBucketClass = 'pro' | 'flash' | 'lite';
 
 export interface GeneratorBucketClasses {
@@ -158,7 +158,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
   goldSources: [],
   generatorConfig: {
     provider: 'anthropic',
-    modelStrategy: 'stable',
+    modelStrategy: 'simple',
     bucketClasses: {
       discovery: 'flash',
       generation: 'pro',

@@ -7,7 +7,6 @@ import {
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 import type {
-  GeneratorBucketClasses,
   GeneratorModelStrategy,
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
@@ -17,11 +16,13 @@ import type {
 import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
 import {
-  BUCKET_CLASS_LABELS,
   DEFAULT_BUCKET_CLASSES,
   getCatalogEntriesForProvider,
   MODEL_STRATEGY_VERSION,
   resolveUiGeneratorStrategyState,
+  SIMPLE_BUCKET_DESCRIPTIONS,
+  SIMPLE_BUCKET_LABELS,
+  type SimpleBucketModels,
 } from './modelStrategy';
 interface JiraProject { key: string; name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
@@ -132,9 +133,7 @@ const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 type UiProvider = Exclude<LlmProvider, 'forge_llms'>;
 const DEFAULT_STRATEGY_STATE = resolveUiGeneratorStrategyState({
   provider: 'anthropic',
-  modelStrategy: 'stable',
-  bucketClasses: DEFAULT_BUCKET_CLASSES,
-  hasStoredStrategy: true,
+  modelStrategy: 'simple',
 });
 
 function getDisplayProvider(provider: LlmProvider): UiProvider {
@@ -260,8 +259,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // Models State
   const [provider, setProvider] = useState<LlmProvider>('anthropic');
-  const [modelStrategy, setModelStrategy] = useState<GeneratorModelStrategy>('stable');
-  const [bucketClasses, setBucketClasses] = useState<GeneratorBucketClasses>(DEFAULT_BUCKET_CLASSES);
+  const [modelStrategy, setModelStrategy] = useState<GeneratorModelStrategy>('simple');
+  const [simpleBucketModels, setSimpleBucketModels] = useState<SimpleBucketModels>(DEFAULT_STRATEGY_STATE.resolvedBucketModels);
   const [decompositionModel, setDecompositionModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.decompositionModel);
   const [arModel, setArModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.arModel);
   const [clarifyModel, setClarifyModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.clarifyModel);
@@ -498,24 +497,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             };
           }
           setModelCatalogs(nextCatalogs);
-          const { entries, allowCatalogResolution } = getCatalogEntriesForProvider(loadedProvider, nextCatalogs);
           const strategyState = resolveUiGeneratorStrategyState({
             config: gc,
             provider: loadedProvider,
-            catalogEntries: entries,
-            allowCatalogResolution,
-            hasStoredStrategy: Boolean(gc.modelStrategy),
           });
           setModelStrategy(strategyState.modelStrategy);
-          setBucketClasses(strategyState.bucketClasses);
+          setSimpleBucketModels(strategyState.resolvedBucketModels);
         } else {
           const strategyState = resolveUiGeneratorStrategyState({
             config: gc,
             provider: loadedProvider,
-            hasStoredStrategy: Boolean(gc.modelStrategy),
           });
           setModelStrategy(strategyState.modelStrategy);
-          setBucketClasses(strategyState.bucketClasses);
+          setSimpleBucketModels(strategyState.resolvedBucketModels);
         }
 
         const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
@@ -764,8 +758,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       await api.saveConfig({
         generatorConfig: {
           provider,
-          modelStrategy: provider === 'azure_openai' ? 'custom' : modelStrategy,
-          bucketClasses,
+          modelStrategy: strategyState.modelStrategy,
+          bucketClasses: DEFAULT_BUCKET_CLASSES,
           modelStrategyVersion: MODEL_STRATEGY_VERSION,
           decompositionModel: generatorModels.decompositionModel,
           arModel: generatorModels.arModel,
@@ -911,7 +905,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     }
   }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, modelCatalogs, refreshModelCatalog]);
 
-  const { entries: catalogEntries, allowCatalogResolution } = useMemo(
+  const { entries: catalogEntries } = useMemo(
     () => getCatalogEntriesForProvider(provider, modelCatalogs),
     [provider, modelCatalogs],
   );
@@ -932,7 +926,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     config: {
       provider,
       modelStrategy,
-      bucketClasses,
       modelStrategyVersion: MODEL_STRATEGY_VERSION,
       decompositionModel,
       arModel,
@@ -945,16 +938,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     },
     provider,
     modelStrategy,
-    bucketClasses,
-    catalogEntries: currentCatalogEntries,
-    allowCatalogResolution,
-    hasStoredStrategy: true,
+    bucketModels: simpleBucketModels,
   }), [
     provider,
     modelStrategy,
-    bucketClasses,
-    currentCatalogEntries,
-    allowCatalogResolution,
+    simpleBucketModels,
     decompositionModel,
     arModel,
     clarifyModel,
@@ -965,13 +953,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   ]);
 
   useEffect(() => {
-    if (provider === 'azure_openai' && modelStrategy !== 'custom') {
-      setModelStrategy('custom');
-    }
-  }, [provider, modelStrategy]);
-
-  useEffect(() => {
-    if (modelStrategy !== 'custom') return;
+    if (strategyState.modelStrategy !== 'advanced') return;
     const proModel = getPreferredFamilyModel(currentCatalogEntries, 'pro');
     const flashModel = getPreferredFamilyModel(currentCatalogEntries, 'flash');
     const liteModel = getPreferredFamilyModel(currentCatalogEntries, 'lite');
@@ -1000,7 +982,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (!isProviderModel(provider, refineModel) && flashModel) setRefineModel(flashModel);
       if (!isProviderModel(provider, themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     }
-  }, [provider, modelStrategy, currentCatalogEntries, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
+  }, [provider, strategyState.modelStrategy, currentCatalogEntries, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
 
   const availableModels = useMemo(() => {
     const options: Array<{ id: string; label: string }> = [];
@@ -1219,21 +1201,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Strategy</div>
                     <div className="mt-1.5 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                      Stable stays on curated proven models. Latest upgrades to the newest approved family where the provider catalog confirms it. Custom gives you exact per-role control.
+                      Simple keeps setup lightweight with one model for each workflow bucket. Advanced exposes all 7 internal model roles when a team wants full control.
                     </div>
                   </div>
 
                   <div className="space-y-2">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Mode</div>
                     <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
-                      {(['stable', 'latest', 'custom'] as const).map((nextStrategy) => {
-                        const disabled = provider === 'azure_openai' && nextStrategy !== 'custom';
+                      {(['simple', 'advanced'] as const).map((nextStrategy) => {
                         return (
                           <button
                             key={nextStrategy}
-                            disabled={disabled}
                             onClick={() => {
-                              if (nextStrategy === 'custom' && modelStrategy !== 'custom') {
+                              if (nextStrategy === 'advanced' && strategyState.modelStrategy !== 'advanced') {
                                 setDecompositionModel(strategyState.resolvedModels.decompositionModel);
                                 setArModel(strategyState.resolvedModels.arModel);
                                 setClarifyModel(strategyState.resolvedModels.clarifyModel);
@@ -1242,27 +1222,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                 setRefineModel(strategyState.resolvedModels.refineModel);
                                 setThemeModel(strategyState.resolvedModels.themeModel);
                               }
+                              if (nextStrategy === 'simple' && strategyState.modelStrategy !== 'simple') {
+                                setSimpleBucketModels(strategyState.resolvedBucketModels);
+                              }
                               setModelStrategy(nextStrategy);
                             }}
                             className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${
-                              modelStrategy === nextStrategy
+                              strategyState.modelStrategy === nextStrategy
                                 ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
                                 : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
-                            } disabled:opacity-40`}
+                            }`}
                           >
                             {nextStrategy}
                           </button>
                         );
                       })}
                     </div>
-                    {provider === 'azure_openai' && (
-                      <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                        Azure OpenAI remains custom-only for now because deployment names differ per tenant.
-                      </div>
-                    )}
                   </div>
 
-                  {modelStrategy === 'custom' ? (
+                  {strategyState.modelStrategy === 'advanced' ? (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
                       {[
                         { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: 'Round 1 discovery and follow-ups' },
@@ -1291,26 +1269,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <div className="space-y-4">
                       <div className="divide-y divide-[var(--rf-border-subtle)]">
                         {[
-                          { key: 'discovery' as const, label: 'Discovery', sub: 'Clarifying questions, sufficiency checks, triage, and themes', resolved: strategyState.resolvedBucketModels.discovery },
-                          { key: 'generation' as const, label: 'Generation', sub: 'Feature breakdown and acceptance requirements', resolved: strategyState.resolvedBucketModels.generation },
-                          { key: 'refinement' as const, label: 'Refinement', sub: 'Interactive edits on existing features', resolved: strategyState.resolvedBucketModels.refinement },
+                          { key: 'discovery' as const, label: SIMPLE_BUCKET_LABELS.discovery, sub: SIMPLE_BUCKET_DESCRIPTIONS.discovery, resolved: strategyState.resolvedBucketModels.discovery },
+                          { key: 'generation' as const, label: SIMPLE_BUCKET_LABELS.generation, sub: SIMPLE_BUCKET_DESCRIPTIONS.generation, resolved: strategyState.resolvedBucketModels.generation },
+                          { key: 'refinement' as const, label: SIMPLE_BUCKET_LABELS.refinement, sub: SIMPLE_BUCKET_DESCRIPTIONS.refinement, resolved: strategyState.resolvedBucketModels.refinement },
                         ].map((item) => (
                           <div key={item.key} className="flex items-center justify-between gap-4 py-2.5">
                             <div>
                               <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
                               <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
-                              <div className="text-[12px] text-[var(--rf-brand)] mt-1 font-semibold">{item.resolved}</div>
+                              <div className="text-[12px] text-[var(--rf-brand)] mt-1 font-semibold">{item.resolved || 'No model selected'}</div>
                             </div>
                             <div className="relative w-[220px] shrink-0">
                               <select
-                                value={bucketClasses[item.key]}
-                                disabled={!isAdmin || provider === 'azure_openai'}
-                                onChange={e => setBucketClasses(prev => ({ ...prev, [item.key]: e.target.value as 'pro' | 'flash' | 'lite' }))}
+                                value={simpleBucketModels[item.key]}
+                                disabled={!isAdmin || availableModels.length === 0}
+                                onChange={e => setSimpleBucketModels(prev => ({ ...prev, [item.key]: e.target.value }))}
                                 className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60"
                               >
-                                {(['pro', 'flash', 'lite'] as const).map((family) => (
-                                  <option key={family} value={family}>{BUCKET_CLASS_LABELS[family]}</option>
-                                ))}
+                                {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                               </select>
                               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
                             </div>
