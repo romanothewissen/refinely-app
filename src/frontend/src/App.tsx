@@ -143,6 +143,28 @@ function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
   return total;
 }
 
+function getLatestFeatureBearingTurn(conversation: any): any | null {
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    if (Array.isArray(turn?.features) && turn.features.length > 0) {
+      return turn;
+    }
+  }
+  return turns[turns.length - 1] ?? null;
+}
+
+function getLatestRequirementText(conversation: any): string {
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const requirement = turns[i]?.requirement;
+    if (typeof requirement === 'string' && requirement.trim()) {
+      return requirement;
+    }
+  }
+  return '';
+}
+
 function buildDiscoveryInputSignature(params: {
   requirement: string;
   projectKey: string;
@@ -458,7 +480,7 @@ export default function App() {
       if (cancelled) return;
 
       if (res?.success && res.conversation?.turns?.length > 0) {
-        const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
+        const lastTurn = getLatestFeatureBearingTurn(res.conversation);
         const restoredSignature = buildConversationInputSignature(res.conversation, {
           projectKey,
           contextMode,
@@ -508,6 +530,7 @@ export default function App() {
       const res = await api.getUsage() as any;
       if (res?.usage) setUsage(res.usage);
       if (res?.limits) setLimits(res.limits);
+      if (res?.tier) setTier(res.tier);
     } catch {}
   };
 
@@ -1050,10 +1073,10 @@ export default function App() {
           null,
           false,
         );
-        const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
+        const lastTurn = getLatestFeatureBearingTurn(res.conversation);
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
-          setRequirement(lastTurn.requirement ?? '');
+          setRequirement(getLatestRequirementText(res.conversation));
           setGenerationContext(lastTurn.generationContext ?? null);
           setClarifyContext(lastTurn.clarifyContext ?? null);
         }
