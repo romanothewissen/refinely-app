@@ -64,7 +64,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
         <div className="flex justify-between items-end">
           <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
           <span className="text-sm font-bold text-[var(--rf-brand)] tracking-tight">
-            {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '\u221e' : max}</span>
+            {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '∞' : max}</span>
           </span>
         </div>
         {!isUnlimited && (

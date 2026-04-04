@@ -33,6 +33,8 @@ export interface LlmCallOptions {
   /** Controls model reasoning depth. Maps to vendor-specific thinking/reasoning APIs. */
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   provider?: LlmProvider;
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -141,6 +143,10 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
 
   if (opts.provider === 'gemini') {
     const result = await callGemini({ ...effectiveOpts, model: resolvedModel });
+    return { ...result, piiMasking };
+  }
+  if (opts.provider === 'anthropic') {
+    const result = await callAnthropic({ ...effectiveOpts, model: resolvedModel });
     return { ...result, piiMasking };
   }
   if (opts.provider === 'openai') {
@@ -305,10 +311,16 @@ function buildCatalog(
 
 export function getFallbackModelCatalog(provider: LlmProvider): LlmVendorModelCatalog {
   if (provider === 'forge_llms') {
+    return buildCatalog(provider, [], 'fallback');
+  }
+  if (provider === 'anthropic') {
     return buildCatalog(provider, [
-      { id: 'claude-opus-4-6', displayName: 'Claude Opus', family: 'pro' },
-      { id: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet', family: 'flash' },
-      { id: 'claude-haiku-4-5-20251001', displayName: 'Claude Haiku', family: 'lite' },
+      { id: 'claude-opus-4-1-20250805', displayName: 'Claude Opus 4.1', family: 'pro' },
+      { id: 'claude-opus-4-20250514', displayName: 'Claude Opus 4', family: 'pro' },
+      { id: 'claude-sonnet-4-20250514', displayName: 'Claude Sonnet 4', family: 'flash' },
+      { id: 'claude-3-7-sonnet-20250219', displayName: 'Claude Sonnet 3.7', family: 'flash' },
+      { id: 'claude-3-5-haiku-20241022', displayName: 'Claude Haiku 3.5', family: 'lite' },
+      { id: 'claude-3-haiku-20240307', displayName: 'Claude Haiku 3', family: 'lite' },
     ], 'fallback');
   }
   if (provider === 'gemini') {
@@ -336,6 +348,19 @@ function isChatCapableOpenAiModel(id: string): boolean {
   return false;
 }
 
+function isTextCapableGeminiModel(id: string): boolean {
+  const normalized = id.toLowerCase();
+  return normalized.startsWith('gemini-')
+    && !normalized.includes('image')
+    && !normalized.includes('vision')
+    && !normalized.includes('video')
+    && !normalized.includes('veo')
+    && !normalized.includes('tts')
+    && !normalized.includes('speech')
+    && !normalized.includes('audio')
+    && !normalized.includes('embedding');
+}
+
 function toDisplayName(modelId: string): string {
   return modelId
     .replace(/^models\//, '')
@@ -345,6 +370,8 @@ function toDisplayName(modelId: string): string {
 
 export async function discoverLlmModelCatalog(opts: {
   provider: LlmProvider;
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -355,6 +382,37 @@ export async function discoverLlmModelCatalog(opts: {
 }): Promise<LlmVendorModelCatalog> {
   if (opts.provider === 'forge_llms') {
     return getFallbackModelCatalog('forge_llms');
+  }
+
+  if (opts.provider === 'anthropic') {
+    const apiKey = (opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? '').trim();
+    if (!apiKey) {
+      return getFallbackModelCatalog('anthropic');
+    }
+    const baseUrl = opts.anthropicBaseUrl ?? process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com/v1';
+    const url = `${baseUrl.replace(/\/+$/, '')}/models`;
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    }, 'Anthropic model discovery');
+    const payload = await res.json() as {
+      data?: Array<{ id?: string; display_name?: string; created_at?: string; type?: string }>;
+    };
+    if (!res.ok) {
+      throw new Error(`Anthropic model discovery failed with status ${res.status}`);
+    }
+    const models = (payload.data ?? [])
+      .filter((model) => model.id)
+      .map((model) => ({
+        id: String(model.id),
+        displayName: model.display_name || toDisplayName(String(model.id)),
+        family: inferModelFamily(String(model.id)) === 'custom' ? undefined : inferModelFamily(String(model.id)),
+        releaseDate: model.created_at,
+        source: 'discovered' as const,
+      }));
+    return models.length ? buildCatalog('anthropic', models, 'discovered') : getFallbackModelCatalog('anthropic');
   }
 
   if (opts.provider === 'gemini') {
@@ -389,7 +447,7 @@ export async function discoverLlmModelCatalog(opts: {
         maxOutputTokens: model.outputTokenLimit,
         source: 'discovered' as const,
       }))
-      .filter((model) => model.id);
+      .filter((model) => model.id && isTextCapableGeminiModel(model.id));
     return models.length ? buildCatalog('gemini', models, 'discovered') : getFallbackModelCatalog('gemini');
   }
 
@@ -558,6 +616,67 @@ async function callGemini(opts: {
   };
 }
 
+async function callAnthropic(opts: {
+  model: string;
+  systemPrompt: string;
+  userMessage: string;
+  maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
+}): Promise<LlmResponse> {
+  const apiKey = (opts.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? '').trim();
+  if (!apiKey) {
+    throw new Error('Anthropic API key is not set.');
+  }
+
+  const baseUrl = opts.anthropicBaseUrl ?? process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com/v1';
+  const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    system: opts.systemPrompt,
+    messages: [
+      { role: 'user', content: opts.userMessage },
+    ],
+    max_tokens: opts.maxTokens ?? 8192,
+  };
+  if (opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+    body.thinking = { type: 'enabled', budget_tokens: geminiThinkingBudget(opts.reasoningEffort) ?? 4096 };
+  }
+
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+  }, 'Anthropic request');
+
+  const rawBody = await res.text();
+  if (!res.ok) {
+    throw new Error(`Anthropic API error: ${rawBody}`);
+  }
+
+  const payload = JSON.parse(rawBody) as {
+    content?: Array<{ type?: string; text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+
+  const text = (payload.content ?? [])
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text ?? '')
+    .join('')
+    .trim();
+
+  return {
+    text,
+    inputTokens: payload.usage?.input_tokens,
+    outputTokens: payload.usage?.output_tokens,
+  };
+}
+
 async function callOpenAI(opts: {
   model: string;
   systemPrompt: string;
@@ -685,6 +804,8 @@ export async function callLlmJson<T>(opts: {
   maxTokens?: number;
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   provider?: LlmProvider;
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -708,6 +829,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
   maxTokens?: number;
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   provider?: LlmProvider;
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;

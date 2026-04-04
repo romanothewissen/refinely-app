@@ -53,6 +53,24 @@ interface RunAttachment {
   charCount: number;
 }
 
+type WorkflowStage =
+  | 'idle'
+  | 'clarify_round_1'
+  | 'sufficiency_check'
+  | 'clarify_round_2'
+  | 'generation'
+  | 'blocked';
+
+function normalizeProjectKeys(projectKeys: string[]): string[] {
+  return [...new Set(projectKeys.map((key) => String(key ?? '').trim()).filter((key) => key && key !== '*'))]
+    .slice(0, 2)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function buildProjectSelectionSignature(projectKeys: string[]): string[] {
+  return normalizeProjectKeys(projectKeys);
+}
+
 /** Recursively extract plain text from an Atlassian Document Format node */
 function extractAdfText(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
@@ -126,12 +144,14 @@ function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
 function buildDiscoveryInputSignature(params: {
   requirement: string;
   projectKey: string;
+  projectKeys?: string[];
   contextMode: 'undecided' | 'project' | 'global';
   attachments: RunAttachment[];
 }): string {
   return JSON.stringify({
     requirement: params.requirement.trim(),
     projectKey: params.projectKey,
+    projectKeys: buildProjectSelectionSignature(params.projectKeys ?? (params.projectKey && params.projectKey !== '*' ? [params.projectKey] : [])),
     contextMode: params.contextMode,
     attachments: params.attachments.map((attachment) => ({
       id: attachment.id,
@@ -173,10 +193,16 @@ function buildConversationInputSignature(
     || lastTurn?.generationContext?.projectKey
     || fallback.projectKey
     || '*';
+  const restoredProjectKeys = normalizeProjectKeys(
+    lastTurn?.clarifyContext?.projectKeys
+      ?? lastTurn?.generationContext?.projectKeys
+      ?? (restoredProjectKey && restoredProjectKey !== '*' ? [restoredProjectKey] : []),
+  );
 
   return buildDiscoveryInputSignature({
     requirement: String(lastTurn.requirement ?? ''),
     projectKey: restoredProjectKey,
+    projectKeys: restoredProjectKeys,
     contextMode: resolveContextModeForSignature(restoredProjectKey, fallback.contextMode),
     attachments: [],
   });
@@ -253,6 +279,7 @@ export default function App() {
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
   const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
+  const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
@@ -291,7 +318,7 @@ export default function App() {
   
   // Issue context (when launched from a Jira issue via issueAction)
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
-  const [projectKey, setProjectKey] = useState<string>('*');
+  const [projectKeys, setProjectKeys] = useState<string[]>([]);
   const [contextMode, setContextMode] = useState<'undecided' | 'project' | 'global'>('undecided');
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
@@ -309,10 +336,17 @@ export default function App() {
     setTimeout(() => { setSidebarOpen(false); setSidebarExiting(false); }, 270);
   };
 
-  const persistSessionPointers = async (nextSessionId: string, issueKeyOverride?: string | null) => {
+  const projectKey = projectKeys[0] ?? '*';
+  const setSelectedProjectKeys = (nextKeys: string[]) => {
+    const normalized = normalizeProjectKeys(nextKeys);
+    setProjectKeys(normalized);
+    setContextMode(normalized.length ? 'project' : 'global');
+  };
+
+  const persistSessionPointers = async (nextSessionId: string, issueKeyOverride?: string | null, bindIssueSession = true) => {
     await Promise.all([
       api.setLastSession(nextSessionId),
-      issueKeyOverride ? api.setIssueSession(issueKeyOverride, nextSessionId) : Promise.resolve(),
+      bindIssueSession && issueKeyOverride ? api.setIssueSession(issueKeyOverride, nextSessionId) : Promise.resolve(),
     ]);
   };
 
@@ -334,7 +368,7 @@ export default function App() {
         (issueKey ? issueKey.split('-')[0] : undefined);
       if (ctxProjectKey) {
         if (!active) return;
-        setProjectKey(ctxProjectKey);
+        setSelectedProjectKeys([ctxProjectKey]);
         setContextMode('project');
       }
 
@@ -371,6 +405,7 @@ export default function App() {
             ? buildDiscoveryInputSignature({
                 requirement: requirementText,
                 projectKey: ctxProjectKey || '*',
+                projectKeys: ctxProjectKey ? [ctxProjectKey] : [],
                 contextMode: fallbackContextMode,
                 attachments: [],
               })
@@ -442,9 +477,8 @@ export default function App() {
       .then((res: any) => {
         const projects = Array.isArray(res?.projects) ? res.projects : [];
         setAvailableProjects(projects);
-        if (projectKey === '*' && projects.length === 1) {
-          setProjectKey(projects[0].key);
-          setContextMode('project');
+        if (projectKeys.length === 0 && projects.length === 1) {
+          setSelectedProjectKeys([projects[0].key]);
         }
       })
       .catch(() => {});
@@ -458,25 +492,34 @@ export default function App() {
       .catch(() => {});
   }, []); // eslint-disable-line
 
-  const loadWiDocs = async (nextProjectKey = projectKey) => {
+  const loadWiDocs = async (nextProjectKeys = projectKeys) => {
     try {
-      const res = await api.listWiDocs(nextProjectKey) as any;
-      setWiDocs(Array.isArray(res?.docs) ? res.docs : []);
+      const keys = normalizeProjectKeys(nextProjectKeys);
+      const targetKeys = keys.length ? keys : ['*'];
+      const results = await Promise.all(targetKeys.map((key) => api.listWiDocs(key) as Promise<any>));
+      const docsById = new Map<string, any>();
+      results.forEach((res: any) => {
+        (Array.isArray(res?.docs) ? res.docs : []).forEach((doc: any) => {
+          docsById.set(doc.docId, doc);
+        });
+      });
+      setWiDocs([...docsById.values()]);
     } catch {}
   };
 
   useEffect(() => {
-    loadWiDocs(projectKey);
-  }, [projectKey]); // eslint-disable-line
+    loadWiDocs(projectKeys);
+  }, [projectKeys]); // eslint-disable-line
 
   const discoveryInputSignature = useMemo(
     () => buildDiscoveryInputSignature({
       requirement,
       projectKey,
+      projectKeys,
       contextMode,
       attachments: runAttachments,
     }),
-    [requirement, projectKey, contextMode, runAttachments],
+    [requirement, projectKey, projectKeys, contextMode, runAttachments],
   );
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
@@ -530,11 +573,13 @@ export default function App() {
       setBrandingLogoUrl(res?.branding?.logoUrl || null);
       // Apply saved default project only when no Forge issue context has set one already
       if (res.defaultProjectKey) {
-        setProjectKey(prev => (prev === '*' ? res.defaultProjectKey : prev));
+        if (projectKeys.length === 0) setSelectedProjectKeys([res.defaultProjectKey]);
         setContextMode(prev => (prev === 'undecided' ? 'project' : prev));
       }
     }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
+    // Initial bootstrap only; later project selection changes are user-driven.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
@@ -565,6 +610,7 @@ export default function App() {
       setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
       setIsWorking(false);
+      setWorkflowStage('idle');
       loadHistory();
       loadUsage();
     },
@@ -573,12 +619,14 @@ export default function App() {
       setGenerationProgressMeta(null);
       setPendingSessionId(null);
       setIsWorking(false);
+      setWorkflowStage('blocked');
     }
     ,
     () => {
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
       setIsWorking(false);
+      setWorkflowStage('idle');
     }
   );
 
@@ -602,6 +650,7 @@ export default function App() {
       setClarifyContext(nextClarifyContext);
       setClarifyRound(1);
       setClarifyAnswers([]);
+      setWorkflowStage('clarify_round_1');
       setIsEvaluatingDiscovery(false);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
@@ -624,20 +673,37 @@ export default function App() {
         },
       );
       setClarifyBlockingError({ message, reasonCode });
+      setWorkflowStage('blocked');
     },
     () => {
       setPendingClarifySessionId(null);
       setIsWorking(false);
+      setWorkflowStage('idle');
     }
   );
 
-  const isCanvasLoading = Boolean(pendingClarifySessionId || pendingSessionId || isClarifying || isGenerating);
-  const loadingPhase: 'clarify' | 'generation' =
-    pendingClarifySessionId || isClarifying ? 'clarify' : 'generation';
-  const loadingTitle = loadingPhase === 'clarify' ? 'Exploring the requirement' : 'Crafting features';
-  const loadingProgress = loadingPhase === 'clarify'
-    ? (clarifyProgress || 'Analyzing requirement and gathering context…')
-    : (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'));
+  const isCanvasLoading = Boolean(
+    pendingClarifySessionId
+    || pendingSessionId
+    || isClarifying
+    || isGenerating
+    || workflowStage === 'sufficiency_check'
+    || workflowStage === 'generation',
+  );
+
+  const loadingTitle = workflowStage === 'sufficiency_check'
+    ? 'Checking discovery sufficiency'
+    : workflowStage === 'generation'
+      ? 'Crafting features'
+      : 'Exploring the requirement';
+
+  const loadingProgress = workflowStage === 'sufficiency_check'
+    ? (clarifyProgress || 'Evaluating whether the first round is enough…')
+    : workflowStage === 'clarify_round_2'
+      ? (clarifyProgress || 'Preparing follow-up discovery questions…')
+      : workflowStage === 'generation'
+        ? (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'))
+        : (clarifyProgress || 'Analyzing requirement and gathering context…');
 
   const applyDiscoveryEvaluationToContext = (
     baseContext: ClarifyContextMeta | null,
@@ -697,11 +763,13 @@ export default function App() {
 
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
+      setWorkflowStage('generation');
       await startGeneration(requirement, mergedAnswers);
       return;
     }
 
     setIsEvaluatingDiscovery(true);
+    setWorkflowStage('sufficiency_check');
     try {
       const evaluation = await api.evaluateSufficiency({
         requirement,
@@ -727,15 +795,18 @@ export default function App() {
         setClarifyQuestions(followupQuestions as ClarifyQuestion[]);
         setClarifyEvaluationError(null);
         setIsWorking(false);
+        setWorkflowStage('clarify_round_2');
         return;
       }
 
       markDiscoveryRoundComplete(1);
+      setWorkflowStage('generation');
       await startGeneration(requirement, mergedAnswers);
     } catch (err) {
       console.error('Discovery sufficiency evaluation failed', err);
       setClarifyEvaluationError('Discovery could not evaluate the current answers. Please retry discovery or skip explicitly if you want to continue without it.');
       setIsWorking(false);
+      setWorkflowStage('clarify_round_1');
     } finally {
       setIsEvaluatingDiscovery(false);
     }
@@ -746,11 +817,13 @@ export default function App() {
     setClarifyEvaluationError(null);
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
+      setWorkflowStage('generation');
       await startGeneration(requirement, clarifyAnswers);
       return;
     }
 
     markDiscoveryRoundComplete(1);
+    setWorkflowStage('generation');
     await startGeneration(requirement, []);
   };
 
@@ -771,6 +844,7 @@ export default function App() {
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
+    setWorkflowStage('idle');
 
     if (clarifyActive) {
       await cancelClarify();
@@ -821,6 +895,7 @@ export default function App() {
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
+    setWorkflowStage('clarify_round_1');
 
     try {
       const clarifySessionId = await resolveDiscoverySessionId();
@@ -829,12 +904,14 @@ export default function App() {
         requirement,
         attachmentText,
         projectKey,
+        projectKeys,
         discoveryInputSignature,
       ) as any;
       if (res.success) {
         setPendingClarifySessionId(clarifySessionId);
       } else {
         setIsWorking(false);
+        setWorkflowStage('blocked');
         setClarifyContext({
           projectKey,
           domainRolesUsed: [],
@@ -848,6 +925,7 @@ export default function App() {
       }
     } catch (err: any) {
       setIsWorking(false);
+      setWorkflowStage('blocked');
       setClarifyContext({
         projectKey,
         domainRolesUsed: [],
@@ -874,6 +952,7 @@ export default function App() {
     setClarifyQuestions([]);
     setClarifyRound(1);
     setClarifyAnswers([]);
+    setWorkflowStage('clarify_round_1');
 
     try {
       const clarifySessionId = await resolveDiscoverySessionId();
@@ -883,11 +962,13 @@ export default function App() {
         requirement,
         attachmentText,
         projectKey,
+        projectKeys,
         discoveryInputSignature,
       ) as any;
       if (!res?.success) {
         setPendingClarifySessionId(null);
         setIsWorking(false);
+        setWorkflowStage('blocked');
         setClarifyContext({
           projectKey,
           domainRolesUsed: [],
@@ -902,6 +983,7 @@ export default function App() {
     } catch (err: any) {
       setPendingClarifySessionId(null);
       setIsWorking(false);
+      setWorkflowStage('blocked');
       setClarifyContext({
         projectKey,
         domainRolesUsed: [],
@@ -936,6 +1018,7 @@ export default function App() {
     setIsEvaluatingDiscovery(false);
     setGenerationProgressMeta(null);
     setPendingClarifySessionId(null);
+    setWorkflowStage('generation');
 
     try {
       setPendingSessionId(sid);
@@ -946,6 +1029,7 @@ export default function App() {
         clarifyAnswers,
         attachmentText,
         projectKey,
+        projectKeys,
       }) as any;
 
       if (res?.success) {
@@ -955,12 +1039,14 @@ export default function App() {
         setIsWorking(false);
         setPendingSessionId(null);
         setGenerationProgressMeta(null);
+        setWorkflowStage('blocked');
       }
     } catch (err: any) {
       setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
       setIsWorking(false);
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
+      setWorkflowStage('blocked');
     }
   };
 
@@ -1001,13 +1087,25 @@ export default function App() {
         setRunAttachments([]);
         setRunAttachmentParseState(null);
         setRunAttachmentError(null);
+        setWorkflowStage('idle');
         setSessionId(res.conversation.sessionId);
+        const currentActiveSignature = activeSessionInputSignatureRef.current;
         const restoredSignature = buildConversationInputSignature(res.conversation, {
           projectKey,
           contextMode,
         });
         setSessionSignatures(restoredSignature, restoredSignature);
-        await persistSessionPointers(res.conversation.sessionId, originIssueKey);
+        const shouldBindIssueSession = Boolean(
+          originIssueKey
+          && restoredSignature
+          && currentActiveSignature
+          && restoredSignature === currentActiveSignature,
+        );
+        await persistSessionPointers(
+          res.conversation.sessionId,
+          shouldBindIssueSession ? originIssueKey : null,
+          shouldBindIssueSession,
+        );
         const lastTurn = res.conversation.turns[res.conversation.turns.length - 1];
         if (lastTurn) {
           setFeatures(lastTurn.features ?? []);
@@ -1124,7 +1222,7 @@ export default function App() {
                 setSidebarExiting(false);
                 setSessionId(newSid);
                 void persistSessionPointers(newSid, originIssueKey);
-                setProjectKey('*');
+                setSelectedProjectKeys([]);
                 setContextMode('undecided');
               }}
               conversations={conversations}
@@ -1140,8 +1238,8 @@ export default function App() {
               brandingLogoUrl={brandingLogoUrl}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
-              projectKey={projectKey}
-              setProjectKey={setProjectKey}
+              projectKeys={projectKeys}
+              setProjectKeys={setSelectedProjectKeys}
               contextMode={contextMode}
               setContextMode={setContextMode}
               availableProjects={availableProjects}
@@ -1203,7 +1301,8 @@ export default function App() {
             )}
           </AnimatePresence>
           <AnimatePresence mode="wait">
-            {(clarifyQuestions.length > 0 || clarifyBlockingError) ? (
+            {((clarifyQuestions.length > 0 && (workflowStage === 'clarify_round_1' || workflowStage === 'clarify_round_2'))
+              || clarifyBlockingError) ? (
               <motion.div
                 key="clarify-view"
                 className="flex-1 flex flex-col h-full overflow-hidden"

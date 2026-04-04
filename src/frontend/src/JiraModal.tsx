@@ -3,6 +3,7 @@ import { X, LayoutDashboard, Type, Activity, CheckCircle, AlertCircle, ExternalL
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { view, router } from '@forge/bridge';
+import { SearchableSelect } from './components/SearchableSelect';
 
 interface JiraModalProps {
   onClose: () => void;
@@ -23,6 +24,11 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
   const [result, setResult] = useState<{ key: string; url?: string; linkedTo?: string | null; linkError?: string | null } | null>(null);
   const [error, setError] = useState('');
   const [accountId, setAccountId] = useState('');
+  const projectOptions = projects.map((project) => ({
+    value: project.key,
+    label: `${project.key} · ${project.name}`,
+    description: project.name,
+  }));
 
   useEffect(() => {
     // Fetch available projects + current user accountId
@@ -130,16 +136,14 @@ export function JiraModal({ onClose, onCreate, feature, originIssueKey, sessionI
                     <LayoutDashboard className="w-4 h-4 text-[var(--rf-brand)]" /> Project
                   </label>
                   {projects.length > 0 ? (
-                    <div className="relative">
-                      <select
-                        value={projectKey}
-                        onChange={e => setProjectKey(e.target.value)}
-                        className="appearance-none pr-7 w-full bg-white border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
-                      >
-                        {projects.map(p => <option key={p.key} value={p.key}>{p.key} — {p.name}</option>)}
-                      </select>
-                      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
-                    </div>
+                    <SearchableSelect
+                      value={projectKey}
+                      onChange={setProjectKey}
+                      options={projectOptions}
+                      placeholder="Select project"
+                      searchPlaceholder="Search projects..."
+                      buttonClassName="bg-white"
+                    />
                   ) : (
                     <input
                       value={projectKey}

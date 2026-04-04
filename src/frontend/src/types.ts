@@ -16,9 +16,10 @@ export interface GoldSource {
   /** Jira custom field IDs whose text is merged into gold acceptance_criteria (use many for multi-AR setups) */
   arFieldIds: string[];
   labels?: string[];                     // optional label filter
+  targetProjects?: string[];
 }
 
-export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
+export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'azure_openai';
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
@@ -55,6 +56,8 @@ export interface GeneratorConfig {
   triageModel: string;          // e.g. claude-haiku-4-5, gpt-4o-mini — fast scope/complexity assessment
   themeModel: string;           // e.g. claude-haiku-4-5, gpt-4o-mini
   maxTokens: number;            // default: 8192
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -99,6 +102,11 @@ export interface ProjectBacklogStatusScope {
   statuses: string[];
 }
 
+export interface ProjectDomainContext {
+  projectKey: string;
+  context: string;
+}
+
 export interface TenantConfig {
   goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
@@ -125,8 +133,10 @@ export interface TenantConfig {
   };
   issueLinkType: string;  // default: 'Relates to'
   arMappings: ProjectArMapping[];
+  domainContexts?: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+  defaultProjectKey?: string;
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
@@ -185,6 +195,12 @@ export const DEFAULT_CONFIG: TenantConfig = {
         descriptionFieldId: 'description',
         arFieldIds: [],
       },
+    }
+  ],
+  domainContexts: [
+    {
+      projectKey: '*',
+      context: '',
     }
   ],
   backlogStatusScopes: [],
@@ -271,6 +287,8 @@ export interface DiscoverySufficiencyResult {
 
 export interface ContextSourceMeta {
   projectKey: string;
+  projectKeys?: string[];
+  projectCount?: number;
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -365,6 +383,7 @@ export interface ClarifyAnswer {
 export interface ConversationTurn {
   turnType: 'generate' | 'refine' | 'clarify';
   requirement: string;
+  inputSignature?: string;
   features: Feature[];
   similarStories: SimilarStory[];
   generationContext?: GenerationContextMeta;
@@ -382,6 +401,38 @@ export interface Conversation {
   saved: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PiiMaskingStats {
+  enabled: boolean;
+  totalRedactions: number;
+  byType: Record<string, number>;
+}
+
+export interface TransparencyReport {
+  reportId: string;
+  sessionId: string;
+  turnType: 'generate' | 'clarify' | 'refine' | 'ask';
+  actorAccountId?: string;
+  provider?: string;
+  model?: string;
+  projectKey?: string;
+  requirementExcerpt?: string;
+  decisionSummary: string[];
+  contextUsage?: Record<string, unknown>;
+  tokenUsage?: TokenUsageSummary;
+  piiMasking: PiiMaskingStats;
+  createdAt: string;
+}
+
+export type ProjectActivityAction = 'clarify' | 'generate' | 'refine' | 'ask' | 'issue';
+
+export interface ProjectActivitySummaryRow {
+  projectKey: string;
+  count: number;
+  tokenUsage: number;
+  latestAt?: string;
+  actionCounts: Record<string, number>;
 }
 
 // ─── Work Instructions ────────────────────────────────────────────────────────
@@ -414,6 +465,7 @@ export interface ClarifyEvent {
   config: TenantConfig;
   license?: any;
   projectKey?: string;
+  projectKeys?: string[];
   round?: 1 | 2;
   priorAnswers?: ClarifyAnswer[];
 }
@@ -427,6 +479,8 @@ export interface GenerationEvent {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   config: TenantConfig;
+  projectKey?: string;
+  projectKeys?: string[];
   goldExamples: string;
   wiContext: string;
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Coins, Download, ExternalLink, BrainCircuit, Layers3, FileText, Clock3, CheckCircle2 } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
@@ -136,15 +136,24 @@ function alignAcceptanceRequirements(
 }
 
 function buildExcerpt(text: string, maxChars = 180): string {
-  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  const compact = normalizeDisplayText(text).replace(/\s+/g, ' ').trim();
   if (compact.length <= maxChars) return compact;
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
-function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: string }) {
-  if (story.url || story.jiraIssueUrl) return story.url || story.jiraIssueUrl || '';
-  if (story.key && /^[A-Z][A-Z0-9]+-\d+$/.test(story.key)) return `/browse/${story.key}`;
-  return '';
+function normalizeDisplayText(value: string): string {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
+
+  return trimmed
+    .replace(/\\u2026/gi, '...')
+    .replace(/\\u2318/gi, 'Cmd')
+    .replace(/\\u2019/gi, "'")
+    .replace(/\\u201c|\\u201d/gi, '"')
+    .replace(/\\u[0-9a-f]{4}/gi, '')
+    .replace(/\b[A-Z][A-Z0-9]+-\d+\b/g, 'backlog item')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 type GenerationProgressMeta = {
@@ -182,12 +191,6 @@ function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?:
   if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
   if (text.includes('planning feature') || text.includes('feature structure')) return 2;
   return 0;
-}
-
-function buildFeatureExcerpt(text: string, maxChars = 150) {
-  const compact = (text || '').replace(/\s+/g, ' ').trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
 const COMPLEXITY_LEVELS = [
@@ -340,7 +343,7 @@ function GeneratingPipeline({
             </h2>
             <p className="mt-1.5 text-[14px] font-medium text-[var(--rf-text-secondary)] flex items-center gap-2">
               <span className="dot-bounce flex gap-0.5"><span /><span /><span /></span>
-              {progress || 'Processing\u2026'}
+              {normalizeDisplayText(progress || 'Processing...')}
             </p>
           </div>
           {canCancel && onCancel && (
@@ -399,7 +402,7 @@ function GeneratingPipeline({
           </div>
           <div className="mt-2 flex items-center justify-between">
             <span className="text-[12px] text-[var(--rf-text-tertiary)]">
-              {arProgress?.total ? `${arProgress.completed} of ${arProgress.total} ARs written` : (GENERATION_STEPS[stageIndex]?.label ?? 'Starting\u2026')}
+              {arProgress?.total ? `${arProgress.completed} of ${arProgress.total} ARs written` : normalizeDisplayText(GENERATION_STEPS[stageIndex]?.label ?? 'Starting...')}
             </span>
             <span className="text-[12px] font-bold text-[var(--rf-brand)]">{pct}%</span>
           </div>
@@ -463,14 +466,14 @@ function GeneratingPipeline({
         {/* Backlog signal (once ingested) */}
         {sources?.referencedSimilarStories && sources.referencedSimilarStories.length > 0 && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5">
-            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Backlog signal</div>
+                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Backlog signal</div>
             {sources.referencedSimilarStories.slice(0, 2).map((s, i) => (
               <div key={s.key || i} className="rounded-lg border border-[var(--rf-border)] bg-white/80 px-3 py-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">{s.key}</span>
+                  <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">Pattern {i + 1}</span>
                   <span className="text-[13px] text-[var(--rf-text-tertiary)]">{Math.round((s.relevanceScore || 0) * 100)}% match</span>
                 </div>
-                <div className="text-[12px] text-[var(--rf-text-secondary)] truncate mt-0.5">{s.summary}</div>
+                <div className="text-[12px] text-[var(--rf-text-secondary)] truncate mt-0.5">{buildExcerpt(s.summary, 120)}</div>
               </div>
             ))}
           </motion.div>
@@ -569,7 +572,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
                 <div className="w-5 h-5 border-[2.5px] border-[rgba(43,89,74,0.12)] border-t-[var(--rf-brand)] rounded-full spin-slow" />
               </div>
               <div className="text-center">
-                <p className="font-bold text-[var(--rf-text)] text-sm">Refining feature\u2026</p>
+                <p className="font-bold text-[var(--rf-text)] text-sm">Refining feature...</p>
                 <p className="text-xs text-[var(--rf-text-tertiary)] mt-1">The AI is working on your request</p>
               </div>
             </div>
@@ -581,7 +584,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSend(); }}
-                placeholder="Your refinement instructions\u2026"
+                placeholder="Your refinement instructions..."
                 className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none"
                 autoFocus
               />
@@ -592,7 +595,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
 
         {!loading && (
           <div className="px-5 py-4 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-3 bg-[var(--rf-surface-soft)]/50">
-            <span className="text-[13px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to send</span>
+            <span className="text-[13px] font-medium text-[var(--rf-text-tertiary)]">Cmd/Ctrl + Enter to send</span>
             <div className="flex gap-2">
               <motion.button onClick={onClose} className="px-4 py-2 text-xs font-semibold text-[var(--rf-text-secondary)] border border-[var(--rf-border)] rounded-lg hover:bg-[var(--rf-surface-soft)] transition bg-white" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
               <motion.button
@@ -683,18 +686,8 @@ export function MainContent({
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
   const [showBulkRefine, setShowBulkRefine] = useState(false);
-  const [showTokenDetails, setShowTokenDetails] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
-  const [lastAiTokenUsage, setLastAiTokenUsage] = useState<{ label: string; input: number; output: number; total: number } | null>(null);
-  const liveStageIndex = getGenerationStageIndex(generationProgressMeta ?? null, progress);
-  const liveTriage = generationProgressMeta?.triage;
-  const liveArProgress = generationProgressMeta?.arProgress;
-  const liveDraftFeatures = generationProgressMeta?.draftFeatures ?? [];
-  const liveFeatureProgress = generationProgressMeta?.featureProgress ?? [];
-  const liveSources = generationProgressMeta?.sources ?? generationContext ?? null;
-  const liveArRatio = liveArProgress?.total ? Math.min(1, liveArProgress.completed / liveArProgress.total) : 0;
-  const liveFeatureProgressById = new Map(liveFeatureProgress.map(item => [item.id, item.status]));
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -995,7 +988,6 @@ export function MainContent({
       }), { input: 0, output: 0, total: 0 });
 
       if (aggregateUsage.total > 0) {
-        setLastAiTokenUsage({ label: 'Bulk refine', ...aggregateUsage });
         onWorkflowTokenUsage?.(aggregateUsage);
       }
 
@@ -1081,95 +1073,47 @@ export function MainContent({
 
       {/* Canvas toolbar — stats + actions, only when features exist */}
       {hasFeatures && !isGenerating && (
-        <div className="shrink-0 flex items-center justify-between gap-3 px-5 border-b border-[var(--rf-border)] bg-[rgba(252,252,251,0.82)] backdrop-blur-md" style={{ height: 44 }}>
-          {/* Left: stats */}
-          <div className="flex items-center gap-2.5 text-[13px]">
-            <span className="font-semibold text-[var(--rf-text)]">{features.length} features</span>
-            <span className="text-[var(--rf-border-strong)] select-none">·</span>
-            <span className="font-semibold text-[var(--rf-text)]">{totalArCount} ARs</span>
-            {features.filter(f => f.isAccepted).length > 0 && (
-              <>
-                <span className="text-[var(--rf-border-strong)] select-none">·</span>
-                <span className="font-semibold text-[var(--rf-success)]">{features.filter(f => f.isAccepted).length} accepted</span>
-              </>
-            )}
-          </div>
-          {/* Right: actions */}
-          <div className="flex items-center gap-2">
-            {features.some(f => f.pendingRefinement) && (
-              <>
-                <motion.button onClick={discardAllProposed} className="px-2.5 py-1 text-[12px] font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] rounded-lg hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition shadow-sm" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
-                <motion.button onClick={acceptAllProposed} className="px-2.5 py-1 bg-[var(--rf-success)] text-white text-[12px] font-bold rounded-lg transition shadow-sm" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
-              </>
-            )}
-            <motion.button
-              onClick={exportFeaturesToExcel}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[var(--rf-border)] bg-white text-[12px] font-bold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)] shadow-sm"
-              whileTap={{ scale: 0.97 }}
-              title="Export to Excel"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Export
-            </motion.button>
-            <div className="relative">
+        <div className="shrink-0 border-b border-[var(--rf-border)] bg-[rgba(252,252,251,0.82)] px-5 py-3 backdrop-blur-md">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { label: 'Features', value: features.length },
+                { label: 'ARs', value: totalArCount },
+                ...(features.filter(f => f.isAccepted).length > 0
+                  ? [{ label: 'Accepted', value: features.filter(f => f.isAccepted).length }]
+                  : []),
+              ].map((chip) => (
+                <span key={chip.label} className="inline-flex items-center gap-2 rounded-full border border-[var(--rf-border)] bg-white px-3 py-1.5 text-[12px] font-semibold text-[var(--rf-text-secondary)] shadow-sm">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{chip.label}</span>
+                  <span className="text-[13px] font-black text-[var(--rf-text)]">{chip.value}</span>
+                </span>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {features.some(f => f.pendingRefinement) && (
+                <>
+                  <motion.button onClick={discardAllProposed} className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
+                  <motion.button onClick={acceptAllProposed} className="rounded-xl border border-[rgba(16,185,129,0.18)] bg-[var(--rf-success-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-success)] shadow-sm transition hover:brightness-[0.98]" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
+                </>
+              )}
               <motion.button
-                onClick={() => setShowBulkRefine(!showBulkRefine)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-bold transition shadow-sm ${showBulkRefine ? 'bg-[var(--rf-text)] text-white border-[var(--rf-text)]' : 'bg-white text-[var(--rf-text-secondary)] border-[var(--rf-border)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'}`}
+                onClick={exportFeaturesToExcel}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] shadow-sm transition hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]"
+                whileTap={{ scale: 0.97 }}
+                title="Export to Excel"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export
+              </motion.button>
+              <motion.button
+                onClick={() => setShowBulkRefine(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[rgba(43,89,74,0.16)] bg-[var(--rf-brand-muted)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand-hover)] shadow-sm transition hover:border-[var(--rf-brand)] hover:bg-white"
                 whileTap={{ scale: 0.97 }}
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 Refine All
               </motion.button>
-              <AnimatePresence>
-                {showBulkRefine && (
-                  <motion.div
-                    className="absolute right-0 top-full mt-3 w-[400px] bg-white rounded-2xl border border-[var(--rf-border)] p-5 z-50 shadow-2xl"
-                    initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-[13px] font-bold text-[var(--rf-text)] uppercase tracking-widest flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-[var(--rf-brand)]" /> Bulk Refine
-                      </h4>
-                      <button onClick={() => setShowBulkRefine(false)} className="p-1 hover:bg-[var(--rf-surface-soft)] rounded-lg transition text-[var(--rf-text-tertiary)]"><X className="w-4 h-4" /></button>
-                    </div>
-                    <textarea
-                      autoFocus
-                      placeholder="e.g. Make all stories more technical, or ensure they all follow regulatory compliance rules..."
-                      value={bulkInput}
-                      onChange={(e) => setBulkInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                          handleBulkRefine();
-                        }
-                      }}
-                      className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm min-h-[120px] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none mb-4"
-                    />
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">\u2318 + Enter to apply</span>
-                      <motion.button
-                        onClick={handleBulkRefine}
-                        disabled={!bulkInput.trim() || isBulkRefining}
-                        className="px-5 py-2 bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] text-white text-[13px] font-bold rounded-lg transition disabled:opacity-40 flex items-center gap-2 shadow-sm shadow-[var(--rf-brand)]/20"
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        {isBulkRefining ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            Refining...
-                          </>
-                        ) : (
-                          <>
-                            <Send className="w-3.5 h-3.5" /> Apply to All
-                          </>
-                        )}
-                      </motion.button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
           </div>
         </div>
@@ -1226,12 +1170,12 @@ export function MainContent({
                     </span>
                     {(generationContext.similarStoriesCount ?? 0) > 0 && (
                       <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.similarStoriesCount} backlog refs
+                        {generationContext.similarStoriesCount} backlog items
                       </span>
                     )}
                     {(generationContext.referencedWiSections?.length ?? 0) > 0 && (
                       <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.referencedWiSections!.length} WI sections
+                        {generationContext.referencedWiSections!.length} WI excerpts
                       </span>
                     )}
                     {generationContext.domainContextApplied && (
@@ -1261,52 +1205,37 @@ export function MainContent({
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Similar backlog stories</div>
+                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Backlog patterns</div>
                             <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
                               {generationContext.referencedSimilarStories?.length || 0}
                             </div>
                           </div>
                           {(generationContext.referencedSimilarStories?.length ?? 0) > 0 ? (
                             <div className="space-y-2.5">
-                              {generationContext.referencedSimilarStories!.slice(0, 4).map((story, i) => {
-                                const storyUrl = resolveStoryUrl(story);
-                                return (
-                                  <div key={`${story.key}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                                    <div className="flex items-start justify-between gap-3">
-                                      {storyUrl ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => void router.navigate(storyUrl)}
-                                          className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition"
-                                          title="Open referenced story"
-                                        >
-                                          {story.key}
-                                          <ExternalLink className="w-3 h-3" />
-                                        </button>
-                                      ) : (
-                                        <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
-                                      )}
-                                      {typeof story.relevanceScore === 'number' && (
-                                        <div className="shrink-0 text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-white border border-[var(--rf-border)] rounded-full px-2 py-1">
-                                          {Math.min(100, Math.round(story.relevanceScore * 100))}% match
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
-                                      {buildExcerpt(story.summary, 160)}
-                                    </div>
+                              {generationContext.referencedSimilarStories!.slice(0, 4).map((story, i) => (
+                                <div key={`${story.key}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="text-xs font-bold text-[var(--rf-text)]">Pattern {i + 1}</div>
+                                    {typeof story.relevanceScore === 'number' && (
+                                      <div className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white px-2 py-1 text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
+                                        {Math.min(100, Math.round(story.relevanceScore * 100))}% match
+                                      </div>
+                                    )}
                                   </div>
-                                );
-                              })}
+                                  <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
+                                    {buildExcerpt(story.summary, 160)}
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           ) : (
-                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No similar stories were available.</div>
+                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No backlog patterns were available.</div>
                           )}
                         </div>
 
                         <div className="rf-card p-4">
                           <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Matched WI sections</div>
+                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Work instruction excerpts</div>
                             <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
                               {generationContext.referencedWiSections?.length || 0}
                             </div>
@@ -1317,20 +1246,17 @@ export function MainContent({
                                 <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
-                                      <div className="text-[13px] font-bold text-[var(--rf-text)] truncate">{section.filename}</div>
-                                      <div className="mt-1 inline-flex items-center rounded-full border border-[var(--rf-border-subtle)] bg-white px-2.5 py-0.5 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                                        Section {section.chunkIndex + 1}
-                                      </div>
+                                      <div className="text-[13px] font-bold text-[var(--rf-text)] truncate">Instruction excerpt {i + 1}</div>
                                     </div>
                                   </div>
                                   <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
-                                    {section.excerpt}
+                                    {buildExcerpt(section.excerpt, 180)}
                                   </div>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No matched WI sections were used.</div>
+                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No work instruction excerpts were used.</div>
                           )}
                         </div>
 
@@ -1625,6 +1551,81 @@ export function MainContent({
         </AnimatePresence>
       </div>
 
+      <AnimatePresence>
+        {showBulkRefine && (
+          <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
+            <motion.div
+              className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
+              onClick={!isBulkRefining ? () => setShowBulkRefine(false) : undefined}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="relative rf-card w-full max-w-lg overflow-hidden shadow-[0_24px_80px_-48px_rgba(15,23,42,0.28)]"
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <div className="border-b border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/50 px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
+                    <span className="text-sm font-bold text-[var(--rf-text)]">Refine all features</span>
+                  </div>
+                  {!isBulkRefining && (
+                    <button onClick={() => setShowBulkRefine(false)} className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]">
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
+                  Apply one instruction across every feature in this canvas. Use this when the same refinement should land everywhere.
+                </p>
+              </div>
+
+              <div className="space-y-4 px-5 py-5">
+                <textarea
+                  autoFocus
+                  placeholder="For example: tighten scope for implementation teams, add regulatory guardrails, or make the ARs more technical."
+                  value={bulkInput}
+                  onChange={(e) => setBulkInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      handleBulkRefine();
+                    }
+                  }}
+                  className="min-h-[132px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                />
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">Cmd/Ctrl + Enter to apply</span>
+                  <motion.button
+                    onClick={handleBulkRefine}
+                    disabled={!bulkInput.trim() || isBulkRefining}
+                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {isBulkRefining ? (
+                      <>
+                        <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Refining...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-3.5 w-3.5" />
+                        Apply to all
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* AI Refine Popup */}
       {refinePopupIdx !== null && (
         <RefinePopup
@@ -1639,7 +1640,6 @@ export function MainContent({
               return n;
             });
             if (tokenUsage) {
-              setLastAiTokenUsage({ label: 'Single refine', ...tokenUsage });
               onWorkflowTokenUsage?.(tokenUsage);
             }
             setRefinePopupIdx(null);

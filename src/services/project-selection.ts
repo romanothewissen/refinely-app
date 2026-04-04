@@ -1,0 +1,105 @@
+import { ClarifyAnswer, ReferencedSimilarStory, ReferencedWiSection, SimilarStory, TenantConfig, WiDoc, WiChunk } from '../types';
+import { findSimilarStories } from '../core/similar-stories';
+import { retrieveWiContext } from '../core/wi-ingestion';
+
+export function normalizeProjectKeys(projectKey?: string, projectKeys?: string[]): string[] {
+  const normalized = [...(projectKeys ?? []), projectKey ?? '']
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value && value !== '*');
+  return [...new Set(normalized)].slice(0, 2);
+}
+
+export function resolvePrimaryProjectKey(projectKey?: string, projectKeys?: string[]): string {
+  return normalizeProjectKeys(projectKey, projectKeys)[0] ?? '*';
+}
+
+export function buildCombinedDomainContext(config: TenantConfig, projectKeys: string[]): string {
+  const contexts = projectKeys
+    .map((key) => config.domainContexts?.find((entry) => entry.projectKey === key)?.context?.trim())
+    .filter(Boolean) as string[];
+  const globalContext = config.domainContexts?.find((entry) => entry.projectKey === '*')?.context?.trim();
+  const fallback = config.domainContext?.trim();
+  return [...new Set([...contexts, globalContext || fallback || ''].filter(Boolean))].join('\n\n');
+}
+
+export async function retrieveScopedWiContext(
+  query: string,
+  topK: number,
+  maxChars: number,
+  projectKeys: string[],
+): Promise<{ text: string; docs: WiDoc[]; chunks: WiChunk[] }> {
+  const keys = projectKeys.length ? projectKeys : ['*'];
+  const results = await Promise.all(keys.map((projectKey) => retrieveWiContext(query, topK, maxChars, projectKey)));
+  const docs = new Map<string, WiDoc>();
+  const chunks = new Map<string, WiChunk>();
+  const texts: string[] = [];
+
+  results.forEach((result) => {
+    result.docs.forEach((doc) => docs.set(doc.docId, doc));
+    result.chunks.forEach((chunk) => chunks.set(`${chunk.docId}:${chunk.chunkIndex}`, chunk));
+    if (result.text.trim()) texts.push(result.text.trim());
+  });
+
+  const text = texts.join('\n\n---\n\n').slice(0, maxChars);
+  return {
+    text,
+    docs: [...docs.values()],
+    chunks: [...chunks.values()].sort((left, right) => {
+      if (left.filename !== right.filename) return left.filename.localeCompare(right.filename);
+      return left.chunkIndex - right.chunkIndex;
+    }),
+  };
+}
+
+export async function retrieveScopedSimilarStories(input: {
+  requirement: string;
+  attachmentText?: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  config: TenantConfig;
+  projectKeys: string[];
+  maxResults?: number;
+}): Promise<SimilarStory[]> {
+  const keys = input.projectKeys.length ? input.projectKeys : [];
+  if (!keys.length) return [];
+
+  const perProjectMax = Math.max(4, Math.ceil((input.maxResults ?? 12) / keys.length));
+  const results = await Promise.all(keys.map((projectKey) => findSimilarStories({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    clarifyAnswers: input.clarifyAnswers,
+    config: input.config,
+    projectKey,
+    maxResults: perProjectMax,
+  })));
+
+  const deduped = new Map<string, SimilarStory>();
+  results.flat().forEach((story) => {
+    const existing = deduped.get(story.key);
+    if (!existing || (story.relevanceScore ?? 0) > (existing.relevanceScore ?? 0)) {
+      deduped.set(story.key, story);
+    }
+  });
+
+  return [...deduped.values()]
+    .sort((left, right) => (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0))
+    .slice(0, input.maxResults ?? 12);
+}
+
+export function summarizeReferencedSimilarStories(stories: SimilarStory[]): ReferencedSimilarStory[] {
+  return stories.map((story) => ({
+    key: story.key,
+    summary: story.summary,
+    relevanceScore: story.relevanceScore,
+    url: story.url,
+    jiraIssueUrl: story.url,
+  }));
+}
+
+export function summarizeReferencedWiSections(chunks: WiChunk[], maxChars = 180): ReferencedWiSection[] {
+  return chunks.map((chunk) => ({
+    docId: chunk.docId,
+    filename: chunk.filename,
+    chunkIndex: chunk.chunkIndex,
+    excerpt: chunk.text.replace(/\s+/g, ' ').trim().slice(0, maxChars),
+  }));
+}

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Check, Menu, AlertCircle, ExternalLink } from 'lucide-react';
+import { ArrowRight, Check, Menu, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { router } from '@forge/bridge';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
 
 const CLARIFY_COMPLEXITY_LEVELS = [
@@ -65,54 +64,24 @@ type LocalAnswerState = {
 };
 
 function buildExcerpt(text: string, maxChars = 180): string {
-  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  const compact = normalizeDisplayText(text).replace(/\s+/g, ' ').trim();
   if (compact.length <= maxChars) return compact;
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
-function resolveStoryUrl(story: { key?: string; url?: string; jiraIssueUrl?: string }) {
-  if (story.url || story.jiraIssueUrl) return story.url || story.jiraIssueUrl || '';
-  if (story.key && /^[A-Z][A-Z0-9]+-\d+$/.test(story.key)) return `/browse/${story.key}`;
-  return '';
-}
+function normalizeDisplayText(value: string): string {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
 
-function renderQuestionWithStoryLinks(
-  question: string,
-  storyLookup: Map<string, string>,
-) {
-  const storyKeyRegex = /\b[A-Z][A-Z0-9]+-\d+\b/g;
-  const matches = Array.from(question.matchAll(storyKeyRegex));
-  if (!matches.length) return question;
-
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  matches.forEach((match, index) => {
-    const key = match[0];
-    const start = match.index ?? 0;
-    if (start > cursor) {
-      parts.push(<React.Fragment key={`text-${index}`}>{question.slice(cursor, start)}</React.Fragment>);
-    }
-
-    const url = storyLookup.get(key) || `/browse/${key}`;
-    parts.push(
-      <button
-        key={`story-${key}-${index}`}
-        type="button"
-        onClick={() => void router.navigate(url)}
-        className="inline text-[var(--rf-brand)] underline decoration-[var(--rf-brand-subtle)] underline-offset-2 hover:text-[var(--rf-brand-hover)] transition-colors"
-        title={`Open ${key}`}
-      >
-        {key}
-      </button>,
-    );
-    cursor = start + key.length;
-  });
-
-  if (cursor < question.length) {
-    parts.push(<React.Fragment key="text-final">{question.slice(cursor)}</React.Fragment>);
-  }
-
-  return parts;
+  return trimmed
+    .replace(/\\u2026/gi, '...')
+    .replace(/\\u2318/gi, 'Cmd')
+    .replace(/\\u2019/gi, "'")
+    .replace(/\\u201c|\\u201d/gi, '"')
+    .replace(/\\u[0-9a-f]{4}/gi, '')
+    .replace(/\b[A-Z][A-Z0-9]+-\d+\b/g, 'related backlog item')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildCompatibilityAnswer(selectedSuggestions: string[], customAnswer: string): string {
@@ -150,11 +119,6 @@ export function ClarifyQuestionsView({
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
   const isBlocked = Boolean(blockingState && questions.length === 0);
-  const storyLookup = new Map(
-    (contextMeta?.referencedSimilarStories ?? [])
-      .map(story => [story.key, resolveStoryUrl(story)] as const)
-      .filter(([key, url]) => Boolean(key && url)),
-  );
 
   function ensureAnswer(idx: number) {
     return answers[idx] ?? { selectedSuggestions: [], customAnswer: '' };
@@ -278,7 +242,7 @@ export function ClarifyQuestionsView({
                   )}
                   {(contextMeta.similarStoriesCount ?? 0) > 0 && (
                     <span className="inline-flex items-center gap-1 rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      {contextMeta.similarStoriesCount} refs
+                      {contextMeta.similarStoriesCount} backlog items
                     </span>
                   )}
                   <button
@@ -375,22 +339,12 @@ export function ClarifyQuestionsView({
                   </div>
                   {(contextMeta.referencedSimilarStories?.length ?? 0) > 0 && (
                     <div>
-                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1.5">Similar stories</div>
+                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1.5">Backlog patterns</div>
                       <div className="grid gap-2 xl:grid-cols-2">
                         {contextMeta.referencedSimilarStories!.map((story, i) => (
                           <div key={`${story.key}-${i}`} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
                             <div className="flex items-center justify-between gap-2">
-                              {resolveStoryUrl(story) ? (
-                                <button
-                                  type="button"
-                                  onClick={() => { const url = resolveStoryUrl(story); if (url) void router.navigate(url); }}
-                                  className="inline-flex items-center gap-1 text-xs font-bold text-[var(--rf-brand-hover)] hover:text-[var(--rf-brand)] transition"
-                                >
-                                  {story.key} <ExternalLink className="w-2.5 h-2.5" />
-                                </button>
-                              ) : (
-                                <div className="text-xs font-bold text-[var(--rf-text)]">{story.key}</div>
-                              )}
+                              <div className="text-xs font-bold text-[var(--rf-text)]">Pattern {i + 1}</div>
                               {typeof story.relevanceScore === 'number' && (
                                 <span className="text-[13px] text-[var(--rf-text-tertiary)]">{(story.relevanceScore * 100).toFixed(0)}%</span>
                               )}
@@ -406,13 +360,13 @@ export function ClarifyQuestionsView({
                   {(contextMeta.referencedWiSections?.length ?? 0) > 0 && (
                     <div>
                       <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1.5">
-                        WI sections · {contextMeta.referencedWiDocs?.length ?? 0} docs
+                        Work instructions · {contextMeta.referencedWiDocs?.length ?? 0} docs
                       </div>
                       <div className="grid gap-2 xl:grid-cols-2">
                         {contextMeta.referencedWiSections!.map((section, i) => (
                           <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
-                            <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">{section.filename} <span className="font-normal text-[var(--rf-text-tertiary)]">§{section.chunkIndex + 1}</span></div>
-                            <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">{section.excerpt}</div>
+                            <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">Instruction excerpt {i + 1}</div>
+                            <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">{normalizeDisplayText(section.excerpt)}</div>
                           </div>
                         ))}
                       </div>
@@ -517,12 +471,12 @@ export function ClarifyQuestionsView({
                             {isAnswered ? <Check className="w-3 h-3" /> : <span>{idx + 1}</span>}
                           </div>
                           <p className="text-[14px] font-semibold text-[var(--rf-text)] leading-snug pt-0.5">
-                            {renderQuestionWithStoryLinks(q.question, storyLookup)}
+                            {normalizeDisplayText(q.question)}
                           </p>
                         </div>
 
                         {suggestions.length > 0 && (
-                          <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+                          <div className="grid gap-1.5 sm:grid-cols-2">
                             {suggestions.map((sug, si) => {
                               const sel = ans.selectedSuggestions.includes(sug);
                               return (
@@ -540,7 +494,7 @@ export function ClarifyQuestionsView({
                                     <div className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${sel ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white' : 'border-[var(--rf-border-strong)] bg-white text-transparent'}`}>
                                       <Check className="w-2.5 h-2.5" />
                                     </div>
-                                    <span>{sug}</span>
+                                    <span>{normalizeDisplayText(sug)}</span>
                                   </div>
                                 </button>
                               );

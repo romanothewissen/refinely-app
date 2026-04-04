@@ -11,17 +11,27 @@ import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
+import { entityDelete, entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import {
   appendComplianceAuditEvent,
   getComplianceSummary,
   listComplianceAuditEvents,
   listTransparencyReports,
+  mergePiiMaskingStats,
   maskPiiText,
   maskPiiInAnswers,
+  previewPiiMasking,
   saveTransparencyReport,
 } from '../services/compliance';
+import { getProjectActivitySummary, recordProjectActivity } from '../services/project-activity';
+import {
+  buildCombinedDomainContext,
+  normalizeProjectKeys,
+  resolvePrimaryProjectKey,
+  retrieveScopedSimilarStories,
+  retrieveScopedWiContext,
+} from '../services/project-selection';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolver: any = new Resolver();
@@ -160,6 +170,7 @@ resolver.define('getConfig', async ({ context }) => {
   if (config.generatorConfig) {
     const gc = config.generatorConfig;
     // Scrub keys for the frontend
+    if (gc.anthropicApiKey) gc.anthropicApiKey = REDACTED;
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
     if (gc.azureOpenAIApiKey) gc.azureOpenAIApiKey = REDACTED;
@@ -176,6 +187,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   const egc = existingConfig.generatorConfig || {};
   const ngc = payload.generatorConfig || {};
   
+  if (ngc.anthropicApiKey === REDACTED) ngc.anthropicApiKey = egc.anthropicApiKey;
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
   if (ngc.azureOpenAIApiKey === REDACTED) ngc.azureOpenAIApiKey = egc.azureOpenAIApiKey;
@@ -188,6 +200,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
     return ngc[field] !== undefined && ngc[field] !== egc[field];
   });
   const apiKeyRotated = Boolean(
+    (ngc.anthropicApiKey && ngc.anthropicApiKey !== REDACTED && ngc.anthropicApiKey !== egc.anthropicApiKey) ||
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
     (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
     (ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED && ngc.azureOpenAIApiKey !== egc.azureOpenAIApiKey),
@@ -209,6 +222,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
       action: 'API_KEY_ROTATED',
       details: {
         providerKeysUpdated: [
+          ngc.anthropicApiKey && ngc.anthropicApiKey !== REDACTED ? 'anthropic' : null,
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
           ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED ? 'azure_openai' : null,
@@ -248,6 +262,7 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     const cfg = await getConfig();
     const gc = cfg.generatorConfig || {};
     
+    const isAnthropic = payload.provider === 'anthropic';
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
     const isAzureOpenAI = payload.provider === 'azure_openai';
@@ -255,6 +270,8 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     const res = await callLlm({
       provider: payload.provider,
       model: payload.model || 'test',
+      anthropicApiKey: isAnthropic ? (payload.anthropicApiKey === REDACTED ? gc.anthropicApiKey : (payload.anthropicApiKey?.trim() || gc.anthropicApiKey)) : undefined,
+      anthropicBaseUrl: isAnthropic ? (payload.anthropicBaseUrl?.trim() || gc.anthropicBaseUrl) : undefined,
       geminiApiKey: isGemini ? (payload.geminiApiKey === REDACTED ? gc.geminiApiKey : (payload.geminiApiKey?.trim() || gc.geminiApiKey)) : undefined,
       geminiBaseUrl: isGemini ? (payload.geminiBaseUrl?.trim() || gc.geminiBaseUrl) : undefined,
       openaiApiKey: isOpenAI ? (payload.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload.openaiApiKey?.trim() || gc.openaiApiKey)) : undefined,
@@ -282,6 +299,8 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
     const provider = payload?.provider || gc.provider || 'forge_llms';
     const catalog = await discoverLlmModelCatalog({
       provider,
+      anthropicApiKey: payload?.anthropicApiKey === REDACTED ? gc.anthropicApiKey : (payload?.anthropicApiKey?.trim() || gc.anthropicApiKey),
+      anthropicBaseUrl: payload?.anthropicBaseUrl?.trim() || gc.anthropicBaseUrl,
       geminiApiKey: payload?.geminiApiKey === REDACTED ? gc.geminiApiKey : (payload?.geminiApiKey?.trim() || gc.geminiApiKey),
       geminiBaseUrl: payload?.geminiBaseUrl?.trim() || gc.geminiBaseUrl,
       openaiApiKey: payload?.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload?.openaiApiKey?.trim() || gc.openaiApiKey),
@@ -308,6 +327,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   }
 
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
 
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
@@ -319,7 +339,8 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     license: context?.license,
     goldExamples: '',   // fetched inside queue consumer
     wiContext: '',      // fetched inside queue consumer
-    projectKey: payload.projectKey || '*',
+    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    projectKeys: selectedProjectKeys,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
@@ -357,12 +378,13 @@ async function cancelWorkflowProgress(
 }
 
 async function enqueueClarifyWorkflow(
-  payload: { sessionId: string; requirement: string; attachmentText?: string; projectKey?: string; inputSignature?: string },
+  payload: { sessionId: string; requirement: string; attachmentText?: string; projectKey?: string; projectKeys?: string[]; inputSignature?: string },
   context: any,
 ) {
   const config = await getConfig();
   const clarifyQueue = new Queue({ key: 'clarify-queue' });
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
   const event: ClarifyEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -371,7 +393,8 @@ async function enqueueClarifyWorkflow(
     attachmentText: payload.attachmentText ?? '',
     config,
     license: context?.license,
-    projectKey: payload.projectKey || '*',
+    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    projectKeys: selectedProjectKeys,
     round: 1,
     priorAnswers: [],
   };
@@ -457,6 +480,7 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
     });
 
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
     await updateLatestTurnFeatures(payload.sessionId, accountId, result.features, 'refine', payload.feedback, result.tokenUsage);
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
@@ -465,8 +489,8 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
         actorAccountId: accountId,
         provider: config.generatorConfig.provider,
         model: config.generatorConfig.refineModel,
-        projectKey: payload.projectKey || '*',
-        requirementExcerpt: String(payload.requirement ?? '').slice(0, 240),
+        projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+        requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
           'Refinement applied based on explicit user feedback.',
           'Feature content preserved where feedback did not request structural changes.',
@@ -476,16 +500,17 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
           feedbackLength: String(payload.feedback ?? '').length,
         },
         tokenUsage: result.tokenUsage,
-        piiMasking: {
-          enabled: piiEnabled,
-          totalRedactions: maskedRequirement.stats.totalRedactions + maskedFeedback.stats.totalRedactions,
-          byType: {
-            ...maskedRequirement.stats.byType,
-            ...maskedFeedback.stats.byType,
-          },
-        },
+        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedFeedback.stats),
       });
     }
+    await recordProjectActivity({
+      action: 'refine',
+      projectKeys: selectedProjectKeys,
+      projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+      sessionId: payload.sessionId,
+      model: config.generatorConfig.refineModel,
+      tokenUsage: result.tokenUsage ?? null,
+    });
 
     return { success: true, features: result.features, tokenUsage: result.tokenUsage };
   } catch (err: any) {
@@ -507,6 +532,7 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
     config,
   });
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : '';
+  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
   if (sessionId) {
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     await updateLatestTurnFeatures(
@@ -524,8 +550,8 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
         actorAccountId: accountId,
         provider: config.generatorConfig.provider,
         model: config.generatorConfig.refineModel,
-        projectKey: payload.projectKey || '*',
-        requirementExcerpt: String(payload.feature?.summary ?? '').slice(0, 240),
+        projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+        requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
           'Single-feature refinement generated from direct feedback.',
           'Summary/description/story points remain stable unless feedback explicitly targets them.',
@@ -535,10 +561,19 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
           feedbackLength: String(payload.feedback ?? '').length,
         },
         tokenUsage: result.tokenUsage,
-        piiMasking: maskedFeedback.stats,
+        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedFeedback.stats),
       });
     }
   }
+  await recordProjectActivity({
+    action: 'refine',
+    projectKeys: selectedProjectKeys,
+    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    sessionId,
+    model: config.generatorConfig.refineModel,
+    tokenUsage: result.tokenUsage ?? null,
+    metadata: { featureId: payload.feature?.id },
+  });
   return { success: true, feature: result.feature, tokenUsage: result.tokenUsage };
 });
 
@@ -556,7 +591,12 @@ resolver.define('checkRefineFeedback', async ({ payload, context }) => {
 
 resolver.define('ask', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
+  const config = {
+    ...eventConfig,
+    domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    tier: getEffectiveTier(eventConfig, context),
+  };
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedPrompt = maskPiiText(payload.message ?? '', piiEnabled);
   const maskedHistory = maskPiiInAnswers(
@@ -568,14 +608,21 @@ resolver.define('ask', async ({ payload, context }) => {
   );
 
   const [wiContext, similarItems] = await Promise.all([
-    config.wiConfig.enabled ? retrieveWiContext(maskedPrompt.text, 4, 20000, '*') : Promise.resolve({ text: '', docs: [] }),
-    findSimilarStories(maskedPrompt.text, config, payload.projectKey || '*'),
+    config.wiConfig.enabled
+      ? retrieveScopedWiContext(maskedPrompt.text, 4, 20000, selectedProjectKeys)
+      : Promise.resolve({ text: '', docs: [], chunks: [] }),
+    retrieveScopedSimilarStories({
+      requirement: maskedPrompt.text,
+      config,
+      projectKeys: selectedProjectKeys,
+      maxResults: 8,
+    }),
   ]);
 
   const systemPrompt = buildAskSystemPrompt({
     domainContext: config.domainContext,
     wiContext: wiContext.text,
-    similarItems: similarItems.map(s => `${s.key}: ${s.summary}`).join('\n'),
+    similarItems: similarItems.map(s => `${s.summary}`).join('\n'),
   });
 
   const reply = await askQuestion({
@@ -596,8 +643,8 @@ resolver.define('ask', async ({ payload, context }) => {
       actorAccountId: accountId,
       provider: config.generatorConfig.provider,
       model: config.generatorConfig.arModel,
-      projectKey: payload.projectKey || '*',
-      requirementExcerpt: String(payload.message ?? '').slice(0, 240),
+      projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+      requirementExcerpt: maskedPrompt.text.slice(0, 240),
       decisionSummary: [
         'Response grounded in domain context, work instructions, and retrieved backlog examples.',
       ],
@@ -605,16 +652,17 @@ resolver.define('ask', async ({ payload, context }) => {
         similarItemsCount: similarItems.length,
         wiContextChars: wiContext.text.length,
       },
-      piiMasking: {
-        enabled: piiEnabled,
-        totalRedactions: maskedPrompt.stats.totalRedactions + maskedHistory.stats.totalRedactions,
-        byType: {
-          ...maskedPrompt.stats.byType,
-          ...maskedHistory.stats.byType,
-        },
-      },
+      piiMasking: mergePiiMaskingStats(maskedPrompt.stats, maskedHistory.stats),
     });
   }
+
+  await recordProjectActivity({
+    action: 'ask',
+    projectKeys: selectedProjectKeys,
+    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    sessionId: String(payload.sessionId ?? 'chat'),
+    model: config.generatorConfig.arModel,
+  });
 
   return { success: true, reply, similarItems };
 });
@@ -700,6 +748,17 @@ resolver.define('createIssue', async ({ payload, context }) => {
         console.warn('[createIssue] Failed to persist Jira issue key on generated feature:', persistErr);
       }
     }
+
+    await recordProjectActivity({
+      action: 'issue',
+      projectKeys: normalizeProjectKeys(payload.projectKey, payload.projectKeys),
+      projectKey: String(payload.projectKey ?? '*'),
+      sessionId: payload.sessionId as string | undefined,
+      metadata: {
+        issueKey: result.issueKey,
+        issueType: payload.issueType,
+      },
+    });
 
     return { success: true, ...result, linkedTo, linkError };
   } catch (err) {
@@ -890,6 +949,18 @@ resolver.define('getComplianceSummary', async ({ context }) => {
   return { success: true, summary };
 });
 
+resolver.define('previewPiiMasking', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  const result = previewPiiMasking(String(payload?.text ?? ''), Boolean(payload?.enabled ?? true));
+  return { success: true, ...result };
+});
+
+resolver.define('getProjectActivitySummary', async ({ payload, context }) => {
+  await ensureAdmin(context);
+  const summary = await getProjectActivitySummary(payload?.limit ?? 1000);
+  return { success: true, summary };
+});
+
 
 resolver.define('removeWiDoc', async ({ payload, context }) => {
   await ensureAdmin(context);
@@ -952,13 +1023,54 @@ resolver.define('getBacklogRefreshStatus', async ({ payload, context }) => {
 
 // ─── Conversation History ─────────────────────────────────────────────────────
 
+async function syncConversationIndexEntry(accountId: string, sessionId: string, patch: {
+  title?: string;
+  updatedAt?: string;
+  turnCount?: number;
+  isPinned?: boolean;
+}, remove = false) {
+  const indexKey = KEYS.userConversationIndex(accountId);
+  const index = await entityGet<Array<Record<string, any>>>(indexKey) ?? [];
+  const existingIndex = index.findIndex((entry) => entry.sessionId === sessionId);
+
+  if (remove) {
+    await entitySet(indexKey, index.filter((entry) => entry.sessionId !== sessionId));
+    return;
+  }
+
+  if (existingIndex >= 0) {
+    index[existingIndex] = { ...index[existingIndex], ...patch };
+  } else {
+    index.unshift({
+      sessionId,
+      title: patch.title ?? 'Untitled session',
+      updatedAt: patch.updatedAt ?? new Date().toISOString(),
+      turnCount: patch.turnCount ?? 0,
+      isPinned: patch.isPinned ?? false,
+    });
+  }
+
+  await entitySet(indexKey, index.slice(0, 100));
+}
+
 resolver.define('getHistory', async ({ payload, context }) => {
   const limit = payload?.limit ?? 30;
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const index = await entityGet<Array<{ sessionId: string; title: string; updatedAt: string; turnCount: number }>>(
     KEYS.userConversationIndex(accountId),
   ) ?? [];
-  return { success: true, conversations: index.slice(0, limit) };
+  const conversations = await Promise.all(index.slice(0, limit).map(async (entry) => {
+    const conversation = await entityGet<any>(KEYS.userConversations(accountId, entry.sessionId));
+    if (!conversation) return entry;
+    return {
+      ...entry,
+      title: conversation.title || entry.title,
+      updatedAt: conversation.updatedAt || entry.updatedAt,
+      turnCount: Array.isArray(conversation.turns) ? conversation.turns.length : entry.turnCount,
+      isPinned: Boolean(entry.isPinned),
+    };
+  }));
+  return { success: true, conversations };
 });
 
 resolver.define('getConversation', async ({ payload, context }) => {
@@ -980,9 +1092,8 @@ resolver.define('saveConversation', async ({ payload, context }) => {
 
 resolver.define('deleteConversation', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const indexKey = KEYS.userConversationIndex(accountId);
-  const index = await entityGet<Array<{ sessionId: string }>>(indexKey) ?? [];
-  await entitySet(indexKey, index.filter(e => e.sessionId !== payload.sessionId));
+  await entityDelete(KEYS.userConversations(accountId, payload.sessionId));
+  await syncConversationIndexEntry(accountId, payload.sessionId, {}, true);
   return { success: true };
 });
 
@@ -1004,7 +1115,12 @@ resolver.define('renameConversation', async ({ payload, context }) => {
   const existing = await entityGet<Record<string, unknown>>(key);
   if (existing) {
     existing.title = payload.title;
+    existing.updatedAt = new Date().toISOString();
     await entitySet(key, existing);
+    await syncConversationIndexEntry(accountId, payload.sessionId, {
+      title: payload.title,
+      updatedAt: String(existing.updatedAt),
+    });
   }
   return { success: true };
 });

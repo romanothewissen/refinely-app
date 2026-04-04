@@ -22,6 +22,7 @@ export const api = {
     clarifyAnswers?: unknown[];
     attachmentText?: string;
     projectKey?: string;
+    projectKeys?: string[];
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)
@@ -30,15 +31,17 @@ export const api = {
     requirement: string,
     attachmentText?: string,
     projectKey?: string,
+    projectKeys?: string[],
     inputSignature?: string,
-  ) => invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, inputSignature }),
+  ) => invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, projectKeys, inputSignature }),
   retryClarify: (
     sessionId: string,
     requirement: string,
     attachmentText?: string,
     projectKey?: string,
+    projectKeys?: string[],
     inputSignature?: string,
-  ) => invoke('retryClarify', { sessionId, requirement, attachmentText, projectKey, inputSignature }),
+  ) => invoke('retryClarify', { sessionId, requirement, attachmentText, projectKey, projectKeys, inputSignature }),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
   evaluateSufficiency: (payload: {
@@ -59,8 +62,8 @@ export const api = {
     invoke('checkRefineFeedback', { feature, feedback }),
 
   // Ask
-  ask: (message: string, history: unknown[]) =>
-    invoke('ask', { message, history }),
+  ask: (message: string, history: unknown[], projectKey?: string, projectKeys?: string[]) =>
+    invoke('ask', { message, history, projectKey, projectKeys }),
 
   // Jira
   createIssue: (payload: {
@@ -117,6 +120,9 @@ export const api = {
   listComplianceAuditEvents: (limit?: number) => invoke('listComplianceAuditEvents', { limit }),
   listTransparencyReports: (payload?: { sessionId?: string; turnType?: 'generate' | 'clarify' | 'refine' | 'ask'; limit?: number }) =>
     invoke('listTransparencyReports', payload || {}),
+  getComplianceSummary: () => invoke('getComplianceSummary'),
+  previewPiiMasking: (payload: { text: string; enabled?: boolean }) => invoke('previewPiiMasking', payload),
+  getProjectActivitySummary: (limit?: number) => invoke('getProjectActivitySummary', { limit }),
   getJiraAuditRecords: (limit?: number) => invoke('getJiraAuditRecords', { limit }),
 
   // LLM config
@@ -124,6 +130,8 @@ export const api = {
   testLlmConnection: (payload: {
     provider: LlmProvider;
     model: string;
+    anthropicApiKey?: string;
+    anthropicBaseUrl?: string;
     geminiApiKey?: string;
     geminiBaseUrl?: string;
     openaiApiKey?: string;
@@ -134,6 +142,8 @@ export const api = {
   }) => invoke('testLlmConnection', payload),
   discoverLlmModels: (payload: {
     provider: LlmProvider;
+    anthropicApiKey?: string;
+    anthropicBaseUrl?: string;
     geminiApiKey?: string;
     geminiBaseUrl?: string;
     openaiApiKey?: string;

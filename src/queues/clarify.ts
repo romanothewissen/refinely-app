@@ -10,11 +10,20 @@
 
 import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode } from '../types';
 import { ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
-import { retrieveWiContext } from '../core/wi-ingestion';
-import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
+import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
-import { appendComplianceAuditEvent, maskPiiText, saveTransparencyReport } from '../services/compliance';
+import { appendComplianceAuditEvent, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
+import { recordProjectActivity } from '../services/project-activity';
+import {
+  buildCombinedDomainContext,
+  normalizeProjectKeys,
+  resolvePrimaryProjectKey,
+  retrieveScopedSimilarStories,
+  retrieveScopedWiContext,
+  summarizeReferencedSimilarStories,
+  summarizeReferencedWiSections,
+} from '../services/project-selection';
 
 /**
  * When the user provides only an attachment (empty requirement), fall back to
@@ -25,25 +34,13 @@ function deriveRetrievalQuery(requirement: string, attachmentText: string): stri
   const att = attachmentText?.trim() ?? '';
   return att ? att.slice(0, 600).replace(/\s+/g, ' ') : requirement;
 }
-
-function buildWiExcerpt(text: string, maxChars = 180): string {
-  const compact = (text || '').replace(/\s+/g, ' ').trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars).trimEnd()}...`;
-}
-
 export async function handler(event: { body: ClarifyEvent }) {
-  const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey } = event.body;
-  
-  // Resolve project-specific context
-  const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
-    || eventConfig.domainContexts?.find(c => c.projectKey === '*')
-    || { context: eventConfig.domainContext || '' };
-    
-  const config = { 
-    ...eventConfig, 
-    domainContext: relevantContext.context,
-    tier: getEffectiveTier(eventConfig, { license }) 
+  const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys } = event.body;
+  const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
+  const config = {
+    ...eventConfig,
+    domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    tier: getEffectiveTier(eventConfig, { license }),
   };
 
   try {
@@ -53,14 +50,15 @@ export async function handler(event: { body: ClarifyEvent }) {
     await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and related stories…', inputSignature);
     const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), 4, 20000, projectKey)
+        ? retrieveScopedWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), 4, 20000, selectedProjectKeys)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
-        ? findSimilarStories({
+        ? retrieveScopedSimilarStories({
             requirement: maskedRequirement.text,
             attachmentText: maskedAttachment.text,
             config,
-            projectKey,
+            projectKeys: selectedProjectKeys,
+            maxResults: 8,
           })
         : Promise.resolve([]),
     ]);
@@ -88,19 +86,15 @@ export async function handler(event: { body: ClarifyEvent }) {
 
     await sendClarifyProgress(sessionId, 'Finalizing discovery questions…', inputSignature);
     const clarifyContext: ClarifyContextMeta = {
-      projectKey,
+      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      projectKeys: selectedProjectKeys,
+      projectCount: selectedProjectKeys.length,
       domainRolesUsed: [],
       discoveryStatus: 'ready',
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
-      referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
-        key: item.key,
-        summary: item.summary,
-        relevanceScore: item.relevanceScore,
-        url: item.url,
-        jiraIssueUrl: item.url,
-      })),
+      referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
       discoveryProfile,
       ambiguityAssessment: {
         ...ambiguityAssessment,
@@ -127,12 +121,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         filename: doc.filename,
         chunkCount: doc.chunkCount,
       })),
-      referencedWiSections: wiContext.chunks.slice(0, 8).map(chunk => ({
-        docId: chunk.docId,
-        filename: chunk.filename,
-        chunkIndex: chunk.chunkIndex,
-        excerpt: buildWiExcerpt(chunk.text),
-      })),
+      referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 8)),
     };
 
     await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
@@ -156,14 +145,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           initialClarifyDurationMs,
         },
         tokenUsage,
-        piiMasking: {
-          enabled: piiEnabled,
-          totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions,
-          byType: {
-            ...maskedRequirement.stats.byType,
-            ...maskedAttachment.stats.byType,
-          },
-        },
+        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats),
       });
     }
     await appendComplianceAuditEvent({
@@ -172,6 +154,13 @@ export async function handler(event: { body: ClarifyEvent }) {
       action: 'CLARIFY_WORKFLOW_EXECUTED',
       details: { sessionId, projectKey, model: config.generatorConfig.clarifyModel },
       enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+    });
+    await recordProjectActivity({
+      action: 'clarify',
+      projectKeys: selectedProjectKeys,
+      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      sessionId,
+      model: config.generatorConfig.clarifyModel,
     });
 
     await entitySet(KEYS.clarifyProgress(sessionId), {

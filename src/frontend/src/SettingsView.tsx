@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
-import type { ConcreteModelFamily, LlmModelCatalogByVendor, LlmModelCatalogEntry, LlmProvider } from './types';
+import type { ConcreteModelFamily, LlmModelCatalogByVendor, LlmModelCatalogEntry, LlmProvider, ProjectActivitySummaryRow } from './types';
 import { REDACTED } from './types';
+import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
 interface JiraProject { key: string; name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
 interface JiraField { id: string; name: string }
@@ -107,27 +108,84 @@ interface ComplianceSummary {
   projectBreakdown: Array<{ projectKey: string; count: number; tokenUsage: number; latestAt?: string }>;
 }
 
+interface PiiPreviewResult {
+  text: string;
+  totalRedactions: number;
+  byType: Record<string, number>;
+}
+
 const CLAUDE_MODELS = [
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fastest)' },
-  { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet (Balanced)' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus (Best logic)' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 · Best reasoning' },
+  { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5 · Balanced' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 · Fast' },
 ];
 const GEMINI_MODELS = [
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-  { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro · Deep reasoning' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash · Balanced speed' },
+  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite · Lowest cost' },
 ];
 const OPENAI_MODELS = [
-  { id: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast)' },
-  { id: 'gpt-4o', label: 'GPT-4o (Strong)' },
-  { id: 'gpt-4.5-preview', label: 'GPT-4.5 (Top logic)' },
-  { id: 'o1-mini', label: 'o1 Mini (Reasoning)' },
-  { id: 'o1-preview', label: 'o1 Preview' },
+  { id: 'gpt-5', label: 'GPT-5 · Highest capability' },
+  { id: 'gpt-4.1', label: 'GPT-4.1 · Strong general model' },
+  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini · Lightweight' },
+  { id: 'gpt-4o', label: 'GPT-4o · Balanced' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini · Fast and economical' },
+  { id: 'o1', label: 'o1 · Reasoning focused' },
+  { id: 'o1-mini', label: 'o1 Mini · Lean reasoning' },
 ];
 const AZURE_OPENAI_MODELS: Array<{ id: string; label: string }> = [];
 const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
+type UiProvider = Exclude<LlmProvider, 'forge_llms'>;
+
+function getDisplayProvider(provider: LlmProvider): UiProvider {
+  return provider === 'forge_llms' ? 'anthropic' : provider;
+}
+
+function getProviderLabel(provider: UiProvider) {
+  if (provider === 'anthropic') return 'Anthropic';
+  if (provider === 'azure_openai') return 'Azure OpenAI';
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+function compactUiText(value: string) {
+  return String(value ?? '')
+    .replace(/\u2026/g, '...')
+    .replace(/\u2318/g, 'Cmd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function maskPreviewText(text: string) {
+  const raw = text ?? '';
+  const counts: Record<string, number> = {};
+  let masked = raw;
+  masked = masked.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, () => {
+    counts.email = (counts.email ?? 0) + 1;
+    return '[REDACTED_EMAIL]';
+  });
+  masked = masked.replace(/\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)\d{3,4}[\s.-]?\d{3,4}\b/g, () => {
+    counts.phone = (counts.phone ?? 0) + 1;
+    return '[REDACTED_PHONE]';
+  });
+  masked = masked.replace(/\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g, () => {
+    counts.iban = (counts.iban ?? 0) + 1;
+    return '[REDACTED_IBAN]';
+  });
+  masked = masked.replace(/\b(?:\d[ -]*?){13,19}\b/g, () => {
+    counts.paymentCard = (counts.paymentCard ?? 0) + 1;
+    return '[REDACTED_CARD]';
+  });
+  masked = masked.replace(/\b\d{3}-\d{2}-\d{4}\b/g, () => {
+    counts.ssn = (counts.ssn ?? 0) + 1;
+    return '[REDACTED_SSN]';
+  });
+  return {
+    text: masked,
+    totalRedactions: Object.values(counts).reduce((sum, next) => sum + next, 0),
+    byType: counts,
+  };
+}
 
 function inferModelFamily(modelId: string): ConcreteModelFamily | undefined {
   const normalized = modelId.trim().toLowerCase();
@@ -139,7 +197,7 @@ function inferModelFamily(modelId: string): ConcreteModelFamily | undefined {
 }
 
 function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
-  if (provider === 'forge_llms') return CLAUDE_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
+  if (provider === 'anthropic' || provider === 'forge_llms') return CLAUDE_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
   if (provider === 'gemini') return GEMINI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
   if (provider === 'openai') return OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
   return AZURE_OPENAI_MODELS.map(model => ({ id: model.id, displayName: model.label, family: inferModelFamily(model.id), source: 'fallback' as const }));
@@ -213,7 +271,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [isSaving, setIsSaving] = useState(false);
 
   // Models State
-  const [provider, setProvider] = useState<LlmProvider>('forge_llms');
+  const [provider, setProvider] = useState<LlmProvider>('anthropic');
   const [decompositionModel, setDecompositionModel] = useState('claude-opus-4-6');
   const [arModel, setArModel] = useState('claude-opus-4-6');
   const [clarifyModel, setClarifyModel] = useState('claude-sonnet-4-5-20250929');
@@ -230,6 +288,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
   const [existingGeminiApiKey, setExistingGeminiApiKey] = useState('');
+
+  const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [anthropicBaseUrl, setAnthropicBaseUrl] = useState('');
+  const [existingAnthropicApiKey, setExistingAnthropicApiKey] = useState('');
   
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
@@ -273,10 +335,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [complianceEvents, setComplianceEvents] = useState<ComplianceAuditEvent[]>([]);
   const [transparencyReports, setTransparencyReports] = useState<TransparencyReportRow[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
+  const [projectActivityRows, setProjectActivityRows] = useState<ProjectActivitySummaryRow[]>([]);
   const [reportFilterTurnType, setReportFilterTurnType] = useState('');
   const [reportFilterProject, setReportFilterProject] = useState('');
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
+  const [showAllAuditEvents, setShowAllAuditEvents] = useState(false);
+  const [auditCategoryFilter, setAuditCategoryFilter] = useState<'all' | 'config' | 'security' | 'prompt' | 'runtime'>('runtime');
+  const [piiPreviewInput, setPiiPreviewInput] = useState('Contact Jane Doe at jane.doe@example.com or +31 6 1234 5678 to review payment card 4111 1111 1111 1111.');
+  const [piiPreviewResult, setPiiPreviewResult] = useState<PiiPreviewResult>({ text: '', totalRedactions: 0, byType: {} });
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('');
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
@@ -295,19 +362,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }, [transparencyReports]);
 
   const projectUsageBreakdown = useMemo(() => {
-    const byProject = new Map<string, { projectKey: string; tokenUsage: number; reportCount: number; latestAt?: string }>();
-    transparencyReports.forEach(report => {
-      const key = report.projectKey || 'Workspace-wide';
-      const current = byProject.get(key) ?? { projectKey: key, tokenUsage: 0, reportCount: 0, latestAt: undefined };
-      current.reportCount += 1;
-      current.tokenUsage += report.tokenUsage?.total ?? 0;
-      if (!current.latestAt || (report.createdAt && report.createdAt > current.latestAt)) {
-        current.latestAt = report.createdAt;
-      }
-      byProject.set(key, current);
-    });
-    return [...byProject.values()].sort((a, b) => b.tokenUsage - a.tokenUsage || b.reportCount - a.reportCount);
-  }, [transparencyReports]);
+    return projectActivityRows
+      .map((row) => ({
+        projectKey: row.projectKey,
+        tokenUsage: row.tokenUsage,
+        reportCount: row.count,
+        latestAt: row.latestAt,
+        actionCounts: row.actionCounts,
+      }))
+      .sort((a, b) => b.reportCount - a.reportCount || b.tokenUsage - a.tokenUsage);
+  }, [projectActivityRows]);
+
+  const projectOptions = useMemo<SearchableSelectOption[]>(
+    () => projects.map((project) => ({
+      value: project.key,
+      label: `${project.key} · ${project.name}`,
+      description: project.name,
+    })),
+    [projects],
+  );
 
   const loadBacklogCacheInfo = useCallback(async (projectKey: string) => {
     try {
@@ -363,6 +436,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   useEffect(() => {
     loadInitialConfig();
+    // Bootstraps settings state once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -397,7 +472,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       const existingConfig = await api.getConfig() as any;
       if (existingConfig) {
         const gc = existingConfig.generatorConfig || {};
-        if (gc.provider) setProvider(gc.provider);
+        if (gc.provider) setProvider(getDisplayProvider(gc.provider));
         if (gc.decompositionModel) setDecompositionModel(gc.decompositionModel);
         if (gc.arModel) setArModel(gc.arModel);
         if (gc.clarifyModel) setClarifyModel(gc.clarifyModel);
@@ -427,12 +502,23 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         
         if (gc.geminiApiKey) setExistingGeminiApiKey(gc.geminiApiKey);
         if (gc.geminiBaseUrl) setGeminiBaseUrl(gc.geminiBaseUrl);
+        if (gc.anthropicApiKey) setExistingAnthropicApiKey(gc.anthropicApiKey);
+        if (gc.anthropicBaseUrl) setAnthropicBaseUrl(gc.anthropicBaseUrl);
         if (gc.openaiApiKey) setExistingOpenaiApiKey(gc.openaiApiKey);
         if (gc.openaiBaseUrl) setOpenaiBaseUrl(gc.openaiBaseUrl);
         if (gc.azureOpenAIApiKey) setExistingAzureOpenAIApiKey(gc.azureOpenAIApiKey);
         if (gc.azureOpenAIBaseUrl) setAzureOpenAIBaseUrl(gc.azureOpenAIBaseUrl);
         if (gc.azureOpenAIApiVersion) setAzureOpenAIApiVersion(gc.azureOpenAIApiVersion);
-        if (gc.modelCatalogs) setModelCatalogs(gc.modelCatalogs);
+        if (gc.modelCatalogs) {
+          const nextCatalogs = { ...gc.modelCatalogs } as LlmModelCatalogByVendor;
+          if (!nextCatalogs.anthropic && nextCatalogs.forge_llms) {
+            nextCatalogs.anthropic = {
+              ...nextCatalogs.forge_llms,
+              vendor: 'anthropic',
+            };
+          }
+          setModelCatalogs(nextCatalogs);
+        }
 
         const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
         setDomainContext(parsedContext.context);
@@ -468,14 +554,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         setProjects(jiraRes.projects ?? []);
         setCustomFields(jiraRes.fields ?? []);
       }
-      const [auditRes, reportRes, summaryRes] = await Promise.all([
+      const [auditRes, reportRes, summaryRes, activityRes, piiPreviewRes] = await Promise.all([
         api.listComplianceAuditEvents(250) as Promise<any>,
         api.listTransparencyReports({ limit: 250 }) as Promise<any>,
-        (api as any).getComplianceSummary().catch(() => null) as Promise<any>,
+        api.getComplianceSummary().catch(() => null) as Promise<any>,
+        api.getProjectActivitySummary(1000).catch(() => null) as Promise<any>,
+        api.previewPiiMasking({ text: piiPreviewInput, enabled: true }).catch(() => null) as Promise<any>,
       ]);
       setComplianceEvents(Array.isArray(auditRes?.events) ? auditRes.events : []);
       setTransparencyReports(Array.isArray(reportRes?.reports) ? reportRes.reports : []);
       if (summaryRes?.summary) setComplianceSummary(summaryRes.summary);
+      setProjectActivityRows(Array.isArray(activityRes?.summary) ? activityRes.summary : []);
+      if (piiPreviewRes?.success) {
+        setPiiPreviewResult({
+          text: piiPreviewRes.text,
+          totalRedactions: piiPreviewRes.totalRedactions ?? 0,
+          byType: piiPreviewRes.byType ?? {},
+        });
+      }
     } catch (e) { console.error('Error loading config', e); }
   }
 
@@ -586,6 +682,35 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     }
   }, [activeTab, activeArProj, loadWiDocs]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await api.previewPiiMasking({ text: piiPreviewInput, enabled: piiMaskingEnabled }) as any;
+        if (!cancelled && res?.success) {
+          setPiiPreviewResult({
+            text: res.text,
+            totalRedactions: res.totalRedactions ?? 0,
+            byType: res.byType ?? {},
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          const fallback = maskPreviewText(piiPreviewInput);
+          setPiiPreviewResult({
+            text: fallback.text,
+            totalRedactions: fallback.totalRedactions,
+            byType: fallback.byType,
+          });
+        }
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [piiPreviewInput, piiMaskingEnabled]);
+
   async function handleWiFileDrop(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
@@ -647,6 +772,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           triageModel,
           themeModel,
           maxTokens: 8192,
+          anthropicApiKey: provider === 'anthropic' ? (anthropicApiKey.trim() || existingAnthropicApiKey || undefined) : undefined,
+          anthropicBaseUrl: provider === 'anthropic' ? (anthropicBaseUrl.trim() || undefined) : undefined,
           geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || "",
           geminiBaseUrl: geminiBaseUrl.trim() || undefined,
           openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || "",
@@ -677,9 +804,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         tier,
       });
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
+      if (anthropicApiKey.trim()) setExistingAnthropicApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
       if (azureOpenAIApiKey.trim()) setExistingAzureOpenAIApiKey(REDACTED);
-      setGeminiApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey('');
+      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
@@ -705,6 +833,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       const res = await api.testLlmConnection({
         provider,
         model: resolvedTestModel,
+        anthropicApiKey: provider === 'anthropic' ? (anthropicApiKey.trim() || existingAnthropicApiKey || undefined) : undefined,
+        anthropicBaseUrl: provider === 'anthropic' ? (anthropicBaseUrl.trim() || undefined) : undefined,
         geminiApiKey: provider === 'gemini' ? (geminiApiKey.trim() || existingGeminiApiKey || undefined) : undefined,
         geminiBaseUrl: provider === 'gemini' ? (geminiBaseUrl.trim() || undefined) : undefined,
         openaiApiKey: provider === 'openai' ? (openaiApiKey.trim() || existingOpenaiApiKey || undefined) : undefined,
@@ -804,6 +934,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     try {
       const res = await api.discoverLlmModels({
         provider,
+        anthropicApiKey: anthropicApiKey.trim() || existingAnthropicApiKey || undefined,
+        anthropicBaseUrl: anthropicBaseUrl.trim() || undefined,
         geminiApiKey: geminiApiKey.trim() || existingGeminiApiKey || undefined,
         geminiBaseUrl: geminiBaseUrl.trim() || undefined,
         openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || undefined,
@@ -822,25 +954,47 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     } finally {
       setIsRefreshingModels(false);
     }
-  }, [provider, geminiApiKey, existingGeminiApiKey, geminiBaseUrl, openaiApiKey, existingOpenaiApiKey, openaiBaseUrl, azureOpenAIApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, azureOpenAIApiVersion]);
+  }, [
+    provider,
+    anthropicApiKey,
+    existingAnthropicApiKey,
+    anthropicBaseUrl,
+    geminiApiKey,
+    existingGeminiApiKey,
+    geminiBaseUrl,
+    openaiApiKey,
+    existingOpenaiApiKey,
+    openaiBaseUrl,
+    azureOpenAIApiKey,
+    existingAzureOpenAIApiKey,
+    azureOpenAIBaseUrl,
+    azureOpenAIApiVersion,
+  ]);
 
   useEffect(() => {
-    if (provider === 'forge_llms') {
-      setModelCatalogs(prev => prev.forge_llms ? prev : { ...prev, forge_llms: { vendor: 'forge_llms', source: 'fallback', fetchedAt: new Date().toISOString(), models: buildStaticCatalog('forge_llms') } });
-      return;
-    }
     const hasStoredCredential = provider === 'gemini'
       ? Boolean(existingGeminiApiKey)
       : provider === 'openai'
         ? Boolean(existingOpenaiApiKey)
-        : Boolean(existingAzureOpenAIApiKey && azureOpenAIBaseUrl.trim());
+        : provider === 'azure_openai'
+          ? Boolean(existingAzureOpenAIApiKey && azureOpenAIBaseUrl.trim())
+          : true;
     if (hasStoredCredential && !modelCatalogs[provider]) {
       void refreshModelCatalog();
     }
   }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, modelCatalogs, refreshModelCatalog]);
 
   const currentCatalogEntries = useMemo(() => {
-    return modelCatalogs[provider]?.models?.length ? modelCatalogs[provider]!.models : buildStaticCatalog(provider);
+    const entries = modelCatalogs[provider]?.models?.length ? modelCatalogs[provider]!.models : buildStaticCatalog(provider);
+    return [...entries].sort((a, b) => {
+      const rank = (entry: LlmModelCatalogEntry) => {
+        if (entry.family === 'pro') return 0;
+        if (entry.family === 'flash') return 1;
+        if (entry.family === 'lite') return 2;
+        return 3;
+      };
+      return rank(a) - rank(b) || (a.displayName || a.id).localeCompare(b.displayName || b.id);
+    });
   }, [modelCatalogs, provider]);
 
   const availableModels = useMemo(() => {
@@ -854,15 +1008,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         });
       }
     });
-    [clarifyModel, decompositionModel, arModel, evaluateModel].forEach(modelId => {
+    [clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel].forEach(modelId => {
       if (modelId && !options.some(option => option.id === modelId)) {
         options.push({ id: modelId, label: modelId });
       }
     });
     return options;
-  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel]);
+  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel]);
 
-  const showComplianceTab = complianceEnabled && (tier === 'premium' || tier === 'enterprise');
+  const showComplianceTab = true;
   const settingsNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
     { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, docs' },
@@ -957,13 +1111,29 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <div className="space-y-2">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">LLM Provider</div>
                     <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
-                      {(['openai', 'azure_openai', 'gemini', 'forge_llms'] as const).map(p => (
+                      {(['anthropic', 'openai', 'azure_openai', 'gemini'] as const).map(p => (
                         <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
-                          {p === 'azure_openai' ? 'Azure OAI' : p === 'forge_llms' ? 'Claude' : p.charAt(0).toUpperCase() + p.slice(1)}
+                          {getProviderLabel(p)}
                         </button>
                       ))}
                     </div>
                   </div>
+
+                  {provider === 'anthropic' && (
+                    <motion.div className="space-y-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Anthropic API Key</label>
+                          {existingAnthropicApiKey && <button onClick={() => { setExistingAnthropicApiKey(''); setAnthropicApiKey(''); }} className="text-[12px] font-bold text-[var(--rf-danger)]">Clear</button>}
+                        </div>
+                        <input type="password" value={anthropicApiKey} onChange={e => setAnthropicApiKey(e.target.value)} placeholder={existingAnthropicApiKey ? '••••••••• (stored)' : 'sk-ant-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Custom Base URL</label>
+                        <input type="text" value={anthropicBaseUrl} onChange={e => setAnthropicBaseUrl(e.target.value)} placeholder="https://api.anthropic.com/v1" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                    </motion.div>
+                  )}
 
                   {provider === 'openai' && (
                     <motion.div className="space-y-1.5" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
@@ -1041,15 +1211,19 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   {advancedModelMode ? (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
                       {[
-                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel },
-                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel },
-                        { label: 'Acceptance Requirements', val: arModel, set: setArModel },
-                        { label: 'Triage', val: triageModel, set: setTriageModel },
-                        { label: 'Refinement', val: refineModel, set: setRefineModel },
-                        { label: 'Review & Titles', val: evaluateModel, set: (v: string) => { setEvaluateModel(v); setThemeModel(v); } },
+                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: 'Round 1 discovery and follow-ups' },
+                        { label: 'Sufficiency Check', val: evaluateModel, set: (v: string) => { setEvaluateModel(v); setThemeModel(v); }, sub: 'Gate before generation continues' },
+                        { label: 'Triage', val: triageModel, set: setTriageModel, sub: 'Scope, complexity, and routing' },
+                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel, sub: 'Draft feature structure' },
+                        { label: 'Acceptance Requirements', val: arModel, set: setArModel, sub: 'Write Given / When / Then' },
+                        { label: 'Theme Analysis & Titles', val: themeModel, set: setThemeModel, sub: 'Cluster themes and title features' },
+                        { label: 'Refinement', val: refineModel, set: setRefineModel, sub: 'Interactive edits on a single feature' },
                       ].map((item, i) => (
                         <div key={i} className="flex items-center justify-between gap-4 py-2.5">
-                          <span className="text-sm font-medium text-[var(--rf-text-secondary)]">{item.label}</span>
+                          <div>
+                            <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
+                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
+                          </div>
                           <div className="relative w-[200px] shrink-0">
                             <select value={item.val} disabled={availableModels.length === 0 || !isAdmin} onChange={e => item.set(e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
                               {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -1062,24 +1236,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   ) : (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
                       {[
-                        {
-                          label: 'Quality',
-                          sub: 'Feature generation & acceptance requirements',
-                          val: qualityModel,
-                          set: setQualityModel,
-                        },
-                        {
-                          label: 'Speed',
-                          sub: 'Clarify, triage, review & theme analysis',
-                          val: speedModel,
-                          set: setSpeedModel,
-                        },
-                        {
-                          label: 'Refinement',
-                          sub: 'Interactive iteration on existing features',
-                          val: refinementModel,
-                          set: setRefinementModel,
-                        },
+                        { label: 'Discovery', sub: 'Clarifying questions, sufficiency check, triage', val: speedModel, set: setSpeedModel },
+                        { label: 'Generation', sub: 'Feature breakdown, AR writing, theme analysis', val: qualityModel, set: setQualityModel },
+                        { label: 'Refinement', sub: 'Interactive iteration on existing features', val: refinementModel, set: setRefinementModel },
                       ].map((item, i) => (
                         <div key={i} className="flex items-center justify-between gap-4 py-2.5">
                           <div>
@@ -1149,17 +1308,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <span className="w-5 h-5 rounded-full bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.15)] text-[var(--rf-brand)] text-[11px] font-black flex items-center justify-center shrink-0">2</span>
                       <div className="text-sm font-bold text-[var(--rf-text)]">Select Project</div>
                     </div>
-                    <div className="relative w-56">
-                      <select
-                        value={activeArProj}
-                        onChange={e => setActiveArProj(e.target.value)}
-                        className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-sm font-bold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
-                      >
-                        <option value="*">Select a project…</option>
-                        {projects.map(p => <option key={p.key} value={p.key}>{p.key}: {p.name}</option>)}
-                      </select>
-                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                    </div>
+                    <SearchableSelect
+                      value={activeArProj}
+                      onChange={(value) => setActiveArProj(value || '*')}
+                      options={projectOptions}
+                      placeholder="Select a project..."
+                      searchPlaceholder="Search projects..."
+                      allowClear
+                      clearLabel="Clear project"
+                      className="w-64"
+                      buttonClassName="bg-[var(--rf-surface-soft)]"
+                    />
                   </div>
 
                   {activeArProj !== '*' ? (
@@ -1245,29 +1404,34 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white">
                           {wiDocs.length === 0 ? (
-                            <div className="col-span-2 p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)]">
+                            <div className="p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)] m-3">
                               <FileText className="w-8 h-8 text-[var(--rf-border-strong)] mx-auto mb-2" />
                               <p className="text-sm font-semibold text-[var(--rf-text-tertiary)]">No work instructions linked to {activeArProj}.</p>
                             </div>
                           ) : (
-                            wiDocs.map(doc => (
-                              <div key={doc.docId} className="bg-[var(--rf-surface-soft)] p-4 rounded-xl border border-[var(--rf-border)] flex items-center justify-between gap-3 group hover:border-[var(--rf-border-strong)] transition-all">
-                                <div className="flex items-start gap-3 min-w-0 flex-1">
-                                  <div className="shrink-0 w-10 h-10 bg-white rounded-lg border border-[var(--rf-border)] flex items-center justify-center shadow-sm">
-                                    <FileText className="w-5 h-5 text-[var(--rf-brand)]" />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-sm font-bold text-[var(--rf-text)] leading-snug break-words">{doc.filename}</p>
-                                    <p className="text-[13px] text-[var(--rf-text-tertiary)] font-bold uppercase tracking-widest mt-0.5">{doc.chunkCount} chunks</p>
-                                  </div>
-                                </div>
-                                <button onClick={() => handleRemoveWiDoc(doc.docId)} className="text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] p-2 rounded-lg hover:bg-[var(--rf-danger-subtle)] transition-colors">
-                                  <Trash className="w-4 h-4" />
-                                </button>
+                            <div>
+                              <div className="grid grid-cols-[minmax(0,1fr)_90px_140px_56px] gap-3 border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                                <div>Document</div>
+                                <div>Chunks</div>
+                                <div>Uploaded</div>
+                                <div />
                               </div>
-                            ))
+                              {wiDocs.map(doc => (
+                                <div key={doc.docId} className="grid grid-cols-[minmax(0,1fr)_90px_140px_56px] gap-3 border-b border-[var(--rf-border-subtle)] px-4 py-3 last:border-b-0">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-[var(--rf-text)]">{doc.filename}</p>
+                                    <p className="mt-0.5 text-[12px] text-[var(--rf-text-tertiary)]">{doc.revision}</p>
+                                  </div>
+                                  <div className="text-sm font-medium text-[var(--rf-text-secondary)]">{doc.chunkCount}</div>
+                                  <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">{new Date(doc.uploadedAt).toLocaleDateString()}</div>
+                                  <button onClick={() => handleRemoveWiDoc(doc.docId)} className="ml-auto rounded-lg p-2 text-[var(--rf-text-tertiary)] transition-colors hover:bg-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]">
+                                    <Trash className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </>
@@ -1297,7 +1461,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </button>
                     </div>
 
-                    <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-3">
+                    <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-2.5">
                       <div className="space-y-3">
                         <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
                           <div>Role</div>
@@ -1305,14 +1469,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <div />
                         </div>
                         {roleGuidanceRows.map((row, index) => (
-                          <div key={`workspace-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 items-start rf-card p-3 ">
+                          <div key={`workspace-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(160px,200px)_1fr_auto] gap-2.5 items-start rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
                             <div className="space-y-1">
                               <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
                               <input
                                 value={row.role}
                                 onChange={e => setRoleGuidanceRows(prev => prev.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item))}
                                 placeholder="Field Service Engineer"
-                                className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2.5 text-sm font-semibold text-[var(--rf-text)] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm"
+                                className="w-full rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
                               />
                             </div>
                             <div className="space-y-1">
@@ -1321,13 +1485,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                                 value={row.activities}
                                 onChange={e => setRoleGuidanceRows(prev => prev.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item))}
                                 placeholder="Schedules visits, checks service windows, and confirms completion."
-                                className="w-full min-h-[72px] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none"
+                                className="min-h-[64px] w-full resize-none rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
                               />
                             </div>
                             <button
                               type="button"
                               onClick={() => setRoleGuidanceRows(prev => prev.length === 1 ? [{ role: '', activities: '' }] : prev.filter((_, idx) => idx !== index))}
-                              className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] hover:border-[var(--rf-danger-subtle)] transition"
+                              className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
                             >
                               Remove
                             </button>
@@ -1355,17 +1519,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Default project</div>
                       <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-0.5">Pre-fills the project selector when opening the generator</div>
                     </div>
-                    <div className="relative w-48">
-                      <select
-                        value={defaultProjectKey}
-                        onChange={e => setDefaultProjectKey(e.target.value)}
-                        className="appearance-none pr-6 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-3 py-1.5 rounded-lg text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
-                      >
-                        <option value="">No default — choose each time</option>
-                        {projects.map(p => <option key={p.key} value={p.key}>{p.name} ({p.key})</option>)}
-                      </select>
-                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                    </div>
+                    <SearchableSelect
+                      value={defaultProjectKey}
+                      onChange={setDefaultProjectKey}
+                      options={projectOptions}
+                      placeholder="No default — choose each time"
+                      searchPlaceholder="Search projects..."
+                      allowClear
+                      clearLabel="Clear default project"
+                      className="w-64"
+                      buttonClassName="bg-[var(--rf-surface-soft)]"
+                    />
                   </div>
                 </div>
               </motion.div>
@@ -1615,6 +1779,30 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
               >
+                <div className="rf-card p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Compliance workspace</div>
+                      <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">Visibility into masking, reports, and audit activity</div>
+                      <p className="mt-1 text-[13px] text-[var(--rf-text-tertiary)]">
+                        This section stays visible even before compliance is fully enabled so admins can see what is configured, what evidence exists, and what will start populating after the next run.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: 'Compliance', value: complianceEnabled },
+                        { label: 'Transparency', value: transparencyEnabled },
+                        { label: 'PII masking', value: piiMaskingEnabled },
+                        { label: 'Audit trail', value: auditTrailEnabled },
+                      ].map((item) => (
+                        <span key={item.label} className={`rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-widest ${item.value ? 'border-[rgba(43,89,74,0.16)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]' : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'}`}>
+                          {item.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Summary cards */}
                 {complianceSummary && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1648,6 +1836,46 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     ))}
                   </div>
                 )}
+
+                <div className="rf-card p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">PII masking proof</div>
+                      <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">Preview how Refinely masks supported PII categories</div>
+                    </div>
+                    <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                      {piiPreviewResult.totalRedactions} redaction{piiPreviewResult.totalRedactions === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Sample input</div>
+                      <textarea
+                        value={piiPreviewInput}
+                        onChange={(e) => setPiiPreviewInput(e.target.value)}
+                        className="min-h-[160px] w-full rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Masked output</div>
+                      <div className="min-h-[160px] rounded-xl border border-[var(--rf-border)] bg-white px-3 py-3 text-sm text-[var(--rf-text-secondary)] whitespace-pre-wrap">
+                        {compactUiText(piiPreviewResult.text || 'Masked output will appear here.')}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(piiPreviewResult.byType).length > 0 ? Object.entries(piiPreviewResult.byType).map(([key, value]) => (
+                      <span key={key} className="rounded-full border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-secondary)]">
+                        {key}: {value}
+                      </span>
+                    )) : (
+                      <span className="text-[13px] text-[var(--rf-text-tertiary)]">No supported PII types detected in the current sample.</span>
+                    )}
+                  </div>
+                  <p className="text-[12px] text-[var(--rf-text-tertiary)]">
+                    Current masking coverage includes email, phone numbers, IBANs, payment cards, and SSNs. Use the transparency reports below for per-run evidence once new runs are executed.
+                  </p>
+                </div>
 
                 {/* Transparency Reports */}
                 <div className="rf-card p-4 space-y-3">
@@ -1717,7 +1945,23 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                 {/* Audit Trail */}
                 <div className="rf-card p-4 space-y-3">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Audit trail ({complianceEvents.length})</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Audit trail ({complianceEvents.length})</div>
+                    <div className="flex items-center gap-2">
+                      <select value={auditCategoryFilter} onChange={e => setAuditCategoryFilter(e.target.value as any)} className="appearance-none rounded border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-1 text-[12px] font-medium text-[var(--rf-text)] outline-none">
+                        {(['runtime', 'config', 'security', 'prompt', 'all'] as const).map(category => (
+                          <option key={category} value={category}>{category === 'all' ? 'All categories' : category}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setShowAllAuditEvents(prev => !prev)}
+                        className="rounded border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-1 text-[12px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-white"
+                      >
+                        {showAllAuditEvents ? 'Refinely only' : 'Show all events'}
+                      </button>
+                    </div>
+                  </div>
                   {complianceEvents.length === 0 ? (
                     <div className="text-sm text-[var(--rf-text-tertiary)]">No audit events yet. Enable the immutable audit trail in the Billing tab.</div>
                   ) : (
@@ -1726,7 +1970,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         <div>Timestamp</div><div>Category</div><div>Action</div><div className="text-center">Chain</div>
                       </div>
                       <div className="divide-y divide-[var(--rf-border)] bg-white max-h-80 overflow-y-auto">
-                        {complianceEvents.filter(e => e.category === 'runtime').map(event => (
+                        {complianceEvents
+                          .filter((event) => showAllAuditEvents || event.category === 'runtime')
+                          .filter((event) => auditCategoryFilter === 'all' || event.category === auditCategoryFilter)
+                          .map(event => (
                           <div key={event.eventId}>
                             <button
                               className="w-full grid grid-cols-[minmax(0,1.2fr)_70px_minmax(0,1fr)_40px] gap-2 px-3 py-2 text-left hover:bg-[var(--rf-surface-soft)] transition items-center"
@@ -1752,7 +1999,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         ))}
                       </div>
                       <div className="px-3 py-1.5 bg-[var(--rf-surface-soft)] border-t border-[var(--rf-border)] text-[11px] text-[var(--rf-text-tertiary)]">
-                        Showing Refinely-created records only. <button className="text-[var(--rf-brand)] font-bold hover:underline" onClick={() => {/* toggle all categories */}}>Show all events</button>
+                        Use the category filter to review runtime, config, security, or prompt events. Toggle “Show all events” to include non-runtime records.
                       </div>
                     </div>
                   )}
@@ -1960,7 +2207,7 @@ function ProjectConfigurationManager({
 
            {expandedSections.backlog && (
            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                <div className="rf-card px-4 py-3 ">
                  <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Indexed Items</div>
                  <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{indexedCount}</div>

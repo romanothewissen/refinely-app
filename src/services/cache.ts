@@ -80,4 +80,5 @@ export const KEYS = {
   complianceAuditTrail: 'compliance_audit_trail',
   transparencyReports: 'transparency_reports',
   complianceRuntimeVersion: 'compliance_runtime_version',
+  projectActivity: 'project_activity',
 } as const;

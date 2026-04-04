@@ -1230,7 +1230,7 @@ export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): 
   return items
     .slice(0, maxItems)
     .map((item, index) => ([
-      `--- Backlog Reference ${index + 1} (${item.key}) ---`,
+      `--- Backlog Reference ${index + 1} ---`,
       `Summary: ${item.summary}`,
       item.description ? `Description: ${item.description.slice(0, 900)}` : '',
       item.acceptanceCriteria ? `Acceptance Criteria:\n${item.acceptanceCriteria.slice(0, 1400)}` : '',

@@ -19,7 +19,7 @@ export interface GoldSource {
   targetProjects?: string[];              // list of project keys that should use this source (use "*" for global)
 }
 
-export type LlmProvider = 'forge_llms' | 'gemini' | 'openai' | 'azure_openai';
+export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'azure_openai';
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
@@ -56,6 +56,8 @@ export interface GeneratorConfig {
   triageModel: string;          // e.g. claude-haiku-4-5, gpt-4o-mini — fast scope/complexity assessment
   themeModel: string;           // e.g. claude-haiku-4-5, gpt-4o-mini
   maxTokens: number;            // default: 8192
+  anthropicApiKey?: string;
+  anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   openaiApiKey?: string;
@@ -285,6 +287,8 @@ export interface DiscoverySufficiencyResult {
 
 export interface ContextSourceMeta {
   projectKey: string;
+  projectKeys?: string[];
+  projectCount?: number;
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -463,6 +467,7 @@ export interface ClarifyEvent {
   config: TenantConfig;
   license?: any;
   projectKey: string;
+  projectKeys?: string[];
   round?: 1 | 2;
   priorAnswers?: ClarifyAnswer[];
 }
@@ -481,6 +486,31 @@ export interface GenerationEvent {
   goldExamplesCount?: number;
   wiContext?: string;
   projectKey: string;
+  projectKeys?: string[];
+}
+
+// ─── Project Activity ────────────────────────────────────────────────────────
+
+export type ProjectActivityAction = 'clarify' | 'generate' | 'refine' | 'ask' | 'issue';
+
+export interface ProjectActivityEvent {
+  eventId: string;
+  timestamp: string;
+  projectKeys: string[];
+  projectKey: string;
+  action: ProjectActivityAction;
+  sessionId?: string;
+  model?: string;
+  tokenUsage?: TokenUsageSummary;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProjectActivitySummaryRow {
+  projectKey: string;
+  count: number;
+  tokenUsage: number;
+  latestAt?: string;
+  actionCounts: Record<string, number>;
 }
 
 // ─── Tier Limits ─────────────────────────────────────────────────────────────

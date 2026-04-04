@@ -23,8 +23,8 @@ interface SidebarProps {
   brandingLogoUrl?: string | null;
   width?: number;
   originIssueKey?: string | null;
-  projectKey: string;
-  setProjectKey: (key: string) => void;
+  projectKeys: string[];
+  setProjectKeys: (keys: string[]) => void;
   contextMode: 'undecided' | 'project' | 'global';
   setContextMode: (mode: 'undecided' | 'project' | 'global') => void;
   availableProjects: Array<{ key: string; name: string }>;
@@ -66,8 +66,8 @@ export function Sidebar({
   brandingLogoUrl,
   width,
   originIssueKey,
-  projectKey,
-  setProjectKey,
+  projectKeys,
+  setProjectKeys,
   contextMode,
   setContextMode,
   availableProjects,
@@ -81,23 +81,52 @@ export function Sidebar({
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
-  const contextReady = contextMode === 'global' || (contextMode === 'project' && projectKey !== '*');
+  const primaryProjectKey = projectKeys[0] ?? '*';
+  const contextReady = contextMode === 'global' || (contextMode === 'project' && primaryProjectKey !== '*');
   const hasPromptInput = Boolean(requirement.trim() || runAttachments.length);
   const brainstormDisabled = !contextReady || !hasPromptInput || isWorking || isAtLimit;
   const [showUsage, setShowUsage] = React.useState(true);
+  const [projectFilter, setProjectFilter] = React.useState('');
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
-  const activeWiDocs = wiDocs.filter(doc => (doc.targetProjects ?? ['*']).includes('*') || (doc.targetProjects ?? []).includes(projectKey));
-  const availableProject = availableProjects.find(p => p.key === projectKey);
-  const projectTitle = projectKey === '*'
-    ? 'Global Workspace'
-    : `${projectKey}${availableProject?.name ? ` · ${availableProject.name}` : ''}`;
+  const activeWiDocs = projectKeys.length
+    ? wiDocs.filter(doc => {
+        const targets = doc.targetProjects ?? ['*'];
+        return targets.includes('*') || projectKeys.some(key => targets.includes(key));
+      })
+    : wiDocs;
+  const selectedProjects = projectKeys
+    .map(key => availableProjects.find(p => p.key === key) || { key, name: '' })
+    .filter((project): project is { key: string; name: string } => Boolean(project.key));
+  const projectTitle = selectedProjects.length
+    ? selectedProjects.map(project => project.name ? `${project.key} · ${project.name}` : project.key).join(' + ')
+    : 'Global Workspace';
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
+  const filteredProjects = availableProjects.filter(project => {
+    const haystack = `${project.key} ${project.name}`.toLowerCase();
+    return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
+  });
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
   }, [brandingLogoUrl]);
+
+  const toggleProject = (nextKey: string) => {
+    const normalized = String(nextKey ?? '').trim();
+    if (!normalized || normalized === '*') return;
+    const exists = projectKeys.includes(normalized);
+    if (exists) {
+      const next = projectKeys.filter(key => key !== normalized);
+      setProjectKeys(next);
+      if (!next.length && contextMode === 'project') setContextMode('global');
+      return;
+    }
+    if (projectKeys.length >= 2) return;
+    const next = [...projectKeys, normalized].slice(0, 2);
+    setProjectKeys(next);
+    if (contextMode !== 'global') setContextMode('project');
+  };
 
   async function handleRunAttachmentUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -190,94 +219,116 @@ export function Sidebar({
                   </div>
                 </div>
               </div>
-              {projectKey !== '*' && (
+              {selectedProjects.length > 0 && (
                 <div className="shrink-0 text-[13px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
-                  Project Active
+                  {selectedProjects.length > 1 ? 'Projects Active' : 'Project Active'}
                 </div>
               )}
             </div>
 
-            {/* Enlarged Select */}
-            <div className="relative w-full">
-              <select
-                value={projectKey}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  setProjectKey(nextValue);
-                  if (nextValue === '*') {
-                    if (contextMode === 'project') setContextMode('undecided');
-                  } else {
-                    setContextMode('project');
-                  }
-                }}
-                className="appearance-none w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/80 text-[13px] font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/10 transition-all shadow-sm cursor-pointer"
-              >
-                <option value="*">Global Workspace (No project)</option>
-                {availableProjects.map(project => (
-                  <option key={project.key} value={project.key}>
-                    {project.key} – {project.name}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-1">
-                <div className="w-px h-4 bg-[rgba(43,89,74,0.1)] mx-1" />
-                <ChevronDown className="w-4 h-4 text-[var(--rf-sidebar-text-muted)]" />
+            <div className="space-y-2">
+              <div className="relative">
+                <input
+                  value={projectFilter}
+                  onChange={(e) => setProjectFilter(e.target.value)}
+                  placeholder="Search projects"
+                  className="w-full rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/80 px-3.5 py-2.5 pr-10 text-[13px] font-semibold text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/10"
+                />
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--rf-sidebar-text-muted)]" />
               </div>
-            </div>
 
-            {/* Hint text */}
-            {projectKey === '*' && availableProjects.length > 0 && (
-              <p className="mt-2 text-[13px] text-[var(--rf-sidebar-text-muted)]">
-                Select a project for scoped context.
+              <div className="flex flex-wrap gap-1.5">
+                {selectedProjects.length ? (
+                  selectedProjects.map((project) => (
+                    <button
+                      key={project.key}
+                      type="button"
+                      onClick={() => toggleProject(project.key)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-[12px] font-bold text-[var(--rf-brand)] transition hover:bg-[var(--rf-brand-muted)]"
+                    >
+                      <span className="max-w-[120px] truncate">
+                        {project.key}{project.name ? ` · ${project.name}` : ''}
+                      </span>
+                      <X className="h-3 w-3" />
+                    </button>
+                  ))
+                ) : (
+                  <span className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                    Workspace-wide
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectKeys([]);
+                    setContextMode('global');
+                  }}
+                  className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[12px] font-bold transition ${
+                    projectKeys.length === 0
+                      ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white'
+                      : 'border-[rgba(43,89,74,0.12)] bg-white/70 text-[var(--rf-text-secondary)] hover:border-[rgba(43,89,74,0.22)] hover:text-[var(--rf-text)]'
+                  }`}
+                >
+                  Workspace-wide
+                </button>
+              </div>
+
+              <div className="max-h-36 overflow-y-auto rounded-xl border border-[rgba(43,89,74,0.08)] bg-white/70 p-1 custom-scrollbar">
+                {filteredProjects.length ? filteredProjects.map((project) => {
+                  const selected = projectKeys.includes(project.key);
+                  const disabled = !selected && projectKeys.length >= 2;
+                  return (
+                    <button
+                      key={project.key}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => toggleProject(project.key)}
+                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                        selected
+                          ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
+                          : 'hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)]'
+                      } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px] font-semibold">{project.key}</span>
+                        <span className="block truncate text-[11px] font-medium text-[var(--rf-sidebar-text-muted)]">{project.name}</span>
+                      </span>
+                      <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                        {selected ? 'Selected' : 'Add'}
+                      </span>
+                    </button>
+                  );
+                }) : (
+                  <div className="px-3 py-2 text-[13px] font-medium text-[var(--rf-sidebar-text-muted)]">
+                    No projects match the search.
+                  </div>
+                )}
+              </div>
+
+              <p className="text-[13px] text-[var(--rf-sidebar-text-muted)]">
+                Select up to two projects. The workspace will union backlog, WI, and guidance from both.
               </p>
-            )}
-          </div>
-
-          {/* Context mode toggles */}
-          <div className="px-3 pb-2.5 flex gap-2">
-            <button
-              type="button"
-              onClick={() => { if (projectKey !== '*') setContextMode('project'); }}
-              disabled={projectKey === '*'}
-              className={`flex-1 rounded-xl px-3 py-1.5 text-[13px] font-bold uppercase tracking-[0.12em] transition-all border ${
-                contextMode === 'project'
-                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
-                  : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
-              } disabled:opacity-40 disabled:cursor-not-allowed`}
-            >
-              Project
-            </button>
-            <button
-              type="button"
-              onClick={() => { setProjectKey('*'); setContextMode('global'); }}
-              className={`flex-1 rounded-xl px-3 py-1.5 text-[13px] font-bold uppercase tracking-[0.12em] transition-all border ${
-                contextMode === 'global'
-                  ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)] shadow-sm'
-                  : 'bg-white/70 text-[var(--rf-text-secondary)] border-[rgba(43,89,74,0.1)] hover:border-[rgba(43,89,74,0.22)] hover:bg-white/90'
-              }`}
-            >
-              Global
-            </button>
+            </div>
           </div>
 
           {/* Cache + Docs stats row */}
           <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5 min-[0px]:min-w-0">
             <button
               type="button"
-              onClick={() => onOpenProjectSettings('jira', projectKey)}
+              onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
               className="group flex min-w-0 items-center gap-2 rounded-lg border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
               <Database className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
                 <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-sidebar-text-muted)]">Cache</div>
                 <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                  {projectKey !== '*' ? 'Project' : 'Select project'}
+                  {primaryProjectKey !== '*' ? 'Project' : 'Select project'}
                 </div>
               </div>
             </button>
             <button
               type="button"
-              onClick={() => onOpenProjectSettings('jira', projectKey)}
+              onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
               className="group flex min-w-0 items-center gap-2 rounded-lg border border-[rgba(43,89,74,0.08)] bg-[var(--rf-brand-muted)] px-2.5 py-1.5 transition-all hover:border-[rgba(43,89,74,0.18)] hover:bg-[var(--rf-brand-subtle)]"
             >
               <FileText className="h-3 w-3 shrink-0 text-[var(--rf-brand)] opacity-70 group-hover:opacity-100 transition-opacity" />

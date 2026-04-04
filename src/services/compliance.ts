@@ -8,6 +8,26 @@ interface MaskResult {
   stats: PiiMaskingStats;
 }
 
+export function mergePiiMaskingStats(...items: Array<PiiMaskingStats | null | undefined>): PiiMaskingStats {
+  const totals: Record<string, number> = {};
+  let enabled = false;
+  let totalRedactions = 0;
+
+  items.filter(Boolean).forEach((item) => {
+    enabled = enabled || Boolean(item?.enabled);
+    totalRedactions += item?.totalRedactions ?? 0;
+    Object.entries(item?.byType ?? {}).forEach(([key, value]) => {
+      totals[key] = (totals[key] ?? 0) + value;
+    });
+  });
+
+  return {
+    enabled,
+    totalRedactions,
+    byType: totals,
+  };
+}
+
 function withCounter(
   input: string,
   regex: RegExp,
@@ -52,6 +72,10 @@ export function maskPiiText(text: string, enabled: boolean): MaskResult {
       byType: counts,
     },
   };
+}
+
+export function previewPiiMasking(text: string, enabled = true): MaskResult {
+  return maskPiiText(text, enabled);
 }
 
 export function maskPiiInAnswers(
@@ -195,4 +219,3 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
 
   return { totalByTurnType, totalTokens, piiRedactionsByType, modelUsage, projectBreakdown };
 }
-

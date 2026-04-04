@@ -7,13 +7,22 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { Feature, GenerationContextMeta, GenerationEvent, SimilarStory, TokenUsageSummary } from '../types';
+import { Feature, GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
 import { assessRequirementWithLlm, GenerationCancelledError, generateFeatures, generateSessionTitle } from '../core/story-generator';
-import { findSimilarStories, formatSimilarStoriesText } from '../core/similar-stories';
-import { retrieveWiContext } from '../core/wi-ingestion';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
-import { maskPiiText, maskPiiInAnswers, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
+import { formatSimilarStoriesText } from '../core/similar-stories';
+import { maskPiiText, maskPiiInAnswers, mergePiiMaskingStats, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
+import { recordProjectActivity } from '../services/project-activity';
+import {
+  buildCombinedDomainContext,
+  normalizeProjectKeys,
+  resolvePrimaryProjectKey,
+  retrieveScopedSimilarStories,
+  retrieveScopedWiContext,
+  summarizeReferencedSimilarStories,
+  summarizeReferencedWiSections,
+} from '../services/project-selection';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -29,7 +38,7 @@ interface GenerationProgressPayload {
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
-  sources?: Pick<GenerationContextMeta, 'projectKey' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
+  sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
 }
 
 const PROGRESS_HEARTBEAT_MS = 15000;
@@ -78,12 +87,6 @@ function startProgressHeartbeat(
   };
 }
 
-function buildWiExcerpt(text: string, maxChars = 180): string {
-  const compact = (text || '').replace(/\s+/g, ' ').trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars).trimEnd()}...`;
-}
-
 function buildTriagePayload(triageResult: Awaited<ReturnType<typeof assessRequirementWithLlm>>) {
   if (!triageResult) return undefined;
   return {
@@ -109,17 +112,12 @@ function buildFeatureProgressState(
 }
 
 export async function handler(event: { body: GenerationEvent }) {
-  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey } = event.body;
-  
-  // Resolve project-specific context
-  const relevantContext = eventConfig.domainContexts?.find(c => c.projectKey === projectKey) 
-    || eventConfig.domainContexts?.find(c => c.projectKey === '*')
-    || { context: eventConfig.domainContext || '' };
-  
-  const config = { 
-    ...eventConfig, 
-    domainContext: relevantContext.context,
-    tier: getEffectiveTier(eventConfig, { license }) 
+  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey, projectKeys } = event.body;
+  const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
+  const config = {
+    ...eventConfig,
+    domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    tier: getEffectiveTier(eventConfig, { license }),
   };
   let stopHeartbeat: (() => void) | null = null;
 
@@ -134,18 +132,26 @@ export async function handler(event: { body: GenerationEvent }) {
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
-    const projectLabel = projectKey && projectKey !== '*' ? projectKey : 'no project selected';
+    const projectLabel = selectedProjectKeys.length === 1
+      ? selectedProjectKeys[0]
+      : selectedProjectKeys.length > 1
+        ? `${selectedProjectKeys.length} projects`
+        : 'no project selected';
     await updateProgress(`Reading work instructions and related stories for ${projectLabel}…`, 1, {
       stage: 'context',
       sources: {
-        projectKey,
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        projectKeys: selectedProjectKeys,
+        projectCount: selectedProjectKeys.length,
         domainContextApplied: Boolean(config.domainContext?.trim()),
         attachmentIncluded: Boolean(attachmentText?.trim()),
       },
     });
 
     const baseSources: GenerationProgressPayload['sources'] = {
-      projectKey,
+      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      projectKeys: selectedProjectKeys,
+      projectCount: selectedProjectKeys.length,
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
     };
@@ -185,15 +191,16 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const [wiContext, similarStories, triageResult] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), config.wiConfig.topKChunks, config.wiConfig.maxChars, projectKey)
+        ? retrieveScopedWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), config.wiConfig.topKChunks, config.wiConfig.maxChars, selectedProjectKeys)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
-        ? findSimilarStories({
+        ? retrieveScopedSimilarStories({
             requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text),
             attachmentText: maskedAttachment.text,
             clarifyAnswers: maskedAnswers.answers,
             config,
-            projectKey,
+            projectKeys: selectedProjectKeys,
+            maxResults: 12,
           })
         : Promise.resolve([]),
       triagePromise,
@@ -220,12 +227,7 @@ export async function handler(event: { body: GenerationEvent }) {
         filename: doc.filename,
         chunkCount: doc.chunkCount,
       })),
-      referencedWiSections: wiContext.chunks.slice(0, 4).map(chunk => ({
-        docId: chunk.docId,
-        filename: chunk.filename,
-        chunkIndex: chunk.chunkIndex,
-        excerpt: buildWiExcerpt(chunk.text),
-      })),
+      referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 4)),
     };
 
     // Progress: pass 1
@@ -292,18 +294,14 @@ export async function handler(event: { body: GenerationEvent }) {
     }
 
     const generationContext: GenerationContextMeta = {
-      projectKey,
+      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      projectKeys: selectedProjectKeys,
+      projectCount: selectedProjectKeys.length,
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
-      referencedSimilarStories: similarStories.slice(0, 12).map(item => ({
-        key: item.key,
-        summary: item.summary,
-        relevanceScore: item.relevanceScore,
-        url: item.url,
-        jiraIssueUrl: item.url,
-      })),
+      referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
@@ -311,12 +309,7 @@ export async function handler(event: { body: GenerationEvent }) {
         filename: doc.filename,
         chunkCount: doc.chunkCount,
       })),
-      referencedWiSections: wiContext.chunks.slice(0, 8).map(chunk => ({
-        docId: chunk.docId,
-        filename: chunk.filename,
-        chunkIndex: chunk.chunkIndex,
-        excerpt: buildWiExcerpt(chunk.text),
-      })),
+      referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 8)),
     };
     result.generationContext = generationContext;
 
@@ -355,15 +348,7 @@ export async function handler(event: { body: GenerationEvent }) {
           domainRolesCount: config.domainRoles?.length ?? 0,
         },
         tokenUsage: result.tokenUsage,
-        piiMasking: {
-          enabled: piiEnabled,
-          totalRedactions: maskedRequirement.stats.totalRedactions + maskedAttachment.stats.totalRedactions + maskedAnswers.stats.totalRedactions,
-          byType: {
-            ...maskedRequirement.stats.byType,
-            ...maskedAttachment.stats.byType,
-            ...maskedAnswers.stats.byType,
-          },
-        },
+        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedAnswers.stats),
       });
     }
 
@@ -373,10 +358,18 @@ export async function handler(event: { body: GenerationEvent }) {
       action: 'GENERATION_WORKFLOW_EXECUTED',
       details: {
         sessionId,
-        projectKey,
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
         model: config.generatorConfig.arModel,
       },
       enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+    });
+    await recordProjectActivity({
+      action: 'generate',
+      projectKeys: selectedProjectKeys,
+      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      sessionId,
+      model: config.generatorConfig.arModel,
+      tokenUsage: result.tokenUsage ?? null,
     });
 
     if (await isWorkflowCancelled(sessionId)) {
