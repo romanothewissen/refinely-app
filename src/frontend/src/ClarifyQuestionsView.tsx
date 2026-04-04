@@ -262,8 +262,8 @@ export function ClarifyQuestionsView({
         </div>
       </motion.header>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6">
-        <div className="mx-auto w-full max-w-6xl space-y-8 pb-12">
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5">
+        <div className="mx-auto w-full max-w-[1320px] space-y-6 pb-10">
           {contextMeta && (
             <motion.div
               className="relative overflow-hidden rounded-[28px] border border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,247,240,0.96))] shadow-[0_32px_80px_-48px_rgba(15,23,42,0.3)]"
@@ -274,41 +274,41 @@ export function ClarifyQuestionsView({
               <div className="absolute inset-x-0 top-0 h-1.5 overflow-hidden">
                 <div className="h-full w-full bg-[linear-gradient(90deg,rgba(43,89,74,0.16),rgba(43,89,74,0.55),rgba(179,94,48,0.28))]" />
               </div>
-              <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-6 sm:px-7 py-6">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[radial-gradient(circle_at_top,rgba(53,113,95,0.14),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,239,230,0.9))] px-5 sm:px-6 py-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="max-w-3xl">
                     <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--rf-brand)]">Discovery Context</div>
                     <div className="mt-2 flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[rgba(43,89,74,0.12)] bg-white shadow-sm">
-                        <AlertCircle className="w-5 h-5 text-[var(--rf-brand)]" />
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[rgba(43,89,74,0.12)] bg-white shadow-sm">
+                        <AlertCircle className="w-4 h-4 text-[var(--rf-brand)]" />
                       </div>
                       <div>
-                        <div className="text-[24px] font-semibold tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>
+                        <div className="text-[20px] font-semibold tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>
                           Discovery is grounding the requirement
                         </div>
-                        <p className="mt-1 text-sm text-[var(--rf-text-secondary)]">
+                        <p className="mt-0.5 text-[13px] text-[var(--rf-text-secondary)]">
                           Review the context pool, then answer only what meaningfully sharpens scope.
                         </p>
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:min-w-[330px]">
-                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-4 py-3">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:min-w-[320px]">
+                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-3.5 py-2.5">
                       <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Project</div>
                       <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}</div>
                     </div>
-                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-4 py-3">
+                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-3.5 py-2.5">
                       <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Docs</div>
                       <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{contextMeta.wiDocsCount ?? 0}</div>
                     </div>
-                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-4 py-3">
+                    <div className="rounded-2xl border border-[rgba(43,89,74,0.08)] bg-white/72 px-3.5 py-2.5">
                       <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Refs</div>
                       <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{contextMeta.similarStoriesCount ?? 0}</div>
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="px-6 sm:px-7 py-4">
+              <div className="px-5 sm:px-6 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-xs font-medium text-[var(--rf-text-secondary)]">
                     Sources used for this pass, plus the ambiguity signals behind the follow-up questions.
@@ -325,7 +325,7 @@ export function ClarifyQuestionsView({
 
               {showContextDetails && (
                 <motion.div
-                  className="border-t border-[var(--rf-border)]/60 px-6 sm:px-7 py-5 space-y-4 text-xs"
+                  className="border-t border-[var(--rf-border)]/60 px-5 sm:px-6 py-4 space-y-4 text-xs"
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                 >
@@ -491,7 +491,7 @@ export function ClarifyQuestionsView({
           {questions.length > 0 && categories.map(({ categoryKey, label, items }, idx) => (
             <motion.div
               key={categoryKey}
-              className="space-y-4"
+              className="space-y-3"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.1, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
@@ -503,7 +503,7 @@ export function ClarifyQuestionsView({
                 <div className="flex-1 h-px bg-[var(--rf-border)]" />
               </div>
 
-              <div className="grid gap-4">
+              <div className="grid gap-3">
                 {items.map(({ idx, q }) => {
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
@@ -512,20 +512,24 @@ export function ClarifyQuestionsView({
                   return (
                     <div
                       key={idx}
-                      className={`overflow-hidden rounded-[26px] border bg-white/88 shadow-sm transition-all duration-300 ${isAnswered ? 'border-[var(--rf-brand-subtle)] shadow-md shadow-[var(--rf-brand)]/5' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-md'}`}
+                      className={`overflow-hidden rounded-[24px] border shadow-sm transition-all duration-300 ${
+                        isAnswered
+                          ? 'border-[var(--rf-brand-subtle)] bg-[linear-gradient(180deg,rgba(248,252,250,0.98),rgba(255,255,255,0.95))] shadow-md shadow-[var(--rf-brand)]/5'
+                          : 'border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(249,247,243,0.94))] hover:border-[var(--rf-border-strong)] hover:shadow-md'
+                      }`}
                     >
-                      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] lg:items-start">
-                        <div className="space-y-4">
-                          <div className="flex items-start gap-4">
-                            <div className={`flex h-9 w-9 rounded-xl items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
+                      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)] lg:items-start">
+                        <div className="space-y-3">
+                          <div className="flex items-start gap-3">
+                            <div className={`flex h-8 w-8 rounded-xl items-center justify-center shrink-0 transition-all text-sm font-bold shadow-inner ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
                               {isAnswered ? <Check className="w-4 h-4" /> : <span>{idx + 1}</span>}
                             </div>
-                            <div className="space-y-2 min-w-0">
+                            <div className="space-y-1.5 min-w-0">
                               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{label}</div>
-                              <p className="text-[16px] font-bold text-[var(--rf-text)] leading-snug">
+                              <p className="text-[15px] font-bold text-[var(--rf-text)] leading-snug">
                                 {renderQuestionWithStoryLinks(q.question, storyLookup)}
                               </p>
-                              <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                              <div className="text-[11px] font-medium text-[var(--rf-text-tertiary)]">
                                 Choose the closest framing, then add only the nuance that matters.
                               </div>
                             </div>
@@ -535,17 +539,17 @@ export function ClarifyQuestionsView({
                             onChange={e => handleCustomChange(idx, e.target.value)}
                             disabled={isSubmitting}
                             placeholder={suggestions.length > 0 ? 'Add nuance, corrections, or anything your chosen answer does not cover…' : 'Type your answer here…'}
-                            rows={4}
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-2xl px-4 py-3.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
+                            rows={3}
+                            className="w-full bg-[rgba(255,255,255,0.82)] border border-[var(--rf-border)] rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)]"
                           />
                         </div>
 
                         {suggestions.length > 0 && (
-                          <div className="rounded-[22px] border border-[rgba(43,89,74,0.08)] bg-[linear-gradient(180deg,rgba(244,239,230,0.52),rgba(255,255,255,0.82))] p-4">
-                            <div className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
+                          <div className="rounded-[20px] border border-[rgba(43,89,74,0.08)] bg-[rgba(246,242,234,0.76)] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
+                            <div className="mb-2.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">
                               Proposed answers
                             </div>
-                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                            <div className="grid gap-2 sm:grid-cols-2">
                               {suggestions.map((sug, si) => {
                                 const sel = ans.selectedSuggestions.includes(sug);
                                 return (
@@ -553,7 +557,7 @@ export function ClarifyQuestionsView({
                                     key={si}
                                     onClick={() => toggleSuggestion(idx, sug)}
                                     disabled={isSubmitting}
-                                    className={`flex min-h-[92px] items-start rounded-2xl border px-4 py-3 text-left text-[13px] font-semibold leading-relaxed transition-all ${
+                                    className={`flex min-h-[74px] items-start rounded-[18px] border px-3.5 py-3 text-left text-[12px] font-semibold leading-relaxed transition-all ${
                                       sel
                                         ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] shadow-sm'
                                         : 'border-[var(--rf-border)] bg-white/88 text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
