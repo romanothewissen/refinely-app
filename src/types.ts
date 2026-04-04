@@ -489,6 +489,20 @@ export interface GenerationEvent {
   projectKeys?: string[];
 }
 
+// ─── Refine Queue Event ───────────────────────────────────────────────────────
+
+export interface RefineEvent {
+  sessionId: string;
+  accountId: string;
+  requirement: string;
+  feedback: string;
+  features: Feature[];
+  config: TenantConfig;
+  license?: any;
+  projectKey: string;
+  projectKeys?: string[];
+}
+
 // ─── Project Activity ────────────────────────────────────────────────────────
 
 export type ProjectActivityAction = 'clarify' | 'generate' | 'refine' | 'ask' | 'issue';

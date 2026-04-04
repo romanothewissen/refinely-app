@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
@@ -813,6 +813,9 @@ export function MainContent({
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
+  const [bulkRefineProgress, setBulkRefineProgress] = useState('');
+  const bulkRefinePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bulkRefineStartedAtRef = useRef<number>(0);
   const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
     String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -1104,29 +1107,107 @@ export function MainContent({
     }
   };
 
+  useEffect(() => {
+    if (!isBulkRefining) {
+      if (bulkRefinePollRef.current) {
+        clearInterval(bulkRefinePollRef.current);
+        bulkRefinePollRef.current = null;
+      }
+      if (!showBulkRefine) setBulkRefineProgress('');
+      return;
+    }
+
+    let active = true;
+    bulkRefineStartedAtRef.current = Date.now();
+    setBulkRefineProgress(previous => previous || 'Starting bulk refinement…');
+
+    bulkRefinePollRef.current = setInterval(async () => {
+      if (!active) return;
+      try {
+        const res = await api.getBulkRefineResult(sessionId) as any;
+        if (!active || !res?.success) return;
+        const event = res.progress;
+
+        if (!event) {
+          if (Date.now() - bulkRefineStartedAtRef.current > 90_000) {
+            throw new Error('Bulk refinement did not start. Please try again.');
+          }
+          return;
+        }
+
+        if (event.type === 'progress') {
+          if (event.message) setBulkRefineProgress(event.message);
+          const updatedAt = event.updatedAt ?? 0;
+          if (updatedAt > 0 && Date.now() - updatedAt > 180_000) {
+            throw new Error('Bulk refinement is taking unusually long. Please try again, or switch to a faster model in Settings.');
+          }
+          return;
+        }
+
+        if (bulkRefinePollRef.current) {
+          clearInterval(bulkRefinePollRef.current);
+          bulkRefinePollRef.current = null;
+        }
+
+        if (event.type === 'complete') {
+          if (!Array.isArray(event.features)) {
+            throw new Error('Bulk refinement finished without returning features.');
+          }
+          if (event.tokenUsage?.total) {
+            onWorkflowTokenUsage?.(event.tokenUsage as { input: number; output: number; total: number });
+          }
+          setFeatures(prev => annotateBulkRefinementResults(prev, event.features as Feature[]));
+          setShowBulkRefine(false);
+          setBulkInput('');
+          setBulkRefineProgress('');
+          setIsBulkRefining(false);
+          return;
+        }
+
+        if (event.type === 'cancelled') {
+          setBulkRefineProgress('');
+          setIsBulkRefining(false);
+          return;
+        }
+
+        throw new Error(event.message || 'Bulk refinement failed');
+      } catch (err: any) {
+        if (bulkRefinePollRef.current) {
+          clearInterval(bulkRefinePollRef.current);
+          bulkRefinePollRef.current = null;
+        }
+        if (!active) return;
+        console.error('Bulk refinement failed:', err);
+        setBulkRefineProgress('');
+        setIsBulkRefining(false);
+        alert(`AI refinement failed: ${err.message || 'Unknown error'}. Please try again.`);
+      }
+    }, 1500);
+
+    return () => {
+      active = false;
+      if (bulkRefinePollRef.current) {
+        clearInterval(bulkRefinePollRef.current);
+        bulkRefinePollRef.current = null;
+      }
+    };
+  }, [isBulkRefining, onWorkflowTokenUsage, sessionId, setFeatures, showBulkRefine]);
+
   const handleBulkRefine = async () => {
     if (!bulkInput.trim() || isBulkRefining) return;
-    setIsBulkRefining(true);
 
     try {
       const feedback = bulkInput.trim();
       const res = await api.refineFeatures(sessionId, requirement, features, feedback) as any;
-      if (!res.success || !Array.isArray(res.features)) {
+      if (!res.success) {
         throw new Error(res.error || 'Bulk refinement failed');
       }
-
-      if (res.tokenUsage?.total) {
-        onWorkflowTokenUsage?.(res.tokenUsage as { input: number; output: number; total: number });
-      }
-
-      setFeatures(prev => annotateBulkRefinementResults(prev, res.features as Feature[]));
-      setShowBulkRefine(false);
-      setBulkInput('');
+      setBulkRefineProgress('Queuing bulk refinement…');
+      setIsBulkRefining(true);
     } catch (err: any) {
       console.error('Bulk refinement failed:', err);
+      setBulkRefineProgress('');
       alert(`AI refinement failed: ${err.message || 'Unknown error'}. Please try again.`);
-    } finally {
-      setIsBulkRefining(false);
     }
   };
 
@@ -1758,7 +1839,9 @@ export function MainContent({
                 />
 
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">Cmd/Ctrl + Enter to apply</span>
+                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                    {isBulkRefining ? (bulkRefineProgress || 'Refining all features…') : 'Cmd/Ctrl + Enter to apply'}
+                  </span>
                   <motion.button
                     onClick={handleBulkRefine}
                     disabled={!bulkInput.trim() || isBulkRefining}

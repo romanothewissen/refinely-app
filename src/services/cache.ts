@@ -72,6 +72,7 @@ export const KEYS = {
   conversationIndex: 'conv_index',
   generationProgress: (sessionId: string) => `gen_progress_${sessionId}`,
   clarifyProgress: (sessionId: string) => `clarify_progress_${sessionId}`,
+  refineProgress: (sessionId: string) => `refine_progress_${sessionId}`,
   userLastSession: (accountId: string) => `u_${accountId}_last_session`,
   userIssueSession: (accountId: string, issueKey: string) => `u_${accountId}_issue_${issueKey}`,
   // per-user scoped

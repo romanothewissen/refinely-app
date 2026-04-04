@@ -50,7 +50,7 @@ import { retrieveWiContext } from '../core/wi-ingestion';
 import { findSimilarStories, getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
-import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent } from '../types';
+import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent, RefineEvent } from '../types';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -376,12 +376,14 @@ resolver.define('startGeneration', async ({ payload, context }) => {
 
 async function cancelWorkflowProgress(
   sessionId: string,
-  type: 'generation' | 'clarify',
+  type: 'generation' | 'clarify' | 'refine',
   message: string,
 ) {
   const key = type === 'generation'
     ? KEYS.generationProgress(sessionId)
-    : KEYS.clarifyProgress(sessionId);
+    : type === 'clarify'
+      ? KEYS.clarifyProgress(sessionId)
+      : KEYS.refineProgress(sessionId);
   const existing = type === 'clarify'
     ? await entityGet<{ inputSignature?: string }>(key)
     : null;
@@ -439,6 +441,15 @@ resolver.define('cancelGeneration', async ({ payload }: { payload: { sessionId: 
   return cancelWorkflowProgress(payload.sessionId, 'generation', 'Generation cancelled.');
 });
 
+resolver.define('getBulkRefineResult', async ({ payload }: { payload: { sessionId: string } }) => {
+  const progress = await entityGet(KEYS.refineProgress(payload.sessionId));
+  return { success: true, progress };
+});
+
+resolver.define('cancelBulkRefine', async ({ payload }: { payload: { sessionId: string } }) => {
+  return cancelWorkflowProgress(payload.sessionId, 'refine', 'Bulk refinement cancelled.');
+});
+
 // ─── Clarify ──────────────────────────────────────────────────────────────────
 
 resolver.define('startClarify', async ({ payload, context }) => {
@@ -487,50 +498,30 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
 resolver.define('refineFeatures', async ({ payload, context }) => {
   try {
     const config = await getConfig();
-    const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
-    const maskedRequirement = maskPiiText(payload.requirement ?? '', piiEnabled);
-    const maskedFeedback = maskPiiText(payload.feedback ?? '', piiEnabled);
-    const result = await refineFeatures({
-      requirement: maskedRequirement.text,
-      features: payload.features as Feature[],
-      feedback: maskedFeedback.text,
-      config,
-    });
-
+    const refineQueue = new Queue({ key: 'refine-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
-    await updateLatestTurnFeatures(payload.sessionId, accountId, result.features, 'refine', payload.feedback, result.tokenUsage);
-    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
-      await saveTransparencyReport({
-        sessionId: payload.sessionId,
-        turnType: 'refine',
-        actorAccountId: accountId,
-        provider: config.generatorConfig.provider,
-        model: config.generatorConfig.refineModel,
-        projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
-        requirementExcerpt: maskedRequirement.text.slice(0, 240),
-        decisionSummary: [
-          'Refinement applied based on explicit user feedback.',
-          'Feature content preserved where feedback did not request structural changes.',
-        ],
-        contextUsage: {
-          featureCount: Array.isArray(payload.features) ? payload.features.length : 0,
-          feedbackLength: String(payload.feedback ?? '').length,
-        },
-        tokenUsage: result.tokenUsage,
-        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedFeedback.stats),
-      });
-    }
-    await recordProjectActivity({
-      action: 'refine',
-      projectKeys: selectedProjectKeys,
-      projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    const event: RefineEvent = {
       sessionId: payload.sessionId,
-      model: config.generatorConfig.refineModel,
-      tokenUsage: result.tokenUsage ?? null,
-    });
+      accountId,
+      requirement: payload.requirement ?? '',
+      feedback: payload.feedback ?? '',
+      features: payload.features as Feature[],
+      config,
+      license: context?.license,
+      projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+      projectKeys: selectedProjectKeys,
+    };
 
-    return { success: true, features: result.features, tokenUsage: result.tokenUsage };
+    await entitySet(KEYS.refineProgress(payload.sessionId), {
+      type: 'progress',
+      sessionId: payload.sessionId,
+      message: 'Queuing bulk refinement…',
+      updatedAt: Date.now(),
+    });
+    await refineQueue.push({ body: event });
+
+    return { success: true, queued: true };
   } catch (err: any) {
     console.error('refineFeatures failed:', err);
     return { success: false, error: err?.message || 'Unknown error' };

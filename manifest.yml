@@ -29,6 +29,9 @@ modules:
     - key: clarify-consumer
       handler: queues/clarify.handler
       timeoutSeconds: 180
+    - key: refine-consumer
+      handler: queues/refine.handler
+      timeoutSeconds: 180
     - key: backlog-cache-refresh
       handler: queues/backlog-cache-refresh.handler
       timeoutSeconds: 900
@@ -39,6 +42,9 @@ modules:
     - key: clarify-consumer-listener
       queue: clarify-queue
       function: clarify-consumer
+    - key: refine-consumer-listener
+      queue: refine-queue
+      function: refine-consumer
     - key: backlog-cache-refresh-listener
       queue: backlog-cache-refresh-queue
       function: backlog-cache-refresh
