@@ -103,6 +103,7 @@ export function Sidebar({
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Free';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
+  const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() => (width ?? 400) >= 430);
   const filteredProjects = availableProjects.filter(project => {
     const haystack = `${project.key} ${project.name}`.toLowerCase();
     return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
@@ -111,6 +112,12 @@ export function Sidebar({
   React.useEffect(() => {
     setLogoLoadFailed(false);
   }, [brandingLogoUrl]);
+
+  React.useEffect(() => {
+    if ((width ?? 400) < 430) {
+      setWorkspaceExpanded(false);
+    }
+  }, [width]);
 
   const toggleProject = (nextKey: string) => {
     const normalized = String(nextKey ?? '').trim();
@@ -219,96 +226,142 @@ export function Sidebar({
                   </div>
                 </div>
               </div>
-              {selectedProjects.length > 0 && (
-                <div className="shrink-0 text-[13px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
-                  {selectedProjects.length > 1 ? 'Projects Active' : 'Project Active'}
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {selectedProjects.length > 0 && (
+                  <div className="shrink-0 text-[13px] font-medium text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2 py-0.5 rounded-full border border-[rgba(43,89,74,0.1)]">
+                    {selectedProjects.length > 1 ? 'Projects Active' : 'Project Active'}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceExpanded((prev) => !prev)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[rgba(43,89,74,0.1)] bg-white/80 text-[var(--rf-text-tertiary)] transition hover:border-[rgba(43,89,74,0.2)] hover:text-[var(--rf-text)]"
+                  title={workspaceExpanded ? 'Collapse workspace' : 'Expand workspace'}
+                >
+                  <ChevronDown className={`h-4 w-4 transition-transform ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="relative">
-                <input
-                  value={projectFilter}
-                  onChange={(e) => setProjectFilter(e.target.value)}
-                  placeholder="Search projects"
-                  className="w-full rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/80 px-3.5 py-2.5 pr-10 text-[13px] font-semibold text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/10"
-                />
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--rf-sidebar-text-muted)]" />
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
+            {!workspaceExpanded && (
+              <div className="flex flex-wrap items-center gap-1.5">
                 {selectedProjects.length ? (
                   selectedProjects.map((project) => (
-                    <button
+                    <span
                       key={project.key}
-                      type="button"
-                      onClick={() => toggleProject(project.key)}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-[12px] font-bold text-[var(--rf-brand)] transition hover:bg-[var(--rf-brand-muted)]"
+                      className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-[12px] font-bold text-[var(--rf-brand)]"
                     >
                       <span className="max-w-[120px] truncate">
                         {project.key}{project.name ? ` · ${project.name}` : ''}
                       </span>
-                      <X className="h-3 w-3" />
-                    </button>
+                    </span>
                   ))
                 ) : (
                   <span className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
                     Workspace-wide
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProjectKeys([]);
-                    setContextMode('global');
-                  }}
-                  className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[12px] font-bold transition ${
-                    projectKeys.length === 0
-                      ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white'
-                      : 'border-[rgba(43,89,74,0.12)] bg-white/70 text-[var(--rf-text-secondary)] hover:border-[rgba(43,89,74,0.22)] hover:text-[var(--rf-text)]'
-                  }`}
+                <span className="text-[12px] font-medium text-[var(--rf-sidebar-text-muted)]">
+                  {activeWiDocs.length > 0 ? `${activeWiDocs.length} docs linked` : 'No docs linked'}
+                </span>
+              </div>
+            )}
+
+            <AnimatePresence initial={false}>
+              {workspaceExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                  className="overflow-hidden"
                 >
-                  Workspace-wide
-                </button>
-              </div>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <input
+                        value={projectFilter}
+                        onChange={(e) => setProjectFilter(e.target.value)}
+                        placeholder="Search projects"
+                        className="w-full rounded-xl border border-[rgba(43,89,74,0.12)] bg-white/80 px-3.5 py-2.5 pr-10 text-[13px] font-semibold text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/10"
+                      />
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--rf-sidebar-text-muted)]" />
+                    </div>
 
-              <div className="max-h-36 overflow-y-auto rounded-xl border border-[rgba(43,89,74,0.08)] bg-white/70 p-1 custom-scrollbar">
-                {filteredProjects.length ? filteredProjects.map((project) => {
-                  const selected = projectKeys.includes(project.key);
-                  const disabled = !selected && projectKeys.length >= 2;
-                  return (
-                    <button
-                      key={project.key}
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => toggleProject(project.key)}
-                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
-                        selected
-                          ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
-                          : 'hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)]'
-                      } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-semibold">{project.key}</span>
-                        <span className="block truncate text-[11px] font-medium text-[var(--rf-sidebar-text-muted)]">{project.name}</span>
-                      </span>
-                      <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
-                        {selected ? 'Selected' : 'Add'}
-                      </span>
-                    </button>
-                  );
-                }) : (
-                  <div className="px-3 py-2 text-[13px] font-medium text-[var(--rf-sidebar-text-muted)]">
-                    No projects match the search.
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedProjects.length ? (
+                        selectedProjects.map((project) => (
+                          <button
+                            key={project.key}
+                            type="button"
+                            onClick={() => toggleProject(project.key)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-[12px] font-bold text-[var(--rf-brand)] transition hover:bg-[var(--rf-brand-muted)]"
+                          >
+                            <span className="max-w-[120px] truncate">
+                              {project.key}{project.name ? ` · ${project.name}` : ''}
+                            </span>
+                            <X className="h-3 w-3" />
+                          </button>
+                        ))
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-[rgba(43,89,74,0.12)] bg-[var(--rf-surface-soft)] px-2.5 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                          Workspace-wide
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProjectKeys([]);
+                          setContextMode('global');
+                        }}
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[12px] font-bold transition ${
+                          projectKeys.length === 0
+                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white'
+                            : 'border-[rgba(43,89,74,0.12)] bg-white/70 text-[var(--rf-text-secondary)] hover:border-[rgba(43,89,74,0.22)] hover:text-[var(--rf-text)]'
+                        }`}
+                      >
+                        Workspace-wide
+                      </button>
+                    </div>
+
+                    <div className="max-h-36 overflow-y-auto rounded-xl border border-[rgba(43,89,74,0.08)] bg-white/70 p-1 custom-scrollbar">
+                      {filteredProjects.length ? filteredProjects.map((project) => {
+                        const selected = projectKeys.includes(project.key);
+                        const disabled = !selected && projectKeys.length >= 2;
+                        return (
+                          <button
+                            key={project.key}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => toggleProject(project.key)}
+                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                              selected
+                                ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
+                                : 'hover:bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)]'
+                            } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] font-semibold">{project.key}</span>
+                              <span className="block truncate text-[11px] font-medium text-[var(--rf-sidebar-text-muted)]">{project.name}</span>
+                            </span>
+                            <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                              {selected ? 'Selected' : 'Add'}
+                            </span>
+                          </button>
+                        );
+                      }) : (
+                        <div className="px-3 py-2 text-[13px] font-medium text-[var(--rf-sidebar-text-muted)]">
+                          No projects match the search.
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-[13px] text-[var(--rf-sidebar-text-muted)]">
+                      Select up to two projects. The workspace will union backlog, WI, and guidance from both.
+                    </p>
                   </div>
-                )}
-              </div>
-
-              <p className="text-[13px] text-[var(--rf-sidebar-text-muted)]">
-                Select up to two projects. The workspace will union backlog, WI, and guidance from both.
-              </p>
-            </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Cache + Docs stats row */}
