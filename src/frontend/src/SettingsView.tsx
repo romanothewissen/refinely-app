@@ -210,17 +210,36 @@ function isProviderModel(provider: LlmProvider, modelId: string) {
   return normalized.startsWith('claude-');
 }
 
-function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
+function coerceRoleGuidanceRows(
+  rawRows: any[] = [],
+  options: { trimFields?: boolean; includeBlankFallback?: boolean } = {},
+): RoleGuidanceRow[] {
+  const { trimFields = true, includeBlankFallback = false } = options;
   const rows = rawRows
     .map((row: any) => {
       if (!row) return null;
-      if (typeof row === 'string') return { role: row.trim(), activities: '' };
-      const role = String(row.role ?? row.name ?? row.title ?? '').trim();
-      const activities = String(row.activities ?? row.activity ?? row.description ?? row.context ?? '').trim();
+      const rawRole = typeof row === 'string'
+        ? row
+        : String(row.role ?? row.name ?? row.title ?? '');
+      const rawActivities = typeof row === 'string'
+        ? ''
+        : String(row.activities ?? row.activity ?? row.description ?? row.context ?? '');
+      const role = trimFields ? rawRole.trim() : rawRole;
+      const activities = trimFields ? rawActivities.trim() : rawActivities;
       return { role, activities };
     })
-    .filter((row: RoleGuidanceRow | null): row is RoleGuidanceRow => Boolean(row && (row.role || row.activities)));
-  return rows.length ? rows : [{ role: '', activities: '' }];
+    .filter((row: RoleGuidanceRow | null): row is RoleGuidanceRow => {
+      if (!row) return false;
+      const hasContent = trimFields
+        ? Boolean(row.role || row.activities)
+        : Boolean(row.role.length || row.activities.length);
+      return hasContent;
+    });
+  return rows.length ? rows : (includeBlankFallback ? [{ role: '', activities: '' }] : []);
+}
+
+function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
+  return coerceRoleGuidanceRows(rawRows, { trimFields: true, includeBlankFallback: true });
 }
 
 function splitGuidanceContext(rawContext = '') {
@@ -2141,6 +2160,9 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     }
   }, [issueTypes, activeIssueType, customFields]);
   const currentContext = domainContexts.find((c: any) => c.projectKey === activeArProj) || { projectKey: activeArProj, context: '', personaRoles: [] };
+  const currentPersonaRoles: RoleGuidanceRow[] = currentContext.personaRoles?.length
+    ? currentContext.personaRoles
+    : [{ role: '', activities: '' }];
   const currentBacklogScope = backlogStatusScopes.find((scope: any) => scope.projectKey === activeArProj) || { projectKey: activeArProj, statuses: [] };
   const effectiveBacklogStatuses = currentBacklogScope.statuses.length
     ? currentBacklogScope.statuses
@@ -2156,7 +2178,15 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
   }, [backlogCacheInfo, backlogDiagnostics]);
   const updateContext = (patch: Partial<ProjectDomainContextRow>) => {
     const idx = domainContexts.findIndex((c: any) => c.projectKey === activeArProj);
-    const upd = normalizeProjectDomainContext({ ...currentContext, ...patch, projectKey: activeArProj });
+    const nextRoles = coerceRoleGuidanceRows(
+      Array.isArray(patch.personaRoles) ? patch.personaRoles : (currentContext.personaRoles ?? []),
+      { trimFields: false, includeBlankFallback: false },
+    );
+    const upd: ProjectDomainContextRow = {
+      projectKey: activeArProj,
+      context: String(patch.context ?? currentContext.context ?? ''),
+      personaRoles: nextRoles,
+    };
     if (idx >= 0) { const l = [...domainContexts]; l[idx] = upd; setDomainContexts(l); }
     else setDomainContexts([...domainContexts, upd]);
   };
@@ -2449,7 +2479,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                         <div>Activities</div>
                         <div />
                       </div>
-                      {normalizeRoleGuidanceRows(currentContext.personaRoles ?? []).map((row, index, allRows) => (
+                      {currentPersonaRoles.map((row, index, allRows) => (
                         <div key={`project-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(160px,200px)_1fr_auto] gap-2.5 items-start rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
                           <div className="space-y-1">
                             <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
