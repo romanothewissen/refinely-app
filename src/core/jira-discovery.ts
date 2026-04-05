@@ -96,10 +96,13 @@ export async function discoverCustomFields(): Promise<JiraField[]> {
 }
 
 export async function discoverAll(projectKey?: string) {
-  const [projects, fields] = await Promise.all([
+  const [projectsResult, fieldsResult] = await Promise.allSettled([
     discoverProjects(),
     discoverCustomFields(),
   ]);
+
+  const projects = projectsResult.status === 'fulfilled' ? projectsResult.value : [];
+  const fields = fieldsResult.status === 'fulfilled' ? fieldsResult.value : [];
 
   let issueTypes: JiraIssueType[] = [];
   let statuses: JiraStatus[] = [];

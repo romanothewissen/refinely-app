@@ -224,6 +224,7 @@ export function Sidebar({
         >
           {/* Project row */}
           <div className="px-3 pt-3 pb-2.5">
+            {/* Header: current workspace + collapse toggle */}
             <motion.button
               type="button"
               onClick={() => setWorkspaceExpanded((prev) => !prev)}
@@ -231,7 +232,7 @@ export function Sidebar({
               aria-controls="workspace-selector"
               className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 p-3 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
               whileTap={{ scale: 0.99 }}
-              title={workspaceExpanded ? 'Collapse workspace selector' : 'Expand workspace selector'}
+              title={workspaceExpanded ? 'Collapse project picker' : 'Expand project picker'}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2.5">
@@ -239,40 +240,39 @@ export function Sidebar({
                     <Orbit className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[11px] font-700 uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Workspace</div>
+                    <div className="text-[11px] font-700 uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+                      {contextMode === 'undecided' ? 'Step 1 — Pick a scope' : 'Workspace'}
+                    </div>
                     <div className="mt-0.5 truncate text-[13px] font-semibold text-[var(--rf-text)]">
-                      {projectTitle}
+                      {contextMode === 'undecided' ? 'Select project or go workspace-wide' : projectTitle}
                     </div>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="hidden rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)] group-hover:text-[var(--rf-brand)] min-[360px]:inline-flex">
-                    Click to {workspaceExpanded ? 'hide' : 'change'}
-                  </span>
-                  <ChevronDown className={`h-4 w-4 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
-                </div>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                {selectedProjects.length ? (
-                  selectedProjects.map((project) => (
-                    <span
-                      key={project.key}
-                      className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]"
-                    >
-                      <span className="max-w-[120px] truncate">
-                        {project.key}{project.name ? ` · ${project.name}` : ''}
+              {contextMode !== 'undecided' && (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {selectedProjects.length ? (
+                    selectedProjects.map((project) => (
+                      <span
+                        key={project.key}
+                        className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]"
+                      >
+                        <span className="max-w-[120px] truncate">
+                          {project.key}{project.name ? ` · ${project.name}` : ''}
+                        </span>
                       </span>
+                    ))
+                  ) : (
+                    <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-0.5 text-[12px] font-medium text-[var(--rf-text-secondary)]">
+                      Workspace-wide
                     </span>
-                  ))
-                ) : (
-                  <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-0.5 text-[12px] font-medium text-[var(--rf-text-secondary)]">
-                    Workspace-wide
+                  )}
+                  <span className="text-[12px] text-[var(--rf-text-tertiary)]">
+                    {activeWiDocs.length > 0 ? `${activeWiDocs.length} docs linked` : 'No docs linked'}
                   </span>
-                )}
-                <span className="text-[12px] text-[var(--rf-text-tertiary)]">
-                  {activeWiDocs.length > 0 ? `${activeWiDocs.length} docs linked` : 'No docs linked'}
-                </span>
-              </div>
+                </div>
+              )}
             </motion.button>
 
             <AnimatePresence initial={false}>
@@ -286,19 +286,35 @@ export function Sidebar({
                   className="overflow-hidden pt-2"
                 >
                   <div className="space-y-2">
-                    <div className="relative">
-                      <input
-                        value={projectFilter}
-                        onChange={(e) => setProjectFilter(e.target.value)}
-                        placeholder="Search projects"
-                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2.5 pr-10 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
-                      />
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--rf-text-tertiary)]" />
+                    {/* Workspace-wide quick-select — always shown prominently */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProjectKeys([]);
+                        setContextMode('global');
+                        setWorkspaceExpanded(false);
+                      }}
+                      className={`w-full flex items-center justify-between rounded-xl border px-3 py-2.5 text-left transition ${
+                        projectKeys.length === 0 && contextMode !== 'undecided'
+                          ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                          : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/80 hover:text-[var(--rf-text)]'
+                      }`}
+                    >
+                      <span className="text-[13px] font-semibold">Workspace-wide</span>
+                      <span className="text-[11px] font-medium opacity-70">All projects</span>
+                    </button>
+
+                    {/* Divider */}
+                    <div className="flex items-center gap-2">
+                      <div className="h-px flex-1 bg-[var(--rf-border)]" />
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--rf-text-tertiary)]">or pick a project</span>
+                      <div className="h-px flex-1 bg-[var(--rf-border)]" />
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedProjects.length ? (
-                        selectedProjects.map((project) => (
+                    {/* Selected project chips */}
+                    {selectedProjects.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedProjects.map((project) => (
                           <button
                             key={project.key}
                             type="button"
@@ -310,26 +326,18 @@ export function Sidebar({
                             </span>
                             <X className="h-2.5 w-2.5" />
                           </button>
-                        ))
-                      ) : (
-                        <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-0.5 text-[12px] font-medium text-[var(--rf-text-secondary)]">
-                          Workspace-wide
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProjectKeys([]);
-                          setContextMode('global');
-                        }}
-                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[12px] font-semibold transition ${
-                          projectKeys.length === 0
-                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white'
-                            : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-text)]'
-                        }`}
-                      >
-                        Workspace-wide
-                      </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Project search + list */}
+                    <div className="relative">
+                      <input
+                        value={projectFilter}
+                        onChange={(e) => setProjectFilter(e.target.value)}
+                        placeholder="Search projects…"
+                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                      />
                     </div>
 
                     <div className="max-h-36 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar backdrop-blur-sm">
@@ -353,19 +361,19 @@ export function Sidebar({
                               <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{project.name}</span>
                             </span>
                             <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
-                              {selected ? 'Selected' : 'Add'}
+                              {selected ? 'Selected' : 'Pick'}
                             </span>
                           </button>
                         );
                       }) : (
                         <div className="px-3 py-2 text-[13px] text-[var(--rf-text-tertiary)]">
-                          No projects match the search.
+                          No projects found.
                         </div>
                       )}
                     </div>
 
                     <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                      Select up to two projects. The workspace will merge backlog, WI, and guidance from both.
+                      Select up to 2 projects to merge their backlog, docs, and guidance.
                     </p>
                   </div>
                 </motion.div>
@@ -373,46 +381,41 @@ export function Sidebar({
             </AnimatePresence>
           </div>
 
-          {/* Backlog + Docs stats row */}
-          <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5">
-            <button
-              type="button"
-              onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
-              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
-              title="Open backlog cache settings"
-            >
-              <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
-              <div className="min-w-0 text-left">
-                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Backlog</div>
-                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                  {selectedProjects.length ? `${totalCachedStories} cached stories` : 'Select project'}
-                </div>
-                {cacheBreakdown.length > 1 && (
-                  <div className="text-[10px] text-[var(--rf-text-tertiary)] truncate">
-                    {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+          {/* Backlog + Docs stats row — only shown once scope is chosen */}
+          {contextReady && (
+            <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
+                className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
+                title="Open backlog cache settings"
+              >
+                <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
+                <div className="min-w-0 text-left">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Backlog</div>
+                  <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
+                    {selectedProjects.length ? `${totalCachedStories} stories` : 'All projects'}
                   </div>
-                )}
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
-              className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
-            >
-              <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
-              <div className="min-w-0 text-left">
-                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Docs</div>
-                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                  {activeWiDocs.length > 0 ? `${activeWiDocs.length} stored` : 'None stored'}
+                  {cacheBreakdown.length > 1 && (
+                    <div className="text-[10px] text-[var(--rf-text-tertiary)] truncate">
+                      {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+                    </div>
+                  )}
                 </div>
-              </div>
-            </button>
-          </div>
-
-          {/* Context not ready warning */}
-          {!contextReady && (
-            <div className="mx-3 mb-3 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(160,81,30,0.14)] px-3 py-2 text-[13px] font-medium text-[var(--rf-warning)]">
-              Choose a context scope to continue.
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
+                className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
+                <div className="min-w-0 text-left">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Docs</div>
+                  <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
+                    {activeWiDocs.length > 0 ? `${activeWiDocs.length} linked` : 'None stored'}
+                  </div>
+                </div>
+              </button>
             </div>
           )}
         </motion.div>
@@ -434,7 +437,7 @@ export function Sidebar({
                 </span>
               )}
               <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
-                Requirement
+                {contextMode === 'undecided' ? 'Step 2 — Requirement' : 'Requirement'}
               </span>
             </div>
             <motion.button
@@ -488,7 +491,7 @@ export function Sidebar({
           <textarea
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
-            placeholder="Type your requirement here, or leave blank and attach a file."
+            placeholder={!contextReady ? 'Pick a scope above first…' : 'Describe your feature or requirement…'}
             disabled={isWorking || !contextReady}
             className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-3 pt-2.5 pb-2 custom-scrollbar"
           />

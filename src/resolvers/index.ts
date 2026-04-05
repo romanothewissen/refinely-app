@@ -60,10 +60,13 @@ async function checkAdmin(context: any) {
   const accountId = (context as { accountId?: string })?.accountId;
   if (!accountId) return false;
   try {
-    const res = await asUser().requestJira(route`/rest/api/3/mypermissions?permissions=ADMINISTER`);
+    const res = await asUser().requestJira(route`/rest/api/3/mypermissions?permissions=ADMINISTER,ADMINISTER_PROJECTS`);
     if (!res.ok) return false;
     const data = await res.json();
-    return data.permissions?.ADMINISTER?.havePermission === true;
+    return (
+      data.permissions?.ADMINISTER?.havePermission === true ||
+      data.permissions?.ADMINISTER_PROJECTS?.havePermission === true
+    );
   } catch (e) {
     return false;
   }
