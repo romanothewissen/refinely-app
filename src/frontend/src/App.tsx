@@ -609,6 +609,7 @@ export default function App() {
 
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
+  const [sidebarCacheCounts, setSidebarCacheCounts] = useState<Record<string, number>>({});
 
   const loadUsage = async () => {
     try {
@@ -667,6 +668,7 @@ export default function App() {
       setIsWorking(false);
       setWorkflowStage('idle');
       loadHistory();
+      window.setTimeout(() => { void loadHistory(); }, 1500);
       loadUsage();
     },
     (errMsg) => {
@@ -688,6 +690,33 @@ export default function App() {
   useEffect(() => {
     setGenerationProgressMeta(liveGenerationPayload ?? null);
   }, [liveGenerationPayload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const selectedKeys = projectKeys.filter((key) => key && key !== '*').slice(0, 2);
+    if (!selectedKeys.length) {
+      setSidebarCacheCounts({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.all(selectedKeys.map(async (key) => {
+      try {
+        const res = await api.getBacklogCacheInfo(key) as any;
+        return [key, res?.success ? (res.issueCount ?? 0) : 0] as const;
+      } catch {
+        return [key, 0] as const;
+      }
+    })).then((entries) => {
+      if (cancelled) return;
+      setSidebarCacheCounts(Object.fromEntries(entries));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKeys]);
 
   const {
     cancelClarify,
@@ -1312,6 +1341,7 @@ export default function App() {
               contextMode={contextMode}
               setContextMode={setContextMode}
               availableProjects={availableProjects}
+              cacheCountsByProject={sidebarCacheCounts}
               wiDocs={wiDocs}
               onOpenProjectSettings={openProjectSettings}
               runAttachments={runAttachments}

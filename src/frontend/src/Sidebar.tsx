@@ -28,6 +28,7 @@ interface SidebarProps {
   contextMode: 'undecided' | 'project' | 'global';
   setContextMode: (mode: 'undecided' | 'project' | 'global') => void;
   availableProjects: Array<{ key: string; name: string }>;
+  cacheCountsByProject: Record<string, number>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
   runAttachments: Array<{ id: string; filename: string; charCount: number }>;
@@ -71,6 +72,7 @@ export function Sidebar({
   contextMode,
   setContextMode,
   availableProjects,
+  cacheCountsByProject,
   wiDocs,
   onOpenProjectSettings,
   runAttachments,
@@ -108,6 +110,10 @@ export function Sidebar({
     const haystack = `${project.key} ${project.name}`.toLowerCase();
     return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
   });
+  const cacheBreakdown = selectedProjects
+    .map((project) => ({ key: project.key, count: cacheCountsByProject[project.key] ?? 0 }))
+    .filter((entry) => entry.key);
+  const totalCachedStories = cacheBreakdown.reduce((sum, entry) => sum + entry.count, 0);
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -231,11 +237,6 @@ export function Sidebar({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {selectedProjects.length > 0 && (
-                  <div className="shrink-0 text-[12px] font-semibold text-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-full border border-[var(--rf-border)]">
-                    {selectedProjects.length > 1 ? 'Projects Active' : 'Project Active'}
-                  </div>
-                )}
                 <button
                   type="button"
                   onClick={() => setWorkspaceExpanded((prev) => !prev)}
@@ -396,6 +397,20 @@ export function Sidebar({
                 </div>
               </div>
             </button>
+            <div className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2">
+              <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60" />
+              <div className="min-w-0 text-left">
+                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Stories</div>
+                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
+                  {selectedProjects.length ? `${totalCachedStories} cached` : 'Pick project'}
+                </div>
+                {cacheBreakdown.length > 1 && (
+                  <div className="text-[10px] text-[var(--rf-text-tertiary)] truncate">
+                    {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Context not ready warning */}
@@ -599,14 +614,14 @@ export function Sidebar({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="relative overflow-hidden rounded-[18px] border border-[var(--rf-border)] bg-white/75 backdrop-blur-xl px-3 py-3">
+          <div className="relative overflow-hidden rounded-[18px] border border-[var(--rf-border)] bg-white/72 backdrop-blur-xl px-3 py-2.5">
             <button
               onClick={() => setShowUsage(false)}
-              className="absolute right-2.5 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/70 hover:text-[var(--rf-text)]"
+              className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/70 hover:text-[var(--rf-text)]"
             >
               <X className="w-3 h-3" />
             </button>
-            <UsageMeter usage={usage} limits={limits} tier={tier} isCompact={true} className="pr-7" />
+            <UsageMeter usage={usage} limits={limits} tier={tier} isCompact={true} className="pr-6" />
           </div>
         </motion.div>
       )}

@@ -262,22 +262,25 @@ const DISCOVERY_CLARITY_LABELS: Record<string, string> = {
   vague: 'Vague ask',
 };
 
-function ComplexityBar({ current }: { current: string }) {
+function ComplexityBar({ current }: { current?: string | null }) {
   const currentIndex = COMPLEXITY_LEVELS.findIndex(l => l.key === current);
   return (
     <div className="flex gap-1">
       {COMPLEXITY_LEVELS.map((level, idx) => {
+        const isUnknown = currentIndex === -1;
         const isActive = idx === currentIndex;
         const isPast = idx < currentIndex;
         return (
           <div key={level.key} className="flex-1 flex flex-col gap-1">
             <div className={`h-2 rounded-sm transition-colors duration-500 ${
-              isActive ? 'bg-[var(--rf-brand)]'
+              isUnknown ? 'bg-[var(--rf-border)]'
+              : isActive ? 'bg-[var(--rf-brand)]'
               : isPast ? 'bg-[var(--rf-brand-subtle)]'
               : 'bg-[var(--rf-border)]'
             }`} />
             <span className={`text-[10px] font-bold uppercase tracking-tight text-center transition-colors leading-tight ${
-              isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-40'
+              isUnknown ? 'text-[var(--rf-text-tertiary)] opacity-40'
+              : isActive ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)] opacity-40'
             }`}>{level.label}</span>
           </div>
         );
@@ -356,7 +359,7 @@ function DiscoveryScoreCard({
   const discoveryProfile = meta?.discoveryProfile ?? context?.discoveryProfile;
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
   const assessment = meta?.assessment ?? null;
-  const complexityKey = discoveryProfile?.complexity ?? assessment?.complexity;
+  const complexityKey = discoveryProfile?.complexity ?? null;
   const complexityLabel = complexityKey ? (COMPLEXITY_LEVELS.find((level) => level.key === complexityKey)?.label ?? complexityKey) : null;
   const plannedQuestions = ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
 
@@ -391,7 +394,7 @@ function DiscoveryScoreCard({
         <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
         <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{complexityLabel ?? 'Assessing'}</span>
       </div>
-      <ComplexityBar current={complexityKey ?? 'medium'} />
+      <ComplexityBar current={complexityKey} />
 
       <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
 

@@ -75,6 +75,7 @@ export const KEYS = {
   refineProgress: (sessionId: string) => `refine_progress_${sessionId}`,
   userLastSession: (accountId: string) => `u_${accountId}_last_session`,
   userIssueSession: (accountId: string, issueKey: string) => `u_${accountId}_issue_${issueKey}`,
+  userPreferences: (accountId: string) => `u_${accountId}_preferences`,
   // per-user scoped
   userConversations: (accountId: string, sessionId: string) => `u_${accountId}_conv_${sessionId}`,
   userConversationIndex: (accountId: string) => `u_${accountId}_conv_index`,

@@ -13,6 +13,7 @@ import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
 import { entityDelete, entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
+import { getUserPreferences, saveUserPreferences } from '../services/user-preferences';
 import {
   appendComplianceAuditEvent,
   getComplianceSummary,
@@ -150,8 +151,48 @@ function normalizeProjectArMapping(arMapping: any, projectKey?: string) {
     iterativeFieldIds: outputMappings.arFieldIds,
     inputMappings,
     outputMappings,
-    issueLinkType: arMapping?.issueLinkType,
+    issueLinkType: arMapping?.issueLinkType || 'Relates to',
   };
+}
+
+function normalizePersonaRoles(rawRows: unknown[]) {
+  const seen = new Set<string>();
+  return (Array.isArray(rawRows) ? rawRows : [])
+    .map((row) => {
+      if (!row) return null;
+      if (typeof row === 'string') return { role: row.trim(), activities: '' };
+      const role = String(row.role ?? row.name ?? row.title ?? '').trim();
+      const activities = String(row.activities ?? row.activity ?? row.description ?? row.context ?? '').trim();
+      return role || activities ? { role, activities } : null;
+    })
+    .filter(Boolean)
+    .filter((row) => {
+      const key = `${row.role.toLowerCase()}::${row.activities.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function normalizeProjectDomainContext(entry: any, projectKey?: string) {
+  return {
+    projectKey: String(entry?.projectKey ?? projectKey ?? '*').trim() || '*',
+    context: String(entry?.context ?? '').trim(),
+    personaRoles: normalizePersonaRoles(entry?.personaRoles),
+  };
+}
+
+function resolveProjectArMapping(config: any, projectKey: string, issueType?: string) {
+  const mappings = Array.isArray(config?.arMappings) ? config.arMappings : [];
+  const normalizedIssueType = String(issueType ?? '*').trim() || '*';
+  const exact = mappings.find((mapping) => mapping.projectKey === projectKey && String(mapping.issueType ?? '*') === normalizedIssueType);
+  if (exact) return normalizeProjectArMapping(exact, projectKey);
+  const projectFallback = mappings.find((mapping) => mapping.projectKey === projectKey && String(mapping.issueType ?? '*') === '*');
+  if (projectFallback) return normalizeProjectArMapping(projectFallback, projectKey);
+  const globalExact = mappings.find((mapping) => mapping.projectKey === '*' && String(mapping.issueType ?? '*') === normalizedIssueType);
+  if (globalExact) return normalizeProjectArMapping(globalExact, projectKey);
+  const globalFallback = mappings.find((mapping) => mapping.projectKey === '*' && String(mapping.issueType ?? '*') === '*');
+  return normalizeProjectArMapping(globalFallback || { mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [] }, projectKey);
 }
 
 function countConfiguredProjects(config: { arMappings?: any[]; domainContexts?: any[]; backlogStatusScopes?: any[] }) {
@@ -187,8 +228,10 @@ resolver.define('checkIsAdmin', async ({ context, payload }) => {
 
 resolver.define('getConfig', async ({ context }) => {
   const config = await getConfig();
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const userPreferences = await getUserPreferences(accountId);
   const isAdmin = await checkAdmin(context);
-  await recordRuntimeVersionIfChanged((context as { accountId?: string })?.accountId, Boolean(config.compliance?.auditTrailEnabled));
+  await recordRuntimeVersionIfChanged(accountId, Boolean(config.compliance?.auditTrailEnabled));
   
   if (config.generatorConfig) {
     const gc = config.generatorConfig;
@@ -199,11 +242,14 @@ resolver.define('getConfig', async ({ context }) => {
     if (gc.azureOpenAIApiKey) gc.azureOpenAIApiKey = REDACTED;
   }
   
-  return { ...config, isAdmin };
+  return { ...config, isAdmin, defaultProjectKey: userPreferences.defaultProjectKey };
 });
 
 resolver.define('saveConfig', async ({ payload, context }) => {
   await ensureAdmin(context);
+  if (Object.prototype.hasOwnProperty.call(payload ?? {}, 'defaultProjectKey')) {
+    delete payload.defaultProjectKey;
+  }
   
   // Key preservation logic
   const existingConfig = await getConfig();
@@ -262,6 +308,20 @@ resolver.define('saveConfig', async ({ payload, context }) => {
     enabled: auditEnabled,
   });
   return { success: true };
+});
+
+resolver.define('getUserPreferences', async ({ context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const preferences = await getUserPreferences(accountId);
+  return { success: true, ...preferences };
+});
+
+resolver.define('saveUserPreferences', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const preferences = await saveUserPreferences(accountId, {
+    defaultProjectKey: typeof payload?.defaultProjectKey === 'string' ? payload.defaultProjectKey : undefined,
+  });
+  return { success: true, ...preferences };
 });
 
 resolver.define('patchConfig', async ({ payload, context }) => {
@@ -705,12 +765,7 @@ resolver.define('createIssue', async ({ payload, context }) => {
       return { success: false, error: 'Could not resolve the current user for issue creation.' };
     }
     const config = await getConfig();
-    const arMapping = normalizeProjectArMapping(
-      config.arMappings?.find(m => m.projectKey === payload.projectKey) 
-        || config.arMappings?.find(m => m.projectKey === '*') 
-        || { mode: 'consolidated', consolidatedFieldId: 'description', iterativeFieldIds: [] },
-      payload.projectKey as string,
-    );
+    const arMapping = resolveProjectArMapping(config, payload.projectKey as string, payload.issueType as string);
 
     const result = await createFeatureIssue({
       feature: payload.feature as Feature,
@@ -740,7 +795,8 @@ resolver.define('createIssue', async ({ payload, context }) => {
         // Secondary attempt: maybe the link type name in Jira is slightly different?
         if (linkError?.includes('400') || linkError?.includes('404')) {
            try {
-             const alternative = ((config.issueLinkType ?? 'Relates to') === 'Relates to') ? 'Relates' : 'Relates to';
+             const configuredLinkType = arMapping.issueLinkType || config.issueLinkType || 'Relates to';
+             const alternative = configuredLinkType === 'Relates to' ? 'Relates' : 'Relates to';
              await createIssueLink({
                inwardIssueKey: payload.originIssueKey as string,
                outwardIssueKey: result.issueKey,
@@ -919,8 +975,9 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
   
   // AR Mappings
   if (arMapping) {
-    const idx = nextConfig.arMappings.findIndex(m => m.projectKey === projectKey);
     const normalizedMapping = normalizeProjectArMapping(arMapping, projectKey);
+    const normalizedIssueType = String(normalizedMapping.issueType ?? '*');
+    const idx = nextConfig.arMappings.findIndex(m => m.projectKey === projectKey && String(m.issueType ?? '*') === normalizedIssueType);
     // Note: the normalized mapping preserves both the new and legacy shapes.
     if (idx >= 0) nextConfig.arMappings[idx] = normalizedMapping;
     else nextConfig.arMappings.push(normalizedMapping);
@@ -928,9 +985,10 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
   
   // Domain Contexts
   if (domainContext !== undefined) {
+    const normalizedContext = normalizeProjectDomainContext(domainContext, projectKey);
     const idx = nextConfig.domainContexts.findIndex(c => c.projectKey === projectKey);
-    if (idx >= 0) nextConfig.domainContexts[idx] = { projectKey, context: domainContext };
-    else nextConfig.domainContexts.push({ projectKey, context: domainContext });
+    if (idx >= 0) nextConfig.domainContexts[idx] = normalizedContext;
+    else nextConfig.domainContexts.push(normalizedContext);
   }
   
   if (Array.isArray(backlogStatuses)) {
@@ -1159,6 +1217,7 @@ resolver.define('renameConversation', async ({ payload, context }) => {
   if (existing) {
     existing.title = payload.title;
     existing.updatedAt = new Date().toISOString();
+    existing.titleEditedAt = String(existing.updatedAt);
     await entitySet(key, existing);
     await syncConversationIndexEntry(accountId, payload.sessionId, {
       title: payload.title,

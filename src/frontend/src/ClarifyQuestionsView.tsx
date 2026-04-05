@@ -461,8 +461,8 @@ export function ClarifyQuestionsView({
                       key={idx}
                       className={`overflow-hidden rounded-[18px] border transition-all duration-200 backdrop-blur-sm ${
                         isAnswered
-                          ? 'border-[var(--rf-brand-subtle)] bg-white/82 shadow-[0_4px_16px_-4px_rgba(43,89,74,0.08)]'
-                          : 'border-[var(--rf-border)] bg-white/78 hover:border-[var(--rf-border-strong)]'
+                          ? 'border-[var(--rf-brand-subtle)] bg-[rgba(255,255,255,0.94)] shadow-[0_6px_20px_-6px_rgba(43,89,74,0.10)]'
+                          : 'border-[var(--rf-border)] bg-[rgba(255,255,255,0.9)] hover:border-[var(--rf-border-strong)]'
                       }`}
                     >
                       <div className="space-y-2.5 p-3">
@@ -487,7 +487,7 @@ export function ClarifyQuestionsView({
                                   className={`flex items-start rounded-[12px] border px-3 py-2 text-left text-[13px] font-medium leading-relaxed transition-all backdrop-blur-sm ${
                                     sel
                                       ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                                      : 'border-[var(--rf-border)] bg-white/55 text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
+                                      : 'border-[var(--rf-border)] bg-[rgba(255,255,255,0.88)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
                                   }`}
                                 >
                                   <div className="flex w-full items-start gap-2">
@@ -508,7 +508,7 @@ export function ClarifyQuestionsView({
                           disabled={isSubmitting}
                           placeholder={suggestions.length > 0 ? 'Add nuance, or anything your chosen answer does not cover…' : 'Type your answer here…'}
                           rows={2}
-                          className="w-full bg-white/55 border border-[var(--rf-border)] rounded-xl px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand-subtle)] focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)] backdrop-blur-sm"
+                          className="w-full bg-[rgba(255,255,255,0.9)] border border-[var(--rf-border)] rounded-xl px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-[var(--rf-brand-subtle)] focus:border-[var(--rf-brand)] transition resize-none placeholder-[var(--rf-text-tertiary)] backdrop-blur-sm"
                         />
                       </div>
                     </div>

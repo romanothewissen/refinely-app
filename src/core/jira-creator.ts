@@ -41,25 +41,48 @@ export async function createFeatureIssue(opts: {
   const outputMappings = mapping.outputMappings;
   const descriptionFieldId = outputMappings.descriptionFieldId || 'description';
   const arFieldIds = normalizeFieldIds(outputMappings.arFieldIds);
-  const descriptionDocOnly = buildAdfDocument(feature, false);
-  const descriptionDocWithArs = buildAdfDocument(feature, true);
-  const arDoc = buildAdfContentOnly(feature.acceptanceRequirements);
+  const iterativeMode = arFieldIds.length > 1;
+  const mappedArEntries = iterativeMode
+    ? arFieldIds.map((fieldId, index) => ({ fieldId, ar: feature.acceptanceRequirements[index] ?? null }))
+    : [];
+  const overflowArs = iterativeMode ? feature.acceptanceRequirements.slice(arFieldIds.length) : [];
+  const descriptionArs = iterativeMode
+    ? [
+        ...feature.acceptanceRequirements.filter((_, index) => {
+          if (index >= arFieldIds.length) return true;
+          const mappedFieldId = arFieldIds[index];
+          return mappedFieldId === descriptionFieldId || mappedFieldId === 'description';
+        }),
+      ]
+    : (arFieldIds.includes(descriptionFieldId) || arFieldIds.includes('description'))
+      ? feature.acceptanceRequirements
+      : [];
+  const descriptionDoc = buildAdfDocument(feature, descriptionArs);
 
-  body.fields.description = descriptionFieldId === 'description' && arFieldIds.includes('description')
-    ? descriptionDocWithArs
-    : descriptionDocOnly;
+  body.fields.description = descriptionFieldId === 'description'
+    ? descriptionDoc
+    : buildAdfDocument(feature, []);
 
   if (descriptionFieldId && descriptionFieldId !== 'description') {
-    body.fields[descriptionFieldId] = arFieldIds.includes(descriptionFieldId) ? descriptionDocWithArs : descriptionDocOnly;
+    body.fields[descriptionFieldId] = descriptionDoc;
   }
 
-  for (const fieldId of arFieldIds) {
-    if (!fieldId || fieldId === descriptionFieldId) continue;
-    if (fieldId === 'description') {
-      body.fields.description = descriptionDocWithArs;
-      continue;
+  if (iterativeMode) {
+    for (const entry of mappedArEntries) {
+      if (!entry.fieldId || !entry.ar) continue;
+      if (entry.fieldId === descriptionFieldId || entry.fieldId === 'description') continue;
+      body.fields[entry.fieldId] = buildAdfContentOnly([entry.ar]);
     }
-    body.fields[fieldId] = arDoc;
+  } else {
+    const arDoc = buildAdfContentOnly(feature.acceptanceRequirements);
+    for (const fieldId of arFieldIds) {
+      if (!fieldId || fieldId === descriptionFieldId) continue;
+      if (fieldId === 'description') {
+        body.fields.description = buildAdfDocument(feature, feature.acceptanceRequirements);
+        continue;
+      }
+      body.fields[fieldId] = arDoc;
+    }
   }
 
   const response = await asUser().requestJira(assumeTrustedRoute('/rest/api/3/issue'), {
@@ -137,7 +160,7 @@ function normalizeProjectArMapping(
     iterativeFieldIds: outputMappings.arFieldIds,
     inputMappings,
     outputMappings,
-    issueLinkType: arMapping?.issueLinkType,
+    issueLinkType: arMapping?.issueLinkType || 'Relates to',
   };
 }
 
@@ -179,7 +202,7 @@ export async function searchUsers(query: string): Promise<Array<{ accountId: str
 
 // ─── ADF Helpers ──────────────────────────────────────────────────────────────
 
-function buildAdfDocument(feature: Feature, includeArs: boolean) {
+function buildAdfDocument(feature: Feature, ars: any[]) {
   const nodes: unknown[] = [];
 
   // Description
@@ -191,14 +214,14 @@ function buildAdfDocument(feature: Feature, includeArs: boolean) {
   }
 
   // Acceptance Requirements
-  if (includeArs && feature.acceptanceRequirements.length) {
+  if (ars.length) {
     nodes.push({
       type: 'heading',
       attrs: { level: 3 },
       content: [{ type: 'text', text: 'Acceptance Requirements' }],
     });
 
-    for (const ar of feature.acceptanceRequirements) {
+    for (const ar of ars) {
       nodes.push(buildSingleArAdf(ar));
     }
   }

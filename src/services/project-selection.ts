@@ -1,4 +1,4 @@
-import { ClarifyAnswer, ReferencedSimilarStory, ReferencedWiSection, SimilarStory, TenantConfig, WiDoc, WiChunk } from '../types';
+import { ClarifyAnswer, ProjectPersonaRole, ReferencedSimilarStory, ReferencedWiSection, SimilarStory, TenantConfig, WiDoc, WiChunk } from '../types';
 import { findSimilarStories } from '../core/similar-stories';
 import { retrieveWiContext } from '../core/wi-ingestion';
 
@@ -20,6 +20,24 @@ export function buildCombinedDomainContext(config: TenantConfig, projectKeys: st
   const globalContext = config.domainContexts?.find((entry) => entry.projectKey === '*')?.context?.trim();
   const fallback = config.domainContext?.trim();
   return [...new Set([...contexts, globalContext || fallback || ''].filter(Boolean))].join('\n\n');
+}
+
+export function getCombinedPersonaRoles(config: TenantConfig, projectKeys: string[]): ProjectPersonaRole[] {
+  const scopedRoles = projectKeys.flatMap((key) => config.domainContexts?.find((entry) => entry.projectKey === key)?.personaRoles ?? []);
+  const globalRoles = config.domainContexts?.find((entry) => entry.projectKey === '*')?.personaRoles ?? [];
+  const legacyRoles = (config.domainRoles ?? []).map((role) => ({ role, activities: '' }));
+  const combined = [...scopedRoles, ...globalRoles, ...legacyRoles];
+  const seen = new Set<string>();
+
+  return combined.filter((row) => {
+    const role = String(row?.role ?? '').trim();
+    const activities = String(row?.activities ?? '').trim();
+    if (!role && !activities) return false;
+    const key = `${role.toLowerCase()}::${activities.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function retrieveScopedWiContext(

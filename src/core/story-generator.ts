@@ -1643,9 +1643,9 @@ export async function checkRefineFeedbackSufficiency(opts: {
 export async function generateSessionTitle(requirement: string, config: TenantConfig): Promise<string> {
   const res = await callLlm({
     model: config.generatorConfig.themeModel,
-    systemPrompt: 'Generate a concise, prescriptive 5-7 word title for this business requirement. Make it action-oriented, outcome-focused, and easy to scan in a backlog. Avoid generic words like feature, flow, process, solution, or system. Output the title only, no quotes.',
+    systemPrompt: 'Generate a very short session title for this software requirement. Prefer 2 to 4 words. Make it specific, scannable, and outcome-focused. Avoid quotes, punctuation-heavy phrasing, and generic labels like feature, task, process, workflow, requirement, or system. Output title only.',
     userMessage: requirement,
-    maxTokens: 32,
+    maxTokens: 20,
     reasoningEffort: 'none',
     ...buildLlmProviderOpts(config),
   });
@@ -1874,15 +1874,27 @@ async function maybeCancelled(shouldCancel?: () => Promise<boolean> | boolean): 
 function formatSessionTitle(rawTitle: string, fallbackRequirement: string): string {
   const cleaned = String(rawTitle ?? '')
     .replace(/^["']|["']$/g, '')
+    .replace(/^[#*\-\d.\s]+/, '')
     .replace(/\s+/g, ' ')
     .replace(/\s*[-–—:;,.]+\s*$/g, '')
     .trim();
 
-  if (!cleaned) {
-    return fallbackRequirement.slice(0, 80).trim();
-  }
+  const trimmed = cleaned && cleaned.toLowerCase() !== 'untitled'
+    ? cleaned
+    : fallbackRequirement
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/(?<=[.?!])\s+/)[0]
+      .split(/[,:;()[\]{}]/)[0]
+      .trim();
 
-  const words = cleaned.split(' ').filter(Boolean);
-  const capped = words.length > 7 ? words.slice(0, 7).join(' ') : cleaned;
-  return capped.length > 80 ? capped.slice(0, 80).trimEnd() : capped;
+  const words = trimmed
+    .split(' ')
+    .map((word) => word.replace(/^[^\w]+|[^\w]+$/g, ''))
+    .filter(Boolean)
+    .filter((word) => !['feature', 'task', 'process', 'workflow', 'requirement', 'system', 'solution'].includes(word.toLowerCase()));
+
+  const capped = words.slice(0, 4).join(' ');
+  const normalized = capped || 'Untitled session';
+  return normalized.length > 48 ? normalized.slice(0, 48).trimEnd() : normalized;
 }

@@ -10,6 +10,8 @@ export const api = {
   getConfig: () => invoke('getConfig'),
   saveConfig: (config: unknown) => invoke('saveConfig', p(config)),
   saveProjectConfig: (payload: any) => invoke('saveProjectConfig', payload),
+  getUserPreferences: () => invoke('getUserPreferences'),
+  saveUserPreferences: (payload: { defaultProjectKey?: string }) => invoke('saveUserPreferences', payload),
   patchConfig: (patch: unknown) => invoke('patchConfig', p(patch)),
 
   // Generation progress (polling)

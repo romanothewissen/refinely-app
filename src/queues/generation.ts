@@ -17,6 +17,7 @@ import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import {
   buildCombinedDomainContext,
+  getCombinedPersonaRoles,
   normalizeProjectKeys,
   resolvePrimaryProjectKey,
   retrieveScopedSimilarStories,
@@ -119,6 +120,7 @@ export async function handler(event: { body: GenerationEvent }) {
     ...eventConfig,
     generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
     domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
   let stopHeartbeat: (() => void) | null = null;
@@ -463,9 +465,11 @@ async function saveConversationTurn(
 async function updateConversationTitle(sessionId: string, accountId: string, title: string) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
-    const existing = await entityGet<{ turns: unknown[]; title?: string }>(key);
+    const existing = await entityGet<{ turns: unknown[]; title?: string; titleEditedAt?: string; updatedAt?: string }>(key);
     if (existing) {
+      if (existing.titleEditedAt) return;
       existing.title = title;
+      existing.updatedAt = new Date().toISOString();
       await entitySet(key, existing);
     }
 
@@ -475,6 +479,7 @@ async function updateConversationTitle(sessionId: string, accountId: string, tit
     const entry = index.find(e => e.sessionId === sessionId);
     if (entry) {
       entry.title = title;
+      entry.updatedAt = new Date().toISOString();
       await entitySet(indexKey, index);
     }
   } catch {

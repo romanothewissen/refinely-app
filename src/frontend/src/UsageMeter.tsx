@@ -22,15 +22,23 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
   const tierName = tier.charAt(0) ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Standard';
 
   if (isCompact) {
+    const remaining = isUnlimited ? null : Math.max(0, max - current);
     return (
-      <div className={`flex items-center gap-2.5 px-3 py-2 bg-white/50 rounded-xl border border-[var(--rf-border)] backdrop-blur-sm ${className}`}>
-        <div className="flex items-center gap-2">
-          <Zap className={`w-3.5 h-3.5 ${isAtLimit ? 'text-[var(--rf-warning)]' : 'text-[var(--rf-brand)]'}`} />
-          <span className="text-[10px] font-bold text-[var(--rf-text-secondary)] uppercase tracking-widest">{tierName}</span>
+      <div className={`flex items-center gap-3 ${className}`}>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className={`flex h-7 w-7 items-center justify-center rounded-xl border ${isAtLimit ? 'border-[var(--rf-warning)]/30 bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]' : 'border-[var(--rf-border)] bg-white/75 text-[var(--rf-brand)]'}`}>
+            <Zap className="w-3.5 h-3.5" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold text-[var(--rf-text-secondary)] uppercase tracking-widest">{tierName} usage</div>
+            <div className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">
+              {isUnlimited ? 'Unlimited plan' : `${remaining} remaining this month`}
+            </div>
+          </div>
         </div>
         {!isUnlimited && (
-          <div className="flex items-center gap-2.5">
-            <div className="w-16 h-1.5 bg-white/60 rounded-full overflow-hidden border border-[rgba(0,0,0,0.04)]">
+          <div className="ml-auto flex min-w-[110px] items-center gap-2.5">
+            <div className="flex-1 h-1.5 bg-white/70 rounded-full overflow-hidden border border-[rgba(0,0,0,0.04)]">
               <div
                 className={`h-full transition-all duration-500 rounded-full ${isAtLimit ? 'bg-[var(--rf-warning)]' : isNearLimit ? 'bg-[var(--rf-warning)]' : 'bg-[var(--rf-brand)]'}`}
                 style={{ width: `${percentage}%` }}

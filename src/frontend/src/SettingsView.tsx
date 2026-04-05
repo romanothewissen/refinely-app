@@ -39,12 +39,18 @@ interface RoleGuidanceRow {
 }
 interface ProjectArMapping {
   projectKey: string;
+  issueType?: string;
   mode: 'consolidated' | 'iterative';
   consolidatedFieldId: string;
   iterativeFieldIds: string[];
   inputMappings: ProjectFieldMapping;
   outputMappings: ProjectFieldMapping;
   issueLinkType?: string;
+}
+interface ProjectDomainContextRow {
+  projectKey: string;
+  context: string;
+  personaRoles?: RoleGuidanceRow[];
 }
 interface BacklogDiagnostics {
   projectKey: string;
@@ -235,17 +241,6 @@ function splitGuidanceContext(rawContext = '') {
   }
 }
 
-function buildGuidanceContextPayload(baseContext: string, roleRows: RoleGuidanceRow[]) {
-  const trimmedBase = baseContext.trim();
-  const serializableRows = roleRows
-    .map(row => ({ role: row.role.trim(), activities: row.activities.trim() }))
-    .filter(row => row.role || row.activities);
-  if (!serializableRows.length) return trimmedBase;
-  return [trimmedBase, `${ROLE_GUIDANCE_MARKER}${JSON.stringify(serializableRows, null, 2)}`]
-    .filter(Boolean)
-    .join('\n');
-}
-
 function normalizeOptionalPositiveInt(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -293,7 +288,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [llmTestResult, setLlmTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Jira State
-  const [issueLinkType, setIssueLinkType] = useState('Relates to');
   const [projects, setProjects] = useState<JiraProject[]>([]);
   const [backlogStatusOptions, setBacklogStatusOptions] = useState<JiraStatus[]>([]);
   const [customFields, setCustomFields] = useState<JiraField[]>([]);
@@ -307,10 +301,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
   const [backlogThemeBudgetOverride, setBacklogThemeBudgetOverride] = useState('');
 
-  // Domain State
+  // Personal + workspace state
   const [defaultProjectKey, setDefaultProjectKey] = useState('');
-  const [domainContext, setDomainContext] = useState('');
-  const [roleGuidanceRows, setRoleGuidanceRows] = useState<RoleGuidanceRow[]>([{ role: '', activities: '' }]);
   const [tier, setTier] = useState<'free' | 'standard'>('standard');
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
@@ -332,7 +324,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
-  const [domainContexts, setDomainContexts] = useState<any[]>([]);
+  const [domainContexts, setDomainContexts] = useState<ProjectDomainContextRow[]>([]);
   const [activeProjAdmin, setActiveProjAdmin] = useState<boolean>(false);
   
   // WIs State
@@ -512,23 +504,26 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           setSimpleBucketModels(strategyState.resolvedBucketModels);
         }
 
-        const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
-        setDomainContext(parsedContext.context);
-        if (parsedContext.roleRows.length) {
-          setRoleGuidanceRows(parsedContext.roleRows);
-        } else if (Array.isArray(existingConfig.domainRoles) && existingConfig.domainRoles.length) {
-          setRoleGuidanceRows(normalizeRoleGuidanceRows(existingConfig.domainRoles as any[]));
-        }
         if (existingConfig.tier) setTier(existingConfig.tier);
         setComplianceEnabled(Boolean(existingConfig.compliance?.enabled));
         setTransparencyEnabled(Boolean(existingConfig.compliance?.transparencyReportsEnabled));
         setPiiMaskingEnabled(Boolean(existingConfig.compliance?.piiMaskingEnabled));
         setAuditTrailEnabled(Boolean(existingConfig.compliance?.auditTrailEnabled));
         if (existingConfig.wiConfig?.enabled !== undefined) setWiEnabled(existingConfig.wiConfig.enabled);
-        if (existingConfig.issueLinkType) setIssueLinkType(existingConfig.issueLinkType);
         if (existingConfig.defaultProjectKey) setDefaultProjectKey(existingConfig.defaultProjectKey);
         if (existingConfig.arMappings) setArMappings(existingConfig.arMappings.map((mapping: any) => normalizeProjectArMapping(mapping)));
-        if (existingConfig.domainContexts) setDomainContexts(existingConfig.domainContexts);
+        if (existingConfig.domainContexts) {
+          setDomainContexts(existingConfig.domainContexts.map((entry: any) => normalizeProjectDomainContext(entry)));
+        } else {
+          const parsedContext = splitGuidanceContext(existingConfig.domainContext || '');
+          setDomainContexts([{
+            projectKey: '*',
+            context: parsedContext.context,
+            personaRoles: parsedContext.roleRows.length
+              ? parsedContext.roleRows
+              : normalizeRoleGuidanceRows(existingConfig.domainRoles as any[]).filter((row) => row.role || row.activities),
+          }]);
+        }
         if (existingConfig.backlogStatusScopes) setBacklogStatusScopes(existingConfig.backlogStatusScopes);
         if (existingConfig.backlogThemeBudgetOverride) {
           setBacklogThemeBudgetOverride(String(existingConfig.backlogThemeBudgetOverride));
@@ -754,6 +749,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   async function handleSave() {
     setIsSaving(true);
     try {
+      if (activeTab === 'domain' && !isAdmin) {
+        await api.saveUserPreferences({ defaultProjectKey: defaultProjectKey || undefined });
+        alert('Personal settings saved successfully!');
+        return;
+      }
       const generatorModels = strategyState.resolvedModels;
       await api.saveConfig({
         generatorConfig: {
@@ -780,9 +780,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
           modelCatalogs,
         },
-        domainContext: buildGuidanceContextPayload(domainContext, roleGuidanceRows),
+        domainContext: '',
         domainContexts,
-        domainRoles: roleGuidanceRows.map(row => row.role.trim()).filter(Boolean),
+        domainRoles: [],
         wiConfig: { enabled: wiEnabled, topKChunks: 8, maxChars: 100000 },
         compliance: {
           enabled: complianceEnabled,
@@ -793,13 +793,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         branding: {
           logoUrl: brandingLogoUrl.trim() || null,
         },
-        issueLinkType,
         arMappings,
         backlogStatusScopes,
         backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
-        defaultProjectKey: defaultProjectKey || undefined,
         tier: 'standard',
       });
+      await api.saveUserPreferences({ defaultProjectKey: defaultProjectKey || undefined });
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
       if (anthropicApiKey.trim()) setExistingAnthropicApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
@@ -1022,7 +1021,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const settingsNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
     { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, docs' },
-    { id: 'domain', label: 'Guidance', icon: Globe, sub: 'Roles and workspace rules' },
+    { id: 'domain', label: 'Personal', icon: Globe, sub: 'Your defaults and preferences' },
     { id: 'stats', label: 'Stats', icon: BarChart3, sub: 'Usage and audit visibility' },
     { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
     ...(showComplianceTab ? [{ id: 'compliance', label: 'Compliance', icon: ShieldCheck, sub: 'Coming Soon' }] : []),
@@ -1049,7 +1048,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           <h2 className="rf-pane-header-title">Settings</h2>
           <div className="flex items-center gap-1.5">
             <span className={`text-[13px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${isAdmin ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
-              {isAdmin ? 'Admin' : 'Read-Only'}
+              {isAdmin ? 'Admin' : 'Personal Only'}
             </span>
             <span className="text-[13px] text-[var(--rf-brand)] font-bold uppercase tracking-wider flex items-center gap-1 bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded-md border border-[rgba(43,89,74,0.12)] capitalize">
               {tier}
@@ -1075,7 +1074,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               </motion.button>
             </div>
           )}
-          {isAdmin && activeTab !== 'jira' && activeTab !== 'compliance' && (
+          {(isAdmin || activeTab === 'domain') && activeTab !== 'jira' && activeTab !== 'compliance' && (
             <motion.button
               onClick={handleSave}
               disabled={isSaving}
@@ -1530,76 +1529,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
               >
-                <div className="rf-card p-4 space-y-5">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Persona roles</div>
-                      <button
-                        type="button"
-                        onClick={() => setRoleGuidanceRows(prev => [...prev, { role: '', activities: '' }])}
-                        className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-lg transition"
-                      >
-                        + Add row
-                      </button>
-                    </div>
-
-                    <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-2.5">
-                      <div className="space-y-3">
-                        <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                          <div>Role</div>
-                          <div>Activities</div>
-                          <div />
-                        </div>
-                        {roleGuidanceRows.map((row, index) => (
-                          <div key={`workspace-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(160px,200px)_1fr_auto] gap-2.5 items-start rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
-                            <div className="space-y-1">
-                              <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
-                              <input
-                                value={row.role}
-                                onChange={e => setRoleGuidanceRows(prev => prev.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item))}
-                                placeholder="Field Service Engineer"
-                                className="w-full rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Activities</div>
-                              <textarea
-                                value={row.activities}
-                                onChange={e => setRoleGuidanceRows(prev => prev.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item))}
-                                placeholder="Schedules visits, checks service windows, and confirms completion."
-                                className="min-h-[64px] w-full resize-none rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setRoleGuidanceRows(prev => prev.length === 1 ? [{ role: '', activities: '' }] : prev.filter((_, idx) => idx !== index))}
-                              className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                <div className="rf-card p-5 space-y-5">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Default project</div>
+                    <div className="text-[13px] text-[var(--rf-text-tertiary)] mt-1">Choose the project that should be preselected for you when opening the generator.</div>
                   </div>
-
-                  <div className="pt-4 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Issue link type</div>
-                      <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-0.5">Default when a project has no override</div>
-                    </div>
-                    <div className="relative w-40">
-                      <select value={issueLinkType} onChange={e => setIssueLinkType(e.target.value)} className="appearance-none pr-6 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-3 py-1.5 rounded-lg text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition">
-                        {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
-                      </select>
-                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Default project</div>
-                      <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-0.5">Pre-fills the project selector when opening the generator</div>
+                  <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <div className="text-sm font-bold text-[var(--rf-text)]">Personal default project</div>
+                      <div className="text-[12px] text-[var(--rf-text-tertiary)]">Stored per user, so each teammate can keep their own starting project.</div>
                     </div>
                     <SearchableSelect
                       value={defaultProjectKey}
@@ -1609,8 +1547,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       searchPlaceholder="Search projects..."
                       allowClear
                       clearLabel="Clear default project"
-                      className="w-64"
-                      buttonClassName="bg-[var(--rf-surface-soft)]"
+                      className="w-full md:w-72"
+                      buttonClassName="bg-white"
                     />
                   </div>
                 </div>
@@ -2202,7 +2140,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
       }));
     }
   }, [issueTypes, activeIssueType, customFields]);
-  const currentContext = domainContexts.find((c: any) => c.projectKey === activeArProj) || { projectKey: activeArProj, context: '' };
+  const currentContext = domainContexts.find((c: any) => c.projectKey === activeArProj) || { projectKey: activeArProj, context: '', personaRoles: [] };
   const currentBacklogScope = backlogStatusScopes.find((scope: any) => scope.projectKey === activeArProj) || { projectKey: activeArProj, statuses: [] };
   const effectiveBacklogStatuses = currentBacklogScope.statuses.length
     ? currentBacklogScope.statuses
@@ -2216,11 +2154,9 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     if (backlogDiagnostics?.totalProjectIssues !== undefined) return backlogDiagnostics.totalProjectIssues;
     return 0;
   }, [backlogCacheInfo, backlogDiagnostics]);
-
-
-  const updateContext = (ctx: string) => {
+  const updateContext = (patch: Partial<ProjectDomainContextRow>) => {
     const idx = domainContexts.findIndex((c: any) => c.projectKey === activeArProj);
-    const upd = { projectKey: activeArProj, context: ctx };
+    const upd = normalizeProjectDomainContext({ ...currentContext, ...patch, projectKey: activeArProj });
     if (idx >= 0) { const l = [...domainContexts]; l[idx] = upd; setDomainContexts(l); }
     else setDomainContexts([...domainContexts, upd]);
   };
@@ -2261,7 +2197,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
       const saveRes = await api.saveProjectConfig({
         projectKey: activeArProj,
         arMapping: currentMapping,
-        domainContext: currentContext.context,
+        domainContext: currentContext,
         backlogStatuses: effectiveBacklogStatuses,
       });
       if ((saveRes as any)?.success === false) {
@@ -2284,7 +2220,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
       const saveRes = await api.saveProjectConfig({
         projectKey: activeArProj,
         arMapping: currentMapping,
-        domainContext: currentContext.context,
+        domainContext: currentContext,
         backlogStatuses: effectiveBacklogStatuses,
       });
       if ((saveRes as any)?.success === false) {
@@ -2489,7 +2425,78 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                       <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Use this for rules, defaults, and phrasing that should apply to this project only.</p>
                     </div>
                   </div>
-                  <textarea value={currentContext.context} onChange={e => updateContext(e.target.value)} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-28 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none" />
+                  <textarea value={currentContext.context} onChange={e => updateContext({ context: e.target.value })} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-28 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none" />
+                </div>
+
+                <div className="rf-card p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Persona roles</div>
+                      <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Define project-specific roles and the activities they commonly perform.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => updateContext({ personaRoles: [...(currentContext.personaRoles ?? []), { role: '', activities: '' }] })}
+                      className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-lg transition"
+                    >
+                      + Add row
+                    </button>
+                  </div>
+                  <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-2.5">
+                    <div className="space-y-3">
+                      <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                        <div>Role</div>
+                        <div>Activities</div>
+                        <div />
+                      </div>
+                      {normalizeRoleGuidanceRows(currentContext.personaRoles ?? []).map((row, index, allRows) => (
+                        <div key={`project-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(160px,200px)_1fr_auto] gap-2.5 items-start rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                          <div className="space-y-1">
+                            <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
+                            <input
+                              value={row.role}
+                              onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item) })}
+                              placeholder="Field Service Engineer"
+                              className="w-full rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Activities</div>
+                            <textarea
+                              value={row.activities}
+                              onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item) })}
+                              placeholder="Schedules visits, checks service windows, and confirms completion."
+                              className="min-h-[64px] w-full resize-none rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => updateContext({ personaRoles: allRows.length === 1 ? [] : allRows.filter((_, idx) => idx !== index) })}
+                            className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rf-card p-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Issue link type</div>
+                    <div className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Used when issues created from this project are linked back to the source issue.</div>
+                  </div>
+                  <div className="relative w-44">
+                    <select
+                      value={currentMapping.issueLinkType || 'Relates to'}
+                      onChange={e => updateMapping({ issueLinkType: e.target.value })}
+                      className="appearance-none pr-6 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-3 py-1.5 rounded-lg text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                    >
+                      {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
+                  </div>
                 </div>
               </div>
             )}
@@ -2573,6 +2580,14 @@ function normalizeFieldIds(fieldIds: Array<string | null | undefined> = []) {
   return [...new Set(fieldIds.map(id => id?.trim()).filter((id): id is string => Boolean(id)))];
 }
 
+function normalizeProjectDomainContext(raw: any): ProjectDomainContextRow {
+  return {
+    projectKey: raw?.projectKey || '*',
+    context: String(raw?.context ?? '').trim(),
+    personaRoles: normalizeRoleGuidanceRows(raw?.personaRoles ?? []).filter((row) => row.role || row.activities),
+  };
+}
+
 function normalizeProjectArMapping(raw: any): ProjectArMapping {
   const legacyArFieldIds = normalizeFieldIds(
     raw?.mode === 'iterative'
@@ -2601,12 +2616,13 @@ function normalizeProjectArMapping(raw: any): ProjectArMapping {
   };
   return {
     projectKey: raw?.projectKey || '*',
+    issueType: raw?.issueType || '*',
     mode: outputMappings.arFieldIds.length > 1 ? 'iterative' : (raw?.mode || 'consolidated'),
     consolidatedFieldId: outputMappings.arFieldIds[0] || outputMappings.descriptionFieldId || 'description',
     iterativeFieldIds: outputMappings.arFieldIds,
     inputMappings,
     outputMappings,
-    issueLinkType: raw?.issueLinkType,
+    issueLinkType: raw?.issueLinkType || 'Relates to',
   };
 }
 

@@ -18,6 +18,7 @@ import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import {
   buildCombinedDomainContext,
+  getCombinedPersonaRoles,
   normalizeProjectKeys,
   resolvePrimaryProjectKey,
   retrieveScopedSimilarStories,
@@ -42,6 +43,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     ...eventConfig,
     generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
     domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
 
@@ -97,10 +99,9 @@ export async function handler(event: { body: ClarifyEvent }) {
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
       onTriageComplete: async (assessment) => {
-        const complexityLabel = assessment.complexity === 'very_high' ? 'complex' : assessment.complexity ?? 'medium';
         await sendClarifyProgress(
           sessionId,
-          `The requirement looks ${complexityLabel} with ${assessment.clarity} clarity, so discovery is targeting about ${assessment.questionPlan.target} questions…`,
+          `Discovery is sizing the ambiguity and targeting about ${assessment.questionPlan.target} questions with ${assessment.clarity} clarity so far…`,
           inputSignature,
           {
             stage: 'question_generation',

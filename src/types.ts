@@ -94,6 +94,11 @@ export interface ProjectFieldMapping {
   arFieldIds: string[];
 }
 
+export interface ProjectPersonaRole {
+  role: string;
+  activities: string;
+}
+
 export interface ProjectArMapping {
   projectKey: string;   // e.g. "MYPROJ" or "*" for default
   issueType?: string;   // e.g. "Story" or "*"
@@ -108,6 +113,7 @@ export interface ProjectArMapping {
 export interface ProjectDomainContext {
   projectKey: string;
   context: string;
+  personaRoles?: ProjectPersonaRole[];
 }
 
 export interface ProjectBacklogStatusScope {
@@ -125,7 +131,9 @@ export interface Branding {
 export interface TenantConfig {
   goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
+  /** @deprecated Legacy workspace-level guidance text. Prefer project-scoped domainContexts. */
   domainContext: string;
+  /** @deprecated Legacy workspace-level persona roles. Prefer project-scoped domainContexts.personaRoles. */
   domainRoles: string[];
   processTaxonomyEnabled: boolean;
   processTaxonomy: ProcessCode[];
@@ -146,11 +154,15 @@ export interface TenantConfig {
     piiMaskingEnabled: boolean;
     auditTrailEnabled: boolean;
   };
+  /** @deprecated Legacy workspace-level fallback. Prefer ProjectArMapping.issueLinkType. */
   issueLinkType: string;  // default: 'Relates to'
   arMappings: ProjectArMapping[];
   domainContexts: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+}
+
+export interface UserPreferences {
   defaultProjectKey?: string;
 }
 
