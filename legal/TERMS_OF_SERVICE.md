@@ -2,7 +2,7 @@
 
 Last updated: April 5, 2026
 
-PLEASE READ THIS AGREEMENT CAREFULLY. IT IS A LEGAL AGREEMENT BETWEEN YOU (AS AN INDIVIDUAL OR THE ENTITY YOU REPRESENT) AND **Simplif.ai** ("THE DEVELOPER") GOVERNING THE USE OF **Refinely** ("THE APP").
+PLEASE READ THIS AGREEMENT CAREFULLY. IT IS A LEGAL AGREEMENT BETWEEN YOU (AS AN INDIVIDUAL OR THE ENTITY YOU REPRESENT) AND **Smartif.ai** ("THE DEVELOPER") GOVERNING THE USE OF **Refinely** ("THE APP").
 
 ## 1. Acceptance
 By installing, accessing, or using the App from the Atlassian Marketplace, you agree to be bound by these Terms. If you do not agree, do not install or use the App.

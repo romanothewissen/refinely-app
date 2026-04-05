@@ -11,9 +11,9 @@ This is the short copy-paste version for the Atlassian Marketplace listing flow.
 - Product: `Jira Cloud`
 - Pricing model: `Paid via Atlassian`
 - Support: `mailto:romano.thewissen@gmail.com`
-- Privacy policy: `https://simplif.ai/privacy`
-- Terms of service: `https://simplif.ai/terms`
-- Admin/setup docs: `https://simplif.ai/docs/setup`
+- Privacy policy: `https://smartif.ai/privacy`
+- Terms of service: `https://smartif.ai/terms`
+- Admin/setup docs: `https://smartif.ai/docs/setup`
 
 ## Listing Copy
 
@@ -160,9 +160,9 @@ Prepare at least these screenshots:
 ## Final Checks
 
 - Confirm the live site matches the current repo:
-  - `https://simplif.ai/privacy`
-  - `https://simplif.ai/terms`
-  - `https://simplif.ai/docs/setup`
+  - `https://smartif.ai/privacy`
+  - `https://smartif.ai/terms`
+  - `https://smartif.ai/docs/setup`
 - Confirm support should remain `romano.thewissen@gmail.com`
 - Confirm no external log shipping contradicts the Privacy & Security answers
 - Confirm production deployment is current

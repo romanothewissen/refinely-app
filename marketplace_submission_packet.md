@@ -12,9 +12,9 @@ This packet is meant to be copied into the Atlassian Marketplace submission flow
 - Supported product: `Jira Cloud`
 - Pricing model: `Paid via Atlassian`
 - Support contact: `mailto:romano.thewissen@gmail.com`
-- Privacy policy: `https://simplif.ai/privacy`
-- Terms of service: `https://simplif.ai/terms`
-- Setup documentation: `https://simplif.ai/docs/setup`
+- Privacy policy: `https://smartif.ai/privacy`
+- Terms of service: `https://smartif.ai/terms`
+- Setup documentation: `https://smartif.ai/docs/setup`
 
 ## Architecture Summary
 
@@ -173,7 +173,7 @@ Use this wording if Marketplace review asks about usage controls:
 
 Keep the public website and legal/documentation pages aligned to these launch facts:
 
-- Brand name should be `Simplif.ai`, not legacy `Smartif.ai`.
+- Brand name should be `Smartif.ai` across the app, site, and Marketplace materials.
 - Supported AI providers in public launch copy should align with the app’s current launch posture and declared remote hosts.
 - Admin setup docs should not present Azure, AWS, Enterprise presets, or enterprise-only packs as launch-critical requirements unless those paths are truly supported.
 - Public pricing pages should not present Advanced and Enterprise as active launch tiers if Marketplace is launching with a simpler Standard-focused offer.
@@ -181,18 +181,18 @@ Keep the public website and legal/documentation pages aligned to these launch fa
 
 ### Current repo alignment status
 
-- The site content in this repo has been aligned to `Simplif.ai` branding, the current support email, and the current launch-provider posture.
+- The site content in this repo should stay aligned to `Smartif.ai` branding, the current support email, and the current launch-provider posture.
 - Pricing copy has been repositioned around the current Standard launch tier, 30-day Marketplace trial, and higher-threshold contact path for larger teams.
 - Privacy, terms, security, and admin setup copy have been rewritten to avoid overstating residency, compliance packs, or roadmap-only packaging.
-- Before submission, verify that the deployed public site at `simplif.ai` matches the repository version and that the live pages remain in sync with Marketplace answers.
+- Before submission, verify that the deployed public site at `smartif.ai` matches the repository version and that the live pages remain in sync with Marketplace answers.
 
 ## Documentation Links for Listing
 
 Use these links in the Marketplace listing:
 
-- Documentation: `https://simplif.ai/docs/setup`
-- Privacy policy: `https://simplif.ai/privacy`
-- Terms of service: `https://simplif.ai/terms`
+- Documentation: `https://smartif.ai/docs/setup`
+- Privacy policy: `https://smartif.ai/privacy`
+- Terms of service: `https://smartif.ai/terms`
 - Support: `mailto:romano.thewissen@gmail.com`
 
 ## Suggested Installation / Setup Notes
@@ -305,9 +305,9 @@ Prepare at least these Marketplace screenshots:
 ## Final Pre-Submission Checklist
 
 - Confirm the public URLs are live:
-  - `https://simplif.ai/privacy`
-  - `https://simplif.ai/terms`
-  - `https://simplif.ai/docs/setup`
+  - `https://smartif.ai/privacy`
+  - `https://smartif.ai/terms`
+  - `https://smartif.ai/docs/setup`
 - Confirm support should remain `romano.thewissen@gmail.com`
 - Confirm production deployment is current
 - Confirm Marketplace vendor profile is complete

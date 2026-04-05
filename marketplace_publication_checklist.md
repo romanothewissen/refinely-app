@@ -24,7 +24,7 @@ You will need these links/files for the submission form:
 - [ ] **Setup Documentation**: Publish documentation that explains installation, configuration, and expected permissions.
 - [ ] **Data Security & Privacy (DSP)**: You must complete the DSP questionnaire during the submission process.
 - [ ] **Website Alignment Check**: Ensure the public site matches the app’s actual launch state for branding, provider support, pricing/tiering, legal owner, support contact, and admin setup instructions.
-- [ ] **Legacy Brand Removal**: Remove remaining `Smartif.ai` references from the public site, metadata, footer, privacy, and terms pages.
+- [ ] **Brand Consistency**: Verify all public site, metadata, footer, privacy, and terms pages use `Smartif.ai` consistently.
 - [ ] **Provider Disclosure Alignment**: Ensure public pages only describe provider options and egress paths that match the current Marketplace launch posture and Forge manifest.
 - [ ] **Tiering Alignment**: Remove or clearly mark roadmap-only `Advanced` / `Enterprise` packaging from the public site unless those tiers are actually available for sale at launch.
 - [ ] **Admin Docs Alignment**: Ensure setup documentation reflects the current support email and does not require enterprise/compliance-pack flows for baseline launch setup.

@@ -4,7 +4,7 @@ Last updated: March 29, 2026
 
 ## 1. Introduction
 
-Thank you for choosing **Refinely** ("the App"). We are committed to protecting your privacy while providing AI-powered user story generation services within Jira. This Privacy Policy describes how **Simplif.ai** ("we," "us," "our") collects, uses, and discloses information when you use our App.
+Thank you for choosing **Refinely** ("the App"). We are committed to protecting your privacy while providing AI-powered user story generation services within Jira. This Privacy Policy describes how **Smartif.ai** ("we," "us," "our") collects, uses, and discloses information when you use our App.
 
 ## 2. Information We Access
 
