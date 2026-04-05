@@ -1,11 +1,10 @@
 /**
- * Helpers for Forge Storage (key-value store).
+ * Helpers for Forge Key-Value Store.
  *
- * storage.set/get/delete → Forge Custom Storage (per-installation, isolated)
- * storage.entity(name) → named entity namespace for larger structured data
+ * kvs.set/get/delete → Forge-hosted storage (per-installation, isolated)
  */
 
-import { storage } from '@forge/api';
+import { kvs } from '@forge/kvs';
 
 // ─── Simple key-value storage ─────────────────────────────────────────────────
 
@@ -15,15 +14,15 @@ export async function entitySet(key: string, value: unknown): Promise<void> {
     return;
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await storage.set(key, value as any);
+  await kvs.set(key, value as any);
 }
 
 export async function entityGet<T = unknown>(key: string): Promise<T | undefined> {
-  return storage.get(key) as Promise<T | undefined>;
+  return kvs.get<T>(key);
 }
 
 export async function entityDelete(key: string): Promise<void> {
-  await storage.delete(key);
+  await kvs.delete(key);
 }
 
 // ─── Object Store (large data — store as base64-encoded JSON) ─────────────────
@@ -31,7 +30,7 @@ export async function entityDelete(key: string): Promise<void> {
 export async function objectWrite(key: string, data: unknown): Promise<boolean> {
   try {
     const bytes = Buffer.from(JSON.stringify(data), 'utf8');
-    await storage.set(key, bytes.toString('base64'));
+    await kvs.set(key, bytes.toString('base64'));
     return true;
   } catch (err) {
     console.error(`[cache] objectWrite failed for key=${key}:`, err);
@@ -41,7 +40,7 @@ export async function objectWrite(key: string, data: unknown): Promise<boolean> 
 
 export async function objectRead<T = unknown>(key: string): Promise<T | null> {
   try {
-    const encoded = await storage.get(key) as string | undefined;
+    const encoded = await kvs.get<string>(key);
     if (!encoded) return null;
     return JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as T;
   } catch (err) {
@@ -52,7 +51,7 @@ export async function objectRead<T = unknown>(key: string): Promise<T | null> {
 
 export async function objectDelete(key: string): Promise<void> {
   try {
-    await storage.delete(key);
+    await kvs.delete(key);
   } catch {
     // ignore
   }

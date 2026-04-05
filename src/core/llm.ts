@@ -1,11 +1,7 @@
 /**
- * Thin wrapper around @forge/llm.
- * All LLM calls in the app go through this module.
- *
- * API reference: https://developer.atlassian.com/platform/forge/runtime-reference/forge-llms-api/
+ * Central LLM wrapper for all provider-backed model calls in the app.
  */
 
-import { chat } from '@forge/llm';
 import type {
   ConcreteModelFamily,
   LlmModelCatalogByVendor,
@@ -159,45 +155,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     return { ...result, piiMasking };
   }
 
-  try {
-    const response = await withTimeout(
-      chat({
-        model: resolvedModel,
-        messages: [
-          { role: 'system', content: effectiveOpts.systemPrompt },
-          { role: 'user', content: effectiveOpts.userMessage },
-        ],
-        max_completion_tokens: opts.maxTokens ?? 8192,
-      }),
-      'LLM request',
-    );
-
-    const content = response.choices[0]?.message?.content ?? '';
-    const text = typeof content === 'string' ? content : JSON.stringify(content);
-
-    return {
-      text: text.trim(),
-      inputTokens: response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
-      piiMasking,
-    };
-  } catch (err) {
-    if (opts.noFallback || !shouldFallbackToGemini(err)) {
-      throw err;
-    }
-    // Fallback to whichever external provider has an API key configured
-    if (opts.openaiApiKey || process.env.OPENAI_API_KEY) {
-      const result = await callOpenAI({ ...effectiveOpts, model: resolvedModel });
-      return { ...result, piiMasking };
-    }
-    const result = await callGemini({ ...effectiveOpts, model: resolvedModel });
-    return { ...result, piiMasking };
-  }
-}
-
-function shouldFallbackToGemini(err: unknown): boolean {
-  const msg = String((err as { message?: unknown })?.message ?? err ?? '').toLowerCase();
-  return msg.includes('llm endpoint not enabled') || msg.includes("'llm' module is not defined");
+  throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, or Azure OpenAI before calling callLlm.');
 }
 
 export function isLatestModelSelector(model: string): model is LatestModelSelector {
@@ -832,7 +790,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
   let totalInput = 0;
   let totalOutput = 0;
   const piiMaskingTotals: PiiMaskingStats = { enabled: !!opts.piiMaskingEnabled, totalRedactions: 0, byType: {} };
-  const provider = opts.provider ?? 'forge_llms';
+  const provider = opts.provider ?? 'unconfigured';
   const requestedModel = opts.model;
 
   for (let attempt = 0; attempt < 2; attempt++) {

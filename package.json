@@ -16,6 +16,7 @@
     "@forge/api": "^5.0.0",
     "@forge/bridge": "5.14.1",
     "@forge/events": "^2.0.0",
+    "@forge/kvs": "^0.1.4",
     "@forge/llm": "^0.6.1",
     "@forge/resolver": "^1.7.1",
     "@forge/storage": "^2.0.3",
@@ -24,10 +25,10 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
     "@types/node": "^20.0.0",
     "@types/pdf-parse": "^1.1.4",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
