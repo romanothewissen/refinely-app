@@ -16,6 +16,6 @@
     "sourceMap": true,
     "allowJs": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/frontend/*.js"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.mjs", "src/frontend/*.js"],
   "exclude": ["node_modules", "dist", "src/frontend/node_modules", "src/frontend/build"]
 }
