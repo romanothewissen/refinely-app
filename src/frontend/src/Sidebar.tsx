@@ -84,6 +84,7 @@ export function Sidebar({
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
   const primaryProjectKey = projectKeys[0] ?? '*';
+  const hasSelectedProject = projectKeys.some((key) => key && key !== '*');
   const contextReady = contextMode === 'global' || (contextMode === 'project' && primaryProjectKey !== '*');
   const hasPromptInput = Boolean(requirement.trim() || runAttachments.length);
   const brainstormDisabled = !contextReady || !hasPromptInput || isWorking;
@@ -105,7 +106,10 @@ export function Sidebar({
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Standard';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
-  const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() => (width ?? 400) >= 360);
+  const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
+    contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
+  );
+  const hadSelectedProjectRef = React.useRef(hasSelectedProject);
   const filteredProjects = availableProjects.filter(project => {
     const haystack = `${project.key} ${project.name}`.toLowerCase();
     return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
@@ -124,6 +128,16 @@ export function Sidebar({
       setWorkspaceExpanded(false);
     }
   }, [width]);
+
+  React.useEffect(() => {
+    const nextHasSelectedProject = projectKeys.some((key) => key && key !== '*');
+    const becameSelected = nextHasSelectedProject && !hadSelectedProjectRef.current;
+    hadSelectedProjectRef.current = nextHasSelectedProject;
+
+    if (becameSelected) {
+      setWorkspaceExpanded(false);
+    }
+  }, [projectKeys]);
 
   const toggleProject = (nextKey: string) => {
     const normalized = String(nextKey ?? '').trim();
