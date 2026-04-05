@@ -27,6 +27,7 @@ interface SidebarProps {
   setProjectKeys: (keys: string[]) => void;
   contextMode: 'undecided' | 'project' | 'global';
   setContextMode: (mode: 'undecided' | 'project' | 'global') => void;
+  workspaceSelectionVersion: number;
   availableProjects: Array<{ key: string; name: string }>;
   cacheCountsByProject: Record<string, number>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
@@ -71,6 +72,7 @@ export function Sidebar({
   setProjectKeys,
   contextMode,
   setContextMode,
+  workspaceSelectionVersion,
   availableProjects,
   cacheCountsByProject,
   wiDocs,
@@ -109,7 +111,6 @@ export function Sidebar({
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
     contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
   );
-  const hadSelectedProjectRef = React.useRef(hasSelectedProject);
   const filteredProjects = availableProjects.filter(project => {
     const haystack = `${project.key} ${project.name}`.toLowerCase();
     return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
@@ -130,14 +131,10 @@ export function Sidebar({
   }, [width]);
 
   React.useEffect(() => {
-    const nextHasSelectedProject = projectKeys.some((key) => key && key !== '*');
-    const becameSelected = nextHasSelectedProject && !hadSelectedProjectRef.current;
-    hadSelectedProjectRef.current = nextHasSelectedProject;
-
-    if (becameSelected) {
+    if (workspaceSelectionVersion > 0) {
       setWorkspaceExpanded(false);
     }
-  }, [projectKeys]);
+  }, [workspaceSelectionVersion]);
 
   const toggleProject = (nextKey: string) => {
     const normalized = String(nextKey ?? '').trim();

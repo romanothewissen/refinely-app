@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './Sidebar';
@@ -426,6 +426,7 @@ export default function App() {
   const [launchContextReady, setLaunchContextReady] = useState(false);
   const [launchProjectKey, setLaunchProjectKey] = useState<string | null>(null);
   const [savedDefaultProjectKey, setSavedDefaultProjectKey] = useState<string | null>(null);
+  const [workspaceSelectionVersion, setWorkspaceSelectionVersion] = useState(0);
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
@@ -443,11 +444,27 @@ export default function App() {
   };
 
   const projectKey = projectKeys[0] ?? '*';
-  const setSelectedProjectKeys = (nextKeys: string[]) => {
+  const preferredProjectKeys = useMemo(
+    () => normalizeProjectKeys(
+      launchProjectKey ? [launchProjectKey] : (savedDefaultProjectKey ? [savedDefaultProjectKey] : []),
+    ),
+    [launchProjectKey, savedDefaultProjectKey],
+  );
+  const setSelectedProjectKeys = useCallback((
+    nextKeys: string[],
+    options?: { collapseWorkspace?: boolean; nextContextMode?: 'undecided' | 'project' | 'global' },
+  ) => {
     const normalized = normalizeProjectKeys(nextKeys);
+    const selectionChanged =
+      normalized.length !== projectKeys.length || normalized.some((key, index) => key !== projectKeys[index]);
+
+    if (selectionChanged && normalized.length > 0 && options?.collapseWorkspace !== false) {
+      setWorkspaceSelectionVersion((prev) => prev + 1);
+    }
+
     setProjectKeys(normalized);
-    setContextMode(normalized.length ? 'project' : 'global');
-  };
+    setContextMode(options?.nextContextMode ?? (normalized.length ? 'project' : 'global'));
+  }, [projectKeys]);
 
   const persistSessionPointers = async (nextSessionId: string, issueKeyOverride?: string | null, bindIssueSession = true) => {
     await Promise.all([
@@ -477,7 +494,6 @@ export default function App() {
           if (!active) return;
           setLaunchProjectKey(ctxProjectKey);
           setSelectedProjectKeys([ctxProjectKey]);
-          setContextMode('project');
         }
 
         if (issueKey) {
@@ -649,13 +665,11 @@ export default function App() {
 
   useEffect(() => {
     if (!launchContextReady) return;
-    if (!savedDefaultProjectKey) return;
-    if (launchProjectKey) return;
+    if (!preferredProjectKeys.length) return;
     if (projectKeys.length > 0) return;
 
-    setSelectedProjectKeys([savedDefaultProjectKey]);
-    setContextMode(prev => (prev === 'undecided' ? 'project' : prev));
-  }, [launchContextReady, launchProjectKey, projectKeys.length, savedDefaultProjectKey]);
+    setSelectedProjectKeys(preferredProjectKeys);
+  }, [launchContextReady, preferredProjectKeys, projectKeys.length, setSelectedProjectKeys]);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
 
@@ -1339,8 +1353,11 @@ export default function App() {
                 setSidebarExiting(false);
                 setSessionId(newSid);
                 void persistSessionPointers(newSid, originIssueKey);
-                setSelectedProjectKeys([]);
-                setContextMode('undecided');
+                if (preferredProjectKeys.length > 0) {
+                  setSelectedProjectKeys(preferredProjectKeys);
+                } else {
+                  setSelectedProjectKeys([], { nextContextMode: 'undecided' });
+                }
               }}
               conversations={conversations}
               currentSessionId={sessionId}
@@ -1359,6 +1376,7 @@ export default function App() {
               setProjectKeys={setSelectedProjectKeys}
               contextMode={contextMode}
               setContextMode={setContextMode}
+              workspaceSelectionVersion={workspaceSelectionVersion}
               availableProjects={availableProjects}
               cacheCountsByProject={sidebarCacheCounts}
               wiDocs={wiDocs}
