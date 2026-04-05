@@ -1468,6 +1468,8 @@ export default function App() {
                   workflowStage={workflowStage}
                   projectKey={projectKey}
                   workflowTokenUsage={workflowTokenUsage}
+                  isAdmin={isAdmin}
+                  onOpenSettings={openSettings}
                   onWorkflowTokenUsage={(usageDelta) => {
                     setWorkflowTokenUsage(prev => {
                       const base = prev || { input: 0, output: 0, total: 0 };

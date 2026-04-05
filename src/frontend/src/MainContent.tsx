@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2 } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
@@ -1066,13 +1066,16 @@ interface MainContentProps {
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
+  isAdmin?: boolean;
+  onOpenSettings?: () => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
-  generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage
+  generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
+  isAdmin, onOpenSettings
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1560,6 +1563,18 @@ export function MainContent({
               <h2 className="rf-pane-header-title">Feature Canvas</h2>
             </div>
           </div>
+          {isAdmin && onOpenSettings && (
+            <motion.button
+              type="button"
+              onClick={onOpenSettings}
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
+              whileTap={{ scale: 0.97 }}
+              title="Open Settings"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Settings
+            </motion.button>
+          )}
         </div>
       </motion.header>
 

@@ -105,7 +105,7 @@ export function Sidebar({
   const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Standard';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
-  const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() => (width ?? 400) >= 430);
+  const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() => (width ?? 400) >= 360);
   const filteredProjects = availableProjects.filter(project => {
     const haystack = `${project.key} ${project.name}`.toLowerCase();
     return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
@@ -120,7 +120,7 @@ export function Sidebar({
   }, [brandingLogoUrl]);
 
   React.useEffect(() => {
-    if ((width ?? 400) < 430) {
+    if ((width ?? 400) < 360) {
       setWorkspaceExpanded(false);
     }
   }, [width]);
@@ -224,32 +224,35 @@ export function Sidebar({
         >
           {/* Project row */}
           <div className="px-3 pt-3 pb-2.5">
-            <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[var(--rf-border)] bg-white/70 shadow-sm">
-                  <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[11px] font-700 uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Workspace</div>
-                  <div className="mt-0.5 truncate text-[13px] font-semibold text-[var(--rf-text)]">
-                    {projectTitle}
+            <motion.button
+              type="button"
+              onClick={() => setWorkspaceExpanded((prev) => !prev)}
+              aria-expanded={workspaceExpanded}
+              aria-controls="workspace-selector"
+              className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 p-3 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
+              whileTap={{ scale: 0.99 }}
+              title={workspaceExpanded ? 'Collapse workspace selector' : 'Expand workspace selector'}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] shadow-sm">
+                    <Orbit className="h-3.5 w-3.5 text-[var(--rf-brand)]" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-700 uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Workspace</div>
+                    <div className="mt-0.5 truncate text-[13px] font-semibold text-[var(--rf-text)]">
+                      {projectTitle}
+                    </div>
                   </div>
                 </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="hidden rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)] group-hover:text-[var(--rf-brand)] min-[360px]:inline-flex">
+                    Click to {workspaceExpanded ? 'hide' : 'change'}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setWorkspaceExpanded((prev) => !prev)}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-text)] hover:bg-white/90"
-                  title={workspaceExpanded ? 'Collapse workspace' : 'Expand workspace'}
-                >
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${workspaceExpanded ? 'rotate-180' : ''}`} />
-                </button>
-              </div>
-            </div>
-
-            {!workspaceExpanded && (
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 {selectedProjects.length ? (
                   selectedProjects.map((project) => (
                     <span
@@ -270,18 +273,19 @@ export function Sidebar({
                   {activeWiDocs.length > 0 ? `${activeWiDocs.length} docs linked` : 'No docs linked'}
                 </span>
               </div>
-            )}
+            </motion.button>
 
             <AnimatePresence initial={false}>
               {workspaceExpanded && (
                 <motion.div
+                  id="workspace-selector"
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                  className="overflow-hidden"
+                  className="overflow-hidden pt-2"
                 >
-                  <div className="space-y-2 pt-1">
+                  <div className="space-y-2">
                     <div className="relative">
                       <input
                         value={projectFilter}
@@ -361,7 +365,7 @@ export function Sidebar({
                     </div>
 
                     <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                      Select up to two projects. The workspace will union backlog, WI, and guidance from both.
+                      Select up to two projects. The workspace will merge backlog, WI, and guidance from both.
                     </p>
                   </div>
                 </motion.div>
@@ -369,19 +373,25 @@ export function Sidebar({
             </AnimatePresence>
           </div>
 
-          {/* Cache + Docs stats row */}
+          {/* Backlog + Docs stats row */}
           <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5">
             <button
               type="button"
               onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
               className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
+              title="Open backlog cache settings"
             >
               <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
               <div className="min-w-0 text-left">
-                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Cache</div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Backlog</div>
                 <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                  {primaryProjectKey !== '*' ? 'Project' : 'Select project'}
+                  {selectedProjects.length ? `${totalCachedStories} cached stories` : 'Select project'}
                 </div>
+                {cacheBreakdown.length > 1 && (
+                  <div className="text-[10px] text-[var(--rf-text-tertiary)] truncate">
+                    {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+                  </div>
+                )}
               </div>
             </button>
             <button
@@ -397,20 +407,6 @@ export function Sidebar({
                 </div>
               </div>
             </button>
-            <div className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2">
-              <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60" />
-              <div className="min-w-0 text-left">
-                <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Stories</div>
-                <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                  {selectedProjects.length ? `${totalCachedStories} cached` : 'Pick project'}
-                </div>
-                {cacheBreakdown.length > 1 && (
-                  <div className="text-[10px] text-[var(--rf-text-tertiary)] truncate">
-                    {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
 
           {/* Context not ready warning */}
