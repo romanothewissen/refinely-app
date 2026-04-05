@@ -4,7 +4,7 @@
   "private": true,
   "homepage": ".",
   "scripts": {
-    "start": "npm run build && node scripts/serve-build.mjs",
+    "start": "node scripts/serve-build.mjs",
     "start:dev": "react-scripts start",
     "build": "react-scripts build",
     "typecheck": "tsc --noEmit"

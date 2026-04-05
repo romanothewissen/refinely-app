@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const buildDir = normalize(join(__dirname, '..', 'build'));
 const port = Number(process.env.PORT || 3000);
-const host = process.env.HOST || '127.0.0.1';
+const host = process.env.HOST || '0.0.0.0';
 
 const contentTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
