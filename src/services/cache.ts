@@ -10,6 +10,10 @@ import { storage } from '@forge/api';
 // ─── Simple key-value storage ─────────────────────────────────────────────────
 
 export async function entitySet(key: string, value: unknown): Promise<void> {
+  if (value === undefined || value === null) {
+    console.warn(`[cache] entitySet called with null/undefined value for key=${key}, skipping write`);
+    return;
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await storage.set(key, value as any);
 }

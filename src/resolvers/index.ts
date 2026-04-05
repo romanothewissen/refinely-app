@@ -1259,6 +1259,7 @@ resolver.define('getLastSession', async ({ context }) => {
 
 resolver.define('setLastSession', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  if (!payload?.sessionId) return { success: false, error: 'missing sessionId' };
   await entitySet(KEYS.userLastSession(accountId), payload.sessionId);
   return { success: true };
 });
@@ -1271,6 +1272,7 @@ resolver.define('getIssueSession', async ({ payload, context }) => {
 
 resolver.define('setIssueSession', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  if (!payload?.issueKey || !payload?.sessionId) return { success: false, error: 'missing issueKey or sessionId' };
   await entitySet(KEYS.userIssueSession(accountId, payload.issueKey), payload.sessionId);
   return { success: true };
 });
