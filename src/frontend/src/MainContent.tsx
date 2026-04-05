@@ -17,6 +17,10 @@ function tokenizeDiffText(text: string): string[] {
   return (text || '').match(/\s+|[^\s]+/g) ?? [];
 }
 
+function isWhitespaceToken(text: string): boolean {
+  return text.trim().length === 0;
+}
+
 function wordDiff(oldText: string, newText: string): DiffToken[] {
   const oldWords = tokenizeDiffText(oldText);
   const newWords = tokenizeDiffText(newText);
@@ -39,14 +43,37 @@ function wordDiff(oldText: string, newText: string): DiffToken[] {
 
 function DiffText({ oldText, newText, fullHighlight = false, mode = 'redline' }: { oldText: string; newText: string; fullHighlight?: boolean; mode?: 'redline' | 'blackline' }) {
   if (mode === 'blackline') return <span>{newText}</span>;
-  if (fullHighlight) return <span className="bg-[var(--rf-success-subtle)] text-[var(--rf-success)] rounded px-0.5">{newText}</span>;
+  if (fullHighlight) {
+    return (
+      <span className="rounded-md border border-[rgba(46,125,86,0.18)] bg-[rgba(46,125,86,0.12)] px-1.5 py-0.5 font-medium text-[var(--rf-success)]">
+        {newText}
+      </span>
+    );
+  }
   const tokens = wordDiff(oldText, newText);
   return (
-    <span>
+    <span className="leading-7">
       {tokens.map((tok, i) => {
         if (tok.type === 'same') return <span key={i}>{tok.text}</span>;
-        if (tok.type === 'added') return <mark key={i} className="bg-[var(--rf-brand-muted)] text-[var(--rf-brand-hover)] rounded px-0.5 not-italic">{tok.text}</mark>;
-        return <del key={i} className="text-[var(--rf-text-tertiary)] line-through bg-[var(--rf-danger-subtle)] rounded px-0.5">{tok.text}</del>;
+        if (isWhitespaceToken(tok.text)) return <span key={i}>{tok.text}</span>;
+        if (tok.type === 'added') {
+          return (
+            <mark
+              key={i}
+              className="rounded-[6px] border border-[rgba(46,125,86,0.16)] bg-[rgba(46,125,86,0.14)] px-1 py-0.5 font-medium text-[var(--rf-success)] not-italic shadow-[inset_0_0_0_1px_rgba(255,255,255,0.3)]"
+            >
+              {tok.text}
+            </mark>
+          );
+        }
+        return (
+          <span
+            key={i}
+            className="rounded-[6px] border border-[rgba(155,53,69,0.16)] bg-[rgba(155,53,69,0.14)] px-1 py-0.5 font-medium text-[#7d2232] line-through decoration-[#7d2232] decoration-2"
+          >
+            {tok.text}
+          </span>
+        );
       })}
     </span>
   );
@@ -79,11 +106,16 @@ function arSimilarity(left: AcceptanceRequirement, right: AcceptanceRequirement)
   const rightText = `${right.given} ${right.when} ${right.then}`.trim();
   const exact = normaliseWhitespace(leftText) === normaliseWhitespace(rightText);
   if (exact) return 1;
+  const leftComplete = Boolean(left.given.trim() && left.when.trim() && left.then.trim());
+  const rightComplete = Boolean(right.given.trim() && right.when.trim() && right.then.trim());
   const wholeScore = jaccard(tokenSet(leftText), tokenSet(rightText));
   const givenScore = jaccard(tokenSet(left.given), tokenSet(right.given));
   const whenScore = jaccard(tokenSet(left.when), tokenSet(right.when));
   const thenScore = jaccard(tokenSet(left.then), tokenSet(right.then));
-  return Math.max(wholeScore, ((givenScore + whenScore + thenScore) / 3) * 0.8 + wholeScore * 0.2);
+  const blendedScore = Math.max(wholeScore, ((givenScore + whenScore + thenScore) / 3) * 0.8 + wholeScore * 0.2);
+  if (leftComplete !== rightComplete) return blendedScore * 0.22;
+  if (!leftComplete && !rightComplete) return blendedScore * 0.55;
+  return blendedScore;
 }
 
 function alignAcceptanceRequirementsDetailed(
@@ -94,7 +126,7 @@ function alignAcceptanceRequirementsDetailed(
   const m = original.length;
   const n = proposed.length;
   const gapCost = 0.55;
-  const matchThreshold = 0.2;
+  const matchThreshold = 0.24;
   const lowSimilarityPenalty = 1.35;
   const dp: number[][] = Array.from({ length: m + 1 }, () => Array.from({ length: n + 1 }, () => Number.POSITIVE_INFINITY));
 
@@ -1964,11 +1996,15 @@ export function MainContent({
                           proposed?.acceptanceRequirements || [],
                         );
                         return (
-                          <div className="mb-5 p-4 rounded-2xl bg-[var(--rf-warning-subtle)]/40 border border-[rgba(179,94,48,0.18)]">
+                          <div className="mb-5 rounded-2xl border border-[rgba(179,94,48,0.16)] bg-[linear-gradient(180deg,rgba(255,248,243,0.92),rgba(255,255,255,0.88))] p-4 shadow-[0_18px_50px_-40px_rgba(160,81,30,0.35)]">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                               <h4 className="text-[var(--rf-warning)] font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> {isAddedFeature ? 'AI Suggested New Feature' : isRemovedFeature ? 'AI Suggested Feature Removal' : 'AI Suggested Refinements'}</h4>
 
                               <div className="flex flex-wrap items-center gap-3">
+                                <div className="hidden md:flex items-center gap-2 rounded-full border border-[rgba(43,89,74,0.10)] bg-white/90 px-3 py-1 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--rf-success)]" /> Added</span>
+                                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--rf-danger)]" /> Removed</span>
+                                </div>
                                 <div className="flex items-center bg-white p-1 rounded-lg border border-[rgba(179,94,48,0.18)] shadow-sm">
                                   <button
                                     onClick={() => setDiffMode('redline')}
@@ -2003,7 +2039,7 @@ export function MainContent({
                                 )}
                                 <div className="space-y-2">
                                   {(isAddedFeature ? [] : feature.acceptanceRequirements).map((ar, i) => (
-                                    <div key={i} className="bg-[#f8faf9] border border-[var(--rf-border)] p-2.5 rounded-lg text-[13px] text-[var(--rf-text-secondary)]">
+                                    <div key={i} className="bg-[#f8faf9] border border-[var(--rf-border)] p-3 rounded-xl text-[13px] text-[var(--rf-text-secondary)] leading-6">
                                       {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
                                       {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
                                       <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
@@ -2011,7 +2047,7 @@ export function MainContent({
                                   ))}
                                 </div>
                               </div>
-                              <div className="bg-[var(--rf-brand-muted)]/50 p-4 rounded-xl border border-[var(--rf-brand-subtle)] shadow-sm">
+                              <div className="bg-white/92 p-4 rounded-xl border border-[rgba(43,89,74,0.12)] shadow-sm">
                                 <div className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-widest mb-2">{isRemovedFeature ? 'Proposed Removal' : `Proposed (${diffMode === 'redline' ? 'Diff' : 'Result'})`}</div>
                                 {isRemovedFeature ? (
                                   <div className="rounded-lg border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)] p-3 text-[13px] font-semibold text-[var(--rf-danger)]">
@@ -2030,7 +2066,7 @@ export function MainContent({
                                     const ar = row.type !== 'removed' ? row.proposed : row.oldAr;
                                     const oldAr = row.type === 'matched' ? row.oldAr : undefined;
                                     return (
-                                      <div key={`${i}-${row.type === 'removed' ? row.oldIndex : row.type === 'added' ? row.newIndex : row.oldIndex}`} className={`p-2.5 rounded-lg text-[13px] border ${isRemoved ? 'bg-[var(--rf-danger-subtle)] border-[var(--rf-danger-subtle)] text-[var(--rf-danger)]' : isNew ? 'bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)] text-[var(--rf-text)]' : 'bg-[#f8faf9] border-[rgba(43,89,74,0.12)] text-[var(--rf-text)]'}`}>
+                                      <div key={`${i}-${row.type === 'removed' ? row.oldIndex : row.type === 'added' ? row.newIndex : row.oldIndex}`} className={`p-3 rounded-xl text-[13px] border leading-6 ${isRemoved ? 'bg-[rgba(155,53,69,0.08)] border-[rgba(155,53,69,0.18)] text-[#7d2232]' : isNew ? 'bg-[rgba(46,125,86,0.08)] border-[rgba(46,125,86,0.18)] text-[var(--rf-text)]' : 'bg-[#f8faf9] border-[rgba(43,89,74,0.12)] text-[var(--rf-text)]'}`}>
                                         {isNew && <div className="text-[12px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
                                         {isRemoved && <div className="text-[12px] font-bold text-[var(--rf-danger)] uppercase tracking-widest mb-2">Removed AR</div>}
                                         {ar.given && <div className="mb-1"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Given</strong>{' '}<DiffText oldText={oldAr?.given || ar.given} newText={isRemoved ? '' : ar.given} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}

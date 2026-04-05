@@ -512,6 +512,8 @@ FEATURE RULES:
 ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
 ACCEPTANCE REQUIREMENT RULES:
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split one logical AR across multiple array items.
+- If you consolidate multiple features into fewer features, merge the coverage cleanly and rewrite the final ARs as complete standalone triples.
 - No solution language or system-specific terms
 - Business outcomes only — not implementation steps
 - Be CONCEPTUAL — describe behavior patterns, never example values
@@ -560,6 +562,7 @@ QUALITY RULES:
 - Feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split a single AR across multiple entries.
 - Be CONCEPTUAL — describe behavior patterns, not specific instances
 - Preserve role wording exactly: if the feature description says "As a [role]", do not rename that actor inside related ARs unless the feedback explicitly changes the role
 

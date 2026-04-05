@@ -9,6 +9,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import {
+  AcceptanceRequirement,
   Feature,
   ClarifyQuestion,
   ClarifyAnswer,
@@ -1593,6 +1594,7 @@ export async function refineSingleFeature(opts: {
     summary: candidate.summary || feature.summary,
     description: candidate.description || feature.description,
     acceptanceRequirements: candidate.acceptanceRequirements?.length
+      && !hasIncompleteAcceptanceRequirements(candidate.acceptanceRequirements)
       ? candidate.acceptanceRequirements
       : feature.acceptanceRequirements,
     storyPoints: candidate.storyPoints ?? feature.storyPoints,
@@ -1712,20 +1714,117 @@ function getRawAcceptanceArray(raw: RawFeature): unknown[] {
 }
 
 function normaliseArs(ars: unknown[]): Array<{ given: string; when: string; then: string }> {
-  return ars
+  const parsed = ars
     .map(ar => {
       if (typeof ar === 'string') return parseArString(ar);
       if (typeof ar === 'object' && ar !== null) {
         const obj = ar as Record<string, unknown>;
         return {
-          given: String(obj.given ?? obj.Given ?? ''),
-          when: String(obj.when ?? obj.When ?? ''),
-          then: String(obj.then ?? obj.Then ?? ''),
+          given: sanitizeArClause(obj.given ?? obj.Given ?? ''),
+          when: sanitizeArClause(obj.when ?? obj.When ?? ''),
+          then: sanitizeArClause(obj.then ?? obj.Then ?? ''),
         };
       }
       return null;
     })
-    .filter((x): x is { given: string; when: string; then: string } => x !== null && (!!x.given || !!x.when || !!x.then));
+    .filter((x): x is { given: string; when: string; then: string } => x !== null && hasAnyArContent(x));
+
+  return repairAcceptanceRequirements(parsed);
+}
+
+function sanitizeArClause(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasAnyArContent(ar: { given?: string; when?: string; then?: string }): boolean {
+  return Boolean(ar.given?.trim() || ar.when?.trim() || ar.then?.trim());
+}
+
+function clausesEqualOrMissing(left: string, right: string): boolean {
+  if (!left || !right) return true;
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function canMergeArFragments(
+  pending: AcceptanceRequirement,
+  incoming: AcceptanceRequirement,
+): boolean {
+  if (hasCompleteArClauses(pending) || !hasAnyArContent(incoming)) return false;
+
+  const fillsMissingClause =
+    (!pending.given && !!incoming.given) ||
+    (!pending.when && !!incoming.when) ||
+    (!pending.then && !!incoming.then);
+
+  if (!fillsMissingClause) return false;
+
+  return clausesEqualOrMissing(pending.given, incoming.given)
+    && clausesEqualOrMissing(pending.when, incoming.when)
+    && clausesEqualOrMissing(pending.then, incoming.then);
+}
+
+function mergeArFragments(
+  pending: AcceptanceRequirement,
+  incoming: AcceptanceRequirement,
+): AcceptanceRequirement {
+  return {
+    given: pending.given || incoming.given,
+    when: pending.when || incoming.when,
+    then: pending.then || incoming.then,
+  };
+}
+
+function hasCompleteArClauses(ar: { given?: string; when?: string; then?: string }): boolean {
+  return Boolean(ar.given?.trim() && ar.when?.trim() && ar.then?.trim());
+}
+
+export function repairAcceptanceRequirements(
+  ars: Array<{ given?: string; when?: string; then?: string }>,
+): AcceptanceRequirement[] {
+  const repaired: AcceptanceRequirement[] = [];
+  let pending: AcceptanceRequirement | null = null;
+
+  for (const rawAr of ars) {
+    const fragment: AcceptanceRequirement = {
+      given: sanitizeArClause(rawAr.given),
+      when: sanitizeArClause(rawAr.when),
+      then: sanitizeArClause(rawAr.then),
+    };
+
+    if (!hasAnyArContent(fragment)) continue;
+
+    if (!pending) {
+      pending = fragment;
+      if (hasCompleteArClauses(pending)) {
+        repaired.push(pending);
+        pending = null;
+      }
+      continue;
+    }
+
+    if (canMergeArFragments(pending, fragment)) {
+      pending = mergeArFragments(pending, fragment);
+      if (hasCompleteArClauses(pending)) {
+        repaired.push(pending);
+        pending = null;
+      }
+      continue;
+    }
+
+    repaired.push(pending);
+    pending = fragment;
+    if (hasCompleteArClauses(pending)) {
+      repaired.push(pending);
+      pending = null;
+    }
+  }
+
+  if (pending) repaired.push(pending);
+
+  const complete = repaired.filter(hasCompleteArClauses);
+  return complete.length ? complete : repaired.filter(hasAnyArContent);
 }
 
 function extractRoleFromDescription(description: string): string | null {
@@ -1806,21 +1905,21 @@ function parseArString(s: string): { given: string; when: string; then: string }
   const whenMatch = t.match(/WHEN\s+([\s\S]+?)(?=\s+THEN\b|$)/i);
   const thenMatch = t.match(/THEN\s+([\s\S]+)$/i);
   
-  let given = givenMatch?.[1]?.trim() ?? '';
-  let when = whenMatch?.[1]?.trim() ?? '';
-  let then = thenMatch?.[1]?.trim() ?? '';
+  let given = sanitizeArClause(givenMatch?.[1] ?? '');
+  let when = sanitizeArClause(whenMatch?.[1] ?? '');
+  let then = sanitizeArClause(thenMatch?.[1] ?? '');
 
   // Clean up any keywords repeated INSIDE the captured groups (fixes LLM hallucinations)
-  given = given.replace(/^(GIVEN|WHEN|THEN)\s+/i, '').trim();
-  when = when.replace(/^(GIVEN|WHEN|THEN)\s+/i, '').trim();
-  then = then.replace(/^(GIVEN|WHEN|THEN)\s+/i, '').trim();
+  given = sanitizeArClause(given.replace(/^(GIVEN|WHEN|THEN)\s+/i, ''));
+  when = sanitizeArClause(when.replace(/^(GIVEN|WHEN|THEN)\s+/i, ''));
+  then = sanitizeArClause(then.replace(/^(GIVEN|WHEN|THEN)\s+/i, ''));
 
   if (given || when || then) {
     return { given, when, then };
   }
 
   // Fallback for unformatted strings
-  return { given: '', when: '', then: t.replace(/^(GIVEN|WHEN|THEN)\s+/i, '').trim() };
+  return { given: '', when: '', then: sanitizeArClause(t.replace(/^(GIVEN|WHEN|THEN)\s+/i, '')) };
 }
 
 /**
