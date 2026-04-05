@@ -34,6 +34,7 @@ import {
   buildRefineSufficiencyPrompt,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
+import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import {
   MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
   MAX_INITIAL_DISCOVERY_QUESTIONS,
@@ -459,7 +460,10 @@ async function backfillMissingAcceptanceRequirements(input: {
 }): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
   const missingIndexes = input.features
     .map((feature, index) => ({ feature, index }))
-    .filter(({ feature }) => getRawAcceptanceArray(feature).length === 0);
+    .filter(({ feature }) => {
+      const rawArs = getRawAcceptanceArray(feature);
+      return rawArs.length === 0 || hasIncompleteAcceptanceRequirements(rawArs as Array<{ given?: string; when?: string; then?: string } | string>);
+    });
 
   if (!missingIndexes.length) {
     return { features: input.features, usage: { input: 0, output: 0 } };
