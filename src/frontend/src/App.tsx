@@ -423,6 +423,9 @@ export default function App() {
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
   const [projectKeys, setProjectKeys] = useState<string[]>([]);
   const [contextMode, setContextMode] = useState<'undecided' | 'project' | 'global'>('undecided');
+  const [launchContextReady, setLaunchContextReady] = useState(false);
+  const [launchProjectKey, setLaunchProjectKey] = useState<string | null>(null);
+  const [savedDefaultProjectKey, setSavedDefaultProjectKey] = useState<string | null>(null);
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
@@ -458,24 +461,25 @@ export default function App() {
     let active = true;
 
     view.getContext().then(async (ctx: any) => {
-      if (!ctx) return;
-      const aid = ctx.accountId as string | undefined;
-      if (!aid) return;
-      if (!active) return;
-      setAccountId(aid);
-
-      const issueKey = ctx.extension?.issue?.key as string | undefined;
-      const ctxProjectKey =
-        (ctx.extension?.project?.key as string | undefined) ||
-        (ctx.extension?.projectKey as string | undefined) ||
-        (issueKey ? issueKey.split('-')[0] : undefined);
-      if (ctxProjectKey) {
-        if (!active) return;
-        setSelectedProjectKeys([ctxProjectKey]);
-        setContextMode('project');
-      }
-
       try {
+        if (!ctx) return;
+        const aid = ctx.accountId as string | undefined;
+        if (!aid) return;
+        if (!active) return;
+        setAccountId(aid);
+
+        const issueKey = ctx.extension?.issue?.key as string | undefined;
+        const ctxProjectKey =
+          (ctx.extension?.project?.key as string | undefined) ||
+          (ctx.extension?.projectKey as string | undefined) ||
+          (issueKey ? issueKey.split('-')[0] : undefined);
+        if (ctxProjectKey) {
+          if (!active) return;
+          setLaunchProjectKey(ctxProjectKey);
+          setSelectedProjectKeys([ctxProjectKey]);
+          setContextMode('project');
+        }
+
         if (issueKey) {
           if (!active) return;
           setOriginIssueKey(issueKey);
@@ -492,8 +496,17 @@ export default function App() {
         }
       } catch (e) {
         console.error('Context error', e);
+      } finally {
+        if (active) {
+          setLaunchContextReady(true);
+        }
       }
-    }).catch(err => console.error('Context error', err));
+    }).catch(err => {
+      console.error('Context error', err);
+      if (active) {
+        setLaunchContextReady(true);
+      }
+    });
 
     return () => {
       active = false;
@@ -627,16 +640,22 @@ export default function App() {
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
       setBrandingLogoUrl(res?.branding?.logoUrl || null);
-      // Apply saved default project only when no Forge issue context has set one already
-      if (res.defaultProjectKey) {
-        if (projectKeys.length === 0) setSelectedProjectKeys([res.defaultProjectKey]);
-        setContextMode(prev => (prev === 'undecided' ? 'project' : prev));
-      }
+      setSavedDefaultProjectKey(typeof res.defaultProjectKey === 'string' ? res.defaultProjectKey : null);
     }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
     // Initial bootstrap only; later project selection changes are user-driven.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!launchContextReady) return;
+    if (!savedDefaultProjectKey) return;
+    if (launchProjectKey) return;
+    if (projectKeys.length > 0) return;
+
+    setSelectedProjectKeys([savedDefaultProjectKey]);
+    setContextMode(prev => (prev === 'undecided' ? 'project' : prev));
+  }, [launchContextReady, launchProjectKey, projectKeys.length, savedDefaultProjectKey]);
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
 
