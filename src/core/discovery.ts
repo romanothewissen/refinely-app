@@ -255,12 +255,14 @@ function ensureQuestionMark(value: string): string {
 
 function simplifyQuestionCopy(value: string): string {
   return cleanText(value)
+    .replace(/["“”'‘’]/g, '')
     .replace(/\((?:as\s+per|per|see|from)\s+[^)]*(?:reference|references|doc|docs|story|stories|evidence|backlog|wi)[^)]*\)/gi, '')
     .replace(/\((?:backlog|reference|references|doc|docs|story|stories|wi)[^)]*\)/gi, '')
     .replace(/\bwhat exact\b/gi, 'what')
     .replace(/\bwhat other events or conditions should\b/gi, 'which policy should')
     .replace(/\bso the team knows this flow is solving the right problem\b/gi, 'first')
     .replace(/\bthat is already present in the supporting evidence\b/gi, 'already in the evidence')
+    .replace(/\s+([,?.!])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -870,10 +872,27 @@ export function normalizeQuestionIntent(value: unknown, categoryKey: ClarifyCate
 
 function splitGroupedQuestion(question: string): string[] {
   const normalized = ensureQuestionMark(question);
-  return normalized ? [normalized] : [];
+  if (!normalized) return [];
+
+  const numberedMatches = [...normalized.matchAll(/(?:^|[\s,;])(\d+)\.\s*([^?]+?)(?=(?:[\s,;]+(?:and\s+)?\d+\.\s)|\?$)/g)];
+  if (numberedMatches.length >= 2) {
+    const prefix = cleanText(normalized.slice(0, numberedMatches[0].index ?? 0).replace(/[:;,]\s*$/g, ''));
+    return numberedMatches
+      .map((match) => {
+        const fragment = cleanText(match[2]).replace(/^(and|or)\s+/i, '');
+        if (!fragment) return '';
+        const combined = prefix ? `${prefix} ${fragment}` : fragment;
+        return ensureQuestionMark(combined);
+      })
+      .filter(Boolean);
+  }
+
+  return [normalized];
 }
 
 function normalizeQuestionText(question: string): string {
+  const raw = cleanText(question);
+  if (/[A-Za-z0-9]['"`‘’]$/.test(raw)) return '';
   const normalized = sentenceCaseQuestion(question);
   return isLikelyCompleteQuestion(normalized) ? normalized : '';
 }

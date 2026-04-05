@@ -65,7 +65,7 @@ export async function checkGenerationAllowed(
   if (usage.generations >= limits.generationsPerMonth) {
     return {
       allowed: true,
-      reason: `Your workspace has used the ${limits.generationsPerMonth} generations included in the Standard plan this month. You can keep going for now, and contact support if you need higher limits.`,
+      reason: `Your workspace has used the ${limits.generationsPerMonth} generations included with the Standard plan this month. Generation is still available, and you can contact support if you need higher soft-limit guidance.`,
     };
   }
   return { allowed: true };

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck — @forge/resolver types payload as `never`; runtime types verified manually
 /**
  * Forge Resolver — handles all invoke() calls from the React Custom UI.
@@ -5,13 +6,12 @@
  * Each function here is a handler for a specific action called from the frontend.
  * Auth is automatic via Forge's platform (cloudId + accountId in context).
  */
-
-const Resolver = require('@forge/resolver').default;
+import Resolver from '@forge/resolver';
 import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
-import { entityDelete, entityGet, entitySet, objectWrite, KEYS } from '../services/cache';
+import { entityDelete, entityGet, entitySet, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import { getUserPreferences, saveUserPreferences } from '../services/user-preferences';
 import {
@@ -39,7 +39,6 @@ import {
 const resolver: any = new Resolver();
 import {
   evaluateSufficiency,
-  refineFeatures,
   refineSingleFeature,
   checkRefineFeedbackSufficiency,
   askQuestion,
@@ -48,8 +47,7 @@ import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } f
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { extractDocumentText } from '../core/document-parser';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
-import { retrieveWiContext } from '../core/wi-ingestion';
-import { findSimilarStories, getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stories';
+import { getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stories';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
 import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent, RefineEvent } from '../types';

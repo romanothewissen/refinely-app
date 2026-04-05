@@ -45,7 +45,6 @@ export async function createFeatureIssue(opts: {
   const mappedArEntries = iterativeMode
     ? arFieldIds.map((fieldId, index) => ({ fieldId, ar: feature.acceptanceRequirements[index] ?? null }))
     : [];
-  const overflowArs = iterativeMode ? feature.acceptanceRequirements.slice(arFieldIds.length) : [];
   const descriptionArs = iterativeMode
     ? [
         ...feature.acceptanceRequirements.filter((_, index) => {

@@ -407,7 +407,8 @@ async function buildBacklogDocs(projectKey: string, config: TenantConfig): Promi
   let nextPageToken: string | undefined;
   const pageSize = 100;
 
-  while (true) {
+  let hasMore = true;
+  while (hasMore) {
     const data = await runSearchJql({
       jql: `project = ${projectKey} AND ${statusClause} AND issuetype not in subTaskIssueTypes() ORDER BY updated DESC`,
       maxResults: pageSize,
@@ -424,8 +425,8 @@ async function buildBacklogDocs(projectKey: string, config: TenantConfig): Promi
       }
     }
 
-    if (data.isLast || !data.nextPageToken) break;
-    nextPageToken = data.nextPageToken;
+    hasMore = !(data.isLast || !data.nextPageToken);
+    nextPageToken = hasMore ? data.nextPageToken : undefined;
   }
 
   return docs;
@@ -542,7 +543,17 @@ async function buildBacklogThemeIndex(
     config,
   );
 
-  const themes: BacklogTheme[] = normalized.map(({ sampleSummaries: _sampleSummaries, ...theme }) => theme);
+  const themes: BacklogTheme[] = normalized.map((theme) => ({
+    id: theme.id,
+    label: theme.label,
+    summary: theme.summary,
+    keywords: theme.keywords,
+    docCount: theme.docCount,
+    shardIds: theme.shardIds,
+    sampleIssueKeys: theme.sampleIssueKeys,
+    updatedRange: theme.updatedRange,
+    signatureTerms: theme.signatureTerms,
+  }));
 
   return {
     schemaVersion: 1,

@@ -16,7 +16,6 @@ import {
   ClarifyFailureReasonCode,
   TenantConfig,
   GenerationResult,
-  ValidationViolation,
   TokenUsageSummary,
   DiscoveryProfile,
 } from '../types';
@@ -853,14 +852,6 @@ export function assessRequirement(input: {
     ambiguityScore: Math.max(0, ambiguityPenalty - (hasConstraints ? 1 : 0)),
     ambiguityReasons,
   };
-}
-
-function normaliseQuestionKey(question: string): string {
-  return question
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {

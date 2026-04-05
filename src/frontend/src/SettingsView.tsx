@@ -1113,7 +1113,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               <div className="px-2.5 py-2 space-y-0.5">
                 <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{tier}</div>
                 <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                  {usage?.currentMonth ?? 0}<span className="text-[var(--rf-border-strong)]">/</span>{limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0}
+                  {usage?.currentMonth ?? 0}<span className="text-[var(--rf-border-strong)]">/</span>{limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} included
                 </div>
               </div>
             </div>
@@ -1642,7 +1642,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                   <div className="flex-1 max-w-xs space-y-1.5">
                     <div className="flex justify-between text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      <span>Generations this month</span>
+                      <span>Included generations this month</span>
                       <span>{usage?.currentMonth ?? 0}<span className="text-[var(--rf-text-tertiary)] font-medium"> / {limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0}</span></span>
                     </div>
                     {limits?.generationsPerMonth !== -1 && (
@@ -1659,11 +1659,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="rf-card p-4 flex items-start justify-between gap-4">
                   <div className="space-y-1.5">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Need more headroom?</div>
-                    <div className="text-sm font-semibold text-[var(--rf-text)]">Larger teams can contact support for higher limits and early access to advanced packaging.</div>
+                    <div className="text-sm font-semibold text-[var(--rf-text)]">Larger teams can contact support for a higher soft threshold and early access to advanced packaging.</div>
                     <div className="text-[12px] text-[var(--rf-text-tertiary)]">We are keeping the launch offer simple, then expanding into larger-organization controls based on customer demand.</div>
                   </div>
                   <a
-                    href="mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry"
+                    href="mailto:romano.thewissen@gmail.com?subject=Refinely%20Advanced%20Tier%20Inquiry"
                     className="shrink-0 inline-flex items-center justify-center rounded-lg border border-[var(--rf-text)] bg-[var(--rf-text)] px-3 py-2 text-[12px] font-bold text-white transition hover:bg-black"
                   >
                     Contact support
@@ -1675,7 +1675,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { label: 'Generations', value: usage?.currentMonth ?? 0, sub: `of ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0}` },
+                      { label: 'Generations', value: usage?.currentMonth ?? 0, sub: `included ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} before warning` },
                       { label: 'Tokens', value: workspaceTokenUsage.toLocaleString(), sub: 'approx.' },
                       { label: 'Projects', value: configuredProjectCount, sub: 'configured' },
                       { label: 'Records', value: transparencyReports.length + complianceEvents.length, sub: 'audit + transparency' },
@@ -1714,8 +1714,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    { key: 'standard', name: 'Standard', price: 'Marketplace launch tier', highlights: ['Full core workflow', 'Shared workspace setup', 'Moderate usage limits'], cta: 'Included in trial', href: 'https://marketplace.atlassian.com' },
-                    { key: 'advanced', name: 'Advanced', price: 'Later / contact us', highlights: ['Higher limits', 'Larger-team controls', 'Priority roadmap input'], cta: 'Talk to support', href: 'mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry' },
+                    { key: 'standard', name: 'Standard', price: 'Marketplace launch tier', highlights: ['Full core workflow', 'Shared workspace setup', 'Soft monthly usage guidance'], cta: 'Included in trial', href: 'https://marketplace.atlassian.com' },
+                    { key: 'advanced', name: 'Advanced', price: 'Later / contact us', highlights: ['Higher limits', 'Larger-team controls', 'Priority roadmap input'], cta: 'Talk to support', href: 'mailto:romano.thewissen@gmail.com?subject=Refinely%20Advanced%20Tier%20Inquiry' },
                   ].map(plan => {
                     const isCurrent = plan.key === 'standard' && tier === 'standard';
                     return (

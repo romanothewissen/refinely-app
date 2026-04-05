@@ -15,15 +15,13 @@ export async function extractDocumentText(filename: string, buffer: Buffer): Pro
   const kind = detectDocumentKind(filename);
 
   if (kind === 'pdf') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse');
+    const pdfParse = (await import('pdf-parse')).default;
     const parsed = await pdfParse(buffer);
     return ensureReadableText(String(parsed.text ?? ''), filename, 'document');
   }
 
   if (kind === 'xlsx') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const XLSX = require('xlsx');
+    const XLSX = await import('xlsx');
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const parts: string[] = [];
 

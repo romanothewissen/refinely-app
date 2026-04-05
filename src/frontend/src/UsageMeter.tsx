@@ -32,7 +32,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
           <div className="min-w-0">
             <div className="text-[10px] font-bold text-[var(--rf-text-secondary)] uppercase tracking-widest">{tierName} usage</div>
             <div className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">
-              {isUnlimited ? 'Unlimited plan' : `${remaining} remaining this month`}
+              {isUnlimited ? 'Unlimited plan' : `${remaining} included before warning`}
             </div>
           </div>
         </div>
@@ -70,7 +70,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
 
       <div className="space-y-2">
         <div className="flex justify-between items-end">
-          <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Generations</span>
+          <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Included generations</span>
           <span className="text-sm font-bold text-[var(--rf-brand)] tracking-tight">
             {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '∞' : max}</span>
           </span>
@@ -89,14 +89,14 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
         )}
         {isAtLimit && (
           <p className="text-[11px] font-medium text-[var(--rf-warning)]">
-            Included monthly usage reached. Generation remains available while you coordinate higher limits with support.
+            Included monthly usage guidance reached. Generation remains available while you coordinate a higher soft threshold with support.
           </p>
         )}
       </div>
 
       {!isUnlimited && (
         <a
-          href="mailto:support@smartif.ai?subject=Refinely%20higher%20limits"
+          href="mailto:romano.thewissen@gmail.com?subject=Refinely%20higher%20limits"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-2 w-full py-2.5 bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] rounded-xl text-[11px] font-bold uppercase tracking-wider hover:bg-[var(--rf-brand)]/15 transition-colors border border-[var(--rf-border)]"

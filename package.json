@@ -1,7 +1,7 @@
 {
   "name": "refinely",
   "version": "1.0.0",
-  "description": "Refinely: AI-powered Jira story generator by AutoMano.ai",
+  "description": "Refinely: AI-powered Jira story generator by Simplif.ai",
   "main": "src/resolvers/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cd src/frontend && npm run build",

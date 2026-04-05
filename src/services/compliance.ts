@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'crypto';
-import { asUser, route } from '@forge/api';
 import { ClarifyAnswer, ComplianceAuditEvent, PiiMaskingStats, TransparencyReport } from '../types';
 import { entityGet, entitySet, KEYS } from './cache';
 

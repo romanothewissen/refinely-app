@@ -66,5 +66,6 @@ permissions:
   external:
     fetch:
       backend:
+        - address: https://api.anthropic.com
         - address: https://generativelanguage.googleapis.com
         - address: https://api.openai.com

@@ -1,7 +1,6 @@
 import type {
   GeneratorBucketClasses,
   GeneratorConfig,
-  GeneratorModelStrategy,
   LlmProvider,
 } from '../types';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
