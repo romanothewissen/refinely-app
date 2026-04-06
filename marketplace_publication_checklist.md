@@ -37,6 +37,7 @@ Visual consistency is key for Marketplace approval.
 - [ ] **App Description**:
     - **Summary**: A short 1-line catchphrase.
     - **Product Overview**: Detailed explanation of features and benefits.
+- [ ] **More Details Field**: Fill the version-specific `More details` section with install, admin setup, and first-use instructions. Do not rely on marketing copy alone.
 - [ ] **Vendor Profile**: Ensure your Marketplace Vendor account is fully set up with a logo and description.
 - [ ] **Launch Messaging Consistency**: Make sure Marketplace copy does not promise roadmap-only plans or enterprise packs that are not actually available at launch.
 - [ ] **Trust Claim Review**: Review all public trust/security badges and claims so they stay within what can be accurately supported during Marketplace review.
@@ -58,7 +59,8 @@ Visual consistency is key for Marketplace approval.
 2. [ ] Click **Manage Vendor** -> **Create new app**.
 3. [ ] Provide the **App ID** (ari:cloud:ecosystem::app/c2222793-707f-4f79-b0ca-66356a03ba2f) from your manifest.
 4. [ ] Fill out the listing details (Screenshots, Descriptions, Categories).
-5. [ ] Submit for Approval.
+5. [ ] Confirm the `More details` content is attached to the reviewable Marketplace-generated version, not only the initial draft.
+6. [ ] Submit for Approval.
 
 > [!IMPORTANT]
 > **Approval Time**: Atlassian typically takes 5–10 business days to review your app. They may reach out with feedback or required changes via an ECOHELP ticket.

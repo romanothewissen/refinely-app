@@ -1,6 +1,6 @@
 # Atlassian Marketplace Submission Packet
 
-Last updated: April 5, 2026
+Last updated: April 6, 2026
 
 This packet is meant to be copied into the Atlassian Marketplace submission flow for the Forge app **Refinely**.
 
@@ -48,11 +48,25 @@ Use this wording for Marketplace submission and launch materials:
 - Marketplace-facing copy should emphasize the current Standard launch offering and avoid presenting Advanced or Enterprise tiers as generally available unless they are actually configured for sale.
 - Optional compliance-oriented features exist in the product surface, but Marketplace copy should describe them conservatively unless they are fully released and supported in launch operations.
 
+## Likely Rejection Cause
+
+If Atlassian says the listing has "not enough details", the weak point is usually the version-specific `More details` field rather than the short summary.
+
+Use the listing to show all three of these clearly:
+
+- what the app does inside Jira
+- how an admin sets it up after install
+- what an end user does on the first run
+
+Operational note:
+
+- In Marketplace, confirm you are editing the reviewable version created during submission. Atlassian review can happen against the Marketplace-generated release version, so do not rely only on the initial draft copy.
+
 ## Listing Copy
 
 ### Short Summary
 
-AI-powered Jira story refinement for turning rough requirements into backlog-ready features and acceptance requirements.
+AI-powered Jira refinement for turning rough requirements into backlog-ready stories and GIVEN / WHEN / THEN acceptance requirements.
 
 ### Tagline Alternatives
 
@@ -62,22 +76,55 @@ AI-powered Jira story refinement for turning rough requirements into backlog-rea
 
 ### Full Overview
 
-Refinely helps Jira teams turn incomplete or rough requirements into clearer, backlog-ready work items without leaving Jira.
+Use this when the Marketplace overview field needs to stay under 250 characters:
 
-The app supports both a Jira global page and an issue action workflow, so teams can either work from a central refinement space or start directly from an existing Jira issue. Refinely generates structured feature candidates, drafts GIVEN / WHEN / THEN acceptance requirements, and supports iterative refinement when users want to clarify or improve the result.
+Refinely turns rough Jira requirements into backlog-ready stories. Start from the global page or an issue action, answer clarifying questions when needed, generate acceptance requirements, and push approved work back to Jira.
 
-For teams that want more consistency, Refinely also supports project-specific configuration, including project context, issue mapping, backlog-aware retrieval, and optional work-instruction guidance. Generated output can be pushed back into Jira as issues, helping teams move from ambiguous requirements to actionable backlog items faster.
+If you have more room available, expand with the details below:
+
+The app appears in two places inside Jira: a global page named `Refinely` for net-new refinement work and an issue action named `Refine Stories` for starting from an existing Jira issue. Users can enter a short requirement, optionally include supporting attachment text, choose workspace or project context, and let Refinely analyze the request.
+
+When a requirement is ambiguous, Refinely can run a discovery step that asks focused follow-up questions before generating output. It then proposes structured feature candidates, descriptions, and GIVEN / WHEN / THEN acceptance requirements, and supports iterative refinement when a user wants to improve or adjust the result.
+
+For teams that want more consistency, admins can configure project-specific mappings, backlog context, work-instruction guidance, AI provider settings, and optional trust controls such as PII masking, transparency reports, and audit trail features. Approved output can be pushed back into Jira as Story, Task, Bug, or Epic items.
+
+### Marketplace `More details` Section
+
+Use this as the paste-ready long-form version for the listing's `More details` field:
+
+Refinely is a Jira Cloud app for teams that receive rough business requests and need to turn them into backlog-ready stories without leaving Jira. The app adds two entry points inside Jira: a global page called `Refinely` and an issue action called `Refine Stories`. Teams can start from a blank requirement in the global page or from an existing Jira issue when they want to refine work that is already in the backlog.
+
+Refinely helps users move from ambiguity to a structured draft. A user enters a requirement, optionally includes attachment text or project context, and Refinely analyzes the request. If the request is still too ambiguous, the app asks targeted clarification questions first. After that, Refinely generates structured feature candidates with descriptions and GIVEN / WHEN / THEN acceptance requirements so the team has a stronger starting point for delivery planning.
+
+After installation, a Jira admin should complete this setup:
+
+1. Open `Refinely` in Jira and go to `Settings`.
+2. Choose the AI provider for the workspace and enter the required API key.
+3. Select the Jira project configuration to support and configure issue mappings, field mappings, and optional issue-linking behavior.
+4. Optionally configure backlog context, work-instruction documents, and privacy controls such as PII masking, transparency reports, and audit trail settings.
+5. Save the configuration.
+
+Once setup is complete, an end user can use the app like this:
+
+1. Open the `Refinely` global page for a new requirement, or open an existing Jira issue and choose `Refine Stories`.
+2. Enter the requirement text and optionally add supporting attachment content or select project context.
+3. Answer clarification questions if Refinely requests more detail.
+4. Review the generated features, descriptions, and acceptance requirements.
+5. Push approved output back into Jira as a Story, Task, Bug, or Epic.
+
+Refinely is intended for product managers, business analysts, delivery leads, and software teams that want faster backlog preparation and more consistent acceptance requirements inside Jira.
 
 ### Key Features
 
-- Generate Jira-ready feature candidates from short business requirements
-- Draft structured GIVEN / WHEN / THEN acceptance requirements
-- Start from a Jira issue action or from a dedicated Jira global page
-- Refine generated output iteratively with additional guidance
-- Create Jira issues directly from generated output
-- Configure project-specific mappings, context, and backlog guidance
-- Show included monthly usage guidance with in-app warning instead of a hard generation stop
-- Optionally use backlog retrieval, work instructions, transparency reports, audit trail, and PII masking controls
+- Start from a Jira global page or directly from the `Refine Stories` issue action on an existing issue
+- Turn short requirement text into structured feature candidates and Jira-ready story drafts
+- Draft GIVEN / WHEN / THEN acceptance requirements for each generated feature
+- Ask targeted clarification questions before generation when the requirement is underspecified
+- Refine generated output iteratively with additional guidance and revision comparison
+- Push approved output back into Jira as Story, Task, Bug, or Epic items
+- Configure project-specific mappings, backlog context, and work-instruction guidance
+- Optionally enable PII masking, transparency reports, and audit trail features
+- Show monthly usage guidance in-app with warning-based thresholding instead of a hard stop
 
 ### Ideal Customer / Use Cases
 
@@ -199,12 +246,14 @@ Use these links in the Marketplace listing:
 
 You can use this in your listing documentation or installation instructions:
 
-1. Install the app into Jira Cloud.
-2. Open Refinely from the Jira global page or from a Jira issue action.
-3. Configure project mappings, issue types, and project context as needed.
-4. Optionally configure backlog guidance, work-instruction references, and AI provider settings.
-5. Generate candidate backlog items and acceptance requirements.
-6. Push approved output back into Jira.
+1. Install `Refinely` into Jira Cloud.
+2. Open the `Refinely` global page in Jira and go to `Settings`.
+3. Choose the workspace AI provider and enter the required API key.
+4. Configure project mappings, field mappings, issue types, and optional issue-linking behavior.
+5. Optionally configure backlog context, work-instruction references, and privacy controls.
+6. Open `Refinely` for a new requirement or use `Refine Stories` from an existing Jira issue.
+7. Enter a requirement, answer any clarification questions, and review the generated output.
+8. Push approved stories back into Jira.
 
 ## Marketplace Reviewer Notes
 
@@ -214,6 +263,7 @@ Use this if Atlassian asks for extra explanation:
 - The core user value is AI-assisted requirement refinement and structured backlog generation inside Jira.
 - The app can optionally cache backlog metadata and project guidance to improve relevance.
 - Some trust-oriented controls are tenant-configurable, including PII masking, transparency reports, and audit-trail features.
+- The listing's long-form `More details` section should include the install, admin setup, and first-use steps above so reviewers can confirm the app matches the described flow.
 
 ## Privacy & Security Tab Draft Answers
 
@@ -295,12 +345,16 @@ Suggested examples:
 
 ## Screenshot Guidance
 
-Prepare at least these Marketplace screenshots:
+Prepare these 8 core Marketplace screenshots for the listing:
 
-1. Jira global page showing requirement refinement workflow
-2. Generated feature list and acceptance requirements
-3. Settings/configuration view showing project mappings or model setup
-4. Optional screenshot of Jira issue creation flow
+1. **Jira Initiation** — Launching Refinely from a Jira issue sidebar.
+2. **Context Ingestion** — Automatic reading of backlog and project context.
+3. **AI Discovery** — Clarifying questions to surface requirements gaps.
+4. **Sufficiency Check** — Verified grounding before backlog generation.
+5. **Standardized Draft** — Generated Features and GIVEN/WHEN/THEN ARs.
+6. **AI Refinement** — Bulk conversational editing across the canvas.
+7. **Redline Review** — Word-level diff transparency before pushing.
+8. **Jira Sync** — Final push confirmation and issue creation in Jira.
 
 ## Final Pre-Submission Checklist
 

@@ -1,6 +1,6 @@
 # Marketplace Form Answers
 
-Last updated: April 5, 2026
+Last updated: April 6, 2026
 
 This is the short copy-paste version for the Atlassian Marketplace listing flow.
 
@@ -19,7 +19,7 @@ This is the short copy-paste version for the Atlassian Marketplace listing flow.
 
 ### Short Summary
 
-AI-powered Jira story refinement that turns rough requirements into backlog-ready features and acceptance requirements.
+AI-powered Jira refinement that turns rough requirements into backlog-ready stories and acceptance requirements.
 
 ### Tagline
 
@@ -27,11 +27,26 @@ Turn rough Jira requirements into structured backlog-ready stories.
 
 ### Overview
 
-Refinely helps Jira teams turn incomplete or rough requirements into clearer, backlog-ready work items without leaving Jira.
+Refinely turns rough Jira requirements into backlog-ready stories. Start from the global page or an issue action, answer clarifying questions when needed, generate acceptance requirements, and push approved work back to Jira.
 
-The app supports both a Jira global page and an issue action workflow, so teams can either work from a central refinement space or start directly from an existing Jira issue. Refinely generates structured feature candidates, drafts GIVEN / WHEN / THEN acceptance requirements, and supports iterative refinement when users want to clarify or improve the result.
+### More Details
 
-For teams that want more consistency, Refinely also supports project-specific configuration, including project context, issue mapping, backlog-aware retrieval, and optional work-instruction guidance. Generated output can be pushed back into Jira as issues, helping teams move from ambiguous requirements to actionable backlog items faster.
+Use this in the version-specific Marketplace `More details` field:
+
+Refinely is a Jira Cloud app for teams that need to turn rough business requests into backlog-ready stories without leaving Jira. The app adds a global page called `Refinely` and an issue action called `Refine Stories`, so teams can either start from a blank requirement or refine an existing Jira issue.
+
+After install, a Jira admin opens `Refinely` and goes to `Settings` to choose the AI provider, enter the required API key, configure project mappings and field mappings, and optionally set backlog context, work-instruction documents, issue-linking behavior, and privacy controls such as PII masking, transparency reports, and audit trail settings.
+
+Once configured, end users can enter a requirement, answer targeted clarification questions if needed, review generated features and acceptance requirements, and push approved output back into Jira as Story, Task, Bug, or Epic items.
+
+### Quick Start
+
+1. Install `Refinely` into Jira Cloud.
+2. Open `Refinely` and complete admin setup in `Settings`.
+3. Start from the global page or use `Refine Stories` on an existing Jira issue.
+4. Enter the requirement and answer any clarification questions.
+5. Review the generated stories and acceptance requirements.
+6. Push approved output back into Jira.
 
 ## Key Features
 
@@ -159,6 +174,8 @@ Prepare at least these screenshots:
 
 ## Final Checks
 
+- Confirm the version-specific Marketplace `More details` field is populated with install, setup, and first-use steps, not just marketing copy
+- Confirm you are editing the reviewable Marketplace-created version before resubmitting
 - Confirm the live site matches the current repo:
   - `https://smartif.ai/privacy`
   - `https://smartif.ai/terms`
