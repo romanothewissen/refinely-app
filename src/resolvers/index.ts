@@ -47,9 +47,11 @@ import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-
 import { extractDocumentText } from '../core/document-parser';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
 import { getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stories';
+import { inferProjectPersonaRolesFromBacklog } from '../core/persona-role-inference';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
 import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent, RefineEvent } from '../types';
+import { handleInferProjectPersonaRoles } from './project-persona-role-inference';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -1223,6 +1225,14 @@ resolver.define('getBacklogRefreshStatus', async ({ payload, context }) => {
   await ensureProjectBrowse(context, projectKey);
   const status = await entityGet(KEYS.backlogRefreshStatus(projectKey));
   return { success: true, status: status ?? null };
+});
+
+resolver.define('inferProjectPersonaRoles', async ({ payload, context }) => {
+  return handleInferProjectPersonaRoles(payload, context, {
+    ensureAdmin,
+    getConfig,
+    inferProjectPersonaRolesFromBacklog,
+  });
 });
 
 // ─── Conversation History ─────────────────────────────────────────────────────

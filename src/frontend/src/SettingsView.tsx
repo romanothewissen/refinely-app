@@ -8,10 +8,12 @@ import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 import type {
   GeneratorModelStrategy,
+  InferProjectPersonaRolesResult,
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
   LlmProvider,
   ProjectActivitySummaryRow,
+  ProjectPersonaRoleSuggestion,
 } from './types';
 import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
@@ -240,6 +242,39 @@ function coerceRoleGuidanceRows(
 
 function normalizeRoleGuidanceRows(rawRows: any[] = []): RoleGuidanceRow[] {
   return coerceRoleGuidanceRows(rawRows, { trimFields: true, includeBlankFallback: true });
+}
+
+function mergeSuggestedPersonaRoles(
+  existingRows: RoleGuidanceRow[],
+  selectedSuggestions: ProjectPersonaRoleSuggestion[],
+): RoleGuidanceRow[] {
+  const normalizedExisting = coerceRoleGuidanceRows(existingRows, { trimFields: true, includeBlankFallback: false });
+  const nextRows = normalizedExisting.length ? [...normalizedExisting] : [];
+  const exactKeys = new Set(nextRows.map((row) => `${row.role.toLowerCase()}::${row.activities.toLowerCase()}`));
+
+  selectedSuggestions.forEach((suggestion) => {
+    const role = suggestion.role.trim();
+    const activities = suggestion.activities.trim();
+    if (!role || !activities) return;
+
+    const exactKey = `${role.toLowerCase()}::${activities.toLowerCase()}`;
+    if (exactKeys.has(exactKey)) return;
+
+    const sameRoleIndex = nextRows.findIndex((row) => row.role.trim().toLowerCase() === role.toLowerCase());
+    if (sameRoleIndex >= 0) {
+      const current = nextRows[sameRoleIndex];
+      if (!current.activities.trim()) {
+        nextRows[sameRoleIndex] = { ...current, activities };
+        exactKeys.add(exactKey);
+      }
+      return;
+    }
+
+    nextRows.push({ role, activities });
+    exactKeys.add(exactKey);
+  });
+
+  return nextRows.length ? nextRows : [{ role: '', activities: '' }];
 }
 
 function splitGuidanceContext(rawContext = '') {
@@ -2199,6 +2234,9 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
 
   const [isSavingProject, setIsSavingProject] = useState(false);
   const [projectNotice, setProjectNotice] = useState<string | null>(null);
+  const [isInferringPersonaRoles, setIsInferringPersonaRoles] = useState(false);
+  const [roleInferenceResult, setRoleInferenceResult] = useState<InferProjectPersonaRolesResult | null>(null);
+  const [selectedRoleSuggestionKeys, setSelectedRoleSuggestionKeys] = useState<string[]>([]);
   const [expandedSections, setExpandedSections] = useState({
     backlog: true,
     guidance: true,
@@ -2207,6 +2245,59 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
 
   const toggleSection = (section: 'backlog' | 'guidance' | 'mapping') => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  useEffect(() => {
+    setRoleInferenceResult(null);
+    setSelectedRoleSuggestionKeys([]);
+  }, [activeArProj]);
+
+  const inferButtonDisabled = !activeArProj || activeArProj === '*' || isInferringPersonaRoles || indexedCount <= 0;
+
+  const handleSuggestPersonaRoles = async () => {
+    if (inferButtonDisabled) return;
+    setIsInferringPersonaRoles(true);
+    setProjectNotice(null);
+    try {
+      const response = await api.inferProjectPersonaRoles(activeArProj) as InferProjectPersonaRolesResult;
+      setRoleInferenceResult(response);
+      setSelectedRoleSuggestionKeys(
+        (response.suggestions ?? []).map((suggestion) => suggestion.role.trim().toLowerCase()),
+      );
+    } catch (error: any) {
+      setRoleInferenceResult({
+        success: false,
+        suggestions: [],
+        sampledIssueCount: 0,
+        sampledIssueKeys: [],
+        usedCache: true,
+        error: error?.message || 'Role suggestions could not be generated.',
+      });
+    } finally {
+      setIsInferringPersonaRoles(false);
+    }
+  };
+
+  const toggleRoleSuggestion = (role: string) => {
+    const key = role.trim().toLowerCase();
+    setSelectedRoleSuggestionKeys((current) => (
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    ));
+  };
+
+  const handleAddSelectedRoleSuggestions = () => {
+    const selectedSuggestions = (roleInferenceResult?.suggestions ?? []).filter((suggestion) => (
+      selectedRoleSuggestionKeys.includes(suggestion.role.trim().toLowerCase())
+    ));
+    if (!selectedSuggestions.length) return;
+    updateContext({
+      personaRoles: mergeSuggestedPersonaRoles(currentContext.personaRoles ?? [], selectedSuggestions),
+    });
+    setProjectNotice(`Added ${selectedSuggestions.length} inferred role${selectedSuggestions.length === 1 ? '' : 's'} to the editable table. Save the project to persist them.`);
+    setRoleInferenceResult(null);
+    setSelectedRoleSuggestionKeys([]);
   };
 
   const handleSave = async () => {
@@ -2458,14 +2549,110 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                       <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Persona roles</div>
                       <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Define project-specific roles and the activities they commonly perform.</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => updateContext({ personaRoles: [...(currentContext.personaRoles ?? []), { role: '', activities: '' }] })}
-                      className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-lg transition"
-                    >
-                      + Add row
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSuggestPersonaRoles}
+                        disabled={inferButtonDisabled}
+                        className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1.5"
+                      >
+                        {isInferringPersonaRoles ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <BrainCircuit className="w-3.5 h-3.5" />}
+                        Suggest from backlog
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateContext({ personaRoles: [...(currentContext.personaRoles ?? []), { role: '', activities: '' }] })}
+                        className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-lg transition"
+                      >
+                        + Add row
+                      </button>
+                    </div>
                   </div>
+                  {indexedCount <= 0 && (
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-[13px] font-medium text-[var(--rf-text-tertiary)]">
+                      Build backlog context first to infer roles from cached project history.
+                    </div>
+                  )}
+                  {roleInferenceResult && (
+                    <div className={`rounded-xl border px-4 py-4 space-y-3 ${roleInferenceResult.success ? 'border-[var(--rf-border)] bg-white' : 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35'}`}>
+                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                        <div>
+                          <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Backlog suggestions</div>
+                          <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
+                            Reviewed suggestions from {roleInferenceResult.sampledIssueCount} sampled backlog item{roleInferenceResult.sampledIssueCount === 1 ? '' : 's'}.
+                          </div>
+                          {(roleInferenceResult.message || roleInferenceResult.error) && (
+                            <div className={`mt-1 text-[13px] font-medium ${roleInferenceResult.error ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                              {roleInferenceResult.error || roleInferenceResult.message}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRoleInferenceResult(null);
+                            setSelectedRoleSuggestionKeys([]);
+                          }}
+                          className="self-start rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-1.5 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border-strong)]"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+
+                      {roleInferenceResult.suggestions.length > 0 && (
+                        <>
+                          <div className="space-y-2">
+                            {roleInferenceResult.suggestions.map((suggestion) => {
+                              const suggestionKey = suggestion.role.trim().toLowerCase();
+                              const checked = selectedRoleSuggestionKeys.includes(suggestionKey);
+                              const confidenceTone = suggestion.confidence === 'high'
+                                ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]'
+                                : suggestion.confidence === 'medium'
+                                  ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]'
+                                  : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]';
+                              return (
+                                <label key={suggestion.role} className="flex gap-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleRoleSuggestion(suggestion.role)}
+                                    className="mt-1 h-4 w-4 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20"
+                                  />
+                                  <div className="min-w-0 flex-1 space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="text-sm font-bold text-[var(--rf-text)]">{suggestion.role}</div>
+                                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.16em] ${confidenceTone}`}>
+                                        {suggestion.confidence}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm font-medium text-[var(--rf-text-secondary)]">{suggestion.activities}</div>
+                                    {suggestion.evidenceIssueKeys.length > 0 && (
+                                      <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                                        Evidence: {suggestion.evidenceIssueKeys.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                              {selectedRoleSuggestionKeys.length} selected. Added suggestions stay editable until you save the project.
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleAddSelectedRoleSuggestions}
+                              disabled={selectedRoleSuggestionKeys.length === 0}
+                              className="rounded-lg bg-[var(--rf-brand)] text-white px-3 py-2 text-[12px] font-bold uppercase tracking-widest transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Add selected
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-2.5">
                     <div className="space-y-3">
                       <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">

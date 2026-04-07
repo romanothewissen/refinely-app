@@ -99,6 +99,23 @@ export interface ProjectPersonaRole {
   activities: string;
 }
 
+export interface ProjectPersonaRoleSuggestion {
+  role: string;
+  activities: string;
+  confidence: 'high' | 'medium' | 'low';
+  evidenceIssueKeys: string[];
+}
+
+export interface InferProjectPersonaRolesResult {
+  success: boolean;
+  suggestions: ProjectPersonaRoleSuggestion[];
+  sampledIssueCount: number;
+  sampledIssueKeys: string[];
+  usedCache: boolean;
+  message?: string;
+  error?: string;
+}
+
 export interface ProjectArMapping {
   projectKey: string;   // e.g. "MYPROJ" or "*" for default
   issueType?: string;   // e.g. "Story" or "*"

@@ -99,6 +99,7 @@ export const api = {
   diagnoseBacklogCache: (projectKey: string) => invoke('diagnoseBacklogCache', { projectKey }),
   refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),
   getBacklogRefreshStatus: (projectKey: string) => invoke('getBacklogRefreshStatus', { projectKey }),
+  inferProjectPersonaRoles: (projectKey: string) => invoke('inferProjectPersonaRoles', { projectKey }),
 
   // History
   getHistory: (limit?: number) => invoke('getHistory', { limit }),
