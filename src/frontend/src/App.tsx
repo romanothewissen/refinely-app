@@ -925,6 +925,7 @@ export default function App() {
       const followupQuestions = Array.isArray(evaluation?.questions) ? evaluation.questions : [];
       const nextContext = applyDiscoveryEvaluationToContext(clarifyContext, evaluation ?? {}, followupQuestions.length);
       setClarifyContext(nextContext);
+      const evaluationWarning = typeof evaluation?.warning === 'string' ? evaluation.warning : null;
 
       if (!evaluation?.sufficient && followupQuestions.length > 0) {
         setClarifyAnswers(mergedAnswers);
@@ -938,12 +939,16 @@ export default function App() {
 
       markDiscoveryRoundComplete(1);
       setWorkflowStage('generation');
-      await startGeneration(requirement, mergedAnswers);
+      await startGeneration(requirement, mergedAnswers, evaluationWarning ?? undefined);
     } catch (err) {
       console.error('Discovery sufficiency evaluation failed', err);
-      setClarifyEvaluationError('Discovery could not evaluate the current answers. Please retry or skip to proceed without additional questions.');
-      setIsWorking(false);
-      setWorkflowStage('clarify_round_1');
+      markDiscoveryRoundComplete(1);
+      setWorkflowStage('generation');
+      await startGeneration(
+        requirement,
+        mergedAnswers,
+        'Discovery sufficiency could not be evaluated, so generation continued with your current answers.',
+      );
     } finally {
       setIsEvaluatingDiscovery(false);
     }
@@ -1138,7 +1143,11 @@ export default function App() {
   // Helpers to avoid stale closures in effects
   const requirementRef = useRef(requirement);
   requirementRef.current = requirement;
-  const startGeneration = async (reqText: string, clarifyAnswers: ClarifyAnswer[]) => {
+  const startGeneration = async (
+    reqText: string,
+    clarifyAnswers: ClarifyAnswer[],
+    continuationWarning?: string,
+  ) => {
     const sid = sessionIdRef.current;
     const req = reqText || requirementRef.current;
     const attachmentText = runAttachments
@@ -1171,7 +1180,7 @@ export default function App() {
       }) as any;
 
       if (res?.success) {
-        setGenerationWarning(res?.warning || null);
+        setGenerationWarning(res?.warning || continuationWarning || null);
       } else {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setIsWorking(false);

@@ -553,7 +553,7 @@ resolver.define('cancelClarify', async ({ payload }: { payload: { sessionId: str
 resolver.define('evaluateSufficiency', async ({ payload, context }) => {
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
-  return evaluateSufficiency({
+  const input = {
     requirement: payload.requirement,
     answers: payload.answers as ClarifyAnswer[],
     askedQuestions: payload.askedQuestions as string[] | undefined,
@@ -561,7 +561,31 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
     initialQuestionCount: payload.initialQuestionCount as number | undefined,
     totalQuestionBudget: payload.totalQuestionBudget as number | undefined,
     config,
-  });
+  } as const;
+
+  try {
+    return await evaluateSufficiency(input);
+  } catch (firstErr) {
+    console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
+    try {
+      return await evaluateSufficiency(input);
+    } catch (retryErr) {
+      console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
+      return {
+        sufficient: true,
+        missingCategoryKeys: [],
+        reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
+        durationMs: 0,
+        tokenUsage: {
+          input: 0,
+          output: 0,
+          total: 0,
+          byStage: {},
+        },
+        warning: 'Discovery sufficiency could not be evaluated, so generation will continue with your current answers.',
+      };
+    }
+  }
 });
 
 // ─── Refine ───────────────────────────────────────────────────────────────────
