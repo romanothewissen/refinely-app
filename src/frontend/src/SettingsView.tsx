@@ -929,15 +929,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   );
 
   const currentCatalogEntries = useMemo(() => {
-    return [...catalogEntries].sort((a, b) => {
-      const rank = (entry: LlmModelCatalogEntry) => {
-        if (entry.family === 'pro') return 0;
-        if (entry.family === 'flash') return 1;
-        if (entry.family === 'lite') return 2;
-        return 3;
-      };
-      return rank(a) - rank(b) || (a.displayName || a.id).localeCompare(b.displayName || b.id);
-    });
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    return [...catalogEntries].sort((a, b) => collator.compare(a.displayName || a.id, b.displayName || b.id));
   }, [catalogEntries]);
 
   const strategyState = useMemo(() => resolveUiGeneratorStrategyState({
@@ -1033,7 +1026,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         options.push({ id: modelId, label: modelId });
       }
     });
-    return options.sort((left, right) => left.label.localeCompare(right.label));
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    return options.sort((left, right) => collator.compare(left.label, right.label));
   }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel, strategyState]);
 
   const showComplianceTab = true;
