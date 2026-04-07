@@ -25,8 +25,6 @@ Refinely is a Forge app for Jira Cloud that helps teams turn rough requirements 
   Required to create or update Jira issues from generated output.
 - `read:jira-user`
   Required to resolve current-user context and selected assignee/reporter information.
-- `manage:jira-configuration`
-  Required to inspect project metadata, fields, statuses, issue types, and configuration-dependent mappings used by admins.
 - `storage:app`
   Required to store tenant configuration, cached backlog data, usage counters, and optional audit/transparency records.
 
@@ -69,6 +67,7 @@ forge deploy -e production
 ## Support
 
 - Support: `https://smartif.ai/support`
+- Security policy: `https://smartif.ai/security`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Setup documentation: `https://smartif.ai/docs/setup`

@@ -84,22 +84,6 @@ function buildTimeoutError(label: string, timeoutMs: number): Error {
   return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s.`);
 }
 
-async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = LLM_REQUEST_TIMEOUT_MS): Promise<T> {
-  return await new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(buildTimeoutError(label, timeoutMs)), timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
 async function fetchWithTimeout(url: string, init: RequestInit | undefined, label: string, timeoutMs = LLM_REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

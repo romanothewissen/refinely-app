@@ -134,7 +134,7 @@ interface PiiPreviewResult {
   totalRedactions: number;
   byType: Record<string, number>;
 }
-const WI_ACCEPT = '.pdf,.xlsx,.xls,.csv,.eml,.txt,.md';
+const WI_ACCEPT = '.pdf,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 type UiProvider = Exclude<LlmProvider, 'forge_llms'>;
 const DEFAULT_STRATEGY_STATE = resolveUiGeneratorStrategyState({
@@ -722,9 +722,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (!files.length) return;
-    const invalid = files.find(file => !['.pdf', '.xlsx', '.xls', '.csv', '.txt', '.md', '.eml'].some(ext => file.name.toLowerCase().endsWith(ext)));
+    const invalid = files.find(file => !['.pdf', '.csv', '.txt', '.md', '.eml'].some(ext => file.name.toLowerCase().endsWith(ext)));
     if (invalid) {
-      setWiUploadError('Supported formats are PDF, Excel (.xlsx/.xls), CSV, TXT, Markdown, and EML.');
+      setWiUploadError('Supported formats are PDF, CSV, TXT, Markdown, and EML.');
       return;
     }
     setWiUploadError(null);

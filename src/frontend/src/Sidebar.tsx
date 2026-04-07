@@ -466,7 +466,7 @@ export function Sidebar({
               ref={runAttachmentInputRef}
               type="file"
               onChange={handleRunAttachmentUpload}
-              accept=".pdf,.xlsx,.xls,.csv,.txt,.md,.eml"
+              accept=".pdf,.csv,.txt,.md,.eml"
               multiple
               className="hidden"
               disabled={isWorking}

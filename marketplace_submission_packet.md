@@ -12,6 +12,7 @@ This packet is meant to be copied into the Atlassian Marketplace submission flow
 - Supported product: `Jira Cloud`
 - Pricing model: `Paid via Atlassian`
 - Support contact: `https://smartif.ai/support`
+- Security policy: `https://smartif.ai/security`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Setup documentation: `https://smartif.ai/docs/setup`
@@ -27,13 +28,15 @@ This packet is meant to be copied into the Atlassian Marketplace submission flow
   - clarify
   - generation
   - refinement
-  - backlog cache refresh
+  - admin-triggered backlog cache refresh
 - Persistent state stored in Forge storage for:
   - tenant configuration
   - user/session history
   - work-instruction metadata
   - backlog cache/theme index
   - optional transparency and audit records
+- Third-party AI provider API keys stored in Forge secret storage
+- Similar-story retrieval gated by explicit user browse-permission checks before app-level Jira reads are used
 - AI execution supports the currently declared external providers:
   - Anthropic
   - Google Gemini
@@ -158,10 +161,6 @@ Used to create Jira issues and write generated output back into Jira when a user
 
 Used to resolve the signed-in user context and selected Jira user details, including reporter and assignee resolution for issue creation workflows.
 
-### `manage:jira-configuration`
-
-Used to inspect Jira configuration metadata needed for admin setup and mapping, including project permissions checks, fields, statuses, issue types, and project-specific creation configuration.
-
 ### `storage:app`
 
 Used to persist tenant configuration, usage counters, cached backlog/theme data, work-instruction metadata, conversation/session pointers, and optional transparency or audit records.
@@ -238,6 +237,7 @@ Keep the public website and legal/documentation pages aligned to these launch fa
 Use these links in the Marketplace listing:
 
 - Documentation: `https://smartif.ai/docs/setup`
+- Security policy: `https://smartif.ai/security`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Support: `https://smartif.ai/support`
@@ -359,6 +359,7 @@ Prepare these 8 core Marketplace screenshots for the listing:
 ## Final Pre-Submission Checklist
 
 - Confirm the public URLs are live:
+  - `https://smartif.ai/security`
   - `https://smartif.ai/privacy`
   - `https://smartif.ai/terms`
   - `https://smartif.ai/docs/setup`

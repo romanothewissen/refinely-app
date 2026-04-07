@@ -48,10 +48,6 @@ modules:
     - key: backlog-cache-refresh-listener
       queue: backlog-cache-refresh-queue
       function: backlog-cache-refresh
-  scheduledTrigger:
-    - key: weekly-backlog-cache-refresh
-      function: backlog-cache-refresh
-      interval: week
 resources:
   - key: main
     path: src/frontend/build
@@ -61,7 +57,6 @@ permissions:
     - read:jira-work
     - write:jira-work
     - read:jira-user
-    - manage:jira-configuration
     - storage:app
   external:
     fetch:

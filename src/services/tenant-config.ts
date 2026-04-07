@@ -64,6 +64,7 @@ function deepMerge(base: Record<string, unknown>, override: Record<string, unkno
 async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<TenantConfig>): Promise<TenantConfig> {
   const generatorConfig = { ...(config.generatorConfig ?? {}) } as TenantConfig['generatorConfig'];
   const savedGeneratorConfig = (saved?.generatorConfig ?? {}) as Partial<GeneratorConfig>;
+  let legacySecretsDetected = false;
 
   const secretValues = await Promise.all(
     GENERATOR_SECRET_FIELDS.map(async ({ field, provider }) => {
@@ -73,13 +74,24 @@ async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<Tenant
         : field === 'geminiApiKey' ? savedGeneratorConfig.geminiApiKey
         : field === 'openaiApiKey' ? savedGeneratorConfig.openaiApiKey
         : savedGeneratorConfig.azureOpenAIApiKey;
-      return [field, secret ?? legacy] as const;
+      const normalizedLegacy = typeof legacy === 'string' ? legacy.trim() : '';
+      if (normalizedLegacy) {
+        legacySecretsDetected = true;
+        if (!secret) {
+          await entitySetSecret(KEYS.providerApiKey(provider), normalizedLegacy);
+        }
+      }
+      return [field, secret ?? normalizedLegacy] as const;
     }),
   );
 
   secretValues.forEach(([field, value]) => {
     if (value) generatorConfig[field] = value;
   });
+
+  if (legacySecretsDetected) {
+    await entitySet(KEYS.tenantConfig, stripGeneratorSecrets(config) as unknown);
+  }
 
   return {
     ...config,

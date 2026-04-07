@@ -186,7 +186,7 @@ export async function findSimilarStories(
   }
 
   try {
-    const index = await ensureBacklogIndex(projectKey, config);
+    const index = await ensureBacklogIndex(projectKey);
     let docs: BacklogDoc[] = [];
 
     if (index.manifest) {
@@ -244,7 +244,7 @@ export async function findSimilarStories(
   }
 }
 
-async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Promise<LoadedBacklogIndex> {
+async function ensureBacklogIndex(projectKey: string): Promise<LoadedBacklogIndex> {
   const manifest = await objectRead<BacklogManifest>(KEYS.backlogManifest(projectKey));
   if (manifest && Array.isArray(manifest.shards)) {
     const themeIndex = await objectRead<BacklogThemeIndex>(KEYS.backlogThemes(projectKey));
@@ -255,22 +255,7 @@ async function ensureBacklogIndex(projectKey: string, config: TenantConfig): Pro
   if (legacy?.docs?.length) {
     return { legacy };
   }
-
-  const refreshed = await refreshBacklogCache(projectKey, config);
-  const refreshedManifest = await objectRead<BacklogManifest>(KEYS.backlogManifest(projectKey));
-  if (refreshedManifest && Array.isArray(refreshedManifest.shards)) {
-    const themeIndex = await objectRead<BacklogThemeIndex>(KEYS.backlogThemes(projectKey));
-    return { manifest: refreshedManifest, themeIndex };
-  }
-
-  return {
-    legacy: {
-      projectKey,
-      builtAt: refreshed.builtAt ?? new Date().toISOString(),
-      issueCount: refreshed.issueCount,
-      docs: [],
-    },
-  };
+  return {};
 }
 
 export async function getBacklogCacheInfo(projectKey: string): Promise<BacklogIndexInfo> {

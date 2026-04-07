@@ -11,6 +11,7 @@ This is the short copy-paste version for the Atlassian Marketplace listing flow.
 - Product: `Jira Cloud`
 - Pricing model: `Paid via Atlassian`
 - Support: `https://smartif.ai/support`
+- Security policy: `https://smartif.ai/security`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Admin/setup docs: `https://smartif.ai/docs/setup`
@@ -79,13 +80,22 @@ Used to create Jira issues and write generated output back into Jira when a user
 
 Used to resolve the signed-in user context and selected Jira user details for issue creation and assignment workflows.
 
-### `manage:jira-configuration`
-
-Used to inspect Jira configuration metadata needed for admin setup and mapping, including fields, statuses, issue types, permissions checks, and project-specific creation configuration.
-
 ### `storage:app`
 
 Used to persist tenant configuration, usage counters, cached backlog/theme data, work-instruction metadata, conversation/session pointers, and optional transparency or audit records.
+
+## Security Questionnaire Notes
+
+- `Q3 asApp permission validation`: `Yes`
+- `Q7 least privilege`: `Yes`
+- `Q10 automated dependency review`: `Yes`
+- `Q12 collects third-party service credentials`: `Yes`
+- `Q12.a stores them with Forge encryption`: `Yes`
+- `Q14 vulnerability scans and review`: `Yes`
+
+Use this wording for the security policy field:
+
+- `https://smartif.ai/security`
 
 ## Remote Hosts
 
@@ -177,6 +187,7 @@ Prepare at least these screenshots:
 - Confirm the version-specific Marketplace `More details` field is populated with install, setup, and first-use steps, not just marketing copy
 - Confirm you are editing the reviewable Marketplace-created version before resubmitting
 - Confirm the live site matches the current repo:
+  - `https://smartif.ai/security`
   - `https://smartif.ai/privacy`
   - `https://smartif.ai/terms`
   - `https://smartif.ai/docs/setup`

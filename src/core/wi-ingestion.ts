@@ -1,7 +1,7 @@
 /**
  * Work instruction ingestion: document text extraction -> chunks -> BM25 retrieval.
  *
- * Uses pdf-parse (npm) for PDFs and xlsx (npm) for spreadsheets.
+ * Uses pdf-parse (npm) for PDFs and text extraction for CSV/TXT/MD/EML.
  * Uses BM25 scoring for retrieval (no embeddings needed for small corpora).
  * Stores in Forge Object Store.
  */

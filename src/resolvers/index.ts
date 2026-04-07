@@ -30,7 +30,6 @@ import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
   normalizeProjectKeys,
-  resolvePrimaryProjectKey,
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
 } from '../services/project-selection';
@@ -70,26 +69,78 @@ async function checkAdmin(context: any) {
   }
 }
 
+async function checkProjectPermission(
+  context: any,
+  projectKey: string | undefined,
+  permissionKey: string,
+) {
+  const accountId = (context as { accountId?: string })?.accountId;
+  if (!accountId || !projectKey || projectKey === '*') return false;
+  try {
+    const res = await asUser().requestJira(
+      route`/rest/api/3/mypermissions?permissions=${permissionKey}&projectKey=${projectKey}`,
+    );
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.permissions?.[permissionKey]?.havePermission === true;
+  } catch {
+    return false;
+  }
+}
+
 async function checkProjectAdmin(context: any, projectKey?: string) {
   const accountId = (context as { accountId?: string })?.accountId;
   if (!accountId) return false;
   // Global admin can always edit everything
   if (await checkAdmin(context)) return true;
-  if (!projectKey || projectKey === '*') return false;
-  try {
-    const res = await asUser().requestJira(route`/rest/api/3/mypermissions?permissions=ADMINISTER_PROJECTS&projectKey=${projectKey}`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
-  } catch (e) {
-    return false;
-  }
+  return checkProjectPermission(context, projectKey, 'ADMINISTER_PROJECTS');
+}
+
+async function checkProjectBrowse(context: any, projectKey?: string) {
+  return checkProjectPermission(context, projectKey, 'BROWSE_PROJECTS');
 }
 
 async function ensureAdmin(context: any, projectKey?: string) {
   if (!(await checkProjectAdmin(context, projectKey))) {
     throw new Error('Unauthorized: You do not have permission to manage this configuration.');
   }
+}
+
+async function ensureProjectBrowse(context: any, projectKey?: string) {
+  if (!projectKey || projectKey === '*') {
+    throw new Error('Select a project before performing this action.');
+  }
+  if (!(await checkProjectBrowse(context, projectKey))) {
+    throw new Error('Unauthorized: You do not have browse access to this project.');
+  }
+}
+
+async function resolveAuthorizedProjectSelection(
+  context: any,
+  payload?: { projectKey?: string; projectKeys?: string[] },
+) {
+  const requestedProjectKeys = normalizeProjectKeys(payload?.projectKey, payload?.projectKeys);
+  if (!requestedProjectKeys.length) {
+    return {
+      projectKeys: [] as string[],
+      projectKey: '*',
+    };
+  }
+
+  const permissionChecks = await Promise.all(
+    requestedProjectKeys.map(async (projectKey) => ({
+      projectKey,
+      allowed: await checkProjectBrowse(context, projectKey),
+    })),
+  );
+  const authorizedProjectKeys = permissionChecks
+    .filter((entry) => entry.allowed)
+    .map((entry) => entry.projectKey);
+
+  return {
+    projectKeys: authorizedProjectKeys,
+    projectKey: authorizedProjectKeys[0] ?? '*',
+  };
 }
 
 async function recordRuntimeVersionIfChanged(actorAccountId?: string, auditEnabled?: boolean) {
@@ -408,7 +459,8 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const check = await checkGenerationAllowed(config, context);
 
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+  const selectedProjectKeys = authorizedProjects.projectKeys;
 
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
@@ -420,7 +472,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     license: context?.license,
     goldExamples: '',   // fetched inside queue consumer
     wiContext: '',      // fetched inside queue consumer
-    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
   };
 
@@ -467,7 +519,8 @@ async function enqueueClarifyWorkflow(
   const config = await getConfig();
   const clarifyQueue = new Queue({ key: 'clarify-queue' });
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+  const selectedProjectKeys = authorizedProjects.projectKeys;
   const event: ClarifyEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -476,7 +529,7 @@ async function enqueueClarifyWorkflow(
     attachmentText: payload.attachmentText ?? '',
     config,
     license: context?.license,
-    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
     round: 1,
     priorAnswers: [],
@@ -490,7 +543,7 @@ async function enqueueClarifyWorkflow(
     payload: {
       stage: 'context',
       sources: {
-        projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+        projectKey: authorizedProjects.projectKey,
         projectCount: selectedProjectKeys.length,
         attachmentIncluded: Boolean(payload.attachmentText?.trim()),
       },
@@ -595,7 +648,8 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
     const config = await getConfig();
     const refineQueue = new Queue({ key: 'refine-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-    const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
+    const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+    const selectedProjectKeys = authorizedProjects.projectKeys;
     const event: RefineEvent = {
       sessionId: payload.sessionId,
       accountId,
@@ -604,7 +658,7 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
       features: payload.features as Feature[],
       config,
       license: context?.license,
-      projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+      projectKey: authorizedProjects.projectKey,
       projectKeys: selectedProjectKeys,
     };
 
@@ -640,7 +694,8 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
     config,
   });
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : '';
-  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+  const selectedProjectKeys = authorizedProjects.projectKeys;
   if (sessionId) {
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     await updateLatestTurnFeatures(
@@ -658,7 +713,7 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
         actorAccountId: accountId,
         provider: config.generatorConfig.provider,
         model: config.generatorConfig.refineModel,
-        projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+        projectKey: authorizedProjects.projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
           result.features.length > 1
@@ -678,7 +733,7 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
   await recordProjectActivity({
     action: 'refine',
     projectKeys: selectedProjectKeys,
-    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    projectKey: authorizedProjects.projectKey,
     sessionId,
     model: config.generatorConfig.refineModel,
     tokenUsage: result.tokenUsage ?? null,
@@ -705,7 +760,8 @@ resolver.define('checkRefineFeedback', async ({ payload, context }) => {
 
 resolver.define('ask', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const selectedProjectKeys = normalizeProjectKeys(payload.projectKey, payload.projectKeys);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+  const selectedProjectKeys = authorizedProjects.projectKeys;
   const config = {
     ...eventConfig,
     generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
@@ -758,7 +814,7 @@ resolver.define('ask', async ({ payload, context }) => {
       actorAccountId: accountId,
       provider: config.generatorConfig.provider,
       model: config.generatorConfig.arModel,
-      projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+      projectKey: authorizedProjects.projectKey,
       requirementExcerpt: maskedPrompt.text.slice(0, 240),
       decisionSummary: [
         'Response grounded in domain context, work instructions, and retrieved backlog examples.',
@@ -774,7 +830,7 @@ resolver.define('ask', async ({ payload, context }) => {
   await recordProjectActivity({
     action: 'ask',
     projectKeys: selectedProjectKeys,
-    projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
+    projectKey: authorizedProjects.projectKey,
     sessionId: String(payload.sessionId ?? 'chat'),
     model: config.generatorConfig.arModel,
   });
@@ -1096,8 +1152,10 @@ resolver.define('removeWiDoc', async ({ payload, context }) => {
   return { success: true };
 });
 
-resolver.define('getBacklogCacheInfo', async ({ payload }) => {
+resolver.define('getBacklogCacheInfo', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
   const projectKey = payload?.projectKey || '*';
+  await ensureProjectBrowse(context, projectKey);
   const info = await getBacklogCacheInfo(projectKey);
   return { success: true, ...info };
 });
@@ -1107,9 +1165,7 @@ resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   const projectKey = payload?.projectKey || '*';
-  if (!projectKey || projectKey === '*') {
-    return { success: false, error: 'Select a project before diagnosing the backlog cache.' };
-  }
+  await ensureProjectBrowse(context, projectKey);
   const diagnostics = await diagnoseBacklogCache(projectKey, config);
   return { success: true, diagnostics };
 });
@@ -1117,9 +1173,7 @@ resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
 resolver.define('refreshBacklogCache', async ({ payload, context }) => {
   await ensureAdmin(context, payload?.projectKey);
   const projectKey = payload?.projectKey || '*';
-  if (!projectKey || projectKey === '*') {
-    return { success: false, error: 'Select a project before refreshing the backlog cache.' };
-  }
+  await ensureProjectBrowse(context, projectKey);
   await entitySet(KEYS.backlogRefreshStatus(projectKey), {
     projectKey,
     status: 'queued',
@@ -1142,9 +1196,7 @@ resolver.define('refreshBacklogCache', async ({ payload, context }) => {
 resolver.define('getBacklogRefreshStatus', async ({ payload, context }) => {
   await ensureAdmin(context, payload?.projectKey);
   const projectKey = payload?.projectKey || '*';
-  if (!projectKey || projectKey === '*') {
-    return { success: false, error: 'Select a project before checking refresh status.' };
-  }
+  await ensureProjectBrowse(context, projectKey);
   const status = await entityGet(KEYS.backlogRefreshStatus(projectKey));
   return { success: true, status: status ?? null };
 });
