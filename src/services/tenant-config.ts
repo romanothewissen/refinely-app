@@ -1,12 +1,20 @@
-import { ProjectDomainContext, ProjectPersonaRole, TenantConfig, DEFAULT_CONFIG } from '../types';
-import { entitySet, entityGet, KEYS } from './cache';
+import { GeneratorConfig, ProjectDomainContext, ProjectPersonaRole, TenantConfig, DEFAULT_CONFIG } from '../types';
+import { entityDeleteSecret, entityGet, entityGetSecret, entitySet, entitySetSecret, KEYS } from './cache';
+
+const GENERATOR_SECRET_FIELDS = [
+  { field: 'anthropicApiKey', provider: 'anthropic' },
+  { field: 'geminiApiKey', provider: 'gemini' },
+  { field: 'openaiApiKey', provider: 'openai' },
+  { field: 'azureOpenAIApiKey', provider: 'azure_openai' },
+] as const;
 
 export async function getConfig(): Promise<TenantConfig> {
   const saved = await entityGet<Partial<TenantConfig>>(KEYS.tenantConfig);
   if (!saved) return { ...DEFAULT_CONFIG };
   // Deep merge with defaults so new fields get defaults on upgrade
   const merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, saved as unknown as Record<string, unknown>) as unknown as TenantConfig;
-  return normalizeConfig(merged);
+  const normalized = normalizeConfig(merged);
+  return withGeneratorSecrets(normalized, saved);
 }
 
 export async function saveConfig(config: Partial<TenantConfig>): Promise<void> {
@@ -15,7 +23,9 @@ export async function saveConfig(config: Partial<TenantConfig>): Promise<void> {
     current as unknown as Record<string, unknown>,
     config as unknown as Record<string, unknown>,
   ) as unknown as TenantConfig;
-  await entitySet(KEYS.tenantConfig, normalizeConfig(merged) as unknown);
+  const normalized = normalizeConfig(merged);
+  await persistGeneratorSecrets(normalized);
+  await entitySet(KEYS.tenantConfig, stripGeneratorSecrets(normalized) as unknown);
 }
 
 export async function patchConfig(patch: Partial<TenantConfig>): Promise<TenantConfig> {
@@ -49,6 +59,61 @@ function deepMerge(base: Record<string, unknown>, override: Record<string, unkno
     }
   }
   return result;
+}
+
+async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<TenantConfig>): Promise<TenantConfig> {
+  const generatorConfig = { ...(config.generatorConfig ?? {}) } as TenantConfig['generatorConfig'];
+  const savedGeneratorConfig = (saved?.generatorConfig ?? {}) as Partial<GeneratorConfig>;
+
+  const secretValues = await Promise.all(
+    GENERATOR_SECRET_FIELDS.map(async ({ field, provider }) => {
+      const secret = await entityGetSecret(KEYS.providerApiKey(provider));
+      const legacy =
+        field === 'anthropicApiKey' ? savedGeneratorConfig.anthropicApiKey
+        : field === 'geminiApiKey' ? savedGeneratorConfig.geminiApiKey
+        : field === 'openaiApiKey' ? savedGeneratorConfig.openaiApiKey
+        : savedGeneratorConfig.azureOpenAIApiKey;
+      return [field, secret ?? legacy] as const;
+    }),
+  );
+
+  secretValues.forEach(([field, value]) => {
+    if (value) generatorConfig[field] = value;
+  });
+
+  return {
+    ...config,
+    generatorConfig,
+  };
+}
+
+async function persistGeneratorSecrets(config: TenantConfig): Promise<void> {
+  const generatorConfig = config.generatorConfig ?? {};
+
+  await Promise.all(
+    GENERATOR_SECRET_FIELDS.map(async ({ field, provider }) => {
+      const value = generatorConfig[field];
+      if (typeof value === 'string' && value.trim()) {
+        await entitySetSecret(KEYS.providerApiKey(provider), value.trim());
+        return;
+      }
+      if (value === '') {
+        await entityDeleteSecret(KEYS.providerApiKey(provider));
+      }
+    }),
+  );
+}
+
+function stripGeneratorSecrets(config: TenantConfig): TenantConfig {
+  const generatorConfig = { ...(config.generatorConfig ?? {}) };
+  GENERATOR_SECRET_FIELDS.forEach(({ field }) => {
+    delete generatorConfig[field];
+  });
+
+  return {
+    ...config,
+    generatorConfig,
+  };
 }
 
 function normalizeConfig(config: TenantConfig): TenantConfig {

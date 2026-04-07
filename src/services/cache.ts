@@ -25,6 +25,22 @@ export async function entityDelete(key: string): Promise<void> {
   await kvs.delete(key);
 }
 
+export async function entitySetSecret(key: string, value: string): Promise<void> {
+  if (!value) {
+    await kvs.deleteSecret(key);
+    return;
+  }
+  await kvs.setSecret(key, value);
+}
+
+export async function entityGetSecret(key: string): Promise<string | undefined> {
+  return kvs.getSecret<string>(key);
+}
+
+export async function entityDeleteSecret(key: string): Promise<void> {
+  await kvs.deleteSecret(key);
+}
+
 // ─── Object Store (large data — store as base64-encoded JSON) ─────────────────
 
 export async function objectWrite(key: string, data: unknown): Promise<boolean> {
@@ -86,4 +102,5 @@ export const KEYS = {
   transparencyReports: 'transparency_reports',
   complianceRuntimeVersion: 'compliance_runtime_version',
   projectActivity: 'project_activity',
+  providerApiKey: (provider: 'anthropic' | 'gemini' | 'openai' | 'azure_openai') => `provider_api_key_${provider}`,
 } as const;
