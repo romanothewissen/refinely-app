@@ -810,7 +810,7 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
   requirement: string;
   sessionId: string;
   onClose: () => void;
-  onResult: (refined: Feature, tokenUsage?: { input: number; output: number; total: number }) => void;
+  onResult: (refined: Feature[], tokenUsage?: { input: number; output: number; total: number }) => void;
 }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -823,8 +823,11 @@ function RefinePopup({ feature, requirement, sessionId, onClose, onResult }: {
     setError('');
     try {
       const res = await api.refineSingleFeature(feature, feedback, requirement, sessionId) as any;
-      if (res.success && res.feature) {
-        onResult(res.feature, res.tokenUsage);
+      const refinedFeatures: Feature[] = Array.isArray(res.features) && res.features.length > 0
+        ? res.features
+        : res.feature ? [res.feature] : [];  // backwards compat
+      if (res.success && refinedFeatures.length > 0) {
+        onResult(refinedFeatures, res.tokenUsage);
       } else {
         setError('Refinement failed — please try again.');
         setLoading(false);
@@ -2245,10 +2248,21 @@ export function MainContent({
           requirement={requirement}
           sessionId={sessionId}
           onClose={() => setRefinePopupIdx(null)}
-          onResult={(refined, tokenUsage) => {
+          onResult={(refinedFeatures, tokenUsage) => {
             setFeatures(prev => {
               const n = [...prev];
-              n[refinePopupIdx] = { ...n[refinePopupIdx], pendingRefinement: refined };
+              // First feature replaces the original (shown as a diff/redline).
+              n[refinePopupIdx] = { ...n[refinePopupIdx], pendingRefinement: refinedFeatures[0] };
+              // Additional features from a split are inserted after the original as pending additions.
+              if (refinedFeatures.length > 1) {
+                const additions = refinedFeatures.slice(1).map(f => ({
+                  ...f,
+                  pendingAddition: true,
+                  pendingRefinement: undefined,
+                  pendingRemoval: false,
+                }));
+                n.splice(refinePopupIdx + 1, 0, ...additions);
+              }
               return n;
             });
             if (tokenUsage) {

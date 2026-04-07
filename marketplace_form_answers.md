@@ -10,7 +10,7 @@ This is the short copy-paste version for the Atlassian Marketplace listing flow.
 - Hosting: `Forge`
 - Product: `Jira Cloud`
 - Pricing model: `Paid via Atlassian`
-- Support: `mailto:romano.thewissen@gmail.com`
+- Support: `https://smartif.ai/support`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Admin/setup docs: `https://smartif.ai/docs/setup`
@@ -180,7 +180,7 @@ Prepare at least these screenshots:
   - `https://smartif.ai/privacy`
   - `https://smartif.ai/terms`
   - `https://smartif.ai/docs/setup`
-- Confirm support should remain `romano.thewissen@gmail.com`
+- Confirm support should remain `https://smartif.ai/support`
 - Confirm no external log shipping contradicts the Privacy & Security answers
 - Confirm production deployment is current
 - Confirm the Marketplace vendor profile is complete

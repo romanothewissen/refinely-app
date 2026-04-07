@@ -1,7 +1,7 @@
 import { ClarifyCategoryKey, ClarifyFailureReasonCode, ClarifyQuestion, DiscoveryProfile } from '../types';
 
 export const MIN_INITIAL_DISCOVERY_QUESTIONS = 4;
-export const MAX_INITIAL_DISCOVERY_QUESTIONS = 12;
+export const MAX_INITIAL_DISCOVERY_QUESTIONS = 15;
 export const MIN_FOLLOWUP_DISCOVERY_QUESTIONS = 1;
 export const MAX_FOLLOWUP_DISCOVERY_QUESTIONS = 8;
 export const MAX_TOTAL_DISCOVERY_QUESTIONS = 20;
@@ -1367,6 +1367,7 @@ export function finalizeFollowupDiscoveryQuestions(
   questions: ClarifyQuestion[],
   opts: {
     askedQuestions: string[];
+    askedCategoryKeys?: ClarifyCategoryKey[];
     missingCategoryKeys: ClarifyCategoryKey[];
     followupCap: number;
     initialQuestionCount: number;
@@ -1382,10 +1383,20 @@ export function finalizeFollowupDiscoveryQuestions(
   );
   if (maxFollowup <= 0) return [];
 
+  // Categories already covered by the initial question round — do not re-ask them.
+  const alreadyAskedCategories = new Set<string>(
+    (opts.askedCategoryKeys ?? []).filter(Boolean),
+  );
+
   const asked = new Set(opts.askedQuestions.map(normalizeKey).filter(Boolean));
-  const deduped = normalizeQuestions(questions, asked, opts.fallbackInput).sort(questionComparator);
+  const deduped = normalizeQuestions(questions, asked, opts.fallbackInput)
+    // Also filter out follow-ups targeting a category that was already asked about.
+    .filter((q) => !alreadyAskedCategories.has(q.categoryKey))
+    .sort(questionComparator);
   const result: ClarifyQuestion[] = [];
-  const preferredCategories = uniqueCategoryKeys(opts.missingCategoryKeys);
+  // Only prefer categories that were not already asked in the initial round.
+  const preferredCategories = uniqueCategoryKeys(opts.missingCategoryKeys)
+    .filter((key) => !alreadyAskedCategories.has(key));
   const addedQuestions = new Set<string>();
 
   preferredCategories.forEach((categoryKey) => {

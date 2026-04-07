@@ -622,7 +622,7 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
     await updateLatestTurnFeatures(
       sessionId,
       accountId,
-      [result.feature],
+      result.features,
       'refine',
       payload.feedback,
       result.tokenUsage,
@@ -637,7 +637,9 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
         projectKey: resolvePrimaryProjectKey(payload.projectKey, payload.projectKeys),
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
-          'Single-feature refinement generated from direct feedback.',
+          result.features.length > 1
+            ? `Single-feature refinement split into ${result.features.length} features based on feedback.`
+            : 'Single-feature refinement generated from direct feedback.',
           'Summary/description/story points remain stable unless feedback explicitly targets them.',
         ],
         contextUsage: {
@@ -658,7 +660,7 @@ resolver.define('refineSingleFeature', async ({ payload, context }) => {
     tokenUsage: result.tokenUsage ?? null,
     metadata: { featureId: payload.feature?.id },
   });
-  return { success: true, feature: result.feature, tokenUsage: result.tokenUsage };
+  return { success: true, features: result.features, tokenUsage: result.tokenUsage };
 });
 
 resolver.define('checkRefineFeedback', async ({ payload, context }) => {

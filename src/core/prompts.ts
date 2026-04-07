@@ -259,11 +259,11 @@ These counts drive all five fields below. Do not anchor to word count or vocabul
 Return a JSON object with:
 - "estimatedFeatures": number (1-15) — how many independently deliverable capabilities this requirement implies (count from property 1 above)
 - "estimatedQuestions": number (4-15) — how many clarifying questions are needed before implementation
-  - 4-6: 5 or 6 discovery categories are already resolved by the requirement text
-  - 7-9: 3 or 4 categories are resolved; several remain unstated
-  - 10-12: only 1 or 2 categories are resolved; key decisions, lifecycle, or roles are undefined
-  - 13-15: 0 or 1 categories are resolved; the requirement names a goal but specifies almost nothing
-  A requirement that resolves fewer than 2 discovery categories almost always needs 10+ questions regardless of length.
+  - 4-6: most discovery categories are already resolved; the requirement states actors, trigger, key rules, and scope clearly — gaps are narrow or low-risk
+  - 7-9: several categories are partially resolved; roles or rules are implied but not fully stated; a focused requirement with a clear scope can land here even if some categories are technically missing
+  - 10-12: only 1 or 2 categories are genuinely resolved AND the scope is broad or multi-actor; key decisions, lifecycle states, or permission boundaries are entirely undefined
+  - 13-15: 0 or 1 categories are resolved; the requirement names a goal but specifies almost nothing; reserve this for truly open-ended, multi-actor, multi-system requirements
+  Use the bands above as the primary guide. Do NOT anchor to missing categories alone — a focused, narrow requirement can omit a category and still need only 6–8 questions. Reserve 10+ for requirements that are both ambiguous AND broad.
 - "shape": one of "minimal", "narrow", "balanced", "broad", "epic"
   - minimal: 1 independently deliverable capability (1 feature)
   - narrow: 2-3 capabilities (1-3 features)
@@ -287,7 +287,7 @@ STRUCTURAL REASONING — apply before finalising all fields:
 - Count what must be built, not what was written. A requirement that names a goal without specifying the mechanism implies more features, higher complexity, and more questions than its length suggests.
 - Shape and complexity should reflect the structural burden of what must be built — decisions, actors, rules, and exception paths — not the vocabulary used to describe it.
 - "standard" arDepth requires that rules, actors, and edge cases are explicitly stated. If structural counts are high but the text is short, use "thorough" or "comprehensive".
-- When uncertain between two levels on any field, choose the higher one.
+- When uncertain between two levels on estimatedFeatures, complexity, or arDepth, choose the higher one. For estimatedQuestions, prefer the lower band unless ambiguity is both broad AND unresolvable from the text.
 
 Output JSON only: {"estimatedFeatures": N, "estimatedQuestions": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
 }
@@ -461,7 +461,8 @@ RULES:
   - edge_cases_exceptions
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
-- Never repeat or lightly rephrase a question that was already asked.
+- Before generating any follow-up question, check DISCOVERY QUESTIONS ALREADY ASKED. You MUST NOT ask a question that covers the same category and business gap as one already asked, even if the wording would differ. A category is only "still open" if its Q&A answer is vague, contradictory, or explicitly deferred — not merely because it could have been answered more thoroughly.
+- If all 6 categories already have a specific, actionable answer in the DISCOVERY ANSWERS, return {"sufficient": true}.
 - Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
 - Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.
@@ -513,6 +514,7 @@ ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_cod
 ACCEPTANCE REQUIREMENT RULES:
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
 - Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split one logical AR across multiple array items.
+- Every returned feature MUST include at least one complete GIVEN/WHEN/THEN acceptance requirement. A feature with an empty acceptance_requirements array is invalid. If splitting a feature moves all ARs to the new features, either write the missing ARs for the original or consolidate it into one of the other features.
 - If you consolidate multiple features into fewer features, merge the coverage cleanly and rewrite the final ARs as complete standalone triples.
 - No solution language or system-specific terms
 - Business outcomes only — not implementation steps

@@ -940,9 +940,11 @@ export default function App() {
       await startGeneration(requirement, mergedAnswers);
     } catch (err) {
       console.error('Discovery sufficiency evaluation failed', err);
-      setClarifyEvaluationError('Discovery could not evaluate the current answers. Please retry discovery or skip explicitly if you want to continue without it.');
+      setClarifyEvaluationError('Discovery could not evaluate the current answers. Please retry or skip to proceed without additional questions.');
       setIsWorking(false);
-      setWorkflowStage('clarify_round_1');
+      // Keep the current stage so the user can retry the sufficiency check.
+      // Do NOT reset to clarify_round_1 — that would re-display the initial questions.
+      setWorkflowStage('sufficiency_check');
     } finally {
       setIsEvaluatingDiscovery(false);
     }

@@ -11,7 +11,7 @@ This packet is meant to be copied into the Atlassian Marketplace submission flow
 - Hosting model: `Forge`
 - Supported product: `Jira Cloud`
 - Pricing model: `Paid via Atlassian`
-- Support contact: `mailto:romano.thewissen@gmail.com`
+- Support contact: `https://smartif.ai/support`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Setup documentation: `https://smartif.ai/docs/setup`
@@ -240,7 +240,7 @@ Use these links in the Marketplace listing:
 - Documentation: `https://smartif.ai/docs/setup`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
-- Support: `mailto:romano.thewissen@gmail.com`
+- Support: `https://smartif.ai/support`
 
 ## Suggested Installation / Setup Notes
 
@@ -362,7 +362,7 @@ Prepare these 8 core Marketplace screenshots for the listing:
   - `https://smartif.ai/privacy`
   - `https://smartif.ai/terms`
   - `https://smartif.ai/docs/setup`
-- Confirm support should remain `romano.thewissen@gmail.com`
+- Confirm support should remain `https://smartif.ai/support`
 - Confirm production deployment is current
 - Confirm Marketplace vendor profile is complete
 - Upload screenshots and branding assets

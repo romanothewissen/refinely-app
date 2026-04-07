@@ -156,7 +156,11 @@ const GENERIC_ROLE_WORDS = new Set([
 const PASS1_CONTEXT_LIMITS = {
   requirement: 5000,
   clarify: 5000,
-  attachment: 4000,
+  // Attachment text is passed as-is — no artificial cap. The predecessor app (jira-story-assistant)
+  // used no truncation for attachments and consistently produced better results. Context windows on
+  // all supported models (Claude 200K, GPT-4o 128K, Gemini 1M) are large enough that the full
+  // attachment poses no risk. Token cost is the tenant's responsibility.
+  attachment: Number.MAX_SAFE_INTEGER,
   wi: 8000,
   similar: 5000,
 } as const;
@@ -164,7 +168,7 @@ const PASS1_CONTEXT_LIMITS = {
 const PASS1_CONTEXT_LIMITS_COMPACT = {
   requirement: 4000,
   clarify: 3000,
-  attachment: 2000,
+  attachment: Number.MAX_SAFE_INTEGER,
   wi: 4000,
   similar: 3000,
 } as const;
@@ -172,7 +176,7 @@ const PASS1_CONTEXT_LIMITS_COMPACT = {
 const PASS2_CONTEXT_LIMITS = {
   requirement: 4000,
   clarify: 4000,
-  attachment: 3000,
+  attachment: Number.MAX_SAFE_INTEGER,
   wi: 5000,
   similar: 3000,
 } as const;
@@ -1250,7 +1254,7 @@ export async function generateClarifyingQuestions(opts: {
     `REQUIREMENT: ${requirement}`,
     `DISCOVERY RANGE: produce between ${questionPlan.min} and ${questionPlan.max} clarifying questions. Ideal target: ${desiredQuestionCount}. If ambiguity is still material, lean toward the upper half of the range. If the requirement and context are unusually explicit, you may go lower, but do not exceed the maximum.`,
   ];
-  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText.slice(0, 3500)}`);
+  if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 12000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 6000)}`);
   if (domainSignals.length) {
@@ -1438,6 +1442,9 @@ export async function evaluateSufficiency(opts: {
     const questions = !sufficient && followupCap > 0
       ? finalizeFollowupDiscoveryQuestions(parsedQuestions, {
           askedQuestions: askedQuestionDetails.map((entry) => entry.question),
+          askedCategoryKeys: askedQuestionDetails
+            .map((entry) => entry.categoryKey)
+            .filter((k): k is ClarifyCategoryKey => Boolean(k)),
           missingCategoryKeys,
           followupCap,
           initialQuestionCount,
@@ -1544,8 +1551,18 @@ export async function refineFeatures(opts: {
     ...buildLlmProviderOpts(config),
   });
 
+  const normalisedFeatures = (result.data.features ?? []).map(normaliseFeature);
+  // Drop any feature the LLM returned with no acceptance requirements — these are
+  // invalid shells left behind when the model incorrectly moves all ARs to split features.
+  const validFeatures = normalisedFeatures.filter((f) => f.acceptanceRequirements.length > 0);
+  if (validFeatures.length < normalisedFeatures.length) {
+    console.warn(
+      `refineFeatures: dropped ${normalisedFeatures.length - validFeatures.length} feature(s) with empty acceptance requirements`,
+    );
+  }
+
   return {
-    features: (result.data.features ?? []).map(normaliseFeature),
+    features: validFeatures.length > 0 ? validFeatures : normalisedFeatures,
     tokenUsage: {
       input: result.usage.input,
       output: result.usage.output,
@@ -1562,7 +1579,7 @@ export async function refineSingleFeature(opts: {
   feature: Feature;
   feedback: string;
   config: TenantConfig;
-}): Promise<{ feature: Feature; tokenUsage: TokenUsageSummary }> {
+}): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
   const { requirement, feature, feedback, config } = opts;
 
   const system = buildSingleFeatureRefineSystemPrompt({
@@ -1586,23 +1603,40 @@ export async function refineSingleFeature(opts: {
     ...buildLlmProviderOpts(config),
   });
 
-  const refined = result.data.features?.[0];
-  const candidate = refined ? normaliseFeature(refined) : feature;
-  const stableResult: Feature = {
-    ...candidate,
-    id: feature.id,
-    summary: candidate.summary || feature.summary,
-    description: candidate.description || feature.description,
-    acceptanceRequirements: candidate.acceptanceRequirements?.length
-      && !hasIncompleteAcceptanceRequirements(candidate.acceptanceRequirements)
-      ? candidate.acceptanceRequirements
-      : feature.acceptanceRequirements,
-    storyPoints: candidate.storyPoints ?? feature.storyPoints,
-    processCode: candidate.processCode ?? feature.processCode,
-  };
+  const rawFeatures = result.data.features ?? [];
+
+  // Build the result feature list. The first returned feature replaces the original
+  // (preserving its id). Any additional features (e.g. when the user asks to split)
+  // are returned as new features with fresh ids.
+  const features: Feature[] = rawFeatures.map((raw, index) => {
+    const candidate = normaliseFeature(raw);
+    if (index === 0) {
+      // Preserve the original feature's id and fall back gracefully.
+      const stableResult: Feature = {
+        ...candidate,
+        id: feature.id,
+        summary: candidate.summary || feature.summary,
+        description: candidate.description || feature.description,
+        acceptanceRequirements: candidate.acceptanceRequirements?.length
+          && !hasIncompleteAcceptanceRequirements(candidate.acceptanceRequirements)
+          ? candidate.acceptanceRequirements
+          : feature.acceptanceRequirements,
+        storyPoints: candidate.storyPoints ?? feature.storyPoints,
+        processCode: candidate.processCode ?? feature.processCode,
+      };
+      return harmonizeFeatureRoleLanguage(stableResult);
+    }
+    // Additional split features get fresh ids (already assigned by normaliseFeature).
+    return harmonizeFeatureRoleLanguage(candidate);
+  });
+
+  // If the LLM returned nothing, fall back to the original feature unchanged.
+  if (features.length === 0) {
+    features.push(feature);
+  }
 
   return {
-    feature: harmonizeFeatureRoleLanguage(stableResult),
+    features,
     tokenUsage: {
       input: result.usage.input,
       output: result.usage.output,

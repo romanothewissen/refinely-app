@@ -68,7 +68,7 @@ forge deploy -e production
 
 ## Support
 
-- Support: `romano.thewissen@gmail.com`
+- Support: `https://smartif.ai/support`
 - Privacy policy: `https://smartif.ai/privacy`
 - Terms of service: `https://smartif.ai/terms`
 - Setup documentation: `https://smartif.ai/docs/setup`
