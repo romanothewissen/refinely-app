@@ -62,6 +62,9 @@ export const MAX_ROLE_INFERENCE_DOCS = 15;
 export const MAX_ROLE_INFERENCE_SHARDS = 5;
 export const MAX_ROLE_INFERENCE_THEMES = 6;
 export const MAX_ROLE_INFERENCE_CORPUS_CHARS = 6000;
+const FALLBACK_ROLE_INFERENCE_DOCS = 8;
+const PRIMARY_ROLE_INFERENCE_TOKENS = 1600;
+const FALLBACK_ROLE_INFERENCE_TOKENS = 1800;
 
 const MAX_DOC_SUMMARY_CHARS = 140;
 const MAX_DOC_DESCRIPTION_CHARS = 220;
@@ -435,6 +438,41 @@ function buildProviderOpts(config: TenantConfig) {
   };
 }
 
+async function requestRoleSuggestionsFromCorpus(input: {
+  corpus: string;
+  sampledIssueKeys: string[];
+  config: TenantConfig;
+  maxSuggestions: number;
+  maxEvidenceIssueKeys: number;
+  maxTokens: number;
+}): Promise<ProjectPersonaRoleSuggestion[]> {
+  const rawSuggestions = await callLlmJson<unknown[]>({
+    model: input.config.generatorConfig.themeModel,
+    systemPrompt: [
+      'You infer human business roles from Jira backlog samples.',
+      'Return valid JSON only.',
+      'Infer only roles supported by repeated evidence in the provided backlog entries.',
+      'Avoid generic placeholders like User, Users, Team, System, or Admin unless the backlog clearly uses them as the real role name.',
+      'Keep activities short and concrete.',
+      'Do not invent organization-specific role names that are not grounded in the sample.',
+    ].join(' '),
+    userMessage: [
+      `Infer up to ${input.maxSuggestions} persona-role suggestions from this sampled backlog corpus.`,
+      'Return a JSON array only. Do not use Markdown fences.',
+      `Each item must be {"role":"...","activities":"one short sentence","confidence":"high|medium|low","evidenceIssueKeys":["ABC-1"]}.`,
+      `Use at most ${input.maxEvidenceIssueKeys} evidence issue key${input.maxEvidenceIssueKeys === 1 ? '' : 's'} per item.`,
+      'Keep each activities sentence brief and avoid long explanations.',
+      'Use only evidence issue keys that appear in the sample.',
+      `Sampled backlog docs:\n${input.corpus}`,
+    ].join('\n\n'),
+    maxTokens: input.maxTokens,
+    reasoningEffort: 'low',
+    ...buildProviderOpts(input.config),
+  });
+
+  return normalizeRoleInferenceSuggestions(rawSuggestions, input.sampledIssueKeys);
+}
+
 export async function inferProjectPersonaRolesFromBacklog(
   projectKey: string,
   config: TenantConfig,
@@ -470,32 +508,33 @@ export async function inferProjectPersonaRolesFromBacklog(
   };
 
   try {
-    const rawSuggestions = await callLlmJson<unknown[]>({
-      model: effectiveConfig.generatorConfig.themeModel,
-      systemPrompt: [
-        'You infer human business roles from Jira backlog samples.',
-        'Return valid JSON only.',
-        'Infer only roles supported by repeated evidence in the provided backlog entries.',
-        'Avoid generic placeholders like User, Users, Team, System, or Admin unless the backlog clearly uses them as the real role name.',
-        'Each activities field must be one short sentence describing common activities.',
-        'Do not invent organization-specific role names that are not grounded in the sample.',
-      ].join(' '),
-      userMessage: [
-        `Infer up to ${MAX_ROLE_SUGGESTIONS} persona-role suggestions from this sampled backlog corpus.`,
-        'Return a JSON array only.',
-        'Each array item must be: {"role":"...","activities":"...","confidence":"high|medium|low","evidenceIssueKeys":["ABC-1","ABC-2"]}.',
-        'Use only evidence issue keys that appear in the sample.',
-        `Sampled backlog docs:\n${sample.corpus}`,
-      ].join('\n\n'),
-      maxTokens: 1200,
-      reasoningEffort: 'low',
-      ...buildProviderOpts(effectiveConfig),
-    });
-
-    const suggestions = normalizeRoleInferenceSuggestions(
-      rawSuggestions,
-      sample.docs.map((doc) => doc.key),
-    );
+    let suggestions: ProjectPersonaRoleSuggestion[];
+    try {
+      suggestions = await requestRoleSuggestionsFromCorpus({
+        corpus: sample.corpus,
+        sampledIssueKeys: sample.docs.map((doc) => doc.key),
+        config: effectiveConfig,
+        maxSuggestions: MAX_ROLE_SUGGESTIONS,
+        maxEvidenceIssueKeys: 2,
+        maxTokens: PRIMARY_ROLE_INFERENCE_TOKENS,
+      });
+    } catch (primaryError) {
+      const fallbackSample = sampleBacklogDocsForRoleInference(cache, {
+        maxDocs: Math.min(FALLBACK_ROLE_INFERENCE_DOCS, sample.docs.length),
+        maxChars: Math.min(3600, MAX_ROLE_INFERENCE_CORPUS_CHARS),
+      });
+      if (!fallbackSample.docs.length || !fallbackSample.corpus.trim()) {
+        throw primaryError;
+      }
+      suggestions = await requestRoleSuggestionsFromCorpus({
+        corpus: fallbackSample.corpus,
+        sampledIssueKeys: fallbackSample.docs.map((doc) => doc.key),
+        config: effectiveConfig,
+        maxSuggestions: 4,
+        maxEvidenceIssueKeys: 1,
+        maxTokens: FALLBACK_ROLE_INFERENCE_TOKENS,
+      });
+    }
 
     return {
       success: true,
