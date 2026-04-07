@@ -56,12 +56,14 @@ interface LoadedInferenceCache {
 export interface RoleInferenceSample {
   docs: BacklogDoc[];
   corpus: string;
+  candidateSummary: string;
 }
 
 export const MAX_ROLE_INFERENCE_DOCS = 15;
 export const MAX_ROLE_INFERENCE_SHARDS = 5;
 export const MAX_ROLE_INFERENCE_THEMES = 6;
 export const MAX_ROLE_INFERENCE_CORPUS_CHARS = 6000;
+const MAX_ROLE_CANDIDATE_SUMMARY_CHARS = 2200;
 const FALLBACK_ROLE_INFERENCE_DOCS = 8;
 const PRIMARY_ROLE_INFERENCE_TOKENS = 1600;
 const FALLBACK_ROLE_INFERENCE_TOKENS = 1800;
@@ -71,7 +73,8 @@ const MAX_DOC_DESCRIPTION_CHARS = 220;
 const MAX_DOC_AC_CHARS = 220;
 const MAX_ACTIVITY_CHARS = 180;
 const MAX_ROLE_CHARS = 72;
-const MAX_ROLE_SUGGESTIONS = 6;
+const MAX_ROLE_SUGGESTIONS = 10;
+const MAX_ROLE_CANDIDATES = 14;
 const GENERIC_ROLE_NAMES = new Set([
   'user',
   'users',
@@ -83,6 +86,54 @@ const GENERIC_ROLE_NAMES = new Set([
   'admin',
   'administrator',
   'manager',
+]);
+const ROLE_SUFFIXES = [
+  'admin',
+  'administrator',
+  'agent',
+  'analyst',
+  'approver',
+  'assistant',
+  'associate',
+  'auditor',
+  'clerk',
+  'coach',
+  'consultant',
+  'coordinator',
+  'customer',
+  'dispatcher',
+  'doctor',
+  'editor',
+  'employee',
+  'engineer',
+  'field',
+  'finance',
+  'lead',
+  'manager',
+  'operator',
+  'owner',
+  'partner',
+  'planner',
+  'reader',
+  'representative',
+  'requester',
+  'reviewer',
+  'scheduler',
+  'seller',
+  'specialist',
+  'staff',
+  'student',
+  'supervisor',
+  'support',
+  'teacher',
+  'technician',
+  'user',
+  'worker',
+];
+const ROLE_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'or', 'the', 'to', 'for', 'of', 'in', 'on', 'by', 'with', 'from',
+  'new', 'existing', 'current', 'all', 'any', 'each', 'every', 'selected', 'related',
+  'other', 'another', 'their', 'our', 'your', 'this', 'that', 'these', 'those',
 ]);
 
 function normalizeWhitespace(value: string): string {
@@ -101,6 +152,14 @@ function normalizeRoleName(value: string): string {
 
 function roleKey(value: string): string {
   return normalizeRoleName(value).toLowerCase();
+}
+
+function titleCaseWords(value: string): string {
+  return normalizeWhitespace(value)
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function tokenize(value: string): string[] {
@@ -141,6 +200,93 @@ function dedupeStrings(values: string[], maxItems?: number): string[] {
     if (maxItems && deduped.length >= maxItems) break;
   }
   return deduped;
+}
+
+function singularizeRoleToken(value: string): string {
+  if (value.endsWith('ies') && value.length > 4) return `${value.slice(0, -3)}y`;
+  if (value.endsWith('s') && !value.endsWith('ss') && value.length > 3) return value.slice(0, -1);
+  return value;
+}
+
+function normalizeRoleCandidate(value: string): string {
+  const normalized = normalizeWhitespace(value)
+    .replace(/^[^a-zA-Z]+|[^a-zA-Z]+$/g, '')
+    .replace(/\s+/g, ' ');
+  if (!normalized) return '';
+
+  const parts = normalized
+    .split(' ')
+    .map((part) => singularizeRoleToken(part.toLowerCase()))
+    .filter((part) => part && !ROLE_STOP_WORDS.has(part));
+  if (!parts.length || parts.length > 5) return '';
+
+  const last = parts[parts.length - 1];
+  const looksLikeRole = ROLE_SUFFIXES.includes(last)
+    || parts.some((part) => ROLE_SUFFIXES.includes(part));
+  if (!looksLikeRole) return '';
+
+  const joined = parts.join(' ');
+  if (isGenericRole(joined)) return '';
+  return titleCaseWords(joined);
+}
+
+function collectRolePatternMatches(text: string): string[] {
+  const matches: string[] = [];
+  const normalized = normalizeWhitespace(text);
+  if (!normalized) return matches;
+
+  const patterns = [
+    /\bas\s+an?\s+([A-Za-z][A-Za-z\s/-]{1,60}?)(?=\s+(?:i|can|need|should|must|may|wants?|needs?|views?|creates?|updates?|reviews?|approves?|schedules?|dispatches?|tracks?)\b|[,.]|$)/gi,
+    /\bfor\s+an?\s+([A-Za-z][A-Za-z\s/-]{1,60}?)(?=\s+(?:to|who|that)\b|[,.]|$)/gi,
+    /\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\b/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of normalized.matchAll(pattern)) {
+      const candidate = normalizeRoleCandidate(match[1] ?? '');
+      if (candidate) matches.push(candidate);
+    }
+  }
+
+  return matches;
+}
+
+function buildRoleCandidateSummary(input: {
+  docs: BacklogDoc[];
+  maxChars: number;
+}): string {
+  const candidateMap = new Map<string, { role: string; count: number; evidence: string[] }>();
+
+  for (const doc of input.docs) {
+    const text = [doc.summary, doc.description, doc.acceptanceCriteria].join(' \n ');
+    const candidates = dedupeStrings(collectRolePatternMatches(text));
+    for (const candidate of candidates) {
+      const key = roleKey(candidate);
+      const existing = candidateMap.get(key) ?? { role: candidate, count: 0, evidence: [] };
+      existing.count += 1;
+      if (existing.evidence.length < 3 && !existing.evidence.includes(doc.key)) {
+        existing.evidence.push(doc.key);
+      }
+      if (candidate.length > existing.role.length) {
+        existing.role = candidate;
+      }
+      candidateMap.set(key, existing);
+    }
+  }
+
+  const lines = [...candidateMap.values()]
+    .sort((left, right) => right.count - left.count || right.evidence.length - left.evidence.length || left.role.localeCompare(right.role))
+    .slice(0, MAX_ROLE_CANDIDATES)
+    .map((candidate) => `${candidate.role} | mentions=${candidate.count} | evidence=${candidate.evidence.join(',')}`);
+
+  let summary = '';
+  for (const line of lines) {
+    const next = summary ? `${summary}\n${line}` : line;
+    if (next.length > input.maxChars) break;
+    summary = next;
+  }
+
+  return summary;
 }
 
 function scoreDocAgainstTerms(doc: BacklogDoc, terms: string[]): number {
@@ -313,6 +459,9 @@ export function sampleBacklogDocsForRoleInference(
   const maxChars = options?.maxChars ?? MAX_ROLE_INFERENCE_CORPUS_CHARS;
   const shardDocs = cache.shardDocs ?? {};
   const loadedDocs = Object.values(shardDocs).flat();
+  const candidateSourceDocs = loadedDocs.length
+    ? loadedDocs
+    : (cache.legacy?.docs ?? []).slice();
 
   const candidates = cache.themeIndex?.themes?.length && loadedDocs.length
     ? selectThemeDrivenDocs({ loadedDocs, themeIndex: cache.themeIndex, maxDocs })
@@ -337,6 +486,10 @@ export function sampleBacklogDocsForRoleInference(
   return {
     docs,
     corpus: JSON.stringify(entries),
+    candidateSummary: buildRoleCandidateSummary({
+      docs: candidateSourceDocs.slice().sort(compareUpdatedDescending).slice(0, 120),
+      maxChars: MAX_ROLE_CANDIDATE_SUMMARY_CHARS,
+    }),
   };
 }
 
@@ -440,6 +593,7 @@ function buildProviderOpts(config: TenantConfig) {
 
 async function requestRoleSuggestionsFromCorpus(input: {
   corpus: string;
+  candidateSummary?: string;
   sampledIssueKeys: string[];
   config: TenantConfig;
   maxSuggestions: number;
@@ -463,8 +617,11 @@ async function requestRoleSuggestionsFromCorpus(input: {
       `Use at most ${input.maxEvidenceIssueKeys} evidence issue key${input.maxEvidenceIssueKeys === 1 ? '' : 's'} per item.`,
       'Keep each activities sentence brief and avoid long explanations.',
       'Use only evidence issue keys that appear in the sample.',
+      input.candidateSummary?.trim()
+        ? `Candidate role signals mined from a broader cached backlog pass:\n${input.candidateSummary}`
+        : '',
       `Sampled backlog docs:\n${input.corpus}`,
-    ].join('\n\n'),
+    ].filter(Boolean).join('\n\n'),
     maxTokens: input.maxTokens,
     reasoningEffort: 'low',
     ...buildProviderOpts(input.config),
@@ -512,6 +669,7 @@ export async function inferProjectPersonaRolesFromBacklog(
     try {
       suggestions = await requestRoleSuggestionsFromCorpus({
         corpus: sample.corpus,
+        candidateSummary: sample.candidateSummary,
         sampledIssueKeys: sample.docs.map((doc) => doc.key),
         config: effectiveConfig,
         maxSuggestions: MAX_ROLE_SUGGESTIONS,
@@ -528,6 +686,7 @@ export async function inferProjectPersonaRolesFromBacklog(
       }
       suggestions = await requestRoleSuggestionsFromCorpus({
         corpus: fallbackSample.corpus,
+        candidateSummary: fallbackSample.candidateSummary,
         sampledIssueKeys: fallbackSample.docs.map((doc) => doc.key),
         config: effectiveConfig,
         maxSuggestions: 4,
