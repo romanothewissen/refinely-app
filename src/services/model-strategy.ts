@@ -45,6 +45,7 @@ function normalizeProvider(provider?: LlmProvider): LlmProvider {
   return provider;
 }
 
+
 function normalizeBucketClasses(value?: Partial<GeneratorBucketClasses>): GeneratorBucketClasses {
   return {
     discovery: value?.discovery ?? DEFAULT_BUCKET_CLASSES.discovery,

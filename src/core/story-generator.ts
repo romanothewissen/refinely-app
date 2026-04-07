@@ -799,9 +799,10 @@ function parseTriageResult(raw: unknown): TriageResult | null {
 
 export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan; questionPlan: ClarifyQuestionPlan } {
   const est = Math.max(1, triage.estimatedFeatures);
+  const buffer = (triage.complexity === 'high' || triage.complexity === 'very_high') ? 2 : 1;
   const featurePlan: FeaturePlan = {
-    min: est,
-    max: est,
+    min: Math.max(1, est - 1),
+    max: est + buffer,
     target: est,
     shape: triage.shape,
     complexity: triage.complexity,

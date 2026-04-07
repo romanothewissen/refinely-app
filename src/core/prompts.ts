@@ -110,14 +110,18 @@ export function buildDecompositionSystemPrompt(opts: {
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is one feature. Its resolution or override path is a second optional feature. Stop there.
 - One well-scoped feature is better than three micro-features.`;
 
-    if (shape === 'narrow')
+    if (shape === 'narrow') {
+      const isHighComplexity = complexity === 'high' || complexity === 'very_high';
       return `${base}
-- This is a tightly scoped requirement. One or two strong features is often the right outcome, even if the planning hint is higher.
-- Apply the decomposition framework ONLY to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
-- A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context, not scope contributors.
-- Do NOT split into trivial or UI-level features. Combine related concerns into a single feature.
-- If a list, notification, status definition, audit trail, exception diagnosis, or visibility aid only supports the core behavior, keep it inside the main feature unless the requirement explicitly asks for it as its own deliverable.
-`;
+${isHighComplexity
+  ? `- This requirement is tightly scoped in surface area but HIGH in complexity. More independently deliverable capabilities may exist beneath the surface — apply the decomposition framework carefully before consolidating.
+- When distinct handling paths, actor groups with different responsibilities, or independently testable workflows are implied, each is a candidate feature. Do not collapse them just to keep the count low.`
+  : `- This is a tightly scoped requirement. One or two strong features is often the right outcome, even if the planning hint is higher.`}
+- Apply the decomposition framework to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
+- A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context unless each requires distinct handling rules — in that case, the distinct handling IS the deliverable scope.
+- Do NOT split into trivial or UI-level features. Combine supporting concerns into a single feature.
+- If a list, notification, status definition, audit trail, exception diagnosis, or visibility aid only supports the core behavior, keep it inside the main feature unless explicitly requested as a separate deliverable.
+`;};
 
     if (shape === 'epic')
       return `${base}
@@ -328,7 +332,8 @@ Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every disc
 Output: {"reasoning": "...", "estimatedFeatures": 11, "estimatedQuestions": 14, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
 
 WHAT TO LOOK FOR WHEN REASONING:
-- Named tools, systems, teams, or platforms are environment context — they do not expand scope or complexity on their own. Count what is being built within or between them.
+- Named tools, systems, or platforms are environment context when they are the setting in which a single capability operates — they do not expand scope or complexity on their own. Count what is being built within or between them.
+- However, when a requirement explicitly enumerates multiple instances of the same category (channels, methods, types, modes, sources, destinations, etc.) that must each be handled with distinct behavior or rules, that enumeration defines deliverable scope. Ask: would each instance require a distinct implementation path, routing rule, or behavioral constraint? If yes, count them toward scope and complexity.
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
 - Do not split one narrowly scoped rule into multiple features just because it has states, timing, or unblock conditions. Count those as acceptance-requirement depth unless they are independently deliverable workflows.
 - Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two systems communicating via an interface is one process, not two actor groups.
