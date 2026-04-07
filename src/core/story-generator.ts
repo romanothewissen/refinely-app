@@ -118,6 +118,21 @@ interface DiscoverySufficiencyEvaluation {
   durationMs: number;
 }
 
+const AR_GENERATION_ATTEMPTS = 3;
+const AR_RETRY_DELAY_MS = 600;
+
+export class AcceptanceRequirementsGenerationError extends Error {
+  draftFeatures: Feature[];
+  failedFeatureIndexes: number[];
+
+  constructor(message: string, draftFeatures: Feature[], failedFeatureIndexes: number[]) {
+    super(message);
+    this.name = 'AcceptanceRequirementsGenerationError';
+    this.draftFeatures = draftFeatures;
+    this.failedFeatureIndexes = failedFeatureIndexes;
+  }
+}
+
 export class GenerationCancelledError extends Error {
   constructor() {
     super('Generation cancelled');
@@ -340,6 +355,95 @@ async function runDecompositionPass(input: {
 
 const PARALLEL_AR_CONCURRENCY = 5;
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function featureHasCompleteAcceptanceRequirements(feature: Pick<Feature, 'acceptanceRequirements'>): boolean {
+  return Array.isArray(feature.acceptanceRequirements)
+    && feature.acceptanceRequirements.length > 0
+    && !hasIncompleteAcceptanceRequirements(feature.acceptanceRequirements);
+}
+
+export function findFeaturesMissingCompleteAcceptanceRequirements(
+  features: Array<Pick<Feature, 'acceptanceRequirements'>>,
+): number[] {
+  return features.reduce<number[]>((indexes, feature, index) => {
+    if (!featureHasCompleteAcceptanceRequirements(feature)) indexes.push(index);
+    return indexes;
+  }, []);
+}
+
+function rawFeatureHasCompleteAcceptanceRequirements(feature: RawFeature): boolean {
+  const rawArs = getRawAcceptanceArray(feature);
+  return rawArs.length > 0
+    && !hasIncompleteAcceptanceRequirements(rawArs as Array<{ given?: string; when?: string; then?: string } | string>);
+}
+
+async function generateAcceptanceRequirementsForFeature(input: {
+  feature: RawFeature;
+  systemPrompt: string;
+  userMessage: string;
+  model: string;
+  maxTokens: number;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<{ feature: RawFeature; usage: { input: number; output: number } }> {
+  let usage = { input: 0, output: 0 };
+
+  for (let attempt = 1; attempt <= AR_GENERATION_ATTEMPTS; attempt++) {
+    try {
+      const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+        model: input.model,
+        systemPrompt: input.systemPrompt,
+        userMessage: input.userMessage,
+        maxTokens: input.maxTokens,
+        reasoningEffort: 'medium',
+        ...input.providerOpts,
+      });
+
+      usage = {
+        input: usage.input + result.usage.input,
+        output: usage.output + result.usage.output,
+      };
+
+      const arFeature = result.data.features?.[0];
+      const nextFeature = arFeature
+        ? {
+            ...input.feature,
+            acceptance_requirements: arFeature.acceptance_requirements ?? arFeature.acceptanceRequirements ?? [],
+          }
+        : input.feature;
+
+      if (rawFeatureHasCompleteAcceptanceRequirements(nextFeature)) {
+        return { feature: nextFeature, usage };
+      }
+    } catch (err) {
+      if (attempt >= AR_GENERATION_ATTEMPTS) {
+        break;
+      }
+      await delay(AR_RETRY_DELAY_MS * attempt);
+      continue;
+    }
+
+    if (attempt < AR_GENERATION_ATTEMPTS) {
+      await delay(AR_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  return { feature: input.feature, usage };
+}
+
 async function runParallelArPass(input: {
   features: RawFeature[];
   requirement: string;
@@ -396,35 +500,29 @@ async function runParallelArPass(input: {
     const batch = tasks.slice(i, i + PARALLEL_AR_CONCURRENCY);
     const batchResults = await Promise.allSettled(
       batch.map(async (task) => {
-        const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-          model,
+        const result = await generateAcceptanceRequirementsForFeature({
+          feature: task.feature,
           systemPrompt,
           userMessage: task.userMessage,
+          model,
           maxTokens,
-          reasoningEffort: 'medium',
-          ...input.providerOpts,
+          providerOpts: input.providerOpts,
         });
-        return { feature: task.feature, result };
+        return result;
       }),
     );
 
     for (let j = 0; j < batchResults.length; j++) {
       const settled = batchResults[j];
-      const originalFeature = batch[j].feature;
       if (settled.status === 'fulfilled') {
-        const arFeatures = settled.value.result.data.features ?? [];
-        // Take the first feature's ARs (we only sent one feature)
-        const arFeature = arFeatures[0];
         results.push({
-          feature: arFeature
-            ? { ...originalFeature, acceptance_requirements: arFeature.acceptance_requirements ?? arFeature.acceptanceRequirements ?? [] }
-            : originalFeature,
-          usage: settled.value.result.usage,
+          feature: settled.value.feature,
+          usage: settled.value.usage,
         });
       } else {
         // Failed — keep original feature without ARs
         results.push({
-          feature: originalFeature,
+          feature: batch[j].feature,
           usage: { input: 0, output: 0 },
         });
       }
@@ -482,8 +580,8 @@ async function backfillMissingAcceptanceRequirements(input: {
   let usage = { input: 0, output: 0 };
 
   for (const { feature, index } of missingIndexes) {
-    const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-      model,
+    const result = await generateAcceptanceRequirementsForFeature({
+      feature,
       systemPrompt,
       userMessage: buildArPerFeatureUserMessage({
         requirement: input.requirement,
@@ -498,9 +596,9 @@ async function backfillMissingAcceptanceRequirements(input: {
           process_code: feature.process_code,
         },
       }),
+      model,
       maxTokens: 3072,
-      reasoningEffort: 'medium',
-      ...input.providerOpts,
+      providerOpts: input.providerOpts,
     });
 
     usage = {
@@ -508,13 +606,8 @@ async function backfillMissingAcceptanceRequirements(input: {
       output: usage.output + result.usage.output,
     };
 
-    const arFeature = result.data.features?.[0];
-    const ars = arFeature ? getRawAcceptanceArray(arFeature) : [];
-    if (ars.length) {
-      nextFeatures[index] = {
-        ...feature,
-        acceptance_requirements: ars,
-      };
+    if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
+      nextFeatures[index] = result.feature;
     }
   }
 
@@ -1174,11 +1267,34 @@ export async function generateFeatures(opts: {
     rawFeatures = pass2Result.data.features?.length
       ? mergeFeatures(pass1Features, pass2Result.data.features)
       : pass1Features;
-    pass2Usage = pass2Result.usage;
+    const backfillResult = await backfillMissingAcceptanceRequirements({
+      features: rawFeatures,
+      requirement,
+      clarifyAnswers,
+      domainContext: config.domainContext,
+      arPlan: assessment.arPlan,
+      generatorConfig,
+      tier: config.tier,
+      providerOpts,
+    });
+    rawFeatures = backfillResult.features;
+    pass2Usage = {
+      input: pass2Result.usage.input + backfillResult.usage.input,
+      output: pass2Result.usage.output + backfillResult.usage.output,
+    };
     if (onArProgress) await onArProgress(pass1Features.length, pass1Features.length, pass1Features.length - 1);
   }
 
   const features = rawFeatures.map(normaliseFeature);
+  const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
+  if (failedFeatureIndexes.length > 0) {
+    const failedCount = failedFeatureIndexes.length;
+    throw new AcceptanceRequirementsGenerationError(
+      `Acceptance requirements could not be completed for ${failedCount} feature${failedCount === 1 ? '' : 's'}. Retry generation to finish the missing acceptance requirements.`,
+      features,
+      failedFeatureIndexes,
+    );
+  }
   const violations = validateFeatures(features, config);
 
   const tokenUsage: TokenUsageSummary = {

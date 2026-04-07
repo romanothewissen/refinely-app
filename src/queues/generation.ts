@@ -8,7 +8,13 @@
  */
 
 import { Feature, GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
-import { assessRequirementWithLlm, GenerationCancelledError, generateFeatures, generateSessionTitle } from '../core/story-generator';
+import {
+  AcceptanceRequirementsGenerationError,
+  assessRequirementWithLlm,
+  GenerationCancelledError,
+  generateFeatures,
+  generateSessionTitle,
+} from '../core/story-generator';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { formatSimilarStoriesText } from '../core/similar-stories';
@@ -40,6 +46,7 @@ interface GenerationProgressPayload {
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
+  failedFeatureIds?: string[];
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
 }
 
@@ -124,6 +131,8 @@ export async function handler(event: { body: GenerationEvent }) {
     tier: getEffectiveTier(eventConfig, { license }),
   };
   let stopHeartbeat: (() => void) | null = null;
+  let triageSnapshot: Awaited<ReturnType<typeof assessRequirementWithLlm>> = null;
+  let progressSourcesSnapshot: GenerationProgressPayload['sources'] | undefined;
 
   try {
     let currentProgress: { message?: string; pass?: 1 | 2; payload?: GenerationProgressPayload } = {};
@@ -209,6 +218,7 @@ export async function handler(event: { body: GenerationEvent }) {
         : Promise.resolve([]),
       triagePromise,
     ]);
+    triageSnapshot = triageResult;
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
@@ -233,6 +243,7 @@ export async function handler(event: { body: GenerationEvent }) {
       })),
       referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 4)),
     };
+    progressSourcesSnapshot = progressSources;
 
     // Progress: pass 1
     await updateProgress('Planning feature structure from gathered context…', 1, {
@@ -400,6 +411,38 @@ export async function handler(event: { body: GenerationEvent }) {
   } catch (err) {
     if (await isWorkflowCancelled(sessionId) || err instanceof GenerationCancelledError || String((err as { name?: string })?.name ?? '') === 'GenerationCancelledError') {
       await markCancelled(sessionId);
+      return;
+    }
+    if (err instanceof AcceptanceRequirementsGenerationError) {
+      const failedFeatureIds = err.failedFeatureIndexes
+        .map((index) => err.draftFeatures[index]?.id)
+        .filter((id): id is string => Boolean(id));
+      await entitySet(KEYS.generationProgress(sessionId), {
+        type: 'error',
+        sessionId,
+        message: err.message,
+        payload: {
+          stage: 'acceptance_requirements',
+          triage: buildTriagePayload(triageSnapshot),
+          draftFeatures: err.draftFeatures.map((feature) => ({
+            id: feature.id,
+            summary: feature.summary,
+            description: feature.description,
+            storyPoints: feature.storyPoints,
+          })),
+          featureProgress: err.draftFeatures.map((feature) => ({
+            id: feature.id,
+            status: failedFeatureIds.includes(feature.id) ? 'active' : 'complete',
+          })),
+          arProgress: {
+            completed: err.draftFeatures.length - failedFeatureIds.length,
+            total: err.draftFeatures.length,
+          },
+          failedFeatureIds,
+          sources: progressSourcesSnapshot,
+        } satisfies GenerationProgressPayload,
+        updatedAt: Date.now(),
+      } as RealtimeEvent);
       return;
     }
     console.error('[generation-queue] Error:', err);
