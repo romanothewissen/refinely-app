@@ -103,15 +103,16 @@ export function buildDecompositionSystemPrompt(opts: {
     if (shape === 'minimal')
       return `${base}
 - This is a FOCUSED, small requirement. Output exactly ${target} feature(s).
-- Do NOT decompose further unless there are genuinely independent capabilities.
-- One well-scoped feature is better than three micro-features.
-- If the ask is a single capability, return exactly 1 feature.`;
+- Apply the decomposition framework ONLY to check whether genuinely independent capabilities exist — do not manufacture a feature for each dimension.
+- A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is one feature. Its resolution or override path is a second optional feature. Stop there.
+- One well-scoped feature is better than three micro-features.`;
 
     if (shape === 'narrow')
       return `${base}
 - This is a tightly scoped requirement. Aim for ${target} features.
-- Do NOT split into trivial or UI-level features.
-- Combine related concerns into a single feature rather than over-splitting.
+- Apply the decomposition framework ONLY to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
+- A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems (SAP, Salesforce, etc.) are environment context, not scope contributors.
+- Do NOT split into trivial or UI-level features. Combine related concerns into a single feature.
 - Do not exceed ${max} features.`;
 
     if (shape === 'epic')
@@ -248,46 +249,55 @@ Output JSON: same features array with acceptance_requirements arrays filled in. 
 export function buildTriageSystemPrompt(): string {
   return `You are a senior business analyst doing a quick triage of a software requirement. Your job is to assess scope, complexity, and ambiguity so the pipeline knows how many features, acceptance requirements, and clarifying questions to produce.
 
-Before assessing any field, count these four structural properties of the requirement:
-  1. Independently deliverable capabilities — each distinct input the system must receive, decision it must make, output it must produce, and exception path it must handle is a potential capability.
-  2. Autonomous decisions — things the system must decide on its own: rules it enforces, rankings it produces, selections it resolves, conflicts it handles, without a human intervening at each step.
-  3. Distinct actor groups — roles with different permissions, different views of the data, or different responsibilities in the process.
-  4. Unresolved discovery categories — how many of these six remain unstated: actors, trigger/context, information, business rules, lifecycle, edge cases.
+Calibrate your assessment the same way a senior BA would in real sprint planning: based on what actually needs to be built, not on the vocabulary, length, or number of named systems in the requirement.
 
-These counts drive all five fields below. Do not anchor to word count or vocabulary.
+Return a JSON object with these five fields:
 
-Return a JSON object with:
-- "estimatedFeatures": number (1-15) — how many independently deliverable capabilities this requirement implies (count from property 1 above)
-- "estimatedQuestions": number (4-15) — how many clarifying questions are needed before implementation
-  - 4-6: most discovery categories are already resolved; the requirement states actors, trigger, key rules, and scope clearly — gaps are narrow or low-risk
-  - 7-9: several categories are partially resolved; roles or rules are implied but not fully stated; a focused requirement with a clear scope can land here even if some categories are technically missing
-  - 10-12: only 1 or 2 categories are genuinely resolved AND the scope is broad or multi-actor; key decisions, lifecycle states, or permission boundaries are entirely undefined
-  - 13-15: 0 or 1 categories are resolved; the requirement names a goal but specifies almost nothing; reserve this for truly open-ended, multi-actor, multi-system requirements
-  Use the bands above as the primary guide. Do NOT anchor to missing categories alone — a focused, narrow requirement can omit a category and still need only 6–8 questions. Reserve 10+ for requirements that are both ambiguous AND broad.
-- "shape": one of "minimal", "narrow", "balanced", "broad", "epic"
-  - minimal: 1 independently deliverable capability (1 feature)
-  - narrow: 2-3 capabilities (1-3 features)
-  - balanced: 4-6 capabilities (3-6 features)
-  - broad: 6-9 capabilities (5-9 features)
-  - epic: 9+ capabilities with multiple actor groups and many decision points (8-15 features)
-- "complexity": one of "trivial", "low", "medium", "high", "very_high"
-  - trivial: 0 autonomous decisions, 1 actor group, 0 enforced rules, single happy path
-  - low: 1-2 autonomous decisions, 1 actor group, a few explicit rules
-  - medium: 3-4 autonomous decisions, 1-2 actor groups, several explicit rules and some edge cases
-  - high: 5+ autonomous decisions, 2-3 actor groups, many rules, multiple exception paths
-  - very_high: many autonomous decisions across multiple actor groups, many enforced rules, many exception paths — the system must resolve most of its own complexity at each step
-- "arDepth": one of "minimal", "lean", "standard", "thorough", "comprehensive"
-  - minimal: 1 happy path, no rules, no exception paths stated or implied
-  - lean: 1-2 explicit rules, low risk if under-specified
-  - standard: rules, actor responsibilities, and key edge cases are all explicitly stated in the requirement
-  - thorough: structural counts (decisions, actors, rules) are high relative to what the text states — implied behavior must be covered
-  - comprehensive: the requirement names a goal but leaves most decisions, rules, and exception paths unstated — the ARs must specify behavior the requirement does not
+- "estimatedFeatures": number (1-15) — independently deliverable capabilities implied by the requirement
+- "estimatedQuestions": number (4-15) — clarifying questions needed before implementation can start
+- "shape": one of "minimal" | "narrow" | "balanced" | "broad" | "epic"
+- "complexity": one of "trivial" | "low" | "medium" | "high" | "very_high"
+- "arDepth": one of "minimal" | "lean" | "standard" | "thorough" | "comprehensive"
 
-STRUCTURAL REASONING — apply before finalising all fields:
-- Count what must be built, not what was written. A requirement that names a goal without specifying the mechanism implies more features, higher complexity, and more questions than its length suggests.
-- Shape and complexity should reflect the structural burden of what must be built — decisions, actors, rules, and exception paths — not the vocabulary used to describe it.
-- "standard" arDepth requires that rules, actors, and edge cases are explicitly stated. If structural counts are high but the text is short, use "thorough" or "comprehensive".
-- When uncertain between two levels on estimatedFeatures, complexity, or arDepth, choose the higher one. For estimatedQuestions, prefer the lower band unless ambiguity is both broad AND unresolvable from the text.
+FIELD DEFINITIONS:
+- shape: minimal = 1 feature; narrow = 2-3; balanced = 4-6; broad = 6-9; epic = 9+
+- complexity: trivial = single rule, one actor, one path; low = 1-2 decisions, few rules; medium = several decisions, 1-2 actor groups, multiple rules; high = many decisions, 2-3 groups, many exception paths; very_high = many autonomous decisions across many groups, most behaviour must be inferred
+- arDepth: minimal = happy path only; lean = 1-2 rules; standard = rules + actors + key edge cases all stated; thorough = implied behaviour must be covered; comprehensive = most behaviour unstated and must be specified
+- estimatedQuestions: calibrate against what remains genuinely unresolved — the trigger, the actors, the rules, the state transitions, the edge cases. A requirement that states its trigger and outcome clearly needs fewer questions even if some details are missing.
+
+CALIBRATION EXAMPLES — use these as reference anchors:
+
+EXAMPLE 1 — Guard / constraint rule (integration between two named systems):
+Requirement: "We must ensure that the service contract status in SAP does not update to completed when the contract expires and there are still open Work Orders in ServiceMax, as SAP will otherwise throw an error on the Work Order to Service Confirmation interface."
+Output: {"estimatedFeatures": 2, "estimatedQuestions": 8, "shape": "narrow", "complexity": "medium", "arDepth": "thorough"}
+Reasoning: One enforcement rule (prevent completion) + one resolution path (lift block when WOs close). SAP and ServiceMax are existing environment context — named systems do not inflate shape or complexity. Complexity is medium because check timing, blocked state, and notification owner are undefined. 8 questions cover the genuine unknowns: open WO definition, linkage, timing, blocked state, notification, override, retry, partial scenarios.
+
+EXAMPLE 2 — Focused single-actor feature:
+Requirement: "Add the ability to export the current report view as a PDF."
+Output: {"estimatedFeatures": 1, "estimatedQuestions": 5, "shape": "minimal", "complexity": "low", "arDepth": "lean"}
+Reasoning: One output capability, one actor, a few formatting and scope questions.
+
+EXAMPLE 3 — Stated multi-step workflow with known actors and rules:
+Requirement: "Managers must be able to approve or reject timesheets submitted by their direct reports. Approved timesheets flow to payroll. Rejected ones are returned to the employee with a mandatory comment."
+Output: {"estimatedFeatures": 4, "estimatedQuestions": 7, "shape": "balanced", "complexity": "medium", "arDepth": "standard"}
+Reasoning: Approval, rejection, payroll handoff, and comment enforcement are four distinct deliverable behaviours. Actors and the core rule are stated; edge cases (late submission, delegation, resubmission) remain open.
+
+EXAMPLE 4 — Broad self-service platform:
+Requirement: "Build a self-service portal where customers can view their account, raise support tickets, track order status, manage their subscription, and update billing details."
+Output: {"estimatedFeatures": 8, "estimatedQuestions": 12, "shape": "broad", "complexity": "high", "arDepth": "thorough"}
+Reasoning: Five named capability areas, each implying multiple sub-features. Authentication, permissions, and notification behaviour all unstated.
+
+EXAMPLE 5 — Open-ended strategic initiative:
+Requirement: "We need to modernise our entire customer onboarding process."
+Output: {"estimatedFeatures": 11, "estimatedQuestions": 14, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
+Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every discovery dimension is open.
+
+IMPORTANT CALIBRATION RULES:
+- Named enterprise systems (SAP, Salesforce, ServiceNow, Jira, Oracle, Dynamics, ServiceMax, etc.) in a requirement are existing environment context — they do not expand scope or complexity. Count what is being built within or between those systems.
+- A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
+- Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two integrated systems communicating via an interface is one process, not two actor groups.
+- Do not anchor to word count or vocabulary. A terse, precise requirement may be genuinely complex; a long vague one may be narrow.
+- When uncertain on estimatedFeatures, complexity, or arDepth, prefer the higher value. For estimatedQuestions, prefer the lower value unless both scope and ambiguity are high.
 
 Output JSON only: {"estimatedFeatures": N, "estimatedQuestions": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
 }
