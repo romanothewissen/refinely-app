@@ -386,10 +386,12 @@ function normalizeTriageQuestions(raw: QuickRefineTriageResponse['questions']): 
 }
 
 function normalizeIssueFields(raw: QuickRefineRawIssueFields | undefined, fallback: QuickRefineIssueFields): QuickRefineIssueFields {
-  const rawArs = Array.isArray(raw?.acceptance_requirements) && raw.acceptance_requirements.length
-    ? raw.acceptance_requirements
-    : Array.isArray(raw?.acceptanceRequirements)
-      ? raw.acceptanceRequirements
+  const snakeArs = raw?.acceptance_requirements;
+  const camelArs = raw?.acceptanceRequirements;
+  const rawArs = Array.isArray(snakeArs) && snakeArs.length
+    ? snakeArs
+    : Array.isArray(camelArs)
+      ? camelArs
       : [];
 
   const summary = String(raw?.summary ?? fallback.summary).trim();
