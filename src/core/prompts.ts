@@ -98,26 +98,29 @@ export function buildDecompositionSystemPrompt(opts: {
     const base = `OUTPUT CALIBRATION:
 - The requirement shape appears: ${shape.toUpperCase()}
 - The requirement complexity appears: ${complexity.toUpperCase()}
-- Produce approximately ${target} features. Do not exceed ${max}.`;
+- Planning hint: this may need around ${target} features. Keep the final feature count within 1-${max}.
+- Treat the planning hint as advisory, not as a quota. If the requirement is genuinely focused, return fewer features.
+- Return as few features as needed to cover the independent business value cleanly.`;
 
     if (shape === 'minimal')
       return `${base}
-- This is a FOCUSED, small requirement. Output exactly ${target} feature(s).
+- This is a FOCUSED, small requirement. Usually one strong feature is the right outcome.
 - Apply the decomposition framework ONLY to check whether genuinely independent capabilities exist — do not manufacture a feature for each dimension.
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is one feature. Its resolution or override path is a second optional feature. Stop there.
 - One well-scoped feature is better than three micro-features.`;
 
     if (shape === 'narrow')
       return `${base}
-- This is a tightly scoped requirement. Aim for ${target} features.
+- This is a tightly scoped requirement. One or two strong features is often the right outcome, even if the planning hint is higher.
 - Apply the decomposition framework ONLY to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
-- A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems (SAP, Salesforce, etc.) are environment context, not scope contributors.
+- A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context, not scope contributors.
 - Do NOT split into trivial or UI-level features. Combine related concerns into a single feature.
+- If a list, notification, status definition, audit trail, exception diagnosis, or visibility aid only supports the core behavior, keep it inside the main feature unless the requirement explicitly asks for it as its own deliverable.
 - Do not exceed ${max} features.`;
 
     if (shape === 'epic')
       return `${base}
-- This is a COMPLEX, multi-workflow requirement. Produce approximately ${target} features.
+- This is a COMPLEX, multi-workflow requirement. Multiple features are expected, but still only when they represent independently deliverable capabilities.
 - Each distinct workflow, role-specific capability, or independently testable behavior MUST be its own feature.
 - DO NOT collapse multiple workflows into a single feature.
 - Keep the feature set practical for one generation run; prefer the most important independently deliverable capabilities first.
@@ -125,22 +128,26 @@ export function buildDecompositionSystemPrompt(opts: {
 
     if (shape === 'broad')
       return `${base}
-- This is a broad requirement covering multiple capabilities. Produce approximately ${target} features.
-- Work through the decomposition framework: what generates the output? What feeds into it? Who uses it? What can go wrong? What changes dynamically? Each independently deliverable answer is a feature.
+- This is a broad requirement covering multiple capabilities. Use the planning hint to sanity-check scope, not to force extra features.
+- Work through the decomposition framework to test whether multiple independent deliverables exist. Do not create a feature for every dimension by default.
 - Each distinct workflow or role-specific behavior should be its own feature.
+- Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature unless it is explicitly requested as a separate deliverable.
 - Do not exceed ${max} features in a single response.`;
 
     // balanced (default)
     return `${base}
-- Produce approximately ${target} features. Work through the decomposition framework: what generates the output? What feeds into it? Who uses it? What can go wrong? What changes dynamically? Each independently deliverable answer is a feature.
-- Do NOT split into trivial or UI-level sub-tasks. Do not exceed ${max} features.`;
+- Work through the decomposition framework to decide whether multiple independent deliverables truly exist.
+- A feature should be backlog-worthy on its own: something a team would reasonably plan, estimate, and accept independently.
+- Do NOT split into trivial or UI-level sub-tasks.
+- If a list, notification, identification step, policy definition, or supporting visibility only exists to enable or explain the main behavior, keep it inside the parent feature and cover it in the description and acceptance requirements.
+- Do not exceed ${max} features.`;
   })();
 
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
 
-YOUR JOB: Given a short requirement, think deeply about everything it actually takes to deliver it. A requirement like "show an optimized schedule based on criticality" implies much more than one feature — think about what generates the schedule, what data feeds it, who uses it, what disrupts it, and what supporting capabilities are needed.
+YOUR JOB: Given a short requirement, think deeply about what actually has to be delivered. Some requirements imply multiple features, but many focused rules, workflows, and business behaviors should stay as one or two strong backlog items rather than being expanded into micro-features.
 
 DECOMPOSITION FRAMEWORK — reason through each dimension:
 1. CORE CAPABILITY: What is the primary thing being requested?
@@ -150,15 +157,19 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically?
 6. DEPENDENCIES: What supporting capabilities need to exist?
 
-Each dimension that represents a distinct, deliverable capability should become its own feature. Use judgment — not every dimension needs a separate feature.
+Each dimension helps you test whether a distinct, deliverable capability exists. Use judgment — not every dimension needs a separate feature.
 
 RULES:
+- A feature must represent independent business value, not just a supporting mechanism, side effect, analysis step, or operational convenience.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - Use business roles appropriate to the domain (from the list above if provided)
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
+- Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
+- Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
+- If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
@@ -167,7 +178,7 @@ ${planningGuidance ? `\n${planningGuidance}` : ''}
 
 ${taxonomySection}
 
-Think step by step about the full scope of this requirement, then output JSON:
+Think step by step about the full scope of this requirement. Prefer the smallest set of strong, independently valuable features that fully covers the ask, then output JSON:
 {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
 }
 
@@ -184,14 +195,15 @@ export function buildArSystemPrompt(opts: {
 }): string {
   const arGuidance = (() => {
     if (!opts.arPlan) return '';
-    const { min, max, target, depth } = opts.arPlan;
+    const { min, max, depth } = opts.arPlan;
     const base = `AR CALIBRATION:
-- Target ${min}-${max} acceptance requirements per feature (target ${target})
+- Use roughly ${min}-${max} acceptance requirements per feature when that reflects the true behavioral surface
+- Treat the range as guidance, not a quota
 - Depth should be ${depth.toUpperCase()}`;
 
     if (depth === 'minimal')
       return `${base}
-- Write only ${min}-${max} ARs per feature covering the happy path.
+- Write only the minimum ARs needed to cover the happy path clearly.
 - Skip edge cases unless they are critical to business correctness.
 - Keep ARs concise and focused on the core behavior.`;
 
@@ -204,10 +216,12 @@ export function buildArSystemPrompt(opts: {
     if (depth === 'lean')
       return `${base}
 - Focus on the happy path and one or two key business rules.
+- Prefer fewer ARs when one concise set fully covers the feature.
 - Do not over-specify very small, straightforward features.`;
 
     // standard / thorough
     return `${base}
+- Prefer fewer ARs when one concise set fully covers the feature.
 - Do not under-specify broad or risky features.
 - Do not over-specify very small, straightforward features.`;
   })();

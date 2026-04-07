@@ -10,7 +10,14 @@ import {
   normalizeDiscoveryProfile,
   validateAndRepairInitialDiscovery,
 } from '../discovery';
-import { buildClarifySystemPrompt, buildEvaluateSystemPrompt, buildTriageSystemPrompt } from '../prompts';
+import {
+  buildArSystemPrompt,
+  buildClarifySystemPrompt,
+  buildDecompositionSystemPrompt,
+  buildEvaluateSystemPrompt,
+  buildTriageSystemPrompt,
+} from '../prompts';
+import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
 
 test('normalizeDiscoveryProfile clamps counts into the supported range', () => {
   const profile = normalizeDiscoveryProfile({
@@ -542,4 +549,61 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
 
   assert.doesNotMatch(triagePrompt, /\bSAP\b/i);
   assert.doesNotMatch(triagePrompt, /\bServiceMax\b/i);
+});
+
+test('decomposition prompt treats feature counts as hints and keeps support behavior inside the parent feature', () => {
+  const prompt = buildDecompositionSystemPrompt({
+    domainContext: 'Use context only to understand the business space.',
+    domainRoles: ['Manager'],
+    processTaxonomy: [],
+    processTaxonomyEnabled: false,
+    featurePlan: {
+      min: 1,
+      max: 4,
+      target: 2,
+      shape: 'narrow',
+      complexity: 'medium',
+    },
+  });
+
+  assert.match(prompt, /planning hint/i);
+  assert.match(prompt, /advisory, not as a quota/i);
+  assert.match(prompt, /independent business value/i);
+  assert.match(prompt, /similar stories, work instructions, or domain context/i);
+  assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, or visibility aid/i);
+  assert.match(prompt, /Prefer the smallest set of strong, independently valuable features/i);
+  assert.doesNotMatch(prompt, /Output exactly/i);
+});
+
+test('ar prompt uses range guidance without exact-count pressure', () => {
+  const prompt = buildArSystemPrompt({
+    domainContext: 'Use context only to reason about business behavior.',
+    arPlan: {
+      min: 1,
+      max: 5,
+      target: 3,
+      depth: 'standard',
+    },
+  });
+
+  assert.match(prompt, /Treat the range as guidance, not a quota/i);
+  assert.match(prompt, /Prefer fewer ARs when one concise set fully covers the feature/i);
+  assert.doesNotMatch(prompt, /\(target 3\)/i);
+  assert.doesNotMatch(prompt, /Target 1-5 acceptance requirements/i);
+});
+
+test('generation fallback is low-bias for focused output planning', () => {
+  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.featurePlan, {
+    min: 1,
+    max: 4,
+    target: 2,
+    shape: 'narrow',
+    complexity: 'medium',
+  });
+  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.arPlan, {
+    min: 1,
+    max: 5,
+    target: 3,
+    depth: 'standard',
+  });
 });

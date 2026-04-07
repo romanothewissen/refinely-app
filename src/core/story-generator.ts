@@ -531,6 +531,14 @@ export interface TriageResult {
   arDepth: ArPlan['depth'];
 }
 
+export const DEFAULT_GENERATION_TRIAGE_FALLBACK: RequirementAssessment = {
+  questionPlan: { min: 4, max: 12, target: 10, clarity: 'vague' },
+  featurePlan: { min: 1, max: 4, target: 2, shape: 'narrow', complexity: 'medium' },
+  arPlan: { min: 1, max: 5, target: 3, depth: 'standard' },
+  ambiguityScore: 3,
+  ambiguityReasons: ['Triage could not be completed; using conservative defaults.'],
+};
+
 const VALID_SHAPES = new Set<FeaturePlan['shape']>(['minimal', 'narrow', 'balanced', 'broad', 'epic']);
 const VALID_COMPLEXITIES = new Set<FeaturePlan['complexity']>(['trivial', 'low', 'medium', 'high', 'very_high']);
 const VALID_AR_DEPTHS = new Set<ArPlan['depth']>(['minimal', 'lean', 'standard', 'thorough', 'comprehensive']);
@@ -1033,14 +1041,6 @@ export async function generateFeatures(opts: {
   } as const;
 
   // ── Triage: LLM assessment of scope, complexity, feature count, AR depth ──
-  const TRIAGE_FALLBACK: RequirementAssessment = {
-    questionPlan: { min: 4, max: 12, target: 10, clarity: 'vague' },
-    featurePlan:  { min: 1, max: 7,  target: 5,  shape: 'balanced', complexity: 'medium' },
-    arPlan:       { min: 1, max: 6,  target: 4,  depth: 'standard' },
-    ambiguityScore: 3,
-    ambiguityReasons: ['Triage could not be completed; using conservative defaults.'],
-  };
-
   const triageResult = precomputedTriage !== undefined
     ? precomputedTriage
     : await assessRequirementWithLlm({
@@ -1052,8 +1052,8 @@ export async function generateFeatures(opts: {
       });
 
   const rawAssessment: RequirementAssessment = triageResult
-    ? { ...TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
-    : TRIAGE_FALLBACK;
+    ? { ...DEFAULT_GENERATION_TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
+    : DEFAULT_GENERATION_TRIAGE_FALLBACK;
   const assessment = capAssessmentForExecution(rawAssessment);
 
   if (onTriageComplete) {
