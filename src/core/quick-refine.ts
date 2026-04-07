@@ -28,8 +28,6 @@ import { callLlmJsonWithUsage } from './llm';
 import { buildAdfContentOnly, buildAdfDocument, createFeatureIssue, createIssueLink } from './jira-creator';
 import { repairAcceptanceRequirements } from './story-generator';
 
-type QuickRefineRoute = 'rewrite' | 'clarify' | 'handoff';
-
 interface QuickRefineRawIssueFields {
   summary?: unknown;
   description?: unknown;
@@ -51,9 +49,7 @@ interface QuickRefineGenerationResponse {
   handoffReason?: unknown;
 }
 
-interface QuickRefineTriageResponse {
-  route?: unknown;
-  reason?: unknown;
+interface QuickRefineQuestionResponse {
   questions?: Array<{
     id?: unknown;
     question?: unknown;
@@ -61,9 +57,9 @@ interface QuickRefineTriageResponse {
   }>;
 }
 
-const QUICK_REFINE_WI_TOP_K = 4;
-const QUICK_REFINE_WI_MAX_CHARS = 8000;
-const QUICK_REFINE_SIMILAR_MAX_RESULTS = 4;
+const QUICK_REFINE_WI_TOP_K = 2;
+const QUICK_REFINE_WI_MAX_CHARS = 2500;
+const QUICK_REFINE_SIMILAR_MAX_RESULTS = 2;
 
 function buildProviderOpts(config: TenantConfig) {
   return {
@@ -294,23 +290,20 @@ function buildContextMessage(input: {
   return sections.filter(Boolean).join('\n\n---\n\n');
 }
 
-function buildQuickRefineTriagePrompt(domainContext: string, domainRoles: string[]): string {
-  return `You are a principal business analyst running a fast Jira issue rewrite triage.
+function buildQuickRefineQuestionsPrompt(domainContext: string, domainRoles: string[]): string {
+  return `You are a principal business analyst preparing a very short clarification step before rewriting a Jira issue.
 
 ${domainContext.trim() ? `DOMAIN CONTEXT:\n${domainContext.trim()}\n` : ''}
 ${domainRoles.length ? `DOMAIN ROLES: ${domainRoles.join(', ')}\n` : ''}
-ROUTING RULES:
-- Use "rewrite" when the issue is clear enough to improve in place now.
-- Use "clarify" only when 1-3 focused questions would materially improve the rewrite quality.
-- Use "handoff" when the issue is too broad, too ambiguous, or too decomposition-heavy for a quick flow.
-- Prefer "rewrite" over "clarify" when the missing detail is minor.
-- Prefer "handoff" over "clarify" when the issue looks like a multi-workflow epic or needs full backlog decomposition.
-- Every clarify question must be concrete, answerable in one short response, and specific to the actual issue.
+RULES:
+- Ask at most 3 questions.
+- Ask only the minimum questions needed to improve the rewrite quality.
+- Questions must be concrete, specific to the actual issue, and answerable in one short response.
+- Prefer business scope, actor, trigger, rule, and exception clarity over implementation detail.
+- Include 2-4 short suggestion chips per question when they help.
 
 Return JSON only:
 {
-  "route": "rewrite" | "clarify" | "handoff",
-  "reason": "short explanation",
   "questions": [
     {
       "id": "q1",
@@ -367,7 +360,7 @@ Return JSON only:
 }`;
 }
 
-function normalizeTriageQuestions(raw: QuickRefineTriageResponse['questions']): QuickRefineQuestion[] {
+function normalizeTriageQuestions(raw: QuickRefineQuestionResponse['questions']): QuickRefineQuestion[] {
   return (raw ?? [])
     .map((question, index) => {
       const text = String(question?.question ?? '').trim();
@@ -383,6 +376,36 @@ function normalizeTriageQuestions(raw: QuickRefineTriageResponse['questions']): 
     })
     .filter((value): value is QuickRefineQuestion => Boolean(value))
     .slice(0, 3);
+}
+
+function quickRefineText(issue: QuickRefineIssueFields): string {
+  return [issue.summary, issue.description].filter(Boolean).join('\n').trim();
+}
+
+function shouldHandoffQuickRefine(issue: QuickRefineIssueFields): boolean {
+  const text = quickRefineText(issue).toLowerCase();
+  const broadSignals = [
+    /\b(epic|initiative|roadmap|program)\b/,
+    /\bmultiple workflows?\b/,
+    /\bend to end\b/,
+    /\bfull process\b/,
+    /\bentire journey\b/,
+    /\bmultiple teams\b/,
+  ];
+  const numberedBullets = (text.match(/\n\s*(?:\d+\.|-|\*)\s+/g) ?? []).length;
+  return broadSignals.some((pattern) => pattern.test(text)) || numberedBullets >= 6 || text.length > 6000;
+}
+
+function shouldClarifyQuickRefine(issue: QuickRefineIssueFields): boolean {
+  const summary = issue.summary.trim();
+  const description = issue.description.trim();
+  const text = quickRefineText(issue).toLowerCase();
+  if (!summary || summary.length < 12) return true;
+  if (!description || description.length < 120) return true;
+  if (issue.acceptanceRequirements.length === 0 && description.length < 220) return true;
+  if (/\b(tbd|todo|need details|figure out|something like|etc\.?)\b/.test(text)) return true;
+  if ((text.match(/\?/g) ?? []).length >= 3) return true;
+  return false;
 }
 
 function normalizeIssueFields(raw: QuickRefineRawIssueFields | undefined, fallback: QuickRefineIssueFields): QuickRefineIssueFields {
@@ -605,18 +628,6 @@ export async function loadQuickRefineIssueContext(opts: {
   };
 
   const domainContext = buildCombinedDomainContext(opts.config, [projectKey]);
-  const similarStories = await retrieveScopedSimilarStories({
-    requirement: buildRequirementText(originalIssue),
-    config: opts.config,
-    projectKeys: [projectKey],
-    maxResults: QUICK_REFINE_SIMILAR_MAX_RESULTS,
-  });
-  const wiContext = await retrieveScopedWiContext(
-    buildRequirementText(originalIssue),
-    QUICK_REFINE_WI_TOP_K,
-    QUICK_REFINE_WI_MAX_CHARS,
-    [projectKey],
-  );
   const domainRoles = getCombinedPersonaRoles(opts.config, [projectKey]).map((role) => role.role).filter(Boolean);
 
   const contextMeta: QuickRefineContextMeta = {
@@ -627,17 +638,13 @@ export async function loadQuickRefineIssueContext(opts: {
     projectCount: 1,
     domainRolesUsed: domainRoles,
     domainContextApplied: Boolean(domainContext.trim()),
-    wiDocsCount: wiContext.docs.length,
-    referencedWiDocs: wiContext.docs.map((doc) => ({
-      docId: doc.docId,
-      filename: doc.filename,
-      chunkCount: doc.chunkCount,
-    })),
-    referencedWiSections: summarizeReferencedWiSections(wiContext.chunks, 140),
+    wiDocsCount: 0,
+    referencedWiDocs: [],
+    referencedWiSections: [],
     activeFieldMapping,
     outputFieldMapping,
-    similarStoriesCount: similarStories.length,
-    referencedSimilarStories: summarizeReferencedSimilarStories(similarStories),
+    similarStoriesCount: 0,
+    referencedSimilarStories: [],
   };
 
   return {
@@ -662,59 +669,60 @@ export async function startQuickRefine(opts: {
   | { route: 'handoff'; reason: string; tokenUsage: TokenUsageSummary }
   | { route: 'rewrite'; draft: QuickRefineDraft }
 > {
+  if (shouldHandoffQuickRefine(opts.context.originalIssue)) {
+    return {
+      route: 'handoff',
+      reason: 'This issue looks broad enough that the full Refinely workflow will produce a better result.',
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        total: 0,
+      },
+    };
+  }
+
   const projectKeys = [opts.context.projectKey];
   const domainContext = buildCombinedDomainContext(opts.config, projectKeys);
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
-  const wiContext = await retrieveScopedWiContext(
-    buildRequirementText(opts.context.originalIssue),
-    QUICK_REFINE_WI_TOP_K,
-    QUICK_REFINE_WI_MAX_CHARS,
-    projectKeys,
-  );
-  const similarStories = await retrieveScopedSimilarStories({
-    requirement: buildRequirementText(opts.context.originalIssue),
-    config: opts.config,
-    projectKeys,
-    maxResults: QUICK_REFINE_SIMILAR_MAX_RESULTS,
-  });
+  if (shouldClarifyQuickRefine(opts.context.originalIssue)) {
+    const questionsResult = await callLlmJsonWithUsage<QuickRefineQuestionResponse>({
+      model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      systemPrompt: buildQuickRefineQuestionsPrompt(domainContext, domainRoles),
+      userMessage: buildContextMessage({
+        issueKey: opts.context.issueKey,
+        issueType: opts.context.issueType,
+        originalIssue: opts.context.originalIssue,
+        domainContext,
+        similarStories: [],
+        wiContextText: '',
+      }),
+      maxTokens: 1100,
+      reasoningEffort: 'low',
+      ...buildProviderOpts(opts.config),
+    });
+    const questions = normalizeTriageQuestions(questionsResult.data.questions);
+    return {
+      route: 'clarify',
+      reason: 'A little more specificity will improve the quick rewrite.',
+      questions,
+      tokenUsage: buildTokenUsage('quick_refine_questions', questionsResult.usage),
+    };
+  }
 
-  const triage = await callLlmJsonWithUsage<QuickRefineTriageResponse>({
-    model: getTierModel(opts.config.generatorConfig.triageModel, opts.config.tier),
-    systemPrompt: buildQuickRefineTriagePrompt(domainContext, domainRoles),
-    userMessage: buildContextMessage({
-      issueKey: opts.context.issueKey,
-      issueType: opts.context.issueType,
-      originalIssue: opts.context.originalIssue,
-      domainContext,
-      similarStories,
-      wiContextText: wiContext.text,
+  const [wiContext, similarStories] = await Promise.all([
+    retrieveScopedWiContext(
+      buildRequirementText(opts.context.originalIssue),
+      QUICK_REFINE_WI_TOP_K,
+      QUICK_REFINE_WI_MAX_CHARS,
+      projectKeys,
+    ),
+    retrieveScopedSimilarStories({
+      requirement: buildRequirementText(opts.context.originalIssue),
+      config: opts.config,
+      projectKeys,
+      maxResults: QUICK_REFINE_SIMILAR_MAX_RESULTS,
     }),
-    maxTokens: 1400,
-    reasoningEffort: 'low',
-    ...buildProviderOpts(opts.config),
-  });
-
-  const triageUsage = buildTokenUsage('quick_refine_triage', triage.usage);
-  const route = ['rewrite', 'clarify', 'handoff'].includes(String(triage.data.route))
-    ? String(triage.data.route) as QuickRefineRoute
-    : 'rewrite';
-
-  if (route === 'clarify') {
-    return {
-      route,
-      reason: String(triage.data.reason ?? '').trim() || undefined,
-      questions: normalizeTriageQuestions(triage.data.questions),
-      tokenUsage: triageUsage,
-    };
-  }
-
-  if (route === 'handoff') {
-    return {
-      route,
-      reason: String(triage.data.reason ?? '').trim() || 'This issue needs the full Refinely workflow.',
-      tokenUsage: triageUsage,
-    };
-  }
+  ]);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
     model: getTierModel(opts.config.generatorConfig.refineModel, opts.config.tier),
@@ -736,10 +744,21 @@ export async function startQuickRefine(opts: {
     route: 'rewrite',
     draft: buildQuickRefineSessionDraft(
       opts.context.originalIssue,
-      opts.context.contextMeta,
+      {
+        ...opts.context.contextMeta,
+        wiDocsCount: wiContext.docs.length,
+        referencedWiDocs: wiContext.docs.map((doc) => ({
+          docId: doc.docId,
+          filename: doc.filename,
+          chunkCount: doc.chunkCount,
+        })),
+        referencedWiSections: summarizeReferencedWiSections(wiContext.chunks, 140),
+        similarStoriesCount: similarStories.length,
+        referencedSimilarStories: summarizeReferencedSimilarStories(similarStories),
+      },
       [],
       rewrite.data,
-      mergeTokenUsage(triageUsage, buildTokenUsage('quick_refine_rewrite', rewrite.usage)),
+      buildTokenUsage('quick_refine_rewrite', rewrite.usage),
     ),
   };
 }

@@ -1581,7 +1581,6 @@ function detectQuickRefineSurface(ctx: any): 'issue-panel' | 'issue-action' | nu
   );
 
   if (moduleKey.includes('quick-refine-issue-panel')) return 'issue-panel';
-  if (moduleKey.includes('story-generator-issue-action')) return 'issue-action';
   return null;
 }
 
@@ -1615,7 +1614,7 @@ export default function App() {
     return (
       <QuickRefineApp
         surface={surface}
-        onOpenFullWorkflow={surface === 'issue-action' ? () => setOpenLegacyWorkflow(true) : undefined}
+        onOpenFullWorkflow={() => setOpenLegacyWorkflow(true)}
       />
     );
   }
