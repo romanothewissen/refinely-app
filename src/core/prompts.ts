@@ -150,6 +150,7 @@ export function buildDecompositionSystemPrompt(opts: {
 - Clarifying context is still THIN or incomplete.
 - Do not silently compress away workflow-defining ambiguity just to keep feature count low.
 - When channel handling, routing logic, case typing, matching, required captured information, lifecycle handling, or exception behavior are core to the requested capability, preserve that scope explicitly in the feature set and/or acceptance coverage.
+- If work instructions are present in the user message, treat their operational guidance as high-authority context for what must be preserved, even when the requirement itself is brief.
 - If one strong feature can still cover the ask, make its scope rich enough that those workflow branches are clearly retained.`
       : `DISCOVERY SIGNAL:
 - Clarifying context includes answered discovery questions. Use those answers to consolidate responsibly, but do not drop workflow-defining rules or exception behavior.`
@@ -180,6 +181,7 @@ RULES:
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
 - Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
+- If work instructions or operational guidance in the user message define relevant business rules, required captured information, routing behavior, lifecycle handling, matching logic, case typing, or exception paths, preserve that scope explicitly rather than generalizing it away.
 - Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
 - If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
@@ -255,6 +257,8 @@ RULES:
 - Each AR tests one distinct thing
 - If an AR refers to the same actor named in the feature description, use that exact same role label
 - Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
+- If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
+- When relevant to the requirement and provided context, explicitly cover channel differences, required captured information, new-versus-existing record decisions, matching confidence, missing identifier behavior, case typing, routing logic, duplicate handling, follow-up handling, and exception paths.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
@@ -340,6 +344,9 @@ Output JSON with reasoning first: {"reasoning": "...", "estimatedFeatures": N, "
 export function buildArPerFeatureUserMessage(opts: {
   requirement: string;
   clarifyAnswers?: { question: string; answer: string }[];
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
   feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string };
 }): string {
   const reqText = (opts.requirement || '').trim().slice(0, 2000);
@@ -352,6 +359,21 @@ export function buildArPerFeatureUserMessage(opts: {
       .join('\n\n')
       .slice(0, 1500);
     parts.push(`CLARIFYING Q&A:\n${qaText}`);
+  }
+
+  const attachmentText = (opts.attachmentText || '').trim();
+  if (attachmentText) {
+    parts.push(`ATTACHMENT CONTEXT:\n${attachmentText.slice(0, 2500)}`);
+  }
+
+  const wiContextText = (opts.wiContextText || '').trim();
+  if (wiContextText) {
+    parts.push(`WORK INSTRUCTIONS / OPERATIONAL GUIDANCE:\nTreat this as high-authority business guidance when it is relevant to the requested capability.\n${wiContextText.slice(0, 4000)}`);
+  }
+
+  const similarStoriesText = (opts.similarStoriesText || '').trim();
+  if (similarStoriesText) {
+    parts.push(`RELATED BACKLOG CONTEXT (secondary to the requirement and work instructions):\n${similarStoriesText.slice(0, 1800)}`);
   }
 
   parts.push(
@@ -538,6 +560,60 @@ RULES:
 Return JSON only in one of these shapes:
 {"sufficient": true, "missingCategoryKeys": [], "reasonCodes": []}
 {"sufficient": false, "missingCategoryKeys": ["business_rules"], "reasonCodes": ["MISSING_RULES"], "questions": [{"categoryKey": "business_rules", "intent": "decision_logic", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
+}
+
+export function buildCoverageCheckSystemPrompt(opts: {
+  domainContext: string;
+}): string {
+  return `You are a principal business analyst reviewing drafted backlog features and acceptance requirements for coverage completeness.
+${platformContextBlock(opts.domainContext)}
+Your job is to decide whether the drafted features and acceptance requirements fully cover the materially relevant workflow branches, business rules, and exception paths implied by:
+- the requirement
+- the answered discovery questions
+- any work-instruction or operational guidance in the user message
+
+RULES:
+- Focus only on business coverage gaps that would materially change what gets built or tested.
+- Do not ask for implementation details.
+- A single feature is acceptable when its description and acceptance requirements preserve the important workflow-defining decisions.
+- Treat work instructions as higher-authority operational guidance than similar backlog stories when both are present.
+- Return sufficient=true only when the current feature set and ARs clearly cover the main workflow, core decision paths, required inputs, and important exception handling for this request.
+
+When evaluating coverage, explicitly check for relevant branches such as:
+- channel-specific handling
+- required captured information
+- new versus existing record decisions
+- matching or linking logic
+- missing identifier or missing-data handling
+- case typing or routing logic
+- duplicates, follow-up behavior, and uncertain matches
+- lifecycle and exception behavior
+
+Return JSON only:
+{"sufficient": true, "missingCoverage": [], "reasoning": "..."}
+or
+{"sufficient": false, "missingCoverage": ["..."], "reasoning": "..."}`;
+}
+
+export function buildCoverageRepairSystemPrompt(opts: {
+  domainContext: string;
+  processTaxonomyEnabled: boolean;
+}): string {
+  return `You are a principal business analyst repairing under-scoped Jira backlog features after a coverage review.
+${platformContextBlock(opts.domainContext)}
+Your job is to preserve the current feature structure unless a split is absolutely necessary, while expanding descriptions and acceptance requirements so the final result covers the missing workflow-defining business behavior.
+
+RULES:
+- Keep the same number of features and the same summary strings unless preserving coverage is impossible without a split.
+- Prefer enriching the existing feature description and acceptance requirements over creating extra features.
+- Treat clarified answers and work instructions in the user message as obligations to cover when relevant.
+- Preserve business meaning that already exists; add missing coverage without dropping valid current behavior.
+- Every returned feature must have complete acceptance_requirements using GIVEN/WHEN/THEN.
+- No solution language, no system names, no implementation detail.
+${opts.processTaxonomyEnabled ? '- Preserve existing process_code values exactly as provided.\n' : ''}
+
+Return JSON only in this shape:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
 }
 
 // ─── Refinement (full feature set) ───────────────────────────────────────────

@@ -11,7 +11,10 @@ import {
 } from '../discovery';
 import {
   buildArSystemPrompt,
+  buildArPerFeatureUserMessage,
   buildClarifySystemPrompt,
+  buildCoverageCheckSystemPrompt,
+  buildCoverageRepairSystemPrompt,
   buildDecompositionSystemPrompt,
   buildEvaluateSystemPrompt,
   buildTriageSystemPrompt,
@@ -564,6 +567,7 @@ test('decomposition prompt treats feature counts as hints and keeps support beha
   assert.match(prompt, /reasoning context, not as a quota or upper bound/i);
   assert.match(prompt, /independent business value/i);
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
+  assert.match(prompt, /work instructions or operational guidance/i);
   assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, or visibility aid/i);
   assert.match(prompt, /Prefer the smallest set of strong, independently valuable features/i);
   assert.doesNotMatch(prompt, /Output exactly/i);
@@ -583,6 +587,8 @@ test('ar prompt uses range guidance without exact-count pressure', () => {
   assert.match(prompt, /Let the feature's actual behavioral surface determine how many acceptance requirements are needed/i);
   assert.match(prompt, /Do not target a fixed count for its own sake/i);
   assert.match(prompt, /Prefer fewer ARs when one concise set fully covers the feature/i);
+  assert.match(prompt, /work-instruction guidance/i);
+  assert.match(prompt, /new-versus-existing record decisions/i);
   assert.doesNotMatch(prompt, /\(target 3\)/i);
   assert.doesNotMatch(prompt, /roughly 1-5 acceptance requirements/i);
 });
@@ -628,4 +634,44 @@ test('decomposition prompt preserves workflow-defining scope when clarifying con
   assert.match(prompt, /Clarifying context is still THIN or incomplete/i);
   assert.match(prompt, /Do not silently compress away workflow-defining ambiguity/i);
   assert.match(prompt, /channel handling, routing logic, case typing, matching, required captured information, lifecycle handling, or exception behavior/i);
+  assert.match(prompt, /work instructions are present in the user message/i);
+});
+
+test('per-feature AR prompt includes work instructions and clarifying context', () => {
+  const message = buildArPerFeatureUserMessage({
+    requirement: 'As a TSS, I need a single way to manage incoming communication channels and create cases from it',
+    clarifyAnswers: [
+      {
+        question: 'How should the system decide whether to create a new case or link to an existing one?',
+        answer: 'Use the customer identifier and open-case match first, and send uncertain matches for manual review.',
+      },
+    ],
+    wiContextText: 'If a serial number is missing, the communication must be queued for manual review before case creation. Case type is determined by communication intent and customer segment.',
+    similarStoriesText: 'A related backlog item linked incoming customer messages to an existing service request.',
+    feature: {
+      summary: 'Triage incoming communications',
+      description: 'As a Technical Support Specialist, I need to triage incoming communications so that customer cases are handled correctly.',
+    },
+  });
+
+  assert.match(message, /WORK INSTRUCTIONS \/ OPERATIONAL GUIDANCE/i);
+  assert.match(message, /serial number is missing/i);
+  assert.match(message, /manual review/i);
+  assert.match(message, /RELATED BACKLOG CONTEXT/i);
+});
+
+test('coverage prompts require WI-backed workflow branches to be checked and repaired', () => {
+  const checkPrompt = buildCoverageCheckSystemPrompt({
+    domainContext: 'Use context only for business scope.',
+  });
+  const repairPrompt = buildCoverageRepairSystemPrompt({
+    domainContext: 'Use context only for business scope.',
+    processTaxonomyEnabled: false,
+  });
+
+  assert.match(checkPrompt, /work-instruction or operational guidance/i);
+  assert.match(checkPrompt, /Treat work instructions as higher-authority operational guidance/i);
+  assert.match(checkPrompt, /missing identifier or missing-data handling/i);
+  assert.match(repairPrompt, /Prefer enriching the existing feature description and acceptance requirements/i);
+  assert.match(repairPrompt, /Treat clarified answers and work instructions in the user message as obligations to cover/i);
 });

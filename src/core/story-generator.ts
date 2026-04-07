@@ -26,6 +26,8 @@ import {
   buildDecompositionSystemPrompt,
   buildArSystemPrompt,
   buildArPerFeatureUserMessage,
+  buildCoverageCheckSystemPrompt,
+  buildCoverageRepairSystemPrompt,
   buildTriageSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
@@ -185,7 +187,7 @@ const PASS1_CONTEXT_LIMITS_COMPACT = {
   requirement: 4000,
   clarify: 3000,
   attachment: Number.MAX_SAFE_INTEGER,
-  wi: 4000,
+  wi: 8000,
   similar: 3000,
 } as const;
 
@@ -290,7 +292,7 @@ function buildGenerationUserMessage(input: {
   }
 
   pushPromptSection(parts, 'ATTACHMENT CONTEXT', input.attachmentText, input.limits.attachment);
-  pushPromptSection(parts, 'WORK INSTRUCTIONS', input.wiContextText, input.limits.wi);
+  pushPromptSection(parts, 'WORK INSTRUCTIONS / OPERATIONAL GUIDANCE (treat relevant rules here as higher-authority business guidance than similar backlog stories)', input.wiContextText, input.limits.wi);
   pushPromptSection(parts, 'SIMILAR STORIES FROM BACKLOG (use these for business context only; never copy actor labels or scope when the requirement already specifies them)', input.similarStoriesText, input.limits.similar);
 
   return parts.join('\n\n---\n\n');
@@ -448,6 +450,9 @@ async function runParallelArPass(input: {
   features: RawFeature[];
   requirement: string;
   clarifyAnswers?: ClarifyAnswer[];
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
   domainContext: string;
   arPlan: ArPlan;
   generatorConfig: TenantConfig['generatorConfig'];
@@ -476,16 +481,19 @@ async function runParallelArPass(input: {
 
   // Build per-feature tasks
   const tasks = input.features.map((feature) => ({
-    feature,
-    userMessage: buildArPerFeatureUserMessage({
-      requirement: input.requirement,
-      clarifyAnswers: input.clarifyAnswers?.map(a => ({
-        question: a.question,
-        answer: a.answer,
-      })),
-      feature: {
-        summary: feature.summary ?? '',
-        description: feature.description ?? '',
+      feature,
+      userMessage: buildArPerFeatureUserMessage({
+        requirement: input.requirement,
+        clarifyAnswers: input.clarifyAnswers?.map(a => ({
+          question: a.question,
+          answer: a.answer,
+        })),
+        attachmentText: input.attachmentText,
+        wiContextText: input.wiContextText,
+        similarStoriesText: input.similarStoriesText,
+        feature: {
+          summary: feature.summary ?? '',
+          description: feature.description ?? '',
         suggested_story_points: feature.suggested_story_points,
         process_code: feature.process_code,
       },
@@ -543,6 +551,9 @@ async function backfillMissingAcceptanceRequirements(input: {
   features: RawFeature[];
   requirement: string;
   clarifyAnswers?: ClarifyAnswer[];
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
   domainContext: string;
   arPlan: ArPlan;
   generatorConfig: TenantConfig['generatorConfig'];
@@ -589,6 +600,9 @@ async function backfillMissingAcceptanceRequirements(input: {
           question: a.question,
           answer: a.answer,
         })),
+        attachmentText: input.attachmentText,
+        wiContextText: input.wiContextText,
+        similarStoriesText: input.similarStoriesText,
         feature: {
           summary: feature.summary ?? '',
           description: feature.description ?? '',
@@ -612,6 +626,130 @@ async function backfillMissingAcceptanceRequirements(input: {
   }
 
   return { features: nextFeatures, usage };
+}
+
+interface CoverageEvaluationResult {
+  sufficient: boolean;
+  missingCoverage: string[];
+  reasoning?: string;
+}
+
+function parseCoverageEvaluation(raw: unknown): CoverageEvaluationResult | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const sufficient = typeof obj.sufficient === 'boolean' ? obj.sufficient : null;
+  if (sufficient == null) return null;
+  const missingCoverage = Array.isArray(obj.missingCoverage)
+    ? obj.missingCoverage
+      .map((value) => String(value ?? '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 12)
+    : [];
+  const reasoning = typeof obj.reasoning === 'string' ? obj.reasoning.trim() : undefined;
+  return { sufficient, missingCoverage, reasoning };
+}
+
+async function evaluateFeatureCoverage(input: {
+  features: RawFeature[];
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  wiContextText: string;
+  similarStoriesText: string;
+  config: TenantConfig;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<{ evaluation: CoverageEvaluationResult | null; usage: { input: number; output: number } }> {
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement: input.requirement,
+      clarifyAnswers: input.clarifyAnswers,
+      attachmentText: input.attachmentText,
+      wiContextText: input.wiContextText,
+      similarStoriesText: input.similarStoriesText,
+      limits: PASS2_CONTEXT_LIMITS,
+    }),
+    `---\n\nCURRENT FEATURES:\n${JSON.stringify(input.features, null, 2)}`,
+  ].join('\n\n');
+
+  const result = await callLlmJsonWithUsage<Record<string, unknown>>({
+    model: getTierModel(input.config.generatorConfig.evaluateModel, input.config.tier),
+    systemPrompt: buildCoverageCheckSystemPrompt({
+      domainContext: input.config.domainContext,
+    }),
+    userMessage,
+    maxTokens: 1200,
+    reasoningEffort: 'medium',
+    ...input.providerOpts,
+  });
+
+  return {
+    evaluation: parseCoverageEvaluation(result.data),
+    usage: result.usage,
+  };
+}
+
+async function repairFeatureCoverage(input: {
+  features: RawFeature[];
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  wiContextText: string;
+  similarStoriesText: string;
+  missingCoverage: string[];
+  config: TenantConfig;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement: input.requirement,
+      clarifyAnswers: input.clarifyAnswers,
+      attachmentText: input.attachmentText,
+      wiContextText: input.wiContextText,
+      similarStoriesText: input.similarStoriesText,
+      limits: PASS2_CONTEXT_LIMITS,
+    }),
+    `MISSING COVERAGE TO PRESERVE:\n- ${input.missingCoverage.join('\n- ')}`,
+    `---\n\nCURRENT FEATURES TO REPAIR:\n${JSON.stringify(input.features, null, 2)}`,
+  ].join('\n\n');
+
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(input.config.generatorConfig.arModel, input.config.tier),
+    systemPrompt: buildCoverageRepairSystemPrompt({
+      domainContext: input.config.domainContext,
+      processTaxonomyEnabled: input.config.processTaxonomyEnabled,
+    }),
+    userMessage,
+    maxTokens: Math.max(input.config.generatorConfig.maxTokens ?? 8192, 4096),
+    reasoningEffort: 'medium',
+    ...input.providerOpts,
+  });
+
+  return {
+    features: result.data.features?.length ? mergeFeatures(input.features, result.data.features) : input.features,
+    usage: result.usage,
+  };
 }
 
 // ─── LLM-based Requirement Triage ────────────────────────────────────────────
@@ -1160,6 +1298,9 @@ export async function generateFeatures(opts: {
       features: pass1Features,
       requirement,
       clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
       domainContext: config.domainContext,
       arPlan: assessment.arPlan,
       generatorConfig,
@@ -1172,6 +1313,9 @@ export async function generateFeatures(opts: {
       features: parallelResult.features,
       requirement,
       clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
       domainContext: config.domainContext,
       arPlan: assessment.arPlan,
       generatorConfig,
@@ -1222,6 +1366,9 @@ export async function generateFeatures(opts: {
       features: rawFeatures,
       requirement,
       clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
       domainContext: config.domainContext,
       arPlan: assessment.arPlan,
       generatorConfig,
@@ -1234,6 +1381,44 @@ export async function generateFeatures(opts: {
       output: pass2Result.usage.output + backfillResult.usage.output,
     };
     if (onArProgress) await onArProgress(pass1Features.length, pass1Features.length, pass1Features.length - 1);
+  }
+
+  try {
+    const coverageEvaluation = await evaluateFeatureCoverage({
+      features: rawFeatures,
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      config,
+      providerOpts,
+    });
+    pass2Usage = {
+      input: pass2Usage.input + coverageEvaluation.usage.input,
+      output: pass2Usage.output + coverageEvaluation.usage.output,
+    };
+
+    if (coverageEvaluation.evaluation && !coverageEvaluation.evaluation.sufficient && coverageEvaluation.evaluation.missingCoverage.length) {
+      const repairedCoverage = await repairFeatureCoverage({
+        features: rawFeatures,
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        wiContextText,
+        similarStoriesText,
+        missingCoverage: coverageEvaluation.evaluation.missingCoverage,
+        config,
+        providerOpts,
+      });
+      rawFeatures = repairedCoverage.features;
+      pass2Usage = {
+        input: pass2Usage.input + repairedCoverage.usage.input,
+        output: pass2Usage.output + repairedCoverage.usage.output,
+      };
+    }
+  } catch {
+    // Coverage review is additive quality control; do not fail the workflow if it cannot run.
   }
 
   const features = rawFeatures.map(normaliseFeature);

@@ -8,6 +8,7 @@
  */
 
 import { Feature, GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
+import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
   assessRequirementWithLlm,
@@ -58,10 +59,24 @@ const PROGRESS_HEARTBEAT_MS = 15000;
  * similar-stories BM25 search. This ensures relevant chunks are returned
  * instead of an empty-string query producing meaningless results.
  */
-function deriveRetrievalQuery(requirement: string, attachmentText: string): string {
-  if ((requirement?.trim().length ?? 0) >= 30) return requirement.trim();
-  const att = attachmentText?.trim() ?? '';
-  return att ? att.slice(0, 600).replace(/\s+/g, ' ') : requirement;
+function deriveRetrievalQuery(
+  requirement: string,
+  attachmentText: string,
+  clarifyAnswers: Array<{ answer?: string }> = [],
+): string {
+  const requirementText = requirement?.trim() ?? '';
+  const attachmentSnippet = (attachmentText?.trim() ?? '').slice(0, 600).replace(/\s+/g, ' ');
+  const answerContext = clarifyAnswers
+    .map((answer) => String(answer?.answer ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 500);
+  const signalContext = extractDiscoverySignals([requirementText, attachmentSnippet, answerContext]).join(' ').slice(0, 250);
+
+  if (requirementText.length >= 30) {
+    return [requirementText, signalContext, answerContext].filter(Boolean).join(' ').slice(0, 900).trim();
+  }
+  return [requirementText, signalContext, answerContext, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
 }
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
@@ -206,11 +221,16 @@ export async function handler(event: { body: GenerationEvent }) {
 
     const [wiContext, similarStories, triageResult] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveScopedWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), config.wiConfig.topKChunks, config.wiConfig.maxChars, selectedProjectKeys)
+        ? retrieveScopedWiContext(
+            deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
+            config.wiConfig.topKChunks,
+            config.wiConfig.maxChars,
+            selectedProjectKeys,
+          )
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
         ? retrieveScopedSimilarStories({
-            requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text),
+            requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
             attachmentText: maskedAttachment.text,
             clarifyAnswers: maskedAnswers.answers,
             config,

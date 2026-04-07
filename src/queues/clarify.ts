@@ -10,6 +10,7 @@
 
 import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
 import { ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
+import { extractDiscoverySignals } from '../core/discovery';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
@@ -32,9 +33,11 @@ import {
  * using the first 600 chars of the attachment as the BM25 retrieval query.
  */
 function deriveRetrievalQuery(requirement: string, attachmentText: string): string {
-  if ((requirement?.trim().length ?? 0) >= 30) return requirement.trim();
-  const att = attachmentText?.trim() ?? '';
-  return att ? att.slice(0, 600).replace(/\s+/g, ' ') : requirement;
+  const requirementText = requirement?.trim() ?? '';
+  const attachmentSnippet = (attachmentText?.trim() ?? '').slice(0, 600).replace(/\s+/g, ' ');
+  const signalContext = extractDiscoverySignals([requirementText, attachmentSnippet]).join(' ').slice(0, 250);
+  if (requirementText.length >= 30) return [requirementText, signalContext].filter(Boolean).join(' ').slice(0, 900).trim();
+  return [requirementText, signalContext, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
 }
 export async function handler(event: { body: ClarifyEvent }) {
   const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys } = event.body;
