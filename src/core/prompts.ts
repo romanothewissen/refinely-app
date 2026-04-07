@@ -233,6 +233,7 @@ COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
 - Never reference internal system concepts or admin configurations as preconditions
 - Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
+- CRITICAL — never confuse the actor role with the business object. The actor (from "As a [role]") is a human who performs actions. The GIVEN describes the state of a business object, not the state of the actor. BAD: "GIVEN a Service Manager has expired" — the Service Manager is the human role; the thing that expires is the service contract. CORRECT: "GIVEN a service contract has expired". The actor belongs in WHEN ("WHEN the Service Manager triggers the process"), never as the subject of an expired/completed/failed state in GIVEN.
 ${arGuidance ? `\n${arGuidance}` : ''}
 
 OUTPUT FORMAT (strict):
@@ -577,6 +578,7 @@ QUALITY RULES:
 - Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split a single AR across multiple entries.
 - Be CONCEPTUAL — describe behavior patterns, not specific instances
 - Preserve role wording exactly: if the feature description says "As a [role]", do not rename that actor inside related ARs unless the feedback explicitly changes the role
+- Never use the actor role as the subject of a GIVEN state condition. The actor (e.g. "Service Manager") is a human who acts — the GIVEN describes the state of a business object (e.g. "a service contract has expired"), not the actor. The actor belongs in WHEN, not GIVEN.
 
 ${taxonomySection}
 
