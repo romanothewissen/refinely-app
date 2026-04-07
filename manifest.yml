@@ -18,6 +18,7 @@ modules:
       resource: main
       resolver:
         function: resolver
+      icon: https://developer.atlassian.com/platform/forge/images/issue-panel-icon.svg
       title: Quick Refine
       viewportSize: medium
   jira:issueAction:
