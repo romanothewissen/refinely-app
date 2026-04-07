@@ -99,9 +99,12 @@ export async function handler(event: { body: ClarifyEvent }) {
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
       onTriageComplete: async (assessment) => {
+        const questionText = assessment.questionPlan.target > 0
+          ? `targeting about ${assessment.questionPlan.target} questions`
+          : 'letting the discovery model decide how many questions are actually needed';
         await sendClarifyProgress(
           sessionId,
-          `Discovery is sizing the ambiguity and targeting about ${assessment.questionPlan.target} questions with ${assessment.clarity} clarity so far…`,
+          `Discovery is sizing the ambiguity, ${questionText}, with ${assessment.clarity} clarity so far…`,
           inputSignature,
           {
             stage: 'question_generation',

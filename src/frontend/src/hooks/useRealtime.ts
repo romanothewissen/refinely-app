@@ -13,7 +13,7 @@ export interface GenerationProgress {
 
 export interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget: number; estimatedQuestions: number };
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
@@ -224,7 +224,7 @@ export function useClarifyRealtime(
           return;
         }
 
-        if (result.type === 'complete' && Array.isArray(result.questions) && result.questions.length > 0) {
+        if (result.type === 'complete' && Array.isArray(result.questions)) {
           console.log('[useClarifyRealtime] session complete with', result.questions.length, 'questions');
           clearInterval(timerRef.current!);
           timerRef.current = null;
@@ -232,18 +232,6 @@ export function useClarifyRealtime(
           setProgress('');
           setProgressPayload(null);
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
-        } else if (result.type === 'complete') {
-          console.warn('[useClarifyRealtime] complete but no questions found — blocking discovery');
-          clearInterval(timerRef.current!);
-          timerRef.current = null;
-          setIsClarifying(false);
-          setProgress('');
-          setProgressPayload(null);
-          onBlockedRef.current({
-            message: 'Discovery completed without any questions. Please retry discovery.',
-            reasonCode: 'invalid_empty_questions',
-            contextMeta: (result.contextMeta as ClarifyContextMeta | undefined) ?? null,
-          });
         } else if (result.type === 'error' || result.type === 'blocked') {
           console.error('[useClarifyRealtime] blocked result from backend');
           clearInterval(timerRef.current!);

@@ -1090,23 +1090,20 @@ export function calibrateDiscoveryProfile(
   if (breadth >= 4) {
     scope = raiseScope(scope, 'moderate');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 6);
   }
 
-  if (breadth >= 6 || repairedQuestionCount >= 9) {
+  if (breadth >= 6) {
     scope = raiseScope(scope, 'broad');
-    complexity = raiseComplexity(complexity, 'medium');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
   }
 
   if (repairApplied) {
     scope = raiseScope(scope, breadth >= 5 ? 'broad' : 'moderate');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(
-      recommendedInitialCount,
-      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(7, breadth + 2)),
-    );
+  }
+
+  if (repairedQuestionCount > 0) {
+    recommendedInitialCount = repairedQuestionCount;
   }
 
   return {
@@ -1115,11 +1112,7 @@ export function calibrateDiscoveryProfile(
     complexity,
     ambiguity,
     missingCategoryKeys: requiredCategoryKeys,
-    recommendedInitialCount: clampCount(
-      recommendedInitialCount,
-      MIN_INITIAL_DISCOVERY_QUESTIONS,
-      MAX_INITIAL_DISCOVERY_QUESTIONS,
-    ),
+    recommendedInitialCount: Math.max(0, Math.round(recommendedInitialCount)),
   };
 }
 
@@ -1130,12 +1123,11 @@ export function normalizeDiscoveryProfile(
   const scope = cleanText(candidate?.scope).toLowerCase();
   const complexity = cleanText(candidate?.complexity).toLowerCase();
   const ambiguity = cleanText(candidate?.ambiguity).toLowerCase();
-  const recommendedInitialCount = clampCount(
+  const recommendedInitialCount = Math.max(
+    0,
     Number.isFinite(candidate?.recommendedInitialCount)
       ? Number(candidate?.recommendedInitialCount)
       : fallbackQuestionCount,
-    MIN_INITIAL_DISCOVERY_QUESTIONS,
-    MAX_INITIAL_DISCOVERY_QUESTIONS,
   );
   const rawMissing = Array.isArray((candidate as { missingCategoryKeys?: unknown[] } | null | undefined)?.missingCategoryKeys)
     ? ((candidate as { missingCategoryKeys?: unknown[] }).missingCategoryKeys ?? [])
@@ -1156,12 +1148,8 @@ export function normalizeDiscoveryProfile(
         .map((value) => normalizeCategoryKey(value))
         .filter((value): value is ClarifyCategoryKey => Boolean(value)),
     ),
-    recommendedInitialCount,
-    followupCap: clampCount(
-      Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4,
-      MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
-      MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
-    ),
+    recommendedInitialCount: Math.round(recommendedInitialCount),
+    followupCap: Math.max(0, Math.round(Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4)),
   };
 }
 
@@ -1177,29 +1165,11 @@ function validateInitialDiscoveryQuestions(
   input?: DiscoveryFallbackInput,
 ): InitialDiscoveryValidation {
   const requiredCategoryKeys = categoryCoverageKeys(profile, input);
-  if (!questions.length) {
+  if (!questions.length && profile.recommendedInitialCount > 0) {
     return {
       valid: false,
       requiredCategoryKeys,
       failureReasonCode: 'invalid_empty_questions',
-    };
-  }
-
-  if (questions.length < MIN_INITIAL_DISCOVERY_QUESTIONS) {
-    return {
-      valid: false,
-      requiredCategoryKeys,
-      failureReasonCode: 'invalid_underpowered_questions',
-    };
-  }
-
-  const presentCategoryKeys = new Set(questions.map((question) => question.categoryKey));
-  const missingCoverage = requiredCategoryKeys.filter((categoryKey) => !presentCategoryKeys.has(categoryKey));
-  if (missingCoverage.length > 0) {
-    return {
-      valid: false,
-      requiredCategoryKeys,
-      failureReasonCode: 'invalid_underpowered_questions',
     };
   }
 
@@ -1252,13 +1222,7 @@ export function validateAndRepairInitialDiscovery(
   }
 
   const repairedProfile = calibrateDiscoveryProfile(
-    {
-      ...calibratedProfile,
-      recommendedInitialCount: Math.max(
-        calibratedProfile.recommendedInitialCount,
-        Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(6, finalizedValidation.requiredCategoryKeys.length + 1)),
-      ),
-    },
+    calibratedProfile,
     {
       requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
       repairApplied: true,
@@ -1321,44 +1285,16 @@ export function finalizeInitialDiscoveryQuestions(
   profile: DiscoveryProfile,
   input?: DiscoveryFallbackInput,
 ): ClarifyQuestion[] {
-  const targetCount = clampCount(
-    profile.recommendedInitialCount,
-    MIN_INITIAL_DISCOVERY_QUESTIONS,
-    MAX_INITIAL_DISCOVERY_QUESTIONS,
-  );
-  const preferredCategories = categoryCoverageKeys(profile, input);
   const deduped = normalizeQuestions(questions, new Set<string>(), input).sort(questionComparator);
-  const result: ClarifyQuestion[] = [];
-  const addedQuestions = new Set<string>();
+  if (deduped.length > 0) return deduped;
+  if (profile.recommendedInitialCount <= 0) return [];
 
-  preferredCategories.forEach((categoryKey) => {
-    const existing = deduped.find((question) => question.categoryKey === categoryKey && !addedQuestions.has(normalizeKey(question.question)));
-    if (!existing) return;
-    addedQuestions.add(normalizeKey(existing.question));
-    result.push(existing);
-  });
-
-  deduped.forEach((question) => {
-    if (result.length >= targetCount) return;
-    const key = normalizeKey(question.question);
-    if (addedQuestions.has(key)) return;
-    addedQuestions.add(key);
-    result.push(question);
-  });
-
-  if (result.length < targetCount) {
-    const coveredCategoryKeys = new Set(result.map((question) => question.categoryKey));
-    const uncoveredPreferredCategories = preferredCategories.filter((categoryKey) => !coveredCategoryKeys.has(categoryKey));
-    const filler = buildFallbackQuestions(
-      uncoveredPreferredCategories.length ? uncoveredPreferredCategories : preferredCategories,
-      addedQuestions,
-      targetCount - result.length,
-      input,
-    );
-    result.push(...filler);
-  }
-
-  return result.slice(0, targetCount).sort(questionComparator);
+  return buildFallbackQuestions(
+    categoryCoverageKeys(profile, input),
+    new Set<string>(),
+    Math.max(1, Math.round(profile.recommendedInitialCount)),
+    input,
+  ).sort(questionComparator);
 }
 
 export function finalizeFollowupDiscoveryQuestions(
@@ -1372,13 +1308,7 @@ export function finalizeFollowupDiscoveryQuestions(
     fallbackInput?: DiscoveryFallbackInput;
   },
 ): ClarifyQuestion[] {
-  const remainingBudget = Math.max(0, MAX_TOTAL_DISCOVERY_QUESTIONS - opts.initialQuestionCount);
-  if (remainingBudget <= 0) return [];
-
-  const maxFollowup = Math.min(
-    remainingBudget,
-    clampCount(opts.followupCap, MIN_FOLLOWUP_DISCOVERY_QUESTIONS, MAX_FOLLOWUP_DISCOVERY_QUESTIONS),
-  );
+  const maxFollowup = Math.max(0, Math.round(opts.followupCap));
   if (maxFollowup <= 0) return [];
 
   // Categories already covered by the initial question round — do not re-ask them.

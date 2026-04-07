@@ -198,7 +198,7 @@ function normalizeDisplayText(value: string): string {
 
 type GenerationProgressMeta = {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget: number; estimatedQuestions: number };
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
@@ -370,11 +370,13 @@ function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] 
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions asked</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">~{triage.estimatedQuestions}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof triage.estimatedQuestions === 'number' ? triage.estimatedQuestions : 'LLM-led'}</div>
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">ARs / feature</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">~{triage.arTarget} <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">({AR_DEPTH_LABELS[triage.arDepth] ?? triage.arDepth})</span></div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">
+            {typeof triage.arTarget === 'number' ? triage.arTarget : 'LLM-led'} <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">({AR_DEPTH_LABELS[triage.arDepth] ?? triage.arDepth})</span>
+          </div>
         </div>
       </div>
     </motion.div>

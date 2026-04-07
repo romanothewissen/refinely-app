@@ -769,13 +769,24 @@ function LegacyApp() {
       setClarifyContext(nextClarifyContext);
       setClarifyRound(1);
       setClarifyAnswers([]);
-      setWorkflowStage('clarify_round_1');
       setIsEvaluatingDiscovery(false);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
         setClarifyQuestions(questions as ClarifyQuestion[]);
+        setWorkflowStage('clarify_round_1');
         setIsWorking(false);
+        return;
       }
+      setClarifyQuestions([]);
+      setClarifyContext((prev) => prev ? {
+        ...prev,
+        roundsCompleted: 1,
+        totalQuestionCount: 0,
+        followupQuestionCount: 0,
+        followupTriggered: false,
+      } : prev);
+      setWorkflowStage('generation');
+      void startGeneration(requirementRef.current, []);
     },
     ({ message, reasonCode, contextMeta }) => {
       setPendingClarifySessionId(null);
@@ -919,7 +930,6 @@ function LegacyApp() {
         })),
         followupCap: clarifyContext?.discoveryProfile?.followupCap,
         initialQuestionCount: clarifyContext?.initialQuestionCount ?? clarifyQuestions.length,
-        totalQuestionBudget: 20,
       }) as any;
 
       setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation?.tokenUsage ?? null));

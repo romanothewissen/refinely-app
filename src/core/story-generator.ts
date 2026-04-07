@@ -36,11 +36,6 @@ import {
 import { validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import {
-  MAX_FOLLOWUP_DISCOVERY_QUESTIONS,
-  MAX_INITIAL_DISCOVERY_QUESTIONS,
-  MAX_TOTAL_DISCOVERY_QUESTIONS,
-  MIN_FOLLOWUP_DISCOVERY_QUESTIONS,
-  MIN_INITIAL_DISCOVERY_QUESTIONS,
   extractDiscoverySignals,
   expandRawQuestionCandidate,
   calibrateDiscoveryProfile,
@@ -202,7 +197,6 @@ const PASS2_CONTEXT_LIMITS = {
   similar: 3000,
 } as const;
 
-const MAX_EXECUTABLE_FEATURES = 10;
 const MAX_CLARIFY_QUESTION_CHARS = 250;
 const MAX_CLARIFY_SUGGESTION_CHARS = 130;
 const FOLLOWUP_GROUNDING_STOPWORDS = new Set([
@@ -631,11 +625,11 @@ export interface TriageResult {
 }
 
 export const DEFAULT_GENERATION_TRIAGE_FALLBACK: RequirementAssessment = {
-  questionPlan: { min: 4, max: 12, target: 10, clarity: 'vague' },
-  featurePlan: { min: 1, max: 4, target: 2, shape: 'narrow', complexity: 'medium' },
-  arPlan: { min: 1, max: 5, target: 3, depth: 'standard' },
+  questionPlan: { min: 0, max: 0, target: 0, clarity: 'medium' },
+  featurePlan: { min: 1, max: 1, target: 1, shape: 'balanced', complexity: 'medium' },
+  arPlan: { min: 0, max: 0, target: 0, depth: 'standard' },
   ambiguityScore: 3,
-  ambiguityReasons: ['Triage could not be completed; using conservative defaults.'],
+  ambiguityReasons: ['Triage could not be completed; using operational fallback metadata only.'],
 };
 
 const VALID_SHAPES = new Set<FeaturePlan['shape']>(['minimal', 'narrow', 'balanced', 'broad', 'epic']);
@@ -654,10 +648,10 @@ function parseTriageResult(raw: unknown): TriageResult | null {
     ? obj.arDepth as ArPlan['depth'] : null;
   if (estimatedFeatures == null || !shape || !complexity || !arDepth) return null;
   const estimatedQuestions = typeof obj.estimatedQuestions === 'number'
-    ? Math.min(15, Math.max(4, Math.round(obj.estimatedQuestions)))
-    : 10;
+    ? Math.max(0, Math.round(obj.estimatedQuestions))
+    : 0;
   return {
-    estimatedFeatures: Math.min(MAX_EXECUTABLE_FEATURES, Math.max(1, Math.round(estimatedFeatures))),
+    estimatedFeatures: Math.max(1, Math.round(estimatedFeatures)),
     estimatedQuestions,
     shape,
     complexity,
@@ -666,80 +660,31 @@ function parseTriageResult(raw: unknown): TriageResult | null {
 }
 
 export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan; questionPlan: ClarifyQuestionPlan } {
-  // Feature plan: LLM's estimate is the target; ceiling is target+2 to prevent runaway generation.
-  // No computed floor — the decomposition prompt instructs the LLM to reach the target.
-  const est = Math.min(MAX_EXECUTABLE_FEATURES, triage.estimatedFeatures);
+  const est = Math.max(1, triage.estimatedFeatures);
   const featurePlan: FeaturePlan = {
-    min: 1,
-    max: Math.min(MAX_EXECUTABLE_FEATURES, est + 2),
+    min: est,
+    max: est,
     target: est,
     shape: triage.shape,
     complexity: triage.complexity,
   };
 
-  // AR plan: LLM's depth drives target; ceiling is target+2.
-  const arTargetMap: Record<ArPlan['depth'], number> = {
-    minimal:       2,
-    lean:          3,
-    standard:      4,
-    thorough:      5,
-    comprehensive: 6,
-  };
-  const arTarget = arTargetMap[triage.arDepth];
   const arPlan: ArPlan = {
-    min: 1,
-    max: arTarget + 2,
-    target: arTarget,
+    min: 0,
+    max: 0,
+    target: 0,
     depth: triage.arDepth,
   };
 
-  // Question plan: LLM's estimate is the target; ceiling is target+2.
-  const q = triage.estimatedQuestions;
+  const q = Math.max(0, triage.estimatedQuestions);
   const questionPlan: ClarifyQuestionPlan = {
-    min: 4,
-    max: Math.min(15, q + 2),
+    min: q,
+    max: q,
     target: q,
     clarity: q >= 10 ? 'vague' : q >= 7 ? 'medium' : 'clear',
   };
 
   return { featurePlan, arPlan, questionPlan };
-}
-
-export function capAssessmentForExecution(assessment: RequirementAssessment): RequirementAssessment {
-  const cappedTarget = Math.min(assessment.featurePlan.target, MAX_EXECUTABLE_FEATURES);
-  const cappedMax = Math.min(Math.max(cappedTarget, assessment.featurePlan.max), MAX_EXECUTABLE_FEATURES);
-  const cappedMin = Math.min(assessment.featurePlan.min, cappedMax);
-
-  const featurePlan: FeaturePlan = {
-    ...assessment.featurePlan,
-    min: cappedMin,
-    max: cappedMax,
-    target: cappedTarget,
-  };
-
-  const arPlan: ArPlan = featurePlan.target >= 7
-    ? {
-        min: Math.min(assessment.arPlan.min, 2),
-        max: Math.min(assessment.arPlan.max, 4),
-        target: Math.min(assessment.arPlan.target, 3),
-        depth: assessment.arPlan.depth === 'comprehensive'
-          ? 'thorough'
-          : assessment.arPlan.depth === 'thorough'
-            ? 'standard'
-            : assessment.arPlan.depth,
-      }
-    : assessment.arPlan;
-
-  return {
-    ...assessment,
-    featurePlan,
-    arPlan,
-  };
-}
-
-function clampFeatureCount(features: RawFeature[], maxFeatures: number): RawFeature[] {
-  if (features.length <= maxFeatures) return features;
-  return features.slice(0, maxFeatures);
 }
 
 export async function assessRequirementWithLlm(input: {
@@ -1090,9 +1035,9 @@ function ambiguityAssessmentFromDiscoveryProfile(
       ? profile.missingCategoryKeys.map((categoryKey) => `${labelForCategoryKey(categoryKey)} still needs clarification.`)
       : ['Discovery is focused on confirming the remaining implementation details.'],
     questionPlan: {
-      min: questionPlan?.min ?? MIN_INITIAL_DISCOVERY_QUESTIONS,
-      max: questionPlan?.max ?? MAX_INITIAL_DISCOVERY_QUESTIONS,
-      target: profile.recommendedInitialCount,
+      min: questionPlan?.min ?? generatedQuestions,
+      max: questionPlan?.max ?? generatedQuestions,
+      target: questionPlan?.target ?? profile.recommendedInitialCount,
     },
     generatedQuestions,
   };
@@ -1119,7 +1064,7 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   precomputedTriage?: TriageResult | null;
-  onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget: number; estimatedQuestions: number }) => Promise<void>;
+  onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions: number }) => Promise<void>;
   onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
   onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
@@ -1150,10 +1095,9 @@ export async function generateFeatures(opts: {
         providerOpts,
       });
 
-  const rawAssessment: RequirementAssessment = triageResult
+  const assessment: RequirementAssessment = triageResult
     ? { ...DEFAULT_GENERATION_TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
     : DEFAULT_GENERATION_TRIAGE_FALLBACK;
-  const assessment = capAssessmentForExecution(rawAssessment);
 
   if (onTriageComplete) {
     await onTriageComplete({
@@ -1161,7 +1105,7 @@ export async function generateFeatures(opts: {
       complexity: assessment.featurePlan.complexity,
       featureTarget: assessment.featurePlan.target,
       arDepth: assessment.arPlan.depth,
-      arTarget: assessment.arPlan.target,
+      arTarget: assessment.arPlan.target || undefined,
       estimatedQuestions: assessment.questionPlan.target,
     });
   }
@@ -1197,7 +1141,7 @@ export async function generateFeatures(opts: {
     providerOpts,
   });
 
-  const pass1Features = clampFeatureCount(pass1Result.features, assessment.featurePlan.max);
+  const pass1Features = pass1Result.features;
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
   if (onPass1Complete) await onPass1Complete(pass1Features.map(normaliseFeature));
@@ -1340,8 +1284,6 @@ export async function generateClarifyingQuestions(opts: {
 }): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config, onTriageComplete } = opts;
 
-  const CLARIFY_QUESTION_FALLBACK: ClarifyQuestionPlan = { min: 4, max: 12, target: 10, clarity: 'vague' };
-
   const clarifyTriageResult = await assessRequirementWithLlm({
     requirement,
     generatorConfig: config.generatorConfig,
@@ -1350,20 +1292,20 @@ export async function generateClarifyingQuestions(opts: {
   });
   const questionPlan = clarifyTriageResult
     ? triageToAssessment(clarifyTriageResult).questionPlan
-    : CLARIFY_QUESTION_FALLBACK;
+    : undefined;
   if (onTriageComplete) {
     await onTriageComplete({
       shape: clarifyTriageResult?.shape,
       complexity: clarifyTriageResult?.complexity,
-      clarity: questionPlan.clarity,
+      clarity: questionPlan?.clarity ?? 'medium',
       questionPlan: {
-        min: questionPlan.min,
-        max: questionPlan.max,
-        target: questionPlan.target,
+        min: questionPlan?.min ?? 0,
+        max: questionPlan?.max ?? 0,
+        target: questionPlan?.target ?? 0,
       },
     });
   }
-  const desiredQuestionCount = questionPlan.target;
+  const desiredQuestionCount = questionPlan?.target ?? 0;
   const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 8192), 6144);
   const domainSignals = extractDiscoverySignals([
     requirement,
@@ -1375,8 +1317,12 @@ export async function generateClarifyingQuestions(opts: {
 
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
-    `DISCOVERY RANGE: produce between ${questionPlan.min} and ${questionPlan.max} clarifying questions. Ideal target: ${desiredQuestionCount}. If ambiguity is still material, lean toward the upper half of the range. If the requirement and context are unusually explicit, you may go lower, but do not exceed the maximum.`,
   ];
+  if (questionPlan) {
+    contextParts.push(
+      `DISCOVERY SIGNAL: the prior assessment estimates around ${desiredQuestionCount} clarifying questions for this request. Treat that estimate as guidance only and return however many questions are materially needed.`,
+    );
+  }
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 12000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 6000)}`);
@@ -1403,14 +1349,11 @@ export async function generateClarifyingQuestions(opts: {
   const parsedQuestions = parseQuestionCandidates(raw.data);
   const normalizedProfileCandidate = normalizeDiscoveryProfile(
     parseDiscoveryProfileCandidate(raw.data),
-    desiredQuestionCount,
+    parsedQuestions.length || desiredQuestionCount,
   );
   const normalizedProfile = {
     ...normalizedProfileCandidate,
-    recommendedInitialCount: Math.min(
-      questionPlan.max,
-      Math.max(questionPlan.min, normalizedProfileCandidate.recommendedInitialCount),
-    ),
+    recommendedInitialCount: parsedQuestions.length || normalizedProfileCandidate.recommendedInitialCount,
   };
   const repairedDiscovery = validateAndRepairInitialDiscovery(parsedQuestions, normalizedProfile, {
     requirement,
@@ -1467,16 +1410,7 @@ export async function evaluateSufficiency(opts: {
   config: TenantConfig;
 }): Promise<DiscoverySufficiencyEvaluation> {
   const initialQuestionCount = Math.max(0, Number(opts.initialQuestionCount ?? 0));
-  const totalQuestionBudget = Math.max(
-    initialQuestionCount,
-    Math.min(MAX_TOTAL_DISCOVERY_QUESTIONS, Number(opts.totalQuestionBudget ?? MAX_TOTAL_DISCOVERY_QUESTIONS)),
-  );
-  const remainingBudget = Math.max(0, totalQuestionBudget - initialQuestionCount);
-  const followupCap = Math.min(
-    remainingBudget,
-    Math.max(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, Math.min(MAX_FOLLOWUP_DISCOVERY_QUESTIONS, Math.round(opts.followupCap ?? 4))),
-  );
-  const followupMin = followupCap > 0 ? Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, followupCap) : 0;
+  const followupCap = Math.max(0, Math.round(opts.followupCap ?? 0));
 
   const compactAnswers = opts.answers
     .slice(0, 8)
@@ -1546,8 +1480,8 @@ export async function evaluateSufficiency(opts: {
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
         domainSignals,
-        minQuestions: Math.max(1, followupMin),
-        maxQuestions: Math.max(1, followupCap),
+        minQuestions: 0,
+        maxQuestions: followupCap,
       }),
       userMessage,
       maxTokens: 900,
@@ -1571,14 +1505,14 @@ export async function evaluateSufficiency(opts: {
       .map((code) => code.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase())
       .filter(Boolean);
 
-    const questions = !sufficient && followupCap > 0
+    const questions = !sufficient
       ? finalizeFollowupDiscoveryQuestions(parsedQuestions, {
           askedQuestions: askedQuestionDetails.map((entry) => entry.question),
           askedCategoryKeys: askedQuestionDetails
             .map((entry) => entry.categoryKey)
             .filter((k): k is ClarifyCategoryKey => Boolean(k)),
           missingCategoryKeys,
-          followupCap,
+          followupCap: followupCap || parsedQuestions.length,
           initialQuestionCount,
           fallbackInput: {
             requirement: opts.requirement,

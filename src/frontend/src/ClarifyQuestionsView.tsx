@@ -3,6 +3,8 @@ import { ArrowRight, Check, Menu, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
 
+const DISCOVERY_PAGE_SIZE = 8;
+
 const CLARIFY_COMPLEXITY_LEVELS = [
   { key: 'trivial', label: 'Trivial' },
   { key: 'low', label: 'Low' },
@@ -114,6 +116,7 @@ export function ClarifyQuestionsView({
 }: ClarifyProps) {
   const [answers, setAnswers] = useState<Record<number, LocalAnswerState>>({});
   const [showContextDetails, setShowContextDetails] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
 
   useEffect(() => {
     const priorByQuestion = new Map(
@@ -140,8 +143,21 @@ export function ClarifyQuestionsView({
     );
   }, [questions, round, priorAnswers]);
 
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [questions, round]);
+
   const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
   const isBlocked = Boolean(blockingState && questions.length === 0);
+  const pageCount = Math.max(1, Math.ceil(questions.length / DISCOVERY_PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, pageCount - 1);
+  const pageStart = safeCurrentPage * DISCOVERY_PAGE_SIZE;
+  const pageEnd = pageStart + DISCOVERY_PAGE_SIZE;
+  const visibleQuestions = questions
+    .map((question, index) => ({ idx: index, q: question }))
+    .slice(pageStart, pageEnd);
+  const isLastPage = safeCurrentPage >= pageCount - 1;
+  const isFirstPage = safeCurrentPage === 0;
 
   function ensureAnswer(idx: number) {
     return answers[idx] ?? { selectedSuggestions: [], customAnswer: '' };
@@ -162,6 +178,11 @@ export function ClarifyQuestionsView({
   }
 
   function handleSubmit() {
+    if (!isLastPage) {
+      setCurrentPage((page) => Math.min(pageCount - 1, page + 1));
+      return;
+    }
+
     const result: ClarifyAnswer[] = questions.map((q, i) => {
       const a = ensureAnswer(i);
       const answer = buildCompatibilityAnswer(a.selectedSuggestions, a.customAnswer);
@@ -182,8 +203,7 @@ export function ClarifyQuestionsView({
     .map((categoryKey) => ({
       categoryKey,
       label: CATEGORY_LABELS[categoryKey],
-      items: questions
-        .map((question, index) => ({ idx: index, q: question }))
+      items: visibleQuestions
         .filter(({ q }) => q.categoryKey === categoryKey),
     }))
     .filter((section) => section.items.length > 0);
@@ -211,7 +231,7 @@ export function ClarifyQuestionsView({
             <div className="rf-pane-header-copy">
               <h1 className="rf-pane-header-title">Requirement Discovery</h1>
               <p className="rf-pane-header-subtitle" style={{ color: 'var(--rf-text-tertiary)' }}>
-                {round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
+                {round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · page <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{safeCurrentPage + 1}</span>/{pageCount} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
               </p>
             </div>
           </div>
@@ -331,7 +351,7 @@ export function ClarifyQuestionsView({
                         )}
                         <div>
                           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
-                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{qPlan?.target && qPlan.target !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> of ~{qPlan.target}</span> : ''}</div>
+                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{typeof qPlan?.target === 'number' && qPlan.target !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> planned {qPlan.target}</span> : ''}</div>
                         </div>
                       </div>
                     )}
@@ -543,17 +563,34 @@ export function ClarifyQuestionsView({
 
           {questions.length > 0 && (
             <motion.div
-              className="flex justify-end pt-4"
+              className="flex items-center justify-between gap-3 pt-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
             >
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.max(0, page - 1))}
+                  disabled={isSubmitting || isFirstPage}
+                  className="px-4 py-2.5 rounded-[14px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/60 transition disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <div className="text-[13px] font-semibold text-[var(--rf-text-tertiary)]">
+                  Showing {pageStart + 1}-{Math.min(questions.length, pageEnd)} of {questions.length}
+                </div>
+              </div>
               <button
                 onClick={handleSubmit}
                 disabled={isSubmitting}
                 className="brainstorm-shimmer flex items-center gap-1.5 px-5 py-2.5 rounded-[14px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm active:scale-[0.98]"
               >
-                {isSubmitting ? 'Checking…' : (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))}
+                {isSubmitting ? 'Checking…' : (
+                  isLastPage
+                    ? (submitLabel ?? (round === 2 ? 'Generate Features' : 'Continue Discovery'))
+                    : 'Next Questions'
+                )}
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </motion.div>

@@ -42,7 +42,7 @@ interface RealtimeEvent {
 
 interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string };
+  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
@@ -103,6 +103,7 @@ function buildTriagePayload(triageResult: Awaited<ReturnType<typeof assessRequir
     complexity: triageResult.complexity,
     featureTarget: triageResult.estimatedFeatures,
     arDepth: triageResult.arDepth,
+    estimatedQuestions: triageResult.estimatedQuestions,
   };
 }
 
@@ -189,8 +190,9 @@ export async function handler(event: { body: GenerationEvent }) {
       }).then(async triageResult => {
         const triage = buildTriagePayload(triageResult);
         if (triage) {
+          const arText = ` with ${triage.arDepth} acceptance depth`;
           await updateProgress(
-            `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ~${triage.featureTarget} features`,
+            `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ${triage.featureTarget} features${arText}`,
             1,
             {
               stage: 'triage',

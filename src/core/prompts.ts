@@ -95,12 +95,12 @@ export function buildDecompositionSystemPrompt(opts: {
 
   const planningGuidance = (() => {
     if (!opts.featurePlan) return '';
-    const { shape, complexity, max, target } = opts.featurePlan;
+    const { shape, complexity, target } = opts.featurePlan;
     const base = `OUTPUT CALIBRATION:
 - The requirement shape appears: ${shape.toUpperCase()}
 - The requirement complexity appears: ${complexity.toUpperCase()}
-- Planning hint: this may need around ${target} features. Keep the final feature count within 1-${max}.
-- Treat the planning hint as advisory, not as a quota. If the requirement is genuinely focused, return fewer features.
+- The prior assessment estimates around ${target} independently valuable features.
+- Treat that estimate as reasoning context, not as a quota or upper bound. If the requirement is genuinely focused, return fewer features. If the requirement clearly contains more independently deliverable capabilities, return more.
 - Return as few features as needed to cover the independent business value cleanly.`;
 
     if (shape === 'minimal')
@@ -117,7 +117,7 @@ export function buildDecompositionSystemPrompt(opts: {
 - A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context, not scope contributors.
 - Do NOT split into trivial or UI-level features. Combine related concerns into a single feature.
 - If a list, notification, status definition, audit trail, exception diagnosis, or visibility aid only supports the core behavior, keep it inside the main feature unless the requirement explicitly asks for it as its own deliverable.
-- Do not exceed ${max} features.`;
+`;
 
     if (shape === 'epic')
       return `${base}
@@ -125,7 +125,7 @@ export function buildDecompositionSystemPrompt(opts: {
 - Each distinct workflow, role-specific capability, or independently testable behavior MUST be its own feature.
 - DO NOT collapse multiple workflows into a single feature.
 - Keep the feature set practical for one generation run; prefer the most important independently deliverable capabilities first.
-- Do not exceed ${max} features in a single response.`;
+`;
 
     if (shape === 'broad')
       return `${base}
@@ -133,7 +133,7 @@ export function buildDecompositionSystemPrompt(opts: {
 - Work through the decomposition framework to test whether multiple independent deliverables exist. Do not create a feature for every dimension by default.
 - Each distinct workflow or role-specific behavior should be its own feature.
 - Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature unless it is explicitly requested as a separate deliverable.
-- Do not exceed ${max} features in a single response.`;
+`;
 
     // balanced (default)
     return `${base}
@@ -141,7 +141,7 @@ export function buildDecompositionSystemPrompt(opts: {
 - A feature should be backlog-worthy on its own: something a team would reasonably plan, estimate, and accept independently.
 - Do NOT split into trivial or UI-level sub-tasks.
 - If a list, notification, identification step, policy definition, or supporting visibility only exists to enable or explain the main behavior, keep it inside the parent feature and cover it in the description and acceptance requirements.
-- Do not exceed ${max} features.`;
+`;
   })();
 
   const discoveryContextGuidance = typeof opts.clarifyAnswerCount === 'number'
@@ -208,10 +208,10 @@ export function buildArSystemPrompt(opts: {
 }): string {
   const arGuidance = (() => {
     if (!opts.arPlan) return '';
-    const { min, max, depth } = opts.arPlan;
+    const { depth } = opts.arPlan;
     const base = `AR CALIBRATION:
-- Use roughly ${min}-${max} acceptance requirements per feature when that reflects the true behavioral surface
-- Treat the range as guidance, not a quota
+- Let the feature's actual behavioral surface determine how many acceptance requirements are needed
+- Do not target a fixed count for its own sake
 - Depth should be ${depth.toUpperCase()}`;
 
     if (depth === 'minimal')
@@ -267,7 +267,7 @@ OUTPUT FORMAT (strict):
 - Return a single JSON object: {"features":[...]} — same number of features as input, same order and same "summary" strings.
 - Each feature MUST include the key "acceptance_requirements" (snake_case, array of strings). Do NOT use "acceptanceRequirements" (camelCase).
 - Each string MUST be one full requirement in the form: GIVEN ... WHEN ... THEN ... (you may use line breaks inside the string for readability).
-- Fill at least 2–4 acceptance_requirements per feature unless the feature is truly trivial (then at least 1).
+- Write as many acceptance_requirements as needed for the requested depth and no more. One focused feature may need only a few. A broad or risky feature may need many.
 
 Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
 }
@@ -376,8 +376,8 @@ export function buildClarifySystemPrompt(opts: {
     ? `Important domain signals from the requirement and supporting evidence: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they sharpen the question.`
     : '';
   const questionPlanHint = opts.questionPlan
-    ? `Discovery range for this request: ${opts.questionPlan.min}-${opts.questionPlan.max} questions with an ideal target of ${opts.questionPlan.target}. Lean toward the upper half only when ambiguity is still material.`
-    : 'Discovery count should follow the range provided in the user message. If no range is supplied, use your judgment and avoid filler.';
+    ? `Prior assessment signal: this request may need around ${opts.questionPlan.target} discovery questions. Treat that as a sizing clue, not a quota. Return however many questions are materially needed, including zero when the requirement is already precise enough.`
+    : 'Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.';
 
   return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
 ${discoveryEvidenceBlock(opts.domainContext)}
@@ -473,9 +473,8 @@ Return JSON in this shape:
 }
 
 OUTPUT RULES:
-- "recommendedInitialCount" must be between 4 and 12.
-- "followupCap" must be between 1 and 8.
-- The number of questions returned must exactly match "recommendedInitialCount".
+- "recommendedInitialCount" must equal the number of questions you return. It may be zero when no discovery questions are needed.
+- "followupCap" should reflect how many additional delta questions might still be needed later if answers remain materially incomplete.
 - "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
 - Every question should be a single focused prompt even when the wording is richer than a short atomic sentence.
@@ -523,7 +522,7 @@ RULES:
 - The taxonomy is a completeness checklist, not a quota. Only mark a category as missing if its absence would materially block precise, testable acceptance requirements for this specific requirement.
 - Before generating any follow-up question, check DISCOVERY QUESTIONS ALREADY ASKED. You MUST NOT ask a question that covers the same category and business gap as one already asked, even if the wording would differ. A category is only "still open" if its Q&A answer is vague, contradictory, or explicitly deferred — not merely because it could have been answered more thoroughly.
 - If all 6 categories already have a specific, actionable answer in the DISCOVERY ANSWERS, return {"sufficient": true}.
-- Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
+- Ask however many follow-up questions are materially needed to close the remaining gaps. Zero is correct when the current answers are sufficient.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
 - For a small, well-bounded rule or workflow, do not force extra follow-up questions about adjacent categories if the actor, object, and core behavior are already clear enough to write acceptance requirements.
 - Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.

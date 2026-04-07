@@ -6,7 +6,6 @@ import {
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
   finalizeInitialDiscoveryQuestions,
-  MAX_TOTAL_DISCOVERY_QUESTIONS,
   normalizeDiscoveryProfile,
   validateAndRepairInitialDiscovery,
 } from '../discovery';
@@ -19,29 +18,29 @@ import {
 } from '../prompts';
 import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
 
-test('normalizeDiscoveryProfile clamps counts into the supported range', () => {
+test('normalizeDiscoveryProfile preserves llm-sized discovery counts', () => {
   const profile = normalizeDiscoveryProfile({
     scope: 'very_broad',
     complexity: 'very_high',
     ambiguity: 'high',
     missingCategoryKeys: ['business_rules', 'context_trigger'],
-    recommendedInitialCount: 14,
-    followupCap: 11,
+    recommendedInitialCount: 50,
+    followupCap: 18,
   });
 
-  assert.equal(profile.recommendedInitialCount, 14);
-  assert.equal(profile.followupCap, 8);
+  assert.equal(profile.recommendedInitialCount, 50);
+  assert.equal(profile.followupCap, 18);
   assert.deepEqual(profile.missingCategoryKeys, ['context_trigger', 'business_rules']);
 });
 
-test('normalizeDiscoveryProfile respects the lower discovery floors for clear asks', () => {
+test('normalizeDiscoveryProfile allows zero-question discovery', () => {
   const profile = normalizeDiscoveryProfile({
-    recommendedInitialCount: 2,
+    recommendedInitialCount: 0,
     followupCap: 0,
   });
 
-  assert.equal(profile.recommendedInitialCount, 4);
-  assert.equal(profile.followupCap, 1);
+  assert.equal(profile.recommendedInitialCount, 0);
+  assert.equal(profile.followupCap, 0);
 });
 
 test('expandRawQuestionCandidate splits numbered grouped prompts into single-focus questions', () => {
@@ -98,7 +97,7 @@ test('expandRawQuestionCandidate splits numbered grouped prompts into single-foc
   );
 });
 
-test('finalizeInitialDiscoveryQuestions fills required BA taxonomy categories when unresolved', () => {
+test('finalizeInitialDiscoveryQuestions preserves the llm question set without padding', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'high',
     missingCategoryKeys: ['user_personas', 'edge_cases_exceptions'],
@@ -118,19 +117,8 @@ test('finalizeInitialDiscoveryQuestions fills required BA taxonomy categories wh
     requirement: 'Automatically create a support case from calls and messages, while avoiding duplicates and handling missing caller details.',
   });
 
-  assert.equal(questions.length, 6);
-  assert.ok(
-    questions.some((question) => question.categoryKey === 'user_personas'),
-    'expected unresolved user personas coverage',
-  );
-  assert.ok(
-    questions.some((question) => question.categoryKey === 'edge_cases_exceptions'),
-    'expected unresolved exceptions coverage',
-  );
-  assert.ok(
-    questions.some((question) => question.categoryKey === 'information_architecture'),
-    'expected data/input coverage for captured fields',
-  );
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].categoryKey, 'context_trigger');
 });
 
 test('validateAndRepairInitialDiscovery repairs an empty model output into a valid initial batch', () => {
@@ -155,7 +143,7 @@ test('validateAndRepairInitialDiscovery repairs an empty model output into a val
   assert.ok(repaired.questions.some((question) => question.categoryKey === 'state_lifecycle'));
 });
 
-test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonomy breadth', () => {
+test('calibrateDiscoveryProfile preserves the llm question count while raising scope metadata from taxonomy breadth', () => {
   const calibrated = calibrateDiscoveryProfile(normalizeDiscoveryProfile({
     scope: 'moderate',
     complexity: 'medium',
@@ -186,7 +174,7 @@ test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonom
   assert.equal(calibrated.scope, 'broad');
   assert.equal(calibrated.complexity, 'medium');
   assert.equal(calibrated.ambiguity, 'high');
-  assert.ok(calibrated.recommendedInitialCount >= 8);
+  assert.equal(calibrated.recommendedInitialCount, 10);
 });
 
 test('calibrateDiscoveryProfile does not inflate implementation complexity solely from discovery breadth', () => {
@@ -428,7 +416,7 @@ test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total
     initialQuestionCount: 18,
   });
 
-  assert.equal(followups.length, MAX_TOTAL_DISCOVERY_QUESTIONS - 18);
+  assert.equal(followups.length, 2);
   assert.ok(
     followups.every((question) => question.question !== 'What should happen if this would create a duplicate case?'),
     'expected already-asked questions to be filtered out',
@@ -534,12 +522,13 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
   assert.match(clarifyPrompt, /Important domain signals from the requirement and supporting evidence/i);
   assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
   assert.match(clarifyPrompt, /company-specific internal terms/i);
+  assert.match(clarifyPrompt, /Return however many questions are materially needed, including zero/i);
   assert.doesNotMatch(clarifyPrompt, /one short sentence/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
   assert.doesNotMatch(clarifyPrompt, /Provide 2-3 suggestions by default/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
-  assert.match(evaluatePrompt, /1-4 follow-up questions/i);
+  assert.match(evaluatePrompt, /Ask however many follow-up questions are materially needed/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Prefer one visible follow-up question per remaining business gap/i);
   assert.match(evaluatePrompt, /Provide exactly 4 suggestions per follow-up question/i);
@@ -572,7 +561,7 @@ test('decomposition prompt treats feature counts as hints and keeps support beha
   });
 
   assert.match(prompt, /planning hint/i);
-  assert.match(prompt, /advisory, not as a quota/i);
+  assert.match(prompt, /reasoning context, not as a quota or upper bound/i);
   assert.match(prompt, /independent business value/i);
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
   assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, or visibility aid/i);
@@ -591,25 +580,32 @@ test('ar prompt uses range guidance without exact-count pressure', () => {
     },
   });
 
-  assert.match(prompt, /Treat the range as guidance, not a quota/i);
+  assert.match(prompt, /Let the feature's actual behavioral surface determine how many acceptance requirements are needed/i);
+  assert.match(prompt, /Do not target a fixed count for its own sake/i);
   assert.match(prompt, /Prefer fewer ARs when one concise set fully covers the feature/i);
   assert.doesNotMatch(prompt, /\(target 3\)/i);
-  assert.doesNotMatch(prompt, /Target 1-5 acceptance requirements/i);
+  assert.doesNotMatch(prompt, /roughly 1-5 acceptance requirements/i);
 });
 
-test('generation fallback is low-bias for focused output planning', () => {
+test('generation fallback is operational only when triage is unavailable', () => {
   assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.featurePlan, {
     min: 1,
-    max: 4,
-    target: 2,
-    shape: 'narrow',
+    max: 1,
+    target: 1,
+    shape: 'balanced',
     complexity: 'medium',
   });
   assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.arPlan, {
-    min: 1,
-    max: 5,
-    target: 3,
+    min: 0,
+    max: 0,
+    target: 0,
     depth: 'standard',
+  });
+  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.questionPlan, {
+    min: 0,
+    max: 0,
+    target: 0,
+    clarity: 'medium',
   });
 });
 
