@@ -9,6 +9,7 @@ import { api } from './hooks/useForge';
 import { useGenerationRealtime, useClarifyRealtime, type GenerationProgressPayload } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
+import QuickRefineApp from './QuickRefineApp';
 import type {
   ClarifyAnswer,
   ClarifyCategoryKey,
@@ -334,7 +335,7 @@ async function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export default function App() {
+function LegacyApp() {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>('generate');
   const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
   const [settingsStartProjectKey, setSettingsStartProjectKey] = useState<string>('*');
@@ -1559,4 +1560,55 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function detectQuickRefineSurface(ctx: any): 'issue-panel' | 'issue-action' | null {
+  const moduleKey = String(
+    ctx?.moduleKey
+    || ctx?.extension?.moduleKey
+    || ctx?.localId
+    || '',
+  );
+
+  if (moduleKey.includes('quick-refine-issue-panel')) return 'issue-panel';
+  if (moduleKey.includes('story-generator-issue-action')) return 'issue-action';
+  return null;
+}
+
+export default function App() {
+  const [surface, setSurface] = useState<'issue-panel' | 'issue-action' | null>(null);
+  const [ready, setReady] = useState(false);
+  const [openLegacyWorkflow, setOpenLegacyWorkflow] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    view.getContext()
+      .then((ctx: any) => {
+        if (cancelled) return;
+        setSurface(detectQuickRefineSurface(ctx));
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!ready) {
+    return <div className="h-full w-full" />;
+  }
+
+  if (surface && !openLegacyWorkflow) {
+    return (
+      <QuickRefineApp
+        surface={surface}
+        onOpenFullWorkflow={surface === 'issue-action' ? () => setOpenLegacyWorkflow(true) : undefined}
+      />
+    );
+  }
+
+  return <LegacyApp />;
 }

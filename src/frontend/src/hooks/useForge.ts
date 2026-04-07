@@ -86,6 +86,37 @@ export const api = {
   discoverStatuses: (projectKey: string) => invoke('discoverStatuses', { projectKey }),
   discoverLinkTypes: () => invoke('discoverLinkTypes'),
 
+  // Quick refine
+  getQuickRefineIssueContext: (payload: {
+    issueKey: string;
+    projectKey?: string;
+    surface: 'issue-panel' | 'issue-action';
+  }) => invoke('getQuickRefineIssueContext', payload),
+  getQuickRefineSession: (payload: { issueKey?: string; sessionId?: string }) =>
+    invoke('getQuickRefineSession', payload),
+  startQuickRefine: (payload: {
+    issueKey: string;
+    projectKey?: string;
+    sessionId: string;
+    surface: 'issue-panel' | 'issue-action';
+  }) => invoke('startQuickRefine', payload),
+  submitQuickRefineAnswers: (payload: {
+    issueKey: string;
+    sessionId: string;
+    answers: unknown[];
+  }) => invoke('submitQuickRefineAnswers', payload),
+  refineQuickRefineDraft: (payload: {
+    issueKey: string;
+    sessionId: string;
+    instructions: string;
+    draft: unknown;
+  }) => invoke('refineQuickRefineDraft', payload),
+  applyQuickRefine: (payload: {
+    issueKey: string;
+    sessionId: string;
+    draft: unknown;
+  }) => invoke('applyQuickRefine', payload),
+
   // Work Instructions
   uploadWi: (filename: string, fileBase64: string, revision?: string, projectKey?: string) =>
     invoke('uploadWi', { filename, fileBase64, revision, projectKey }),

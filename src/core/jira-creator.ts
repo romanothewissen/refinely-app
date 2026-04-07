@@ -201,7 +201,7 @@ export async function searchUsers(query: string): Promise<Array<{ accountId: str
 
 // ─── ADF Helpers ──────────────────────────────────────────────────────────────
 
-function buildAdfDocument(feature: Feature, ars: any[]) {
+export function buildAdfDocument(feature: Feature, ars: any[]) {
   const nodes: unknown[] = [];
 
   // Description
@@ -260,7 +260,7 @@ function buildSingleArAdf(ar: any) {
   };
 }
 
-function buildAdfContentOnly(ars: any[]) {
+export function buildAdfContentOnly(ars: any[]) {
   const nodes = ars.map(ar => buildSingleArAdf(ar));
   // Insert blank lines between ARs if requested
   const spacedNodes: any[] = [];

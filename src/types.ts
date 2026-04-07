@@ -451,6 +451,108 @@ export interface ClarifyAnswer {
   intent?: string;
 }
 
+// ─── Quick Refine ────────────────────────────────────────────────────────────
+
+export type QuickRefineSurface = 'issue-panel' | 'issue-action';
+export type QuickRefineSessionStatus = 'idle' | 'needs_clarification' | 'draft' | 'handoff' | 'applied';
+
+export interface QuickRefineQuestion {
+  id: string;
+  question: string;
+  suggestions: string[];
+}
+
+export interface QuickRefineAnswer {
+  questionId: string;
+  question: string;
+  answer: string;
+  selectedSuggestions: string[];
+}
+
+export interface QuickRefineIssueFields {
+  summary: string;
+  description: string;
+  acceptanceRequirements: AcceptanceRequirement[];
+}
+
+export interface SplitCandidate extends QuickRefineIssueFields {
+  id: string;
+  issueType: string;
+  selected: boolean;
+  storyPoints?: number;
+  reason?: string;
+  jiraIssueKey?: string;
+  jiraIssueUrl?: string;
+}
+
+export interface QuickRefineContextMeta extends ContextSourceMeta {
+  issueKey: string;
+  issueType: string;
+  activeFieldMapping: ProjectFieldMapping;
+  outputFieldMapping: ProjectFieldMapping;
+  similarStoriesCount?: number;
+  referencedSimilarStories?: ReferencedSimilarStory[];
+}
+
+export interface QuickRefineDraft {
+  currentIssue: QuickRefineIssueFields;
+  splitCandidates: SplitCandidate[];
+  clarifyAnswers: QuickRefineAnswer[];
+  contextMeta?: QuickRefineContextMeta;
+  tokenUsage?: TokenUsageSummary;
+  changeSummary?: string[];
+  handoffRecommended?: boolean;
+  handoffReason?: string;
+  updatedAt?: string;
+}
+
+export interface QuickRefineIssueContext {
+  surface: QuickRefineSurface;
+  issueKey: string;
+  issueId?: string;
+  projectKey: string;
+  issueType: string;
+  originalIssue: QuickRefineIssueFields;
+  fieldMapping: ProjectFieldMapping;
+  outputFieldMapping: ProjectFieldMapping;
+  linkType: string;
+  contextMeta: QuickRefineContextMeta;
+  existingSessionId?: string | null;
+  sessionStatus?: QuickRefineSessionStatus | null;
+  updatedAt?: string | null;
+}
+
+export interface QuickRefineApplyResult {
+  updatedIssueKey: string;
+  createdIssues: Array<{
+    candidateId: string;
+    issueKey: string;
+    issueUrl: string;
+  }>;
+  linkErrors: Array<{
+    candidateId: string;
+    error: string;
+  }>;
+}
+
+export interface QuickRefineSession {
+  sessionId: string;
+  surface: QuickRefineSurface;
+  issueKey: string;
+  projectKey: string;
+  issueType: string;
+  originalIssue: QuickRefineIssueFields;
+  context: QuickRefineIssueContext;
+  status: QuickRefineSessionStatus;
+  questions?: QuickRefineQuestion[];
+  draft?: QuickRefineDraft;
+  handoffReason?: string;
+  updatedAt: string;
+  createdAt: string;
+  appliedAt?: string;
+  applyResult?: QuickRefineApplyResult;
+}
+
 // ─── Conversation / History ───────────────────────────────────────────────────
 
 export interface ConversationTurn {

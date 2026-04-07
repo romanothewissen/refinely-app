@@ -50,7 +50,24 @@ import { getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stori
 import { inferProjectPersonaRolesFromBacklog } from '../core/persona-role-inference';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
-import { ClarifyAnswer, Feature, GenerationEvent, ClarifyEvent, RefineEvent } from '../types';
+import {
+  applyQuickRefine,
+  loadQuickRefineIssueContext,
+  refineQuickRefineDraft,
+  resolveQuickRefineProjectMapping,
+  startQuickRefine,
+  submitQuickRefineAnswers,
+} from '../core/quick-refine';
+import {
+  ClarifyAnswer,
+  Feature,
+  GenerationEvent,
+  ClarifyEvent,
+  QuickRefineDraft,
+  QuickRefineSession,
+  QuickRefineSurface,
+  RefineEvent,
+} from '../types';
 import { handleInferProjectPersonaRoles } from './project-persona-role-inference';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
@@ -965,6 +982,374 @@ resolver.define('searchUsers', async ({ payload }) => {
   return { success: true, users };
 });
 
+// ─── Quick Refine ────────────────────────────────────────────────────────────
+
+resolver.define('getQuickRefineIssueContext', async ({ payload, context }) => {
+  try {
+    const config = await getConfig();
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const surface = (payload?.surface === 'issue-panel' ? 'issue-panel' : 'issue-action') as QuickRefineSurface;
+    const issueKey = String(payload?.issueKey ?? '').trim();
+    if (!issueKey) {
+      return { success: false, error: 'Missing issue key.' };
+    }
+
+    const projectKey = String(payload?.projectKey ?? issueKey.split('-')[0] ?? '*').trim() || '*';
+    const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
+      projectKey,
+      projectKeys: projectKey && projectKey !== '*' ? [projectKey] : [],
+    });
+
+    const issueContext = await loadQuickRefineIssueContext({
+      issueKey,
+      surface,
+      config,
+      projectKeys: authorizedProjects.projectKeys.length ? authorizedProjects.projectKeys : [projectKey],
+    });
+
+    const existing = await getQuickRefineStoredSession(accountId, issueKey);
+    issueContext.existingSessionId = existing.sessionId;
+    issueContext.sessionStatus = existing.session?.status ?? null;
+    issueContext.updatedAt = existing.session?.updatedAt ?? null;
+
+    return {
+      success: true,
+      context: issueContext,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+resolver.define('getQuickRefineSession', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const existing = await getQuickRefineStoredSession(accountId, payload?.issueKey, payload?.sessionId);
+  return {
+    success: true,
+    sessionId: existing.sessionId,
+    session: existing.session,
+  };
+});
+
+resolver.define('startQuickRefine', async ({ payload, context }) => {
+  try {
+    const config = await getConfig();
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const surface = (payload?.surface === 'issue-panel' ? 'issue-panel' : 'issue-action') as QuickRefineSurface;
+    const issueKey = String(payload?.issueKey ?? '').trim();
+    const sessionId = String(payload?.sessionId ?? '').trim();
+    if (!issueKey || !sessionId) {
+      return { success: false, error: 'Missing issue key or session id.' };
+    }
+
+    const projectKey = String(payload?.projectKey ?? issueKey.split('-')[0] ?? '*').trim() || '*';
+    const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
+      projectKey,
+      projectKeys: projectKey && projectKey !== '*' ? [projectKey] : [],
+    });
+    const issueContext = await loadQuickRefineIssueContext({
+      issueKey,
+      surface,
+      config,
+      projectKeys: authorizedProjects.projectKeys.length ? authorizedProjects.projectKeys : [projectKey],
+    });
+
+    const result = await startQuickRefine({
+      context: issueContext,
+      config: {
+        ...config,
+        generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
+        tier: getEffectiveTier(config, context),
+      },
+    });
+
+    const now = new Date().toISOString();
+    const session: QuickRefineSession = {
+      sessionId,
+      surface,
+      issueKey,
+      projectKey: issueContext.projectKey,
+      issueType: issueContext.issueType,
+      originalIssue: issueContext.originalIssue,
+      context: issueContext,
+      status: result.route === 'clarify' ? 'needs_clarification' : result.route === 'handoff' ? 'handoff' : 'draft',
+      questions: result.route === 'clarify' ? result.questions : undefined,
+      draft: result.route === 'rewrite' ? result.draft : undefined,
+      handoffReason: result.route === 'handoff' ? result.reason : undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await persistQuickRefineSession(accountId, session);
+
+    if (result.route === 'rewrite' && config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId,
+        turnType: 'refine',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: config.generatorConfig.refineModel,
+        projectKey: issueContext.projectKey,
+        requirementExcerpt: issueContext.originalIssue.summary.slice(0, 240),
+        decisionSummary: [
+          'Quick refine generated a preview rewrite for the current Jira issue.',
+        ],
+        contextUsage: {
+          issueKey,
+          similarStoriesCount: issueContext.contextMeta.similarStoriesCount ?? 0,
+          wiDocsCount: issueContext.contextMeta.wiDocsCount ?? 0,
+        },
+        tokenUsage: result.draft?.tokenUsage,
+        piiMasking: { enabled: false, totalRedactions: 0, byType: {} },
+      });
+    }
+
+    await recordProjectActivity({
+      action: 'refine',
+      projectKeys: [issueContext.projectKey],
+      projectKey: issueContext.projectKey,
+      sessionId,
+      model: config.generatorConfig.refineModel,
+      tokenUsage: result.route === 'rewrite' ? (result.draft?.tokenUsage ?? null) : (result.tokenUsage ?? null),
+      metadata: {
+        issueKey,
+        quickRefine: true,
+        route: result.route,
+      },
+    });
+
+    return {
+      success: true,
+      route: result.route,
+      sessionId,
+      questions: result.route === 'clarify' ? result.questions : undefined,
+      reason: result.route === 'handoff' ? result.reason : result.route === 'clarify' ? result.reason : undefined,
+      draft: result.route === 'rewrite' ? result.draft : undefined,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+resolver.define('submitQuickRefineAnswers', async ({ payload, context }) => {
+  try {
+    const config = await getConfig();
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const sessionId = String(payload?.sessionId ?? '').trim();
+    if (!sessionId) {
+      return { success: false, error: 'Missing session id.' };
+    }
+    const existing = await getQuickRefineStoredSession(accountId, payload?.issueKey, sessionId);
+    if (!existing.session) {
+      return { success: false, error: 'Quick refine session not found.' };
+    }
+
+    const answers = Array.isArray(payload?.answers) ? payload.answers : [];
+    const draft = await submitQuickRefineAnswers({
+      context: existing.session.context,
+      answers,
+      config: {
+        ...config,
+        generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
+        tier: getEffectiveTier(config, context),
+      },
+    });
+
+    const nextSession: QuickRefineSession = {
+      ...existing.session,
+      draft,
+      questions: undefined,
+      status: draft.handoffRecommended ? 'handoff' : 'draft',
+      handoffReason: draft.handoffReason,
+      updatedAt: new Date().toISOString(),
+    };
+    await persistQuickRefineSession(accountId, nextSession);
+
+    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId,
+        turnType: 'refine',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: config.generatorConfig.refineModel,
+        projectKey: existing.session.projectKey,
+        requirementExcerpt: existing.session.originalIssue.summary.slice(0, 240),
+        decisionSummary: [
+          'Quick refine generated a rewrite after inline clarification answers.',
+        ],
+        contextUsage: {
+          issueKey: existing.session.issueKey,
+          answerCount: answers.length,
+        },
+        tokenUsage: draft.tokenUsage,
+        piiMasking: { enabled: false, totalRedactions: 0, byType: {} },
+      });
+    }
+
+    await recordProjectActivity({
+      action: 'refine',
+      projectKeys: [existing.session.projectKey],
+      projectKey: existing.session.projectKey,
+      sessionId,
+      model: config.generatorConfig.refineModel,
+      tokenUsage: draft.tokenUsage ?? null,
+      metadata: {
+        issueKey: existing.session.issueKey,
+        quickRefine: true,
+        stage: 'answered',
+      },
+    });
+
+    return {
+      success: true,
+      draft,
+      session: nextSession,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+resolver.define('refineQuickRefineDraft', async ({ payload, context }) => {
+  try {
+    const config = await getConfig();
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const sessionId = String(payload?.sessionId ?? '').trim();
+    const instructions = String(payload?.instructions ?? '').trim();
+    if (!sessionId || !instructions) {
+      return { success: false, error: 'Missing session id or refine instructions.' };
+    }
+
+    const existing = await getQuickRefineStoredSession(accountId, payload?.issueKey, sessionId);
+    if (!existing.session?.draft) {
+      return { success: false, error: 'Quick refine draft not found.' };
+    }
+
+    const nextDraft = await refineQuickRefineDraft({
+      context: existing.session.context,
+      draft: payload?.draft ?? existing.session.draft,
+      instructions,
+      config: {
+        ...config,
+        generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
+        tier: getEffectiveTier(config, context),
+      },
+    });
+
+    const nextSession: QuickRefineSession = {
+      ...existing.session,
+      draft: nextDraft,
+      status: nextDraft.handoffRecommended ? 'handoff' : 'draft',
+      handoffReason: nextDraft.handoffReason,
+      updatedAt: new Date().toISOString(),
+    };
+    await persistQuickRefineSession(accountId, nextSession);
+
+    await recordProjectActivity({
+      action: 'refine',
+      projectKeys: [existing.session.projectKey],
+      projectKey: existing.session.projectKey,
+      sessionId,
+      model: config.generatorConfig.refineModel,
+      tokenUsage: nextDraft.tokenUsage ?? null,
+      metadata: {
+        issueKey: existing.session.issueKey,
+        quickRefine: true,
+        stage: 'manual_refine',
+      },
+    });
+
+    return { success: true, draft: nextDraft, session: nextSession };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+resolver.define('applyQuickRefine', async ({ payload, context }) => {
+  try {
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const sessionId = String(payload?.sessionId ?? '').trim();
+    if (!sessionId) {
+      return { success: false, error: 'Missing session id.' };
+    }
+
+    const existing = await getQuickRefineStoredSession(accountId, payload?.issueKey, sessionId);
+    if (!existing.session) {
+      return { success: false, error: 'Quick refine session not found.' };
+    }
+
+    const config = await getConfig();
+    const draft = (payload?.draft as QuickRefineDraft | undefined) ?? existing.session.draft;
+    if (!draft) {
+      return { success: false, error: 'Quick refine draft not found.' };
+    }
+    const currentMapping = existing.session.context.fieldMapping;
+    const createIssueMapping = resolveQuickRefineProjectMapping(config, existing.session.projectKey, existing.session.issueType);
+    const result = await applyQuickRefine({
+      issueKey: existing.session.issueKey,
+      projectKey: existing.session.projectKey,
+      draft,
+      reporterAccountId: accountId,
+      currentIssueMapping: currentMapping,
+      createIssueMapping,
+      linkType: existing.session.context.linkType,
+    });
+
+    const nextSession: QuickRefineSession = {
+      ...existing.session,
+      draft,
+      status: 'applied',
+      appliedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      applyResult: result,
+    };
+    await persistQuickRefineSession(accountId, nextSession);
+
+    if (config.compliance?.enabled && config.compliance?.auditTrailEnabled) {
+      await appendComplianceAuditEvent({
+        actorAccountId: accountId,
+        category: 'runtime',
+        action: 'QUICK_REFINE_APPLIED',
+        details: {
+          issueKey: existing.session.issueKey,
+          createdIssueCount: result.createdIssues.length,
+        },
+        enabled: true,
+      });
+    }
+
+    await recordProjectActivity({
+      action: 'issue',
+      projectKeys: [existing.session.projectKey],
+      projectKey: existing.session.projectKey,
+      sessionId,
+      metadata: {
+        issueKey: existing.session.issueKey,
+        quickRefine: true,
+        createdIssues: result.createdIssues.length,
+      },
+    });
+
+    return { success: true, result, session: nextSession };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
 // ─── Jira Discovery ───────────────────────────────────────────────────────────
 
 resolver.define('discoverJira', async ({ payload }) => {
@@ -1234,6 +1619,25 @@ resolver.define('inferProjectPersonaRoles', async ({ payload, context }) => {
     inferProjectPersonaRolesFromBacklog,
   });
 });
+
+async function getQuickRefineStoredSession(accountId: string, issueKey?: string, sessionId?: string) {
+  const resolvedSessionId = sessionId
+    || (issueKey ? await entityGet<string>(KEYS.userIssueSession(accountId, issueKey)) : null);
+  if (!resolvedSessionId) {
+    return { sessionId: null, session: null };
+  }
+
+  const session = await entityGet<QuickRefineSession>(KEYS.quickRefineSession(resolvedSessionId));
+  return {
+    sessionId: resolvedSessionId,
+    session: session ?? null,
+  };
+}
+
+async function persistQuickRefineSession(accountId: string, session: QuickRefineSession) {
+  await entitySet(KEYS.quickRefineSession(session.sessionId), session);
+  await entitySet(KEYS.userIssueSession(accountId, session.issueKey), session.sessionId);
+}
 
 // ─── Conversation History ─────────────────────────────────────────────────────
 

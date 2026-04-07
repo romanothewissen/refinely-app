@@ -13,6 +13,13 @@ modules:
         function: resolver
       title: Refinely
       route: story-generator
+  jira:issuePanel:
+    - key: quick-refine-issue-panel
+      resource: main
+      resolver:
+        function: resolver
+      title: Quick Refine
+      viewportSize: medium
   jira:issueAction:
     - key: story-generator-issue-action
       resource: main
