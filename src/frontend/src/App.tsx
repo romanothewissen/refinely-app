@@ -335,9 +335,15 @@ async function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function LegacyApp() {
-  const [viewMode, setViewMode] = useState<'generate' | 'settings'>('generate');
-  const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
+function LegacyApp({
+  initialViewMode = 'generate',
+  initialSettingsTab = 'models',
+}: {
+  initialViewMode?: 'generate' | 'settings';
+  initialSettingsTab?: 'models' | 'jira' | 'domain' | 'billing';
+}) {
+  const [viewMode, setViewMode] = useState<'generate' | 'settings'>(initialViewMode);
+  const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialSettingsTab);
   const [settingsStartProjectKey, setSettingsStartProjectKey] = useState<string>('*');
   const [requirement, setRequirement] = useState('');
   const [activePushFeatureIdx, setActivePushFeatureIdx] = useState<number | null>(null);
@@ -1588,6 +1594,8 @@ export default function App() {
   const [surface, setSurface] = useState<'issue-panel' | 'issue-action' | null>(null);
   const [ready, setReady] = useState(false);
   const [openLegacyWorkflow, setOpenLegacyWorkflow] = useState(false);
+  const [legacyLaunchMode, setLegacyLaunchMode] = useState<'generate' | 'settings'>('generate');
+  const [legacySettingsTab, setLegacySettingsTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
 
   useEffect(() => {
     let cancelled = false;
@@ -1614,10 +1622,24 @@ export default function App() {
     return (
       <QuickRefineApp
         surface={surface}
-        onOpenFullWorkflow={() => setOpenLegacyWorkflow(true)}
+        onOpenFullWorkflow={() => {
+          setLegacyLaunchMode('generate');
+          setLegacySettingsTab('models');
+          setOpenLegacyWorkflow(true);
+        }}
+        onOpenSettings={() => {
+          setLegacyLaunchMode('settings');
+          setLegacySettingsTab('jira');
+          setOpenLegacyWorkflow(true);
+        }}
       />
     );
   }
 
-  return <LegacyApp />;
+  return (
+    <LegacyApp
+      initialViewMode={legacyLaunchMode}
+      initialSettingsTab={legacySettingsTab}
+    />
+  );
 }
