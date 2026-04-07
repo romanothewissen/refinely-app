@@ -904,6 +904,7 @@ export default function App() {
       return;
     }
 
+    setClarifyAnswers(mergedAnswers);
     setIsEvaluatingDiscovery(true);
     setWorkflowStage('sufficiency_check');
     try {
@@ -942,9 +943,7 @@ export default function App() {
       console.error('Discovery sufficiency evaluation failed', err);
       setClarifyEvaluationError('Discovery could not evaluate the current answers. Please retry or skip to proceed without additional questions.');
       setIsWorking(false);
-      // Keep the current stage so the user can retry the sufficiency check.
-      // Do NOT reset to clarify_round_1 — that would re-display the initial questions.
-      setWorkflowStage('sufficiency_check');
+      setWorkflowStage('clarify_round_1');
     } finally {
       setIsEvaluatingDiscovery(false);
     }
@@ -1474,6 +1473,7 @@ export default function App() {
                   contextMeta={clarifyContext}
                   blockingState={clarifyBlockingError}
                   inlineError={clarifyEvaluationError}
+                  priorAnswers={clarifyRound === 1 ? clarifyAnswers : []}
                   sidebarOpen={sidebarOpen}
                   setSidebarOpen={setSidebarOpen}
                 />

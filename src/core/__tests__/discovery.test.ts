@@ -10,7 +10,7 @@ import {
   normalizeDiscoveryProfile,
   validateAndRepairInitialDiscovery,
 } from '../discovery';
-import { buildClarifySystemPrompt, buildEvaluateSystemPrompt } from '../prompts';
+import { buildClarifySystemPrompt, buildEvaluateSystemPrompt, buildTriageSystemPrompt } from '../prompts';
 
 test('normalizeDiscoveryProfile clamps counts into the supported range', () => {
   const profile = normalizeDiscoveryProfile({
@@ -22,7 +22,7 @@ test('normalizeDiscoveryProfile clamps counts into the supported range', () => {
     followupCap: 11,
   });
 
-  assert.equal(profile.recommendedInitialCount, 12);
+  assert.equal(profile.recommendedInitialCount, 14);
   assert.equal(profile.followupCap, 8);
   assert.deepEqual(profile.missingCategoryKeys, ['context_trigger', 'business_rules']);
 });
@@ -176,10 +176,43 @@ test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonom
     repairedQuestionCount: 10,
   });
 
-  assert.equal(calibrated.scope, 'very_broad');
-  assert.equal(calibrated.complexity, 'very_high');
+  assert.equal(calibrated.scope, 'broad');
+  assert.equal(calibrated.complexity, 'medium');
   assert.equal(calibrated.ambiguity, 'high');
-  assert.ok(calibrated.recommendedInitialCount >= 8);
+  assert.ok(calibrated.recommendedInitialCount >= 7);
+});
+
+test('calibrateDiscoveryProfile does not inflate implementation complexity solely from discovery breadth', () => {
+  const calibrated = calibrateDiscoveryProfile(normalizeDiscoveryProfile({
+    scope: 'narrow',
+    complexity: 'medium',
+    ambiguity: 'medium',
+    missingCategoryKeys: [
+      'context_trigger',
+      'user_personas',
+      'information_architecture',
+      'business_rules',
+      'state_lifecycle',
+      'edge_cases_exceptions',
+    ],
+    recommendedInitialCount: 6,
+    followupCap: 4,
+  }), {
+    requiredCategoryKeys: [
+      'context_trigger',
+      'user_personas',
+      'information_architecture',
+      'business_rules',
+      'state_lifecycle',
+      'edge_cases_exceptions',
+    ],
+    repairApplied: false,
+    repairedQuestionCount: 6,
+  });
+
+  assert.equal(calibrated.scope, 'broad');
+  assert.equal(calibrated.complexity, 'medium');
+  assert.equal(calibrated.ambiguity, 'high');
 });
 
 test('broad multi-input automation asks infer a non-trivial unresolved-category set', () => {
@@ -455,6 +488,7 @@ test('finalizeFollowupDiscoveryQuestions does not invent a generic fallback ques
 });
 
 test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery contract', () => {
+  const triagePrompt = buildTriageSystemPrompt();
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
@@ -505,4 +539,7 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);
   assert.doesNotMatch(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
+
+  assert.doesNotMatch(triagePrompt, /\bSAP\b/i);
+  assert.doesNotMatch(triagePrompt, /\bServiceMax\b/i);
 });

@@ -1418,8 +1418,8 @@ export async function evaluateSufficiency(opts: {
         maxQuestions: Math.max(1, followupCap),
       }),
       userMessage,
-      maxTokens: 2048,
-      reasoningEffort: 'medium',
+      maxTokens: 1400,
+      reasoningEffort: 'low',
       ...buildLlmProviderOpts(opts.config),
     });
     const durationMs = Date.now() - startedAt;

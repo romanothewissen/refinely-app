@@ -1088,26 +1088,24 @@ export function calibrateDiscoveryProfile(
   let recommendedInitialCount = profile.recommendedInitialCount;
 
   if (breadth >= 4) {
+    scope = raiseScope(scope, 'moderate');
+    ambiguity = raiseAmbiguity(ambiguity, 'high');
+    recommendedInitialCount = Math.max(recommendedInitialCount, 5);
+  }
+
+  if (breadth >= 6 || repairedQuestionCount >= 9) {
     scope = raiseScope(scope, 'broad');
-    complexity = raiseComplexity(complexity, 'high');
+    complexity = raiseComplexity(complexity, 'medium');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
     recommendedInitialCount = Math.max(recommendedInitialCount, 6);
   }
 
-  if (breadth >= 6 || repairedQuestionCount >= 9) {
-    scope = raiseScope(scope, 'very_broad');
-    complexity = raiseComplexity(complexity, 'very_high');
-    ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
-  }
-
   if (repairApplied) {
-    scope = raiseScope(scope, breadth >= 5 ? 'very_broad' : 'broad');
-    complexity = raiseComplexity(complexity, breadth >= 5 ? 'very_high' : 'high');
+    scope = raiseScope(scope, breadth >= 5 ? 'broad' : 'moderate');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
     recommendedInitialCount = Math.max(
       recommendedInitialCount,
-      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(6, breadth + 1)),
+      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(5, breadth + 1)),
     );
   }
 

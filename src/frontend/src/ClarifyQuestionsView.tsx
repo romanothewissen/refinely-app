@@ -54,6 +54,7 @@ interface ClarifyProps {
   contextMeta?: ClarifyContextMeta | null;
   blockingState?: { message: string; reasonCode?: ClarifyFailureReasonCode } | null;
   inlineError?: string | null;
+  priorAnswers?: ClarifyAnswer[];
   sidebarOpen: boolean;
   setSidebarOpen: (o: boolean) => void;
 }
@@ -107,6 +108,7 @@ export function ClarifyQuestionsView({
   contextMeta,
   blockingState,
   inlineError,
+  priorAnswers = [],
   sidebarOpen,
   setSidebarOpen,
 }: ClarifyProps) {
@@ -114,8 +116,29 @@ export function ClarifyQuestionsView({
   const [showContextDetails, setShowContextDetails] = useState(false);
 
   useEffect(() => {
-    setAnswers({});
-  }, [questions, round]);
+    const priorByQuestion = new Map(
+      priorAnswers
+        .filter((answer) => answer?.question)
+        .map((answer) => [
+          answer.question,
+          {
+            selectedSuggestions: Array.isArray(answer.selectedSuggestions) ? answer.selectedSuggestions : [],
+            customAnswer: answer.customAnswer ?? '',
+          },
+        ]),
+    );
+
+    setAnswers(
+      Object.fromEntries(
+        questions
+          .map((question, index) => {
+            const existing = priorByQuestion.get(question.question);
+            return existing ? [index, existing] : null;
+          })
+          .filter((entry): entry is [number, LocalAnswerState] => Boolean(entry)),
+      ),
+    );
+  }, [questions, round, priorAnswers]);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
   const isBlocked = Boolean(blockingState && questions.length === 0);

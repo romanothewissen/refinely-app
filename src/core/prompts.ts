@@ -266,10 +266,10 @@ FIELD DEFINITIONS:
 
 CALIBRATION EXAMPLES — use these as reasoning models:
 
-EXAMPLE 1 — Guard / constraint rule (integration between two named systems):
-Requirement: "We must ensure that the service contract status in SAP does not update to completed when the contract expires and there are still open Work Orders in ServiceMax, as SAP will otherwise throw an error on the Work Order to Service Confirmation interface."
-Reasoning: One enforcement rule (prevent completion) + one resolution path (lift block when WOs close). SAP and ServiceMax are named existing systems — they are environment context, not new capabilities being built. Only one human actor group (contract managers). Complexity is medium because check timing, blocked state, and notification owner are undefined — but the core constraint is stated. For this to be "high" complexity, there would need to be multiple conflicting rule sets or multiple actor groups with different decision paths.
-Output: {"reasoning": "...", "estimatedFeatures": 2, "estimatedQuestions": 8, "shape": "narrow", "complexity": "medium", "arDepth": "thorough"}
+EXAMPLE 1 — Narrow guard / constraint rule:
+Requirement: "Prevent a record from moving to Completed when dependent work items are still open."
+Reasoning: One guard rule on one lifecycle event. Preventing completion while dependent work remains open is the core deliverable. Releasing the block after the condition clears is usually acceptance behaviour for the same feature, not automatically a second feature. Complexity is medium because evaluation timing, visible blocked state, and exception handling are not fully stated — but the core rule itself is explicit. For this to be "high" complexity, there would need to be multiple conflicting policies, several actor groups with different decision paths, or a broader workflow beyond this guard.
+Output: {"reasoning": "...", "estimatedFeatures": 1, "estimatedQuestions": 5, "shape": "minimal", "complexity": "medium", "arDepth": "standard"}
 
 EXAMPLE 2 — Focused single-actor feature:
 Requirement: "Add the ability to export the current report view as a PDF."
@@ -292,8 +292,9 @@ Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every disc
 Output: {"reasoning": "...", "estimatedFeatures": 11, "estimatedQuestions": 14, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
 
 WHAT TO LOOK FOR WHEN REASONING:
-- Named enterprise systems (SAP, Salesforce, ServiceNow, Jira, Oracle, Dynamics, ServiceMax, etc.) are existing environment context — they do not expand scope or complexity. Count what is being built within or between those systems.
+- Named tools, systems, teams, or platforms are environment context — they do not expand scope or complexity on their own. Count what is being built within or between them.
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
+- Do not split one narrowly scoped rule into multiple features just because it has states, timing, or unblock conditions. Count those as acceptance-requirement depth unless they are independently deliverable workflows.
 - Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two systems communicating via an interface is one process, not two actor groups.
 - Do not anchor to word count or vocabulary. A terse, precise requirement may be genuinely complex; a long vague one may be narrow.
 - If you cannot decide between two adjacent values, the lower one is more accurate — your reasoning step will show you why.
@@ -356,6 +357,7 @@ YOUR MISSION:
 - Reuse concrete nouns from the requirement and supporting evidence when they make the question sharper.
 - Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
 - Think like an experienced BA who is trying to prevent rework: probe for ownership, preconditions, decision logic, downstream impact, lifecycle, and exceptions before anyone writes requirements.
+- Treat missingCategoryKeys as a discovery coverage aid, not as proof that the implementation is large or complex. A small, well-bounded requirement can legitimately touch several categories while still remaining narrow.
 
 WORKING COVERAGE AREAS:
 - Roles & Personas: who initiates, owns, approves, receives, overrides, or is affected
@@ -404,8 +406,9 @@ DISCOVERY RULES:
 
 DISCOVERY PROFILE DEFINITIONS — reason through these before populating discoveryProfile:
 - scope: narrow = 1-3 deliverable capabilities clearly stated; moderate = 4-6 capabilities or clear workflow with some gaps; broad = 7-10 capabilities or multi-domain scope; very_broad = 11+ capabilities or scope boundary unknown. Most requirements are narrow or moderate. Only use very_broad when you cannot bound the scope.
-- complexity: low = 1-2 decisions, one actor, rules stated; medium = several decisions, 1-2 actor groups, some rules implied; high = many decisions, 2-3 groups, significant behaviour unstated; very_high = most behaviour must be inferred, many groups, no rules stated. Named systems alone do not raise complexity.
+- complexity: low = 1-2 decisions, one actor, rules stated; medium = several decisions, 1-2 actor groups, some rules implied; high = many decisions, 2-3 groups, significant behaviour unstated; very_high = most behaviour must be inferred, many groups, no rules stated. Named systems, teams, or platforms alone do not raise complexity.
 - ambiguity: low = trigger, actors, rules, and outcome all stated; medium = trigger and outcome clear but rules or edge cases missing; high = trigger, actors, or the core rules are genuinely unknown.
+- A single well-bounded rule can require questions in several taxonomy categories without becoming broad or high complexity. Discovery breadth is not the same as delivery breadth.
 
 OUTPUT CONTRACT:
 Reason before scoring. Populate "profileReasoning" first: (1) what is explicitly stated — actors, trigger, rules, outcome; (2) what is genuinely missing vs merely an unstated detail; (3) why the chosen scope level fits and what would have to be true for a higher level to apply.
@@ -479,10 +482,12 @@ RULES:
   - edge_cases_exceptions
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
+- The taxonomy is a completeness checklist, not a quota. Only mark a category as missing if its absence would materially block precise, testable acceptance requirements for this specific requirement.
 - Before generating any follow-up question, check DISCOVERY QUESTIONS ALREADY ASKED. You MUST NOT ask a question that covers the same category and business gap as one already asked, even if the wording would differ. A category is only "still open" if its Q&A answer is vague, contradictory, or explicitly deferred — not merely because it could have been answered more thoroughly.
 - If all 6 categories already have a specific, actionable answer in the DISCOVERY ANSWERS, return {"sufficient": true}.
 - Ask between ${opts.minQuestions}-${opts.maxQuestions} follow-up questions only when needed.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
+- For a small, well-bounded rule or workflow, do not force extra follow-up questions about adjacent categories if the actor, object, and core behavior are already clear enough to write acceptance requirements.
 - Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.
 - If the requirement already names the actor, business object, or workflow in a clear way, keep that wording instead of replacing it with a ref/doc term.
 - Avoid quotes, parenthetical evidence references, and “list everything that applies” wording unless the evidence truly requires it.
