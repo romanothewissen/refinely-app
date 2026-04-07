@@ -414,25 +414,26 @@ export async function handler(event: { body: GenerationEvent }) {
       return;
     }
     if (err instanceof AcceptanceRequirementsGenerationError) {
-      const failedFeatureIds = err.failedFeatureIndexes
-        .map((index) => err.draftFeatures[index]?.id)
+      const arError = err as AcceptanceRequirementsGenerationError;
+      const failedFeatureIds = arError.failedFeatureIndexes
+        .map((index) => arError.draftFeatures[index]?.id)
         .filter((id): id is string => Boolean(id));
       const arFailurePayload: GenerationProgressPayload = {
         stage: 'acceptance_requirements',
         triage: buildTriagePayload(triageSnapshot),
-        draftFeatures: err.draftFeatures.map((feature) => ({
+        draftFeatures: arError.draftFeatures.map((feature) => ({
           id: feature.id,
           summary: feature.summary,
           description: feature.description,
           storyPoints: feature.storyPoints,
         })),
-        featureProgress: err.draftFeatures.map((feature) => ({
+        featureProgress: arError.draftFeatures.map((feature) => ({
           id: feature.id,
           status: failedFeatureIds.includes(feature.id) ? 'active' : 'complete',
         })),
         arProgress: {
-          completed: err.draftFeatures.length - failedFeatureIds.length,
-          total: err.draftFeatures.length,
+          completed: arError.draftFeatures.length - failedFeatureIds.length,
+          total: arError.draftFeatures.length,
         },
         failedFeatureIds,
         sources: progressSourcesSnapshot,
@@ -440,7 +441,7 @@ export async function handler(event: { body: GenerationEvent }) {
       await entitySet(KEYS.generationProgress(sessionId), {
         type: 'error',
         sessionId,
-        message: err.message,
+        message: arError.message,
         payload: arFailurePayload,
         updatedAt: Date.now(),
       } as RealtimeEvent);
