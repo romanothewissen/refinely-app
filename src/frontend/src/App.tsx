@@ -947,7 +947,7 @@ export default function App() {
       await startGeneration(
         requirement,
         mergedAnswers,
-        'Discovery sufficiency could not be evaluated, so generation continued with your current answers.',
+        'Discovery sufficiency could not be evaluated, so generation continued with your current answers. For workflow-heavy requests, the result may be under-scoped until discovery can confirm the missing business rules and exceptions.',
       );
     } finally {
       setIsEvaluatingDiscovery(false);

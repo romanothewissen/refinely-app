@@ -211,7 +211,7 @@ export function ClarifyQuestionsView({
             <div className="rf-pane-header-copy">
               <h1 className="rf-pane-header-title">Requirement Discovery</h1>
               <p className="rf-pane-header-subtitle" style={{ color: 'var(--rf-text-tertiary)' }}>
-                Round {round} of 2 · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
+                {round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
               </p>
             </div>
           </div>

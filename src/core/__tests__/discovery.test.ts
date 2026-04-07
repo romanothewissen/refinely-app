@@ -186,7 +186,7 @@ test('calibrateDiscoveryProfile raises broad vague discovery floors from taxonom
   assert.equal(calibrated.scope, 'broad');
   assert.equal(calibrated.complexity, 'medium');
   assert.equal(calibrated.ambiguity, 'high');
-  assert.ok(calibrated.recommendedInitialCount >= 7);
+  assert.ok(calibrated.recommendedInitialCount >= 8);
 });
 
 test('calibrateDiscoveryProfile does not inflate implementation complexity solely from discovery breadth', () => {
@@ -525,6 +525,9 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
   assert.match(clarifyPrompt, /A question may be longer than a terse chip-style prompt/i);
   assert.match(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
   assert.match(clarifyPrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
+  assert.match(clarifyPrompt, /Never write discovery questions in first person/i);
+  assert.match(clarifyPrompt, /normalize the question voice into third-person business language/i);
+  assert.match(clarifyPrompt, /What should the TSS do when/i);
   assert.match(clarifyPrompt, /Keep the suggestions aligned to the actual question being asked/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
@@ -549,6 +552,8 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
 
   assert.doesNotMatch(triagePrompt, /\bSAP\b/i);
   assert.doesNotMatch(triagePrompt, /\bServiceMax\b/i);
+  assert.match(triagePrompt, /Short capability-area asks about intake, channel consolidation, routing, matching, deduplication, case creation, prioritization, or case-type determination are often HIGH complexity/i);
+  assert.match(triagePrompt, /Short but capability-heavy workflow area/i);
 });
 
 test('decomposition prompt treats feature counts as hints and keeps support behavior inside the parent feature', () => {
@@ -606,4 +611,25 @@ test('generation fallback is low-bias for focused output planning', () => {
     target: 3,
     depth: 'standard',
   });
+});
+
+test('decomposition prompt preserves workflow-defining scope when clarifying context is thin', () => {
+  const prompt = buildDecompositionSystemPrompt({
+    domainContext: 'Use context only to understand the business space.',
+    domainRoles: ['TSS'],
+    processTaxonomy: [],
+    processTaxonomyEnabled: false,
+    clarifyAnswerCount: 0,
+    featurePlan: {
+      min: 1,
+      max: 4,
+      target: 2,
+      shape: 'narrow',
+      complexity: 'high',
+    },
+  });
+
+  assert.match(prompt, /Clarifying context is still THIN or incomplete/i);
+  assert.match(prompt, /Do not silently compress away workflow-defining ambiguity/i);
+  assert.match(prompt, /channel handling, routing logic, case typing, matching, required captured information, lifecycle handling, or exception behavior/i);
 });

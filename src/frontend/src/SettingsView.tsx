@@ -1033,7 +1033,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         options.push({ id: modelId, label: modelId });
       }
     });
-    return options;
+    return options.sort((left, right) => left.label.localeCompare(right.label));
   }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel, strategyState]);
 
   const showComplianceTab = true;

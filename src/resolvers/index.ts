@@ -616,27 +616,51 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
     config,
   } as const;
 
+  const failOpen = {
+    sufficient: true,
+    missingCategoryKeys: [],
+    reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
+    durationMs: 0,
+    tokenUsage: {
+      input: 0,
+      output: 0,
+      total: 0,
+      byStage: {},
+    },
+    warning: 'Discovery sufficiency could not be evaluated, so generation will continue with your current answers. For workflow-heavy requests, the result may be under-scoped until discovery can confirm the missing business rules and exceptions.',
+  } as const;
+
+  const withResolverBudget = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Sufficiency evaluation exceeded ${timeoutMs}ms resolver budget.`));
+      }, timeoutMs);
+
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+
   try {
-    return await evaluateSufficiency(input);
+    return await withResolverBudget(evaluateSufficiency(input), 12000);
   } catch (firstErr) {
     console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
+    const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    const isBudgetFailure = /resolver budget/i.test(firstMessage);
+    if (isBudgetFailure) {
+      return failOpen;
+    }
     try {
-      return await evaluateSufficiency(input);
+      return await withResolverBudget(evaluateSufficiency(input), 8000);
     } catch (retryErr) {
       console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
-      return {
-        sufficient: true,
-        missingCategoryKeys: [],
-        reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
-        durationMs: 0,
-        tokenUsage: {
-          input: 0,
-          output: 0,
-          total: 0,
-          byStage: {},
-        },
-        warning: 'Discovery sufficiency could not be evaluated, so generation will continue with your current answers.',
-      };
+      return failOpen;
     }
   }
 });

@@ -133,6 +133,12 @@ export class AcceptanceRequirementsGenerationError extends Error {
   }
 }
 
+function trimForPrompt(text: string, maxChars: number): string {
+  const trimmed = String(text ?? '').trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
 export class GenerationCancelledError extends Error {
   constructor() {
     super('Generation cancelled');
@@ -1179,6 +1185,7 @@ export async function generateFeatures(opts: {
     domainRoles: config.domainRoles,
     processTaxonomy: config.processTaxonomy,
     processTaxonomyEnabled: config.processTaxonomyEnabled,
+    clarifyAnswerCount: clarifyAnswers.length,
     featurePlan: assessment.featurePlan,
   });
 
@@ -1470,7 +1477,15 @@ export async function evaluateSufficiency(opts: {
     Math.max(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, Math.min(MAX_FOLLOWUP_DISCOVERY_QUESTIONS, Math.round(opts.followupCap ?? 4))),
   );
   const followupMin = followupCap > 0 ? Math.min(MIN_FOLLOWUP_DISCOVERY_QUESTIONS, followupCap) : 0;
-  const qaText = opts.answers
+
+  const compactAnswers = opts.answers
+    .slice(0, 8)
+    .map((answer) => ({
+      ...answer,
+      question: trimForPrompt(answer.question, 180),
+      answer: trimForPrompt(answer.answer, 240),
+    }));
+  const qaText = compactAnswers
     .map(a => `Q: ${a.question}\nA: ${a.answer}`)
     .join('\n\n');
   const askedQuestionDetails = (opts.askedQuestions ?? opts.answers.map((answer) => ({
@@ -1478,13 +1493,14 @@ export async function evaluateSufficiency(opts: {
     categoryKey: answer.categoryKey,
     intent: answer.intent,
   })))
+    .slice(0, 8)
     .map((entry) => {
       if (typeof entry === 'string') {
-        return { question: entry.trim() };
+        return { question: trimForPrompt(entry, 180) };
       }
 
       return {
-        question: String(entry?.question ?? '').trim(),
+        question: trimForPrompt(String(entry?.question ?? ''), 180),
         categoryKey: entry?.categoryKey,
         intent: entry?.intent,
       };
@@ -1534,7 +1550,7 @@ export async function evaluateSufficiency(opts: {
         maxQuestions: Math.max(1, followupCap),
       }),
       userMessage,
-      maxTokens: 1400,
+      maxTokens: 900,
       reasoningEffort: 'low',
       ...buildLlmProviderOpts(opts.config),
     });
@@ -1588,6 +1604,7 @@ export async function evaluateSufficiency(opts: {
   const firstPass = evaluationPasses[0];
   const shouldRetryFollowup = !firstPass.sufficient
     && followupCap > 0
+    && firstPass.durationMs < 9000
     && followupQuestionsLookWeak(firstPass.questions, groundingTerms);
 
   if (shouldRetryFollowup) {

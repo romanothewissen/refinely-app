@@ -1090,14 +1090,14 @@ export function calibrateDiscoveryProfile(
   if (breadth >= 4) {
     scope = raiseScope(scope, 'moderate');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 5);
+    recommendedInitialCount = Math.max(recommendedInitialCount, 6);
   }
 
   if (breadth >= 6 || repairedQuestionCount >= 9) {
     scope = raiseScope(scope, 'broad');
     complexity = raiseComplexity(complexity, 'medium');
     ambiguity = raiseAmbiguity(ambiguity, 'high');
-    recommendedInitialCount = Math.max(recommendedInitialCount, 6);
+    recommendedInitialCount = Math.max(recommendedInitialCount, 8);
   }
 
   if (repairApplied) {
@@ -1105,7 +1105,7 @@ export function calibrateDiscoveryProfile(
     ambiguity = raiseAmbiguity(ambiguity, 'high');
     recommendedInitialCount = Math.max(
       recommendedInitialCount,
-      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(5, breadth + 1)),
+      Math.min(MAX_INITIAL_DISCOVERY_QUESTIONS, Math.max(7, breadth + 2)),
     );
   }
 

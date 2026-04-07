@@ -72,6 +72,7 @@ export function buildDecompositionSystemPrompt(opts: {
   domainRoles: string[];
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
+  clarifyAnswerCount?: number;
   featurePlan?: {
     min: number;
     max: number;
@@ -143,6 +144,17 @@ export function buildDecompositionSystemPrompt(opts: {
 - Do not exceed ${max} features.`;
   })();
 
+  const discoveryContextGuidance = typeof opts.clarifyAnswerCount === 'number'
+    ? opts.clarifyAnswerCount <= 1
+      ? `DISCOVERY SIGNAL:
+- Clarifying context is still THIN or incomplete.
+- Do not silently compress away workflow-defining ambiguity just to keep feature count low.
+- When channel handling, routing logic, case typing, matching, required captured information, lifecycle handling, or exception behavior are core to the requested capability, preserve that scope explicitly in the feature set and/or acceptance coverage.
+- If one strong feature can still cover the ask, make its scope rich enough that those workflow branches are clearly retained.`
+      : `DISCOVERY SIGNAL:
+- Clarifying context includes answered discovery questions. Use those answers to consolidate responsibly, but do not drop workflow-defining rules or exception behavior.`
+    : '';
+
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
@@ -175,6 +187,7 @@ RULES:
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
 ${processRule}
 ${planningGuidance ? `\n${planningGuidance}` : ''}
+${discoveryContextGuidance ? `\n${discoveryContextGuidance}` : ''}
 
 ${taxonomySection}
 
@@ -295,12 +308,17 @@ Requirement: "Managers must be able to approve or reject timesheets submitted by
 Reasoning: Four distinct deliverable behaviours: approval action, rejection action, payroll handoff, comment enforcement. Two actor groups (managers, employees). Core rule is stated; edge cases (late submission, delegation, resubmission) remain open but the workflow is clear. For this to be "high", multiple conflicting decision paths or 3+ actor groups would be needed.
 Output: {"reasoning": "...", "estimatedFeatures": 4, "estimatedQuestions": 7, "shape": "balanced", "complexity": "medium", "arDepth": "standard"}
 
-EXAMPLE 4 — Broad self-service platform:
+EXAMPLE 4 — Short but capability-heavy workflow area:
+Requirement: "As a support coordinator, I need one place to manage incoming customer communications and create or update cases from them."
+Reasoning: The actor is stated, but the operating logic is mostly not. Channel differences, case creation vs linking, duplicate handling, case typing, required captured information, matching rules, missing identifiers, and lifecycle handling are all materially unresolved. This is not just one focused rule; it is a short prompt that names a workflow area whose real behavior must largely be inferred. That should push complexity to high and require more discovery, even if the final feature count is still moderate.
+Output: {"reasoning": "...", "estimatedFeatures": 3, "estimatedQuestions": 10, "shape": "narrow", "complexity": "high", "arDepth": "thorough"}
+
+EXAMPLE 5 — Broad self-service platform:
 Requirement: "Build a self-service portal where customers can view their account, raise support tickets, track order status, manage their subscription, and update billing details."
 Reasoning: Five named capability areas, each implying multiple sub-features — this genuinely yields 8+ independently deliverable items. Authentication, permissions, and notification behaviour all unstated. For this to be "epic", the scope boundary itself would need to be unknown.
 Output: {"reasoning": "...", "estimatedFeatures": 8, "estimatedQuestions": 12, "shape": "broad", "complexity": "high", "arDepth": "thorough"}
 
-EXAMPLE 5 — Open-ended strategic initiative:
+EXAMPLE 6 — Open-ended strategic initiative:
 Requirement: "We need to modernise our entire customer onboarding process."
 Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every discovery dimension is open. This is genuinely epic — the scope is unknown, not just large.
 Output: {"reasoning": "...", "estimatedFeatures": 11, "estimatedQuestions": 14, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
@@ -310,6 +328,7 @@ WHAT TO LOOK FOR WHEN REASONING:
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
 - Do not split one narrowly scoped rule into multiple features just because it has states, timing, or unblock conditions. Count those as acceptance-requirement depth unless they are independently deliverable workflows.
 - Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two systems communicating via an interface is one process, not two actor groups.
+- Short capability-area asks about intake, channel consolidation, routing, matching, deduplication, case creation, prioritization, or case-type determination are often HIGH complexity when the business rules are mostly unstated. The hidden workflow logic matters more than the word count.
 - Do not anchor to word count alone. Distinguish two kinds of brevity: (1) precise brevity — short because the trigger, actor, and outcome are stated clearly — complexity comes from what is stated, not from what is missing; (2) vague brevity — short because the requirement names a capability area without stating actors, rules, states, or edge cases. In case (2), most behaviour must be inferred from domain knowledge — rate it as high, not medium, because the unknown-unknowns dominate. This affects both estimatedQuestions (more questions needed to uncover the unstated scope) and arDepth (implied behaviour must be covered). A long requirement can still be narrow if it is repetitive or over-specified; a short one can be high complexity if any practitioner in that domain would immediately recognise it implies multiple sub-workflows.
 - If you cannot decide between two adjacent values, the lower one is more accurate — your reasoning step will show you why.
 
@@ -400,6 +419,9 @@ DISCOVERY RULES:
 - Every question must be specific to THIS requirement, not generic boilerplate.
 - Preserve user-provided nouns exactly unless the evidence makes a better, more precise business noun obvious.
 - If the requirement already names the actor, business object, or workflow in a clear way, keep that wording instead of replacing it with a ref/doc term.
+- If the requirement is written as a user story such as As a [role], I need ..., preserve the role label but normalize the question voice into third-person business language.
+- Never write discovery questions in first person. Do not use I, my, me, we, our, or I need phrasing in the question text or suggestions.
+- When a named role is available, ask in role-based BA wording such as What should the TSS do when... rather than mirroring the original user-story sentence.
 - Use supporting evidence to avoid redundant questions and to understand the business context, not to inject jargon for its own sake.
 - Evaluate all 6 taxonomy categories, then ask only from the ones that are still materially unresolved.
 - ${questionPlanHint}
@@ -414,6 +436,7 @@ DISCOVERY RULES:
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
+- For intake, communication-channel, case-creation, matching, linking, or deduplication asks, you usually need coverage across channel differences, identifiers, case-typing rules, required captured information, routing logic, missing-data handling, and duplicate or follow-up behavior when those details remain ambiguous.
 - Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
 - Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
 - Provide exactly 4 suggestions per question.
@@ -423,6 +446,7 @@ DISCOVERY PROFILE DEFINITIONS — reason through these before populating discove
 - complexity: low = 1-2 decisions, one actor, rules stated; medium = several decisions, 1-2 actor groups, some rules implied; high = many decisions, 2-3 groups, significant behaviour unstated; very_high = most behaviour must be inferred, many groups, no rules stated. Named systems, teams, or platforms alone do not raise complexity.
 - ambiguity: low = trigger, actors, rules, and outcome all stated; medium = trigger and outcome clear but rules or edge cases missing; high = trigger, actors, or the core rules are genuinely unknown.
 - A single well-bounded rule can require questions in several taxonomy categories without becoming broad or high complexity. Discovery breadth is not the same as delivery breadth.
+- When the request names a capability area but leaves channel handling, identifiers, routing logic, case typing, missing-data handling, duplicate handling, or minimum required information unresolved, treat that as materially missing business logic rather than implementation detail.
 
 OUTPUT CONTRACT:
 Reason before scoring. Populate "profileReasoning" first: (1) what is explicitly stated — actors, trigger, rules, outcome; (2) what is genuinely missing vs merely an unstated detail; (3) why the chosen scope level fits and what would have to be true for a higher level to apply.
