@@ -391,6 +391,9 @@ resolver.define('saveUserPreferences', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const preferences = await saveUserPreferences(accountId, {
     defaultProjectKey: typeof payload?.defaultProjectKey === 'string' ? payload.defaultProjectKey : undefined,
+    quickRefineModelByProvider: payload?.quickRefineModelByProvider && typeof payload.quickRefineModelByProvider === 'object'
+      ? payload.quickRefineModelByProvider
+      : undefined,
   });
   return { success: true, ...preferences };
 });
@@ -1041,6 +1044,7 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
     const surface = (payload?.surface === 'issue-panel' ? 'issue-panel' : 'issue-action') as QuickRefineSurface;
     const issueKey = String(payload?.issueKey ?? '').trim();
     const sessionId = String(payload?.sessionId ?? '').trim();
+    const modelOverride = String(payload?.modelOverride ?? '').trim() || undefined;
     if (!issueKey || !sessionId) {
       return { success: false, error: 'Missing issue key or session id.' };
     }
@@ -1064,6 +1068,7 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
         generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
         tier: getEffectiveTier(config, context),
       },
+      modelOverride,
     });
 
     const now = new Date().toISOString();
@@ -1073,6 +1078,8 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
       issueKey,
       projectKey: issueContext.projectKey,
       issueType: issueContext.issueType,
+      modelProvider: config.generatorConfig.provider,
+      modelOverride,
       originalIssue: issueContext.originalIssue,
       context: issueContext,
       status: result.route === 'clarify' ? 'needs_clarification' : result.route === 'handoff' ? 'handoff' : 'draft',
@@ -1090,7 +1097,7 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
         turnType: 'refine',
         actorAccountId: accountId,
         provider: config.generatorConfig.provider,
-        model: config.generatorConfig.refineModel,
+        model: modelOverride || config.generatorConfig.refineModel,
         projectKey: issueContext.projectKey,
         requirementExcerpt: issueContext.originalIssue.summary.slice(0, 240),
         decisionSummary: [
@@ -1111,7 +1118,7 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
       projectKeys: [issueContext.projectKey],
       projectKey: issueContext.projectKey,
       sessionId,
-      model: config.generatorConfig.refineModel,
+      model: modelOverride || config.generatorConfig.refineModel,
       tokenUsage: result.route === 'rewrite' ? (result.draft?.tokenUsage ?? null) : (result.tokenUsage ?? null),
       metadata: {
         issueKey,
@@ -1150,6 +1157,7 @@ resolver.define('submitQuickRefineAnswers', async ({ payload, context }) => {
     }
 
     const answers = Array.isArray(payload?.answers) ? payload.answers : [];
+    const modelOverride = String(payload?.modelOverride ?? existing.session.modelOverride ?? '').trim() || undefined;
     const draft = await submitQuickRefineAnswers({
       context: existing.session.context,
       answers,
@@ -1158,10 +1166,12 @@ resolver.define('submitQuickRefineAnswers', async ({ payload, context }) => {
         generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
         tier: getEffectiveTier(config, context),
       },
+      modelOverride,
     });
 
     const nextSession: QuickRefineSession = {
       ...existing.session,
+      modelOverride,
       draft,
       questions: undefined,
       status: draft.handoffRecommended ? 'handoff' : 'draft',
@@ -1176,7 +1186,7 @@ resolver.define('submitQuickRefineAnswers', async ({ payload, context }) => {
         turnType: 'refine',
         actorAccountId: accountId,
         provider: config.generatorConfig.provider,
-        model: config.generatorConfig.refineModel,
+        model: modelOverride || config.generatorConfig.refineModel,
         projectKey: existing.session.projectKey,
         requirementExcerpt: existing.session.originalIssue.summary.slice(0, 240),
         decisionSummary: [
@@ -1196,7 +1206,7 @@ resolver.define('submitQuickRefineAnswers', async ({ payload, context }) => {
       projectKeys: [existing.session.projectKey],
       projectKey: existing.session.projectKey,
       sessionId,
-      model: config.generatorConfig.refineModel,
+      model: modelOverride || config.generatorConfig.refineModel,
       tokenUsage: draft.tokenUsage ?? null,
       metadata: {
         issueKey: existing.session.issueKey,
@@ -1232,6 +1242,7 @@ resolver.define('refineQuickRefineDraft', async ({ payload, context }) => {
     if (!existing.session?.draft) {
       return { success: false, error: 'Quick refine draft not found.' };
     }
+    const modelOverride = String(payload?.modelOverride ?? existing.session.modelOverride ?? '').trim() || undefined;
 
     const nextDraft = await refineQuickRefineDraft({
       context: existing.session.context,
@@ -1242,10 +1253,12 @@ resolver.define('refineQuickRefineDraft', async ({ payload, context }) => {
         generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
         tier: getEffectiveTier(config, context),
       },
+      modelOverride,
     });
 
     const nextSession: QuickRefineSession = {
       ...existing.session,
+      modelOverride,
       draft: nextDraft,
       status: nextDraft.handoffRecommended ? 'handoff' : 'draft',
       handoffReason: nextDraft.handoffReason,
@@ -1258,7 +1271,7 @@ resolver.define('refineQuickRefineDraft', async ({ payload, context }) => {
       projectKeys: [existing.session.projectKey],
       projectKey: existing.session.projectKey,
       sessionId,
-      model: config.generatorConfig.refineModel,
+      model: modelOverride || config.generatorConfig.refineModel,
       tokenUsage: nextDraft.tokenUsage ?? null,
       metadata: {
         issueKey: existing.session.issueKey,

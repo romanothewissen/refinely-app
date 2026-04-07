@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildQuickRefineReadFields,
   parseAcceptanceRequirementsFromText,
+  resolveQuickRefineModel,
   resolveQuickRefineProjectMapping,
   splitDescriptionAndArs,
 } from '../quick-refine';
@@ -85,4 +86,60 @@ test('buildQuickRefineReadFields includes mapped fields only once', () => {
 
   assert.equal(fields.filter((field) => field === 'description').length, 1);
   assert.equal(fields.includes('customfield_10015'), true);
+});
+
+test('resolveQuickRefineModel prefers the override and still applies tier downgrades', () => {
+  const model = resolveQuickRefineModel({
+    tier: 'free',
+    generatorConfig: {
+      provider: 'openai',
+      modelStrategy: 'simple',
+      bucketClasses: {
+        discovery: 'flash',
+        generation: 'pro',
+        refinement: 'flash',
+      },
+      modelStrategyVersion: 'test',
+      decompositionModel: 'gpt-4.1',
+      arModel: 'gpt-4.1',
+      clarifyModel: 'gpt-4.1-mini',
+      refineModel: 'gpt-4.1-mini',
+      evaluateModel: 'gpt-4.1-mini',
+      triageModel: 'gpt-4.1-mini',
+      themeModel: 'gpt-4.1-mini',
+      maxTokens: 8192,
+    },
+    goldSources: [],
+    domainContext: '',
+    domainRoles: [],
+    processTaxonomyEnabled: false,
+    processTaxonomy: [],
+    branding: {
+      appTitle: 'Refinely',
+      logoUrl: null,
+      primaryColor: '#000000',
+      secondaryColor: '#111111',
+    },
+    similarityConfig: {
+      threshold: 0.24,
+      useLlmRerank: true,
+    },
+    wiConfig: {
+      enabled: true,
+      topKChunks: 8,
+      maxChars: 100000,
+    },
+    compliance: {
+      enabled: false,
+      transparencyReportsEnabled: false,
+      piiMaskingEnabled: false,
+      auditTrailEnabled: false,
+    },
+    issueLinkType: 'Relates to',
+    arMappings: [],
+    domainContexts: [],
+    backlogStatusScopes: [],
+  } as any, 'refineModel', 'gpt-4.1') ;
+
+  assert.equal(model, 'gpt-4.1-mini');
 });

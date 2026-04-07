@@ -12,9 +12,23 @@ export async function saveUserPreferences(accountId: string, patch: Partial<User
   const next: UserPreferences = {
     ...current,
     ...patch,
+    quickRefineModelByProvider: {
+      ...(current.quickRefineModelByProvider ?? {}),
+      ...(patch.quickRefineModelByProvider ?? {}),
+    },
   };
   if (!next.defaultProjectKey || next.defaultProjectKey === '*') {
     delete next.defaultProjectKey;
+  }
+  if (next.quickRefineModelByProvider) {
+    Object.entries(next.quickRefineModelByProvider).forEach(([provider, model]) => {
+      if (!model?.trim()) {
+        delete next.quickRefineModelByProvider?.[provider as keyof typeof next.quickRefineModelByProvider];
+      }
+    });
+    if (!Object.keys(next.quickRefineModelByProvider).length) {
+      delete next.quickRefineModelByProvider;
+    }
   }
   await entitySet(KEYS.userPreferences(accountId), next);
   return next;

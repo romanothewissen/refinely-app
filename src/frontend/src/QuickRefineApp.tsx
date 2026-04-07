@@ -20,8 +20,12 @@ import {
   X,
 } from 'lucide-react';
 import { api } from './hooks/useForge';
+import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
+import { getCatalogEntriesForProvider, getCatalogModelId } from './modelStrategy';
 import type {
   AcceptanceRequirement,
+  LlmModelCatalogByVendor,
+  LlmProvider,
   QuickRefineAnswer,
   QuickRefineApplyResult,
   QuickRefineDraft,
@@ -33,6 +37,7 @@ import type {
 } from './types';
 
 type Stage = 'idle' | 'loading' | 'questions' | 'draft' | 'handoff';
+type DraftViewMode = 'diff' | 'result';
 
 interface QuickRefineAppProps {
   surface: QuickRefineSurface;
@@ -87,13 +92,147 @@ function formatRelativeTimestamp(value?: string | null) {
   return date.toLocaleString();
 }
 
-function summarizeFieldMapping(context: QuickRefineIssueContext | null) {
-  if (!context) return 'summary, description';
-  const mapping = context.fieldMapping;
-  const fields = [mapping.summaryFieldId, mapping.descriptionFieldId, ...mapping.arFieldIds]
-    .filter(Boolean)
-    .filter((value, index, values) => values.indexOf(value) === index);
-  return fields.join(', ');
+function buildModelOptions(
+  provider: LlmProvider | null,
+  modelCatalogs: LlmModelCatalogByVendor,
+  fallbackModels: string[] = [],
+) {
+  if (!provider) return [];
+  const { entries } = getCatalogEntriesForProvider(provider, modelCatalogs);
+  const options = new Map<string, string>();
+  entries.forEach((entry) => {
+    const id = getCatalogModelId(entry);
+    if (!id) return;
+    options.set(id, entry.displayName || entry.id);
+  });
+  fallbackModels.forEach((modelId) => {
+    const trimmed = String(modelId ?? '').trim();
+    if (trimmed && !options.has(trimmed)) {
+      options.set(trimmed, trimmed);
+    }
+  });
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  return [...options.entries()]
+    .map(([id, label]) => ({ id, label }))
+    .sort((left, right) => collator.compare(left.label, right.label));
+}
+
+function CompactArEditor({
+  ars,
+  onChange,
+}: {
+  ars: AcceptanceRequirement[];
+  onChange: (next: AcceptanceRequirement[]) => void;
+}) {
+  return (
+    <div className="space-y-2.5">
+      {ars.map((ar, index) => (
+        <div key={`ar-${index}`} className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-[11px] text-[var(--rf-danger)]"
+              onClick={() => onChange(ars.filter((_, candidateIndex) => candidateIndex !== index))}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-3">
+            {(['given', 'when', 'then'] as const).map((field) => (
+              <label key={field} className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{field}</span>
+                <textarea
+                  rows={2}
+                  value={ar[field]}
+                  onChange={(event) => {
+                    const next = [...ars];
+                    next[index] = {
+                      ...next[index],
+                      [field]: event.target.value,
+                    };
+                    onChange(next);
+                  }}
+                  className="w-full min-h-[72px] resize-y rounded-lg border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...(ars.length ? ars : []), emptyAr()])}
+        className="inline-flex items-center gap-2 rounded-lg border border-dashed border-[var(--rf-border-strong)] px-3 py-1.5 text-sm font-semibold text-[var(--rf-brand)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)]"
+      >
+        <Plus className="w-4 h-4" />
+        Add AR
+      </button>
+    </div>
+  );
+}
+
+function CompactArDiff({
+  original,
+  proposed,
+  mode,
+}: {
+  original: AcceptanceRequirement[];
+  proposed: AcceptanceRequirement[];
+  mode: DraftViewMode;
+}) {
+  const rows = alignAcceptanceRequirementsDetailed(original, proposed);
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => {
+        const isRemoved = row.type === 'removed';
+        const isAdded = row.type === 'added';
+        const current = row.type === 'removed' ? row.oldAr : row.proposed;
+        const previous = row.type === 'matched' ? row.oldAr : undefined;
+        return (
+          <div
+            key={`${row.type}-${index}`}
+            className={`rounded-xl border px-3 py-2 text-sm ${
+              isRemoved
+                ? 'border-[rgba(155,53,69,0.16)] bg-[rgba(155,53,69,0.05)]'
+                : isAdded
+                  ? 'border-[rgba(46,125,86,0.16)] bg-[rgba(46,125,86,0.05)]'
+                  : 'border-[var(--rf-border)] bg-white/70'
+            }`}
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+                {isRemoved ? 'Removed' : isAdded ? 'Added' : 'Updated'}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {(['given', 'when', 'then'] as const).map((field) => (
+                <div key={field} className="grid gap-2 md:grid-cols-[56px_minmax(0,1fr)]">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{field}</span>
+                  <div className="leading-6 text-[var(--rf-text)]">
+                    <DiffText
+                      oldText={previous?.[field] || current[field]}
+                      newText={isRemoved ? '' : current[field]}
+                      fullHighlight={isAdded}
+                      mode={mode === 'diff' ? 'redline' : 'blackline'}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {!rows.length ? (
+        <div className="rounded-xl border border-dashed border-[var(--rf-border-strong)] px-3 py-2 text-sm text-[var(--rf-text-tertiary)]">
+          No acceptance requirements yet.
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromptDialogProps) {
@@ -158,60 +297,6 @@ function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromp
   );
 }
 
-function ArEditor({
-  ars,
-  onChange,
-}: {
-  ars: AcceptanceRequirement[];
-  onChange: (next: AcceptanceRequirement[]) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      {ars.map((ar, index) => (
-        <div key={`ar-${index}`} className="rounded-2xl border border-[var(--rf-border)] bg-white/70 p-3 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-xs text-[var(--rf-danger)]"
-              onClick={() => onChange(ars.filter((_, candidateIndex) => candidateIndex !== index))}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
-          </div>
-          {(['given', 'when', 'then'] as const).map((field) => (
-            <label key={field} className="block space-y-1">
-              <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">{field}</span>
-              <textarea
-                rows={2}
-                value={ar[field]}
-                onChange={(event) => {
-                  const next = [...ars];
-                  next[index] = {
-                    ...next[index],
-                    [field]: event.target.value,
-                  };
-                  onChange(next);
-                }}
-                className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
-              />
-            </label>
-          ))}
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={() => onChange([...(ars.length ? ars : []), emptyAr()])}
-        className="inline-flex items-center gap-2 rounded-2xl border border-dashed border-[var(--rf-border-strong)] px-3 py-2 text-sm font-semibold text-[var(--rf-brand)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)]"
-      >
-        <Plus className="w-4 h-4" />
-        Add Acceptance Requirement
-      </button>
-    </div>
-  );
-}
-
 function DraftCard({
   title,
   changed,
@@ -244,11 +329,15 @@ function DraftCard({
 export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: QuickRefineAppProps) {
   const [issueKey, setIssueKey] = useState('');
   const [projectKey, setProjectKey] = useState('');
+  const [provider, setProvider] = useState<LlmProvider | null>(null);
+  const [modelCatalogs, setModelCatalogs] = useState<LlmModelCatalogByVendor>({});
+  const [modelOverride, setModelOverride] = useState('');
   const [context, setContext] = useState<QuickRefineIssueContext | null>(null);
   const [session, setSession] = useState<QuickRefineSession | null>(null);
   const [sessionId, setSessionId] = useState<string>('');
   const [stage, setStage] = useState<Stage>('idle');
   const [active, setActive] = useState(surface === 'issue-action');
+  const [draftViewMode, setDraftViewMode] = useState<DraftViewMode>('diff');
   const [busyLabel, setBusyLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -285,24 +374,52 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
         setIssueKey(nextIssueKey);
         setProjectKey(nextProjectKey);
 
-        const contextRes = await api.getQuickRefineIssueContext({
-          issueKey: nextIssueKey,
-          projectKey: nextProjectKey,
-          surface,
-        }) as any;
+        const [contextRes, configRes, preferencesRes] = await Promise.all([
+          api.getQuickRefineIssueContext({
+            issueKey: nextIssueKey,
+            projectKey: nextProjectKey,
+            surface,
+          }) as Promise<any>,
+          api.getConfig() as Promise<any>,
+          api.getUserPreferences() as Promise<any>,
+        ]);
         if (!contextRes?.success) {
           throw new Error(contextRes?.error || 'Could not load issue context.');
         }
 
         if (cancelled) return;
         const nextContext = contextRes.context as QuickRefineIssueContext;
+        const nextProvider = (configRes?.generatorConfig?.provider ?? null) as LlmProvider | null;
+        const nextModelCatalogs = (configRes?.generatorConfig?.modelCatalogs ?? {}) as LlmModelCatalogByVendor;
+        const configuredModels = [
+          configRes?.generatorConfig?.refineModel,
+          configRes?.generatorConfig?.clarifyModel,
+        ];
+        const nextModelOptions = buildModelOptions(nextProvider, nextModelCatalogs, configuredModels);
+        const preferredModel = String(preferencesRes?.quickRefineModelByProvider?.[nextProvider ?? ''] ?? '').trim();
+        const validPreferredModel = preferredModel && nextModelOptions.some((option) => option.id === preferredModel)
+          ? preferredModel
+          : String(configRes?.generatorConfig?.refineModel ?? '').trim();
+
         setContext(nextContext);
+        setProvider(nextProvider);
+        setModelCatalogs(nextModelCatalogs);
+        setModelOverride(validPreferredModel);
+
+        if (preferredModel && preferredModel !== validPreferredModel && nextProvider) {
+          void api.saveUserPreferences({
+            quickRefineModelByProvider: {
+              [nextProvider]: validPreferredModel,
+            },
+          }).catch(() => {});
+        }
 
         if (nextContext.existingSessionId) {
           const sessionRes = await api.getQuickRefineSession({ sessionId: nextContext.existingSessionId }) as any;
           if (sessionRes?.success && sessionRes?.session && !cancelled) {
             const nextSession = sessionRes.session as QuickRefineSession;
             startTransition(() => {
+              setModelOverride(String(nextSession.modelOverride ?? validPreferredModel).trim() || validPreferredModel);
               setSession(nextSession);
               setSessionId(nextSession.sessionId);
               setApplyResult(nextSession.applyResult || null);
@@ -338,6 +455,12 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
     };
   }, [surface]);
 
+  const modelOptions = useMemo(() => buildModelOptions(provider, modelCatalogs, []), [provider, modelCatalogs]);
+
+  const selectedModelLabel = useMemo(() => {
+    return modelOptions.find((option) => option.id === modelOverride)?.label || modelOverride || 'Default model';
+  }, [modelOptions, modelOverride]);
+
   const hasResume = Boolean(session && (session.questions?.length || session.draft || session.status === 'handoff'));
   const originalIssue = context?.originalIssue;
 
@@ -369,9 +492,30 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
 
   const openEditor = () => setActive(true);
 
+  const persistModelPreference = async (nextModel: string) => {
+    if (!provider) return;
+    try {
+      await api.saveUserPreferences({
+        quickRefineModelByProvider: {
+          [provider]: nextModel,
+        },
+      });
+    } catch {
+      // Best-effort only.
+    }
+  };
+
+  const handleModelChange = (nextModel: string) => {
+    setModelOverride(nextModel);
+    void persistModelPreference(nextModel);
+  };
+
   const restoreFromSession = (nextSession: QuickRefineSession) => {
     setSession(nextSession);
     setSessionId(nextSession.sessionId);
+    if (nextSession.modelOverride) {
+      setModelOverride(nextSession.modelOverride);
+    }
     setApplyResult(nextSession.applyResult || null);
     setHandoffReason(nextSession.handoffReason || '');
     if (nextSession.status === 'needs_clarification' && nextSession.questions?.length) {
@@ -397,19 +541,29 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
     setStage('idle');
   };
 
-  const handleStart = async () => {
+  const handleStart = async (options?: { restart?: boolean }) => {
     if (!issueKey || !projectKey) return;
     const nextSessionId = sessionId || createSessionId();
     setSessionId(nextSessionId);
     setBusy(true);
-    setBusyLabel('Building quick rewrite');
+    setBusyLabel(options?.restart ? 'Restarting quick rewrite' : 'Building quick rewrite');
     setError('');
+    if (options?.restart) {
+      setApplyResult(null);
+      setDraft(null);
+      setQuestions([]);
+      setAnswers([]);
+      setHandoffReason('');
+      setStage('idle');
+    }
     try {
       const res = await api.startQuickRefine({
         issueKey,
         projectKey,
         sessionId: nextSessionId,
         surface,
+        modelOverride,
+        restart: options?.restart,
       }) as any;
       if (!res?.success) {
         throw new Error(res?.error || 'Quick refine could not start.');
@@ -456,6 +610,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
         issueKey,
         sessionId,
         answers: completedAnswers,
+        modelOverride,
       }) as any;
       if (!res?.success) {
         throw new Error(res?.error || 'Could not apply answers.');
@@ -479,6 +634,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
         sessionId,
         instructions,
         draft,
+        modelOverride,
       }) as any;
       if (!res?.success) {
         throw new Error(res?.error || 'Could not refine the quick draft.');
@@ -547,15 +703,18 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--rf-text-tertiary)]">
+                  <span>{selectedModelLabel}</span>
                   <span>{context?.contextMeta.similarStoriesCount ?? 0} similar</span>
                   <span>{context?.contextMeta.wiDocsCount ?? 0} WI docs</span>
                   <span>{formatRelativeTimestamp(context?.updatedAt)}</span>
                 </div>
               </div>
             </div>
-            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2 py-0.5 text-[10px] text-[var(--rf-text-tertiary)]">
-              {summarizeFieldMapping(context)}
-            </span>
+            {context?.contextMeta.domainContextApplied ? (
+              <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2 py-0.5 text-[10px] text-[var(--rf-text-tertiary)]">
+                Project context on
+              </span>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -570,19 +729,6 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPenLine className="w-4 h-4" />}
               {hasResume ? 'Resume Draft' : 'Quick Rewrite'}
             </button>
-            {hasResume ? (
-              <button
-                type="button"
-                onClick={() => {
-                  openEditor();
-                  if (session) restoreFromSession(session);
-                }}
-                className="inline-flex items-center gap-2 rounded-lg border border-[var(--rf-border)] px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/80"
-              >
-                <RefreshCcw className="w-4 h-4" />
-                Resume
-              </button>
-            ) : null}
             {onOpenSettings ? (
               <button
                 type="button"
@@ -631,6 +777,38 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {stage === 'draft' ? (
+                <div className="inline-flex items-center gap-1 rounded-xl border border-[var(--rf-border)] bg-white p-1">
+                  {(['diff', 'result'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setDraftViewMode(mode)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] transition ${
+                        draftViewMode === mode
+                          ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                          : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text)]'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {modelOptions.length ? (
+                <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm text-[var(--rf-text-secondary)]">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Model</span>
+                  <select
+                    value={modelOverride}
+                    onChange={(event) => handleModelChange(event.target.value)}
+                    className="min-w-[170px] bg-transparent text-sm font-semibold text-[var(--rf-text)] outline-none"
+                  >
+                    {modelOptions.map((option) => (
+                      <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {onOpenSettings ? (
                 <button
                   type="button"
@@ -638,6 +816,17 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                   className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
                 >
                   Settings
+                </button>
+              ) : null}
+              {(stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
+                <button
+                  type="button"
+                  onClick={() => void handleStart({ restart: true })}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCcw className="w-4 h-4" />
+                  Restart
                 </button>
               ) : null}
               {surface === 'issue-panel' ? (
@@ -663,9 +852,11 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
           </div>
 
           <div className="flex flex-wrap gap-2 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-brand-muted)]/60 px-4 py-3 text-xs text-[var(--rf-text-secondary)]">
-            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 break-all">{summarizeFieldMapping(context)}</span>
             <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
               {context?.contextMeta.domainContextApplied ? 'project context on' : 'project context off'}
+            </span>
+            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
+              {selectedModelLabel}
             </span>
             <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
               {context?.contextMeta.similarStoriesCount ?? 0} similar
@@ -819,54 +1010,78 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                   actions={(
                     <div className="flex items-center gap-2 text-sm text-[var(--rf-text-tertiary)]">
                       <PencilLine className="w-4 h-4" />
-                      Editable preview
+                      {draftViewMode === 'diff' ? 'Compact diff' : 'Editable result'}
                     </div>
                   )}
                 >
-                  <label className="block space-y-1">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Summary</span>
-                    <input
-                      value={draft.currentIssue.summary}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        currentIssue: {
-                          ...draft.currentIssue,
-                          summary: event.target.value,
-                        },
-                      })}
-                      className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
-                    />
-                    {isFieldChanged(originalIssue.summary, draft.currentIssue.summary) ? (
-                      <p className="text-xs text-[var(--rf-text-tertiary)]">Original: {originalIssue.summary}</p>
-                    ) : null}
-                  </label>
+                  {draftViewMode === 'diff' ? (
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-3">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Summary</p>
+                        <div className="text-sm text-[var(--rf-text)]">
+                          <DiffText oldText={originalIssue.summary} newText={draft.currentIssue.summary} mode="redline" />
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-3">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Description</p>
+                        <div className="text-sm leading-7 text-[var(--rf-text)] whitespace-pre-wrap">
+                          <DiffText oldText={originalIssue.description} newText={draft.currentIssue.description} mode="redline" />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Acceptance Requirements</p>
+                        <CompactArDiff
+                          original={originalIssue.acceptanceRequirements}
+                          proposed={draft.currentIssue.acceptanceRequirements}
+                          mode={draftViewMode}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Summary</span>
+                        <input
+                          value={draft.currentIssue.summary}
+                          onChange={(event) => setDraft({
+                            ...draft,
+                            currentIssue: {
+                              ...draft.currentIssue,
+                              summary: event.target.value,
+                            },
+                          })}
+                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                        />
+                      </label>
 
-                  <label className="block space-y-1">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Description</span>
-                    <textarea
-                      rows={5}
-                      value={draft.currentIssue.description}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        currentIssue: {
-                          ...draft.currentIssue,
-                          description: event.target.value,
-                        },
-                      })}
-                      className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
-                    />
-                  </label>
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Description</span>
+                        <textarea
+                          rows={4}
+                          value={draft.currentIssue.description}
+                          onChange={(event) => setDraft({
+                            ...draft,
+                            currentIssue: {
+                              ...draft.currentIssue,
+                              description: event.target.value,
+                            },
+                          })}
+                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                        />
+                      </label>
 
-                  <ArEditor
-                    ars={draft.currentIssue.acceptanceRequirements}
-                    onChange={(next) => setDraft({
-                      ...draft,
-                      currentIssue: {
-                        ...draft.currentIssue,
-                        acceptanceRequirements: next,
-                      },
-                    })}
-                  />
+                      <CompactArEditor
+                        ars={draft.currentIssue.acceptanceRequirements}
+                        onChange={(next) => setDraft({
+                          ...draft,
+                          currentIssue: {
+                            ...draft.currentIssue,
+                            acceptanceRequirements: next,
+                          },
+                        })}
+                      />
+                    </>
+                  )}
                 </DraftCard>
 
                 <DraftCard
@@ -963,7 +1178,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                             />
                           </label>
 
-                          <ArEditor
+                          <CompactArEditor
                             ars={candidate.acceptanceRequirements}
                             onChange={(next) => setDraft({
                               ...draft,

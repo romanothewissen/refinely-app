@@ -77,6 +77,15 @@ function buildProviderOpts(config: TenantConfig) {
   };
 }
 
+function resolveQuickRefineModel(
+  config: TenantConfig,
+  fallbackField: 'clarifyModel' | 'refineModel',
+  modelOverride?: string,
+) {
+  const requestedModel = String(modelOverride ?? '').trim() || config.generatorConfig[fallbackField];
+  return getTierModel(requestedModel, config.tier);
+}
+
 function normalizeFieldIds(fieldIds: Array<string | null | undefined> = []) {
   return [...new Set(fieldIds.map((id) => String(id ?? '').trim()).filter(Boolean))];
 }
@@ -664,6 +673,7 @@ export async function loadQuickRefineIssueContext(opts: {
 export async function startQuickRefine(opts: {
   context: QuickRefineIssueContext;
   config: TenantConfig;
+  modelOverride?: string;
 }): Promise<
   | { route: 'clarify'; questions: QuickRefineQuestion[]; reason?: string; tokenUsage: TokenUsageSummary }
   | { route: 'handoff'; reason: string; tokenUsage: TokenUsageSummary }
@@ -686,7 +696,7 @@ export async function startQuickRefine(opts: {
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
   if (shouldClarifyQuickRefine(opts.context.originalIssue)) {
     const questionsResult = await callLlmJsonWithUsage<QuickRefineQuestionResponse>({
-      model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      model: resolveQuickRefineModel(opts.config, 'clarifyModel', opts.modelOverride),
       systemPrompt: buildQuickRefineQuestionsPrompt(domainContext, domainRoles),
       userMessage: buildContextMessage({
         issueKey: opts.context.issueKey,
@@ -725,7 +735,7 @@ export async function startQuickRefine(opts: {
   ]);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
-    model: getTierModel(opts.config.generatorConfig.refineModel, opts.config.tier),
+    model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
     systemPrompt: buildQuickRefineRewritePrompt(domainContext, domainRoles, 'rewrite'),
     userMessage: buildContextMessage({
       issueKey: opts.context.issueKey,
@@ -767,6 +777,7 @@ export async function submitQuickRefineAnswers(opts: {
   context: QuickRefineIssueContext;
   answers: QuickRefineAnswer[];
   config: TenantConfig;
+  modelOverride?: string;
 }): Promise<QuickRefineDraft> {
   const projectKeys = [opts.context.projectKey];
   const domainContext = buildCombinedDomainContext(opts.config, projectKeys);
@@ -790,7 +801,7 @@ export async function submitQuickRefineAnswers(opts: {
   });
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
-    model: getTierModel(opts.config.generatorConfig.refineModel, opts.config.tier),
+    model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
     systemPrompt: buildQuickRefineRewritePrompt(domainContext, domainRoles, 'rewrite'),
     userMessage: buildContextMessage({
       issueKey: opts.context.issueKey,
@@ -820,13 +831,14 @@ export async function refineQuickRefineDraft(opts: {
   draft: QuickRefineDraft;
   instructions: string;
   config: TenantConfig;
+  modelOverride?: string;
 }): Promise<QuickRefineDraft> {
   const projectKeys = [opts.context.projectKey];
   const domainContext = buildCombinedDomainContext(opts.config, projectKeys);
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
-    model: getTierModel(opts.config.generatorConfig.refineModel, opts.config.tier),
+    model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
     systemPrompt: buildQuickRefineRewritePrompt(domainContext, domainRoles, 'refine'),
     userMessage: [
       `ISSUE KEY: ${opts.context.issueKey}`,
@@ -848,6 +860,8 @@ export async function refineQuickRefineDraft(opts: {
     mergeTokenUsage(opts.draft.tokenUsage, buildTokenUsage('quick_refine_refine', rewrite.usage)),
   );
 }
+
+export { resolveQuickRefineModel };
 
 async function updateExistingIssue(issueKey: string, fields: Record<string, unknown>) {
   const res = await asUser().requestJira(assumeTrustedRoute(`/rest/api/3/issue/${issueKey}`), {

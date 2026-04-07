@@ -181,6 +181,7 @@ export interface TenantConfig {
 
 export interface UserPreferences {
   defaultProjectKey?: string;
+  quickRefineModelByProvider?: Partial<Record<LlmProvider, string>>;
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
@@ -541,6 +542,8 @@ export interface QuickRefineSession {
   issueKey: string;
   projectKey: string;
   issueType: string;
+  modelProvider?: LlmProvider;
+  modelOverride?: string;
   originalIssue: QuickRefineIssueFields;
   context: QuickRefineIssueContext;
   status: QuickRefineSessionStatus;

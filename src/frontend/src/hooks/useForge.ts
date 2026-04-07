@@ -11,7 +11,7 @@ export const api = {
   saveConfig: (config: unknown) => invoke('saveConfig', p(config)),
   saveProjectConfig: (payload: any) => invoke('saveProjectConfig', payload),
   getUserPreferences: () => invoke('getUserPreferences'),
-  saveUserPreferences: (payload: { defaultProjectKey?: string }) => invoke('saveUserPreferences', payload),
+  saveUserPreferences: (payload: { defaultProjectKey?: string; quickRefineModelByProvider?: Partial<Record<LlmProvider, string>> }) => invoke('saveUserPreferences', payload),
   patchConfig: (patch: unknown) => invoke('patchConfig', p(patch)),
 
   // Generation progress (polling)
@@ -99,17 +99,21 @@ export const api = {
     projectKey?: string;
     sessionId: string;
     surface: 'issue-panel' | 'issue-action';
+    modelOverride?: string;
+    restart?: boolean;
   }) => invoke('startQuickRefine', payload),
   submitQuickRefineAnswers: (payload: {
     issueKey: string;
     sessionId: string;
     answers: unknown[];
+    modelOverride?: string;
   }) => invoke('submitQuickRefineAnswers', payload),
   refineQuickRefineDraft: (payload: {
     issueKey: string;
     sessionId: string;
     instructions: string;
     draft: unknown;
+    modelOverride?: string;
   }) => invoke('refineQuickRefineDraft', payload),
   applyQuickRefine: (payload: {
     issueKey: string;

@@ -140,6 +140,10 @@ export function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[
   }));
 }
 
+export function getCatalogModelId(entry?: LlmModelCatalogEntry) {
+  return entry?.deploymentName || entry?.id || '';
+}
+
 export function getCatalogEntriesForProvider(
   provider: LlmProvider,
   modelCatalogs: LlmModelCatalogByVendor,
