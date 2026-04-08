@@ -7,7 +7,8 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { Feature, GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
+import { DiscoveryProfile, Feature, GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
+import { TriageResult } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
@@ -32,6 +33,80 @@ import {
   summarizeReferencedSimilarStories,
   summarizeReferencedWiSections,
 } from '../services/project-selection';
+
+// ─── Discovery Profile Floor ─────────────────────────────────────────────────
+// The triage model (Haiku) runs before generation and can under-estimate scope.
+// The clarify model (Sonnet) already assessed scope/complexity during discovery.
+// This function upgrades the triage result to be at least as high as the clarify
+// profile suggests — taking the max across all dimensions.
+
+const SHAPE_ORDER = ['minimal', 'narrow', 'balanced', 'broad', 'epic'] as const;
+const COMPLEXITY_ORDER = ['trivial', 'low', 'medium', 'high', 'very_high'] as const;
+const AR_DEPTH_ORDER = ['minimal', 'lean', 'standard', 'thorough', 'comprehensive'] as const;
+type Shape = typeof SHAPE_ORDER[number];
+type Complexity = typeof COMPLEXITY_ORDER[number];
+type ArDepth = typeof AR_DEPTH_ORDER[number];
+
+function maxShape(a: Shape, b: Shape): Shape {
+  return SHAPE_ORDER.indexOf(a) >= SHAPE_ORDER.indexOf(b) ? a : b;
+}
+function maxComplexity(a: Complexity, b: Complexity): Complexity {
+  return COMPLEXITY_ORDER.indexOf(a) >= COMPLEXITY_ORDER.indexOf(b) ? a : b;
+}
+function maxArDepth(a: ArDepth, b: ArDepth): ArDepth {
+  return AR_DEPTH_ORDER.indexOf(a) >= AR_DEPTH_ORDER.indexOf(b) ? a : b;
+}
+
+function complexityToArDepth(c: Complexity): ArDepth {
+  if (c === 'very_high') return 'comprehensive';
+  if (c === 'high') return 'thorough';
+  if (c === 'medium') return 'standard';
+  if (c === 'low') return 'lean';
+  return 'minimal';
+}
+
+function applyDiscoveryProfileFloor(
+  triage: TriageResult | null,
+  profile: DiscoveryProfile,
+): TriageResult {
+  // Map clarify scope → minimum triage shape + feature count
+  const scopeToShape: Record<DiscoveryProfile['scope'], { shape: Shape; minFeatures: number }> = {
+    narrow:    { shape: 'narrow',   minFeatures: 2 },
+    moderate:  { shape: 'balanced', minFeatures: 4 },
+    broad:     { shape: 'broad',    minFeatures: 7 },
+    very_broad: { shape: 'epic',    minFeatures: 11 },
+  };
+
+  // Map clarify complexity → triage complexity (same scale except 'trivial' doesn't exist in clarify)
+  const complexityMap: Record<DiscoveryProfile['complexity'], Complexity> = {
+    low:       'low',
+    medium:    'medium',
+    high:      'high',
+    very_high: 'very_high',
+  };
+
+  const profileShape = scopeToShape[profile.scope];
+  const profileComplexity = complexityMap[profile.complexity];
+
+  const baseFeatures = Math.max(1, triage?.estimatedFeatures ?? 1);
+  const baseShape = (triage?.shape ?? 'minimal') as Shape;
+  const baseComplexity = (triage?.complexity ?? 'low') as Complexity;
+  const baseArDepth = (triage?.arDepth ?? 'lean') as ArDepth;
+  const baseQuestions = Math.max(0, triage?.estimatedQuestions ?? 0);
+
+  const finalShape = maxShape(baseShape, profileShape.shape);
+  const finalComplexity = maxComplexity(baseComplexity, profileComplexity);
+  const finalFeatures = Math.max(baseFeatures, profileShape.minFeatures);
+  const finalArDepth = maxArDepth(baseArDepth, complexityToArDepth(finalComplexity));
+
+  return {
+    estimatedFeatures: finalFeatures,
+    estimatedQuestions: baseQuestions,
+    shape: finalShape,
+    complexity: finalComplexity,
+    arDepth: finalArDepth,
+  };
+}
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -137,7 +212,7 @@ function buildFeatureProgressState(
 }
 
 export async function handler(event: { body: GenerationEvent }) {
-  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey, projectKeys } = event.body;
+  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey, projectKeys, clarifyDiscoveryProfile } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
@@ -240,7 +315,15 @@ export async function handler(event: { body: GenerationEvent }) {
         : Promise.resolve([]),
       triagePromise,
     ]);
-    triageSnapshot = triageResult;
+    // Apply clarify profile as a floor on triage estimates.
+    // The clarify LLM (a capable model with richer prompting) already assessed
+    // scope and complexity during discovery. If the triage under-estimates relative
+    // to that assessment, upgrade it so decomposition gets accurate guidance.
+    const effectiveTriageResult = clarifyDiscoveryProfile
+      ? applyDiscoveryProfileFloor(triageResult, clarifyDiscoveryProfile)
+      : triageResult;
+
+    triageSnapshot = effectiveTriageResult;
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
@@ -270,7 +353,7 @@ export async function handler(event: { body: GenerationEvent }) {
     // Progress: pass 1
     await updateProgress('Planning feature structure from gathered context…', 1, {
       stage: 'decomposition',
-      triage: buildTriagePayload(triageResult),
+      triage: buildTriagePayload(effectiveTriageResult),
       sources: progressSources,
     });
 
@@ -283,7 +366,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
-      precomputedTriage: triageResult,
+      precomputedTriage: effectiveTriageResult,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
         if (!triageResult) {

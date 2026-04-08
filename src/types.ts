@@ -665,6 +665,8 @@ export interface GenerationEvent {
   wiContext?: string;
   projectKey: string;
   projectKeys?: string[];
+  /** Discovery profile from the clarify LLM — used to floor triage estimates. */
+  clarifyDiscoveryProfile?: DiscoveryProfile;
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

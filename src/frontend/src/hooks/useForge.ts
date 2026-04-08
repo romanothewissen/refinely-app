@@ -25,6 +25,7 @@ export const api = {
     attachmentText?: string;
     projectKey?: string;
     projectKeys?: string[];
+    clarifyDiscoveryProfile?: unknown;
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)

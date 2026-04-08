@@ -496,6 +496,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     wiContext: '',      // fetched inside queue consumer
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
+    clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker

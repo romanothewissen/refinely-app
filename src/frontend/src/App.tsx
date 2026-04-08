@@ -1190,6 +1190,7 @@ function LegacyApp({
         attachmentText,
         projectKey,
         projectKeys,
+        clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
       }) as any;
 
       if (res?.success) {
