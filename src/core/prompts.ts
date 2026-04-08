@@ -96,12 +96,16 @@ export function buildDecompositionSystemPrompt(opts: {
   const planningGuidance = (() => {
     if (!opts.featurePlan) return '';
     const { shape, complexity, target, min, max } = opts.featurePlan;
+    const isBroadOrEpic = shape === 'broad' || shape === 'epic';
+    const estimateGuidance = isBroadOrEpic
+      ? `- The estimate (${min}–${max}, midpoint ${target}) is a reliable floor for this scope. Expect to find this many independently deliverable capabilities — only consolidate where features are genuinely inseparable, not just closely related.`
+      : `- Treat that range as reasoning context, not as a quota or upper bound. If the requirement is genuinely focused, return fewer features — even below the range. If deep analysis reveals more independently deliverable capabilities than the initial estimate anticipated, return more — even above the range.
+- Your own decomposition reasoning takes priority over the triage estimate. The triage was a fast shallow pass; you have the full context.`;
     const base = `OUTPUT CALIBRATION:
 - The requirement shape appears: ${shape.toUpperCase()}
 - The requirement complexity appears: ${complexity.toUpperCase()}
 - The prior assessment estimates ${min}-${max} independently valuable features (midpoint: ${target}).
-- Treat that range as reasoning context, not as a quota or upper bound. If the requirement is genuinely focused, return fewer features — even below the range. If deep analysis reveals more independently deliverable capabilities than the initial estimate anticipated, return more — even above the range.
-- Your own decomposition reasoning takes priority over the triage estimate. The triage was a fast shallow pass; you have the full context.`;
+${estimateGuidance}`;
 
     if (shape === 'minimal')
       return `${base}
@@ -134,9 +138,9 @@ ${isHighComplexity
 
     if (shape === 'broad')
       return `${base}
-- This is a broad requirement covering multiple capabilities. Use the planning hint to sanity-check scope, not to force extra features.
-- Work through the decomposition framework to test whether multiple independent deliverables exist. Do not create a feature for every dimension by default.
-- Each distinct workflow or role-specific behavior should be its own feature.
+- This is a broad requirement covering multiple capabilities. The planning estimate is a floor — a broad requirement typically has multiple independently deliverable capabilities, and your job is to surface all of them.
+- Work through the decomposition framework to find distinct workflows, role-specific behaviors, and independently testable capabilities. Do not collapse them to keep count low.
+- Each distinct workflow or role-specific behavior should be its own feature. Only consolidate when features are genuinely inseparable — not just closely related.
 - Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature unless it is explicitly requested as a separate deliverable.
 `;
 

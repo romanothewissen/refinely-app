@@ -61,6 +61,39 @@ function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number
   }
 }
 
+// ─── Model-Capability Helpers ─────────────────────────────────────────────────
+// These detect thinking/reasoning support from model names so we only send the
+// vendor-specific thinking params to models that actually support them.
+// Update the patterns here when new model generations ship with changed APIs.
+
+function buildGeminiThinkingConfig(
+  model: string,
+  effort: LlmCallOptions['reasoningEffort'],
+): Record<string, unknown> | undefined {
+  if (!effort || effort === 'none') return undefined;
+  const budget = geminiThinkingBudget(effort);
+  if (budget === undefined || budget === 0) return undefined;
+  // Thinking-capable Gemini models: 2.x series, explicit "thinking" in name, or "exp"
+  // Non-thinking models (e.g. gemini-1.5-flash, gemini-1.0) do not accept thinkingConfig.
+  // When Gemini 3.0+ changes its schema, add a version branch here.
+  const isThinkingCapable = /gemini-(2[._]|flash-2|pro-2|exp)/i.test(model)
+    || model.toLowerCase().includes('thinking');
+  if (!isThinkingCapable) return undefined;
+  return { thinkingBudget: budget };
+}
+
+function anthropicSupportsThinking(model: string): boolean {
+  // Extended thinking requires Claude 3.7+ Sonnet or any Claude 4.x model.
+  // Older models (3.5, 3.0, etc.) reject the thinking block with a 400 error.
+  return /claude-(3[-_]7|sonnet-4|opus-4|haiku-4|4[-_])/i.test(model);
+}
+
+function openAISupportsReasoning(model: string): boolean {
+  // reasoning: { effort } is only supported by o-series models (o1, o3, o4, o3-mini, etc.)
+  // GPT-4o and other chat models ignore or error on this parameter.
+  return /\bo\d/.test(model);
+}
+
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
 
 function summarizeJsonParseInput(text: string): Record<string, string | number | boolean> {
@@ -475,16 +508,16 @@ async function callGemini(opts: {
   const model = mapModelForGemini(opts.model);
   const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const thinkingBudget = geminiThinkingBudget(opts.reasoningEffort);
-  const useThinking = thinkingBudget !== undefined && thinkingBudget > 0;
+  const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort);
+  const useThinking = thinkingConfig !== undefined;
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: opts.maxTokens ?? 8192,
   };
   if (!useThinking) {
     generationConfig.responseMimeType = 'application/json';
   }
-  if (thinkingBudget !== undefined) {
-    generationConfig.thinkingConfig = { thinkingBudget };
+  if (thinkingConfig) {
+    generationConfig.thinkingConfig = thinkingConfig;
   }
 
   const res = await fetchWithTimeout(url, {
@@ -567,7 +600,7 @@ async function callAnthropic(opts: {
     ],
     max_tokens: opts.maxTokens ?? 8192,
   };
-  if (opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+  if (anthropicSupportsThinking(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.thinking = { type: 'enabled', budget_tokens: geminiThinkingBudget(opts.reasoningEffort) ?? 4096 };
   }
 
@@ -629,7 +662,7 @@ async function callOpenAI(opts: {
     max_tokens: opts.maxTokens ?? 8192,
     response_format: { type: 'json_object' },
   };
-  if (opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+  if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning = { effort: opts.reasoningEffort };
   }
 
@@ -688,7 +721,7 @@ async function callAzureOpenAI(opts: {
     ],
     max_tokens: opts.maxTokens ?? 8192,
   };
-  if (opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+  if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning = { effort: opts.reasoningEffort };
   }
 

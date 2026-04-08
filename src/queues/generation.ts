@@ -260,41 +260,53 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentIncluded: Boolean(attachmentText?.trim()),
     };
 
-    const triagePromise = assessRequirementWithLlm({
-        requirement: maskedRequirement.text,
-        clarifyAnswers: maskedAnswers.answers,
-        generatorConfig: config.generatorConfig,
-        tier: config.tier,
-        providerOpts: {
-          provider: config.generatorConfig.provider,
-          geminiApiKey: config.generatorConfig.geminiApiKey,
-          geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-          openaiApiKey: config.generatorConfig.openaiApiKey,
-          openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-          azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
-          azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
-          azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
-          modelCatalogs: config.generatorConfig.modelCatalogs,
-          piiMaskingEnabled: piiEnabled,
-        },
-      }).then(async triageResult => {
-        const triage = buildTriagePayload(triageResult);
-        if (triage) {
-          const arText = ` with ${triage.arDepth} acceptance depth`;
-          await updateProgress(
-            `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ${triage.featureTarget} features${arText}`,
-            1,
-            {
-              stage: 'triage',
-              triage,
-              sources: baseSources,
-            },
-          );
-        }
-        return triageResult;
-      });
+    // When the user completed discovery, skip the triage LLM call — the clarify model
+    // already assessed scope and complexity with a richer prompt. Derive the effective
+    // triage directly from the discovery profile and fire the progress message immediately.
+    const triagePromise: Promise<Awaited<ReturnType<typeof assessRequirementWithLlm>>> = clarifyDiscoveryProfile
+      ? Promise.resolve(applyDiscoveryProfileFloor(null, clarifyDiscoveryProfile)).then(async result => {
+          const triage = buildTriagePayload(result);
+          if (triage) {
+            const arText = ` with ${triage.arDepth} acceptance depth`;
+            await updateProgress(
+              `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ${triage.featureTarget} features${arText}`,
+              1,
+              { stage: 'triage', triage, sources: baseSources },
+            );
+          }
+          return result;
+        })
+      : assessRequirementWithLlm({
+          requirement: maskedRequirement.text,
+          clarifyAnswers: maskedAnswers.answers,
+          generatorConfig: config.generatorConfig,
+          tier: config.tier,
+          providerOpts: {
+            provider: config.generatorConfig.provider,
+            geminiApiKey: config.generatorConfig.geminiApiKey,
+            geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+            openaiApiKey: config.generatorConfig.openaiApiKey,
+            openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+            azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
+            azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
+            azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+            modelCatalogs: config.generatorConfig.modelCatalogs,
+            piiMaskingEnabled: piiEnabled,
+          },
+        }).then(async triageResult => {
+          const triage = buildTriagePayload(triageResult);
+          if (triage) {
+            const arText = ` with ${triage.arDepth} acceptance depth`;
+            await updateProgress(
+              `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ${triage.featureTarget} features${arText}`,
+              1,
+              { stage: 'triage', triage, sources: baseSources },
+            );
+          }
+          return triageResult;
+        });
 
-    const [wiContext, similarStories, triageResult] = await Promise.all([
+    const [wiContext, similarStories, effectiveTriageResult] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(
             deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
@@ -315,13 +327,6 @@ export async function handler(event: { body: GenerationEvent }) {
         : Promise.resolve([]),
       triagePromise,
     ]);
-    // Apply clarify profile as a floor on triage estimates.
-    // The clarify LLM (a capable model with richer prompting) already assessed
-    // scope and complexity during discovery. If the triage under-estimates relative
-    // to that assessment, upgrade it so decomposition gets accurate guidance.
-    const effectiveTriageResult = clarifyDiscoveryProfile
-      ? applyDiscoveryProfileFloor(triageResult, clarifyDiscoveryProfile)
-      : triageResult;
 
     triageSnapshot = effectiveTriageResult;
 
@@ -369,7 +374,7 @@ export async function handler(event: { body: GenerationEvent }) {
       precomputedTriage: effectiveTriageResult,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
-        if (!triageResult) {
+        if (!effectiveTriageResult) {
           await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features, ~${triage.arTarget} ARs each`, 1, {
             stage: 'triage',
             triage,
@@ -386,7 +391,7 @@ export async function handler(event: { body: GenerationEvent }) {
         }));
         await updateProgress(`Writing acceptance requirements for ${draftFeatures.length} feature${draftFeatures.length !== 1 ? 's' : ''}…`, 2, {
           stage: 'acceptance_requirements',
-          triage: buildTriagePayload(triageResult),
+          triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, 0),
           arProgress: { completed: 0, total: draftFeatures.length },
@@ -396,7 +401,7 @@ export async function handler(event: { body: GenerationEvent }) {
       onArProgress: async (completed, total) => {
         await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2, {
           stage: 'acceptance_requirements',
-          triage: buildTriagePayload(triageResult),
+          triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, completed),
           arProgress: { completed, total },

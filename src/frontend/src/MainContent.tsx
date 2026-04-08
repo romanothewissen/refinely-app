@@ -283,19 +283,19 @@ function DiscoveryScoreCard({
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{discoveryProfile ? 'Scope' : 'Ask shape'}</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Scope</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">
             {discoveryProfile
               ? (DISCOVERY_SCOPE_LABELS[discoveryProfile.scope] ?? discoveryProfile.scope)
-              : (assessment?.shape ? (SHAPE_LABELS[assessment.shape] ?? assessment.shape) : 'Assessing')}
+              : 'Assessing'}
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{discoveryProfile ? 'Ambiguity' : 'Clarity'}</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Ambiguity</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">
             {discoveryProfile
               ? (DISCOVERY_AMBIGUITY_LABELS[discoveryProfile.ambiguity] ?? discoveryProfile.ambiguity)
-              : (assessment?.clarity ? (DISCOVERY_CLARITY_LABELS[assessment.clarity] ?? assessment.clarity) : 'Assessing')}
+              : 'Assessing'}
           </div>
         </div>
         <div>
