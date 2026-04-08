@@ -498,6 +498,7 @@ export interface QuickRefineContextMeta extends ContextSourceMeta {
 
 export interface QuickRefineDraft {
   currentIssue: QuickRefineIssueFields;
+  diffBaseIssue?: QuickRefineIssueFields;
   splitCandidates: SplitCandidate[];
   clarifyAnswers: QuickRefineAnswer[];
   contextMeta?: QuickRefineContextMeta;

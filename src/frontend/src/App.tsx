@@ -9,7 +9,7 @@ import { api } from './hooks/useForge';
 import { useGenerationRealtime, useClarifyRealtime, type GenerationProgressPayload } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
-import QuickRefineApp from './QuickRefineApp';
+import QuickRefineApp, { type QuickRefineViewState } from './QuickRefineApp';
 import type {
   ClarifyAnswer,
   ClarifyCategoryKey,
@@ -338,9 +338,11 @@ async function fileToBase64(file: File): Promise<string> {
 function LegacyApp({
   initialViewMode = 'generate',
   initialSettingsTab = 'models',
+  onCloseSettings,
 }: {
   initialViewMode?: 'generate' | 'settings';
   initialSettingsTab?: 'models' | 'jira' | 'domain' | 'billing';
+  onCloseSettings?: () => void;
 }) {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>(initialViewMode);
   const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialSettingsTab);
@@ -390,7 +392,7 @@ function LegacyApp({
   const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
   const [sufficiencyProgressTick, setSufficiencyProgressTick] = useState(0);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(initialViewMode !== 'settings');
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1431,6 +1433,10 @@ function LegacyApp({
       {viewMode === 'settings' && isAdmin ? (
         <SettingsView
           onClose={() => {
+            if (onCloseSettings) {
+              onCloseSettings();
+              return;
+            }
             setViewMode('generate');
             setSidebarOpen(true);
             api.getConfig()
@@ -1594,6 +1600,8 @@ export default function App() {
   const [openLegacyWorkflow, setOpenLegacyWorkflow] = useState(false);
   const [legacyLaunchMode, setLegacyLaunchMode] = useState<'generate' | 'settings'>('generate');
   const [legacySettingsTab, setLegacySettingsTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
+  const [quickRefineViewState, setQuickRefineViewState] = useState<QuickRefineViewState | null>(null);
+  const [returnToQuickRefine, setReturnToQuickRefine] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1620,14 +1628,18 @@ export default function App() {
     return (
       <QuickRefineApp
         surface={surface}
+        initialState={quickRefineViewState}
+        onStateChange={setQuickRefineViewState}
         onOpenFullWorkflow={() => {
           setLegacyLaunchMode('generate');
           setLegacySettingsTab('models');
+          setReturnToQuickRefine(false);
           setOpenLegacyWorkflow(true);
         }}
         onOpenSettings={() => {
           setLegacyLaunchMode('settings');
           setLegacySettingsTab('jira');
+          setReturnToQuickRefine(true);
           setOpenLegacyWorkflow(true);
         }}
       />
@@ -1638,6 +1650,10 @@ export default function App() {
     <LegacyApp
       initialViewMode={legacyLaunchMode}
       initialSettingsTab={legacySettingsTab}
+      onCloseSettings={returnToQuickRefine ? () => {
+        setOpenLegacyWorkflow(false);
+        setReturnToQuickRefine(false);
+      } : undefined}
     />
   );
 }

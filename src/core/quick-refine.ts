@@ -162,6 +162,89 @@ function sanitizeClause(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeSentence(value: string): string {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim().replace(/^[,.;:\s]+|[,.;:\s]+$/g, '');
+  return text;
+}
+
+function normalizeBenefit(value: string): string {
+  return normalizeSentence(value)
+    .replace(/^this\s+(?:ensures|allows|helps|means)\s+/i, '')
+    .replace(/^to\s+/i, '');
+}
+
+function ensureTrailingPeriod(value: string): string {
+  const text = normalizeSentence(value);
+  if (!text) return '';
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+function toSentenceCase(value: string): string {
+  const text = normalizeSentence(value);
+  if (!text) return '';
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function parseStoryLikeDescription(value: string): { role: string; action: string; benefit: string } | null {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+
+  const strictMatch = text.match(/^As an?\s+(.+?),\s*I need to\s+(.+?)\s+so that\s+(.+)$/i);
+  if (strictMatch) {
+    return {
+      role: normalizeSentence(strictMatch[1]),
+      action: normalizeSentence(strictMatch[2]),
+      benefit: normalizeSentence(strictMatch[3]),
+    };
+  }
+
+  const looseMatch = text.match(/^As an?\s+(.+?),\s*I (?:need|want) to\s+(.+)$/i);
+  if (looseMatch) {
+    const role = normalizeSentence(looseMatch[1]);
+    const remainder = looseMatch[2].trim();
+    const [firstSentence = '', ...rest] = remainder.split(/(?<=[.!?])\s+/);
+    const sentence = normalizeSentence(firstSentence);
+    const benefit = normalizeSentence(rest.join(' '));
+
+    if (!sentence) return null;
+    if (/so that/i.test(sentence)) {
+      const [actionPart, benefitPart] = sentence.split(/\s+so that\s+/i);
+      return {
+        role,
+        action: normalizeSentence(actionPart),
+        benefit: normalizeSentence([benefitPart, benefit].filter(Boolean).join(' ')),
+      };
+    }
+
+    return {
+      role,
+      action: sentence,
+      benefit,
+    };
+  }
+
+  return null;
+}
+
+export function ensureUserStoryDescription(value: unknown, fallback?: string): string {
+  const attempt = parseStoryLikeDescription(String(value ?? ''));
+  const fallbackAttempt = parseStoryLikeDescription(String(fallback ?? ''));
+  const source = attempt ?? fallbackAttempt;
+
+  if (!source) {
+    throw new Error('Quick refine description must follow "As a [role], I need to [action] so that [benefit]".');
+  }
+
+  const role = normalizeSentence(source.role);
+  const action = normalizeSentence(source.action);
+  const benefit = normalizeBenefit(source.benefit) || 'the intended business outcome is achieved';
+  if (!role || !action || !benefit) {
+    throw new Error('Quick refine description is missing a role, action, or benefit.');
+  }
+
+  return `As a ${toSentenceCase(role)}, I need to ${action} so that ${ensureTrailingPeriod(benefit)}`;
+}
+
 function parseArString(text: string): AcceptanceRequirement {
   const trimmed = text.trim();
   const givenMatch = trimmed.match(/GIVEN\s+([\s\S]+?)(?=\s+(?:WHEN|THEN)\b|$)/i);
@@ -340,7 +423,8 @@ RULES:
 - Keep the current issue as one rewritten item in "currentIssue".
 - You may propose up to 3 "splitCandidates" only when the issue currently bundles multiple independently deliverable capabilities.
 - Use business-friendly language. Avoid implementation detail unless the issue explicitly requires it.
-- Description should read like a concise backlog-ready requirement, ideally in user-story form when appropriate.
+- Every description MUST strictly follow: "As a [role], I need to [action] so that [benefit]".
+- Do not add any extra explanation before or after the user story sentence.
 - acceptance_requirements must be complete GIVEN / WHEN / THEN triples.
 - If the issue still needs the full Refinely workflow, set handoffRecommended to true and explain why in handoffReason, but still return the best possible draft.
 
@@ -430,7 +514,7 @@ function normalizeIssueFields(raw: QuickRefineRawIssueFields | undefined, fallba
       : [];
 
   const summary = String(raw?.summary ?? fallback.summary).trim();
-  const description = String(raw?.description ?? fallback.description).trim();
+  const description = ensureUserStoryDescription(raw?.description ?? fallback.description, fallback.description);
   const acceptanceRequirements = normalizeAcceptanceRequirements(rawArs).length
     ? normalizeAcceptanceRequirements(rawArs)
     : fallback.acceptanceRequirements;
@@ -446,8 +530,9 @@ function normalizeSplitCandidates(raw: QuickRefineGenerationResponse['splitCandi
   return (raw ?? [])
     .map((candidate, index) => {
       const summary = String(candidate?.summary ?? '').trim();
-      const description = String(candidate?.description ?? '').trim();
-      if (!summary && !description) return null;
+      const rawDescription = String(candidate?.description ?? '').trim();
+      if (!summary && !rawDescription) return null;
+      const description = ensureUserStoryDescription(rawDescription, summary ? `As a user, I need to handle ${summary.toLowerCase()} so that the requested outcome is achieved.` : '');
       const rawArs = Array.isArray(candidate?.acceptance_requirements) && candidate.acceptance_requirements.length
         ? candidate.acceptance_requirements
         : Array.isArray(candidate?.acceptanceRequirements)
@@ -503,6 +588,7 @@ function mergeTokenUsage(
 
 function buildQuickRefineSessionDraft(
   originalIssue: QuickRefineIssueFields,
+  diffBaseIssue: QuickRefineIssueFields,
   contextMeta: QuickRefineContextMeta,
   answers: QuickRefineAnswer[],
   response: QuickRefineGenerationResponse,
@@ -510,6 +596,7 @@ function buildQuickRefineSessionDraft(
 ): QuickRefineDraft {
   return {
     currentIssue: normalizeIssueFields(response.currentIssue, originalIssue),
+    diffBaseIssue,
     splitCandidates: normalizeSplitCandidates(response.splitCandidates),
     clarifyAnswers: answers,
     contextMeta,
@@ -797,6 +884,7 @@ export async function startQuickRefine(opts: {
     route: 'rewrite',
     draft: buildQuickRefineSessionDraft(
       opts.context.originalIssue,
+      opts.context.originalIssue,
       enrichQuickRefineContextMeta(opts.context.contextMeta, wiContext, similarStories),
       [],
       rewrite.data,
@@ -840,6 +928,7 @@ export async function submitQuickRefineAnswers(opts: {
   });
 
   return buildQuickRefineSessionDraft(
+    opts.context.originalIssue,
     opts.context.originalIssue,
     contextMeta,
     opts.answers,
@@ -891,6 +980,7 @@ export async function refineQuickRefineDraft(opts: {
 
   return buildQuickRefineSessionDraft(
     opts.context.originalIssue,
+    opts.draft.currentIssue,
     contextMeta,
     answers,
     rewrite.data,

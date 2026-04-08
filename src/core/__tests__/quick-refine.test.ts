@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildQuickRefineReadFields,
+  ensureUserStoryDescription,
   parseAcceptanceRequirementsFromText,
   resolveQuickRefineModel,
   resolveQuickRefineProjectMapping,
@@ -75,6 +76,17 @@ GIVEN required context is missing WHEN quick refine runs THEN the app asks focus
 
   assert.equal(ars.length, 2);
   assert.match(ars[1]?.when ?? '', /quick refine runs/i);
+});
+
+test('ensureUserStoryDescription normalizes loose story phrasing into strict user-story format', () => {
+  const description = ensureUserStoryDescription(
+    'As a System Administrator, I want to restrict create and update access to IM&T records. This ensures data integrity.',
+  );
+
+  assert.equal(
+    description,
+    'As a System Administrator, I need to restrict create and update access to IM&T records so that data integrity.',
+  );
 });
 
 test('buildQuickRefineReadFields includes mapped fields only once', () => {
