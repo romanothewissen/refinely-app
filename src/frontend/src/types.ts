@@ -456,7 +456,7 @@ export interface ClarifyAnswer {
 // ─── Quick Refine ────────────────────────────────────────────────────────────
 
 export type QuickRefineSurface = 'issue-panel' | 'issue-action';
-export type QuickRefineSessionStatus = 'idle' | 'needs_clarification' | 'draft' | 'handoff' | 'applied';
+export type QuickRefineSessionStatus = 'idle' | 'queued' | 'running' | 'needs_clarification' | 'draft' | 'handoff' | 'applied' | 'failed';
 
 export interface QuickRefineQuestion {
   id: string;
@@ -552,6 +552,7 @@ export interface QuickRefineSession {
   questions?: QuickRefineQuestion[];
   draft?: QuickRefineDraft;
   handoffReason?: string;
+  error?: string;
   updatedAt: string;
   createdAt: string;
   appliedAt?: string;

@@ -1,4 +1,4 @@
-import React, { startTransition, useEffect, useMemo, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
 import { router, view } from '@forge/bridge';
 import { motion } from 'framer-motion';
 import {
@@ -112,6 +112,18 @@ function formatRelativeTimestamp(value?: string | null) {
   return date.toLocaleString();
 }
 
+function getSessionBadgeCopy(session: QuickRefineSession | null) {
+  if (!session) return 'Ready';
+  if (session.status === 'queued') return 'Queued';
+  if (session.status === 'running') return 'Refining';
+  if (session.status === 'failed') return 'Needs retry';
+  if (session.draft) return 'Draft ready';
+  if (session.status === 'needs_clarification') return 'Questions ready';
+  if (session.status === 'handoff') return 'Needs handoff';
+  if (session.status === 'applied') return 'Applied';
+  return 'Ready';
+}
+
 function buildModelOptions(
   provider: LlmProvider | null,
   modelCatalogs: LlmModelCatalogByVendor,
@@ -169,9 +181,9 @@ function CompactArEditor({
   return (
     <div className="space-y-2">
       {ars.map((ar, index) => (
-        <div key={`ar-${index}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/70 p-2.5 space-y-2">
+        <div key={`ar-${index}`} className="rounded-[18px] border border-[rgba(43,89,74,0.12)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(245,249,246,0.86))] p-2.5 space-y-2 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
             <button
               type="button"
               className="inline-flex items-center gap-1 text-[11px] text-[var(--rf-danger)]"
@@ -181,7 +193,7 @@ function CompactArEditor({
               Delete
             </button>
           </div>
-          <label className="block rounded-lg border border-[var(--rf-border-subtle)] bg-white px-2.5 py-2 space-y-1">
+          <label className="block rounded-[16px] border border-[var(--rf-border-subtle)] bg-white/92 px-2.5 py-2 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Acceptance Requirement</span>
             <textarea
               rows={4}
@@ -192,7 +204,7 @@ function CompactArEditor({
                 onChange(next);
               }}
               placeholder={'GIVEN ...\nWHEN ...\nTHEN ...'}
-              className="w-full min-h-[92px] resize-y rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm leading-6 text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+              className="w-full min-h-[88px] resize-y rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm leading-6 text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
             />
           </label>
         </div>
@@ -338,8 +350,8 @@ function DraftCard({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="rf-card overflow-hidden border border-[var(--rf-border)] shadow-[0_12px_36px_rgba(16,24,40,0.08)]">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--rf-border)] px-4 py-3 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,250,248,0.88))]">
+    <div className="rf-card overflow-hidden border border-[rgba(43,89,74,0.12)] shadow-[0_16px_40px_rgba(16,24,40,0.07)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[rgba(43,89,74,0.1)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,249,246,0.9))] px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold text-[var(--rf-text)]">{title}</h3>
           {typeof changed === 'boolean' ? (
@@ -366,7 +378,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
   const [sessionId, setSessionId] = useState<string>('');
   const [stage, setStage] = useState<Stage>('idle');
   const [active, setActive] = useState(surface === 'issue-action');
-  const [draftViewMode, setDraftViewMode] = useState<DraftViewMode>('diff');
+  const [draftViewMode, setDraftViewMode] = useState<DraftViewMode>('result');
   const [busyLabel, setBusyLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -473,7 +485,12 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
               setSessionId(nextSession.sessionId);
               setApplyResult(nextSession.applyResult || null);
               setHandoffReason(nextSession.handoffReason || '');
-              if (nextSession.status === 'needs_clarification' && nextSession.questions?.length) {
+              if (nextSession.status === 'queued' || nextSession.status === 'running') {
+                setStage('loading');
+              } else if (nextSession.status === 'failed') {
+                setError(nextSession.error || 'Quick refine could not finish.');
+                setStage('idle');
+              } else if (nextSession.status === 'needs_clarification' && nextSession.questions?.length) {
                 setQuestions(nextSession.questions);
                 setAnswers(nextSession.questions.map((question) => ({
                   questionId: question.id,
@@ -484,6 +501,8 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                 setStage('questions');
               } else if (nextSession.draft) {
                 setDraft(nextSession.draft);
+                setDiffBaseIssue(nextSession.draft.diffBaseIssue || nextContext.originalIssue);
+                setDraftViewMode('result');
                 setStage('draft');
               } else if (nextSession.status === 'handoff') {
                 setStage('handoff');
@@ -547,7 +566,17 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
 
   const modelOptions = useMemo(() => buildModelOptions(provider, modelCatalogs, []), [provider, modelCatalogs]);
 
-  const hasResume = Boolean(session && (session.questions?.length || session.draft || session.status === 'handoff'));
+  const hasResume = Boolean(
+    session
+    && (
+      session.questions?.length
+      || session.draft
+      || session.status === 'handoff'
+      || session.status === 'queued'
+      || session.status === 'running'
+    ),
+  );
+  const isSessionProcessing = stage === 'loading' || session?.status === 'queued' || session?.status === 'running';
   const originalIssue = context?.originalIssue;
 
   const currentIssueChanged = useMemo(() => {
@@ -596,7 +625,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
     void persistModelPreference(nextModel);
   };
 
-  const restoreFromSession = (nextSession: QuickRefineSession) => {
+  const restoreFromSession = useCallback((nextSession: QuickRefineSession) => {
     setSession(nextSession);
     setSessionId(nextSession.sessionId);
     if (nextSession.modelOverride) {
@@ -605,7 +634,21 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
     setApplyResult(nextSession.applyResult || null);
     setHandoffReason(nextSession.handoffReason || '');
     setDiffBaseIssue(nextSession.draft?.diffBaseIssue ?? context?.originalIssue ?? null);
+    if (nextSession.status === 'queued' || nextSession.status === 'running') {
+      setError('');
+      setStage('loading');
+      return;
+    }
+    if (nextSession.status === 'failed') {
+      setDraft(null);
+      setQuestions([]);
+      setAnswers([]);
+      setError(nextSession.error || 'Quick refine could not finish.');
+      setStage('idle');
+      return;
+    }
     if (nextSession.status === 'needs_clarification' && nextSession.questions?.length) {
+      setError('');
       setQuestions(nextSession.questions);
       setAnswers(nextSession.questions.map((question) => ({
         questionId: question.id,
@@ -617,23 +660,66 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
       return;
     }
     if (nextSession.draft) {
+      setError('');
       setDraft(nextSession.draft);
+      setQuestions([]);
+      setAnswers([]);
+      setDraftViewMode('result');
       setStage('draft');
       return;
     }
     if (nextSession.status === 'handoff') {
+      setError('');
       setStage('handoff');
       return;
     }
     setStage('idle');
-  };
+  }, [context?.originalIssue]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!isSessionProcessing) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const sessionRes = await api.getQuickRefineSession({ sessionId }) as any;
+        if (cancelled) return;
+        if (!sessionRes?.success || !sessionRes?.session) {
+          throw new Error(sessionRes?.error || 'Quick refine session could not be refreshed.');
+        }
+        const nextSession = sessionRes.session as QuickRefineSession;
+        if (nextSession.status === 'queued' || nextSession.status === 'running') {
+          setSession(nextSession);
+          setBusyLabel(nextSession.status === 'queued' ? 'Queued for context loading' : 'Building rewrite with project context');
+          timer = setTimeout(() => void poll(), 1500);
+          return;
+        }
+        setBusyLabel('');
+        restoreFromSession(nextSession);
+      } catch (err) {
+        if (cancelled) return;
+        setBusyLabel('');
+        setError(err instanceof Error ? err.message : String(err));
+        setStage('idle');
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [isSessionProcessing, restoreFromSession, sessionId]);
 
   const handleStart = async (options?: { restart?: boolean }) => {
     if (!issueKey || !projectKey) return;
     const nextSessionId = sessionId || createSessionId();
     setSessionId(nextSessionId);
     setBusy(true);
-    setBusyLabel(options?.restart ? 'Restarting quick rewrite' : 'Building quick rewrite');
+    setBusyLabel(options?.restart ? 'Queueing a fresh quick rewrite' : 'Queueing quick refine');
     setError('');
     if (options?.restart) {
       setApplyResult(null);
@@ -641,7 +727,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
       setQuestions([]);
       setAnswers([]);
       setHandoffReason('');
-      setStage('idle');
+      setStage('loading');
     }
     try {
       const res = await api.startQuickRefine({
@@ -655,31 +741,14 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
       if (!res?.success) {
         throw new Error(res?.error || 'Quick refine could not start.');
       }
-
-      if (res.route === 'clarify') {
-        const nextQuestions = Array.isArray(res.questions) ? res.questions as QuickRefineQuestion[] : [];
-        setQuestions(nextQuestions);
-        setAnswers(nextQuestions.map((question) => ({
-          questionId: question.id,
-          question: question.question,
-          answer: '',
-          selectedSuggestions: [],
-        })));
-        setStage('questions');
-      } else if (res.route === 'rewrite') {
-        setDraft(res.draft as QuickRefineDraft);
-        setStage('draft');
-      } else {
-        setHandoffReason(String(res.reason ?? 'This issue needs the full Refinely workflow.'));
-        setStage('handoff');
+      if (res.session) {
+        setSession(res.session as QuickRefineSession);
       }
-
-      const sessionRes = await api.getQuickRefineSession({ sessionId: nextSessionId }) as any;
-      if (sessionRes?.success && sessionRes?.session) {
-        restoreFromSession(sessionRes.session as QuickRefineSession);
-      }
+      setDraftViewMode('result');
+      setStage('loading');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setStage('idle');
     } finally {
       setBusy(false);
       setBusyLabel('');
@@ -776,27 +845,42 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
   if (!active && surface === 'issue-panel') {
     return (
       <div className="h-full w-full p-2">
-        <div className="rf-card h-full p-3 space-y-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="inline-flex h-7 w-7 items-center justify-center rounded-xl bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
-                <Sparkles className="w-3.5 h-3.5" />
+        <div className="rf-card relative h-full overflow-hidden border border-[rgba(43,89,74,0.12)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.2),transparent_42%),linear-gradient(180deg,rgba(252,253,252,0.96),rgba(243,248,245,0.96))] p-3">
+          <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.35),transparent)]" />
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="flex min-w-0 items-start gap-2.5">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-[var(--rf-brand)] shadow-[0_12px_28px_rgba(43,89,74,0.12)]">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-text-tertiary)]">Issue Panel</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-[22px] leading-none font-semibold text-[var(--rf-text)]">Quick Refinely</h2>
+                    <span className="rounded-full border border-[rgba(43,89,74,0.14)] bg-white/85 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-brand)]">
+                      {getSessionBadgeCopy(session)}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] leading-5 text-[var(--rf-text-secondary)]">
+                    Rewrite this issue with project context, WI guidance, and tighter acceptance requirements.
+                  </div>
+                </div>
               </div>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-sm font-semibold text-[var(--rf-text)]">Quick Refine</h2>
-                  <span className="rounded-full border border-[var(--rf-border)] bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--rf-text-secondary)]">
-                    {hasResume ? 'Draft ready' : 'Ready'}
-                  </span>
-                </div>
-                <div className="text-[11px] text-[var(--rf-text-tertiary)]">
-                  {formatRelativeTimestamp(context?.updatedAt)}
-                </div>
+              <div className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
+                {formatRelativeTimestamp(context?.updatedAt)}
               </div>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {!busy ? (
+            {isSessionProcessing ? (
+              <div className="rounded-2xl border border-[rgba(43,89,74,0.14)] bg-white/82 px-3 py-3 shadow-[0_18px_36px_rgba(43,89,74,0.08)]">
+                <div className="flex items-center gap-2 text-[var(--rf-brand)]">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm font-semibold">{busyLabel || 'Quick refine is running'}</span>
+                </div>
+                <p className="mt-1 text-[12px] leading-5 text-[var(--rf-text-secondary)]">
+                  We are retrieving backlog signals and composing a rewrite in the background.
+                </p>
+              </div>
+            ) : (
               <button
                 type="button"
                 onClick={() => {
@@ -804,22 +888,29 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   if (!hasResume) void handleStart();
                 }}
                 disabled={busy}
-                className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="group inline-flex w-full items-center justify-between rounded-[22px] border border-[rgba(43,89,74,0.18)] bg-[linear-gradient(135deg,var(--rf-brand),#3b715f)] px-4 py-3 text-left text-white shadow-[0_22px_42px_rgba(43,89,74,0.22)] transition hover:-translate-y-0.5 hover:shadow-[0_26px_48px_rgba(43,89,74,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <ClipboardPenLine className="w-4 h-4" />
-                {hasResume ? 'Resume Draft' : 'Quick Rewrite'}
+                <span className="flex items-center gap-3">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/14 ring-1 ring-white/20">
+                    <ClipboardPenLine className="h-4.5 w-4.5" />
+                  </span>
+                  <span>
+                    <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-white/72">
+                      {hasResume ? 'Continue where you left off' : 'Refine this story now'}
+                    </span>
+                    <span className="block text-base font-semibold">
+                      {hasResume ? 'Open Quick Refine draft' : 'Launch Quick Refine'}
+                    </span>
+                  </span>
+                </span>
+                <ArrowRight className="h-4.5 w-4.5 transition group-hover:translate-x-0.5" />
               </button>
-            ) : (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)]">
-                <Loader2 className="w-4 h-4 animate-spin text-[var(--rf-brand)]" />
-                {busyLabel || 'Working'}
-              </div>
             )}
-            {onOpenSettings ? (
+            {onOpenSettings && !isSessionProcessing ? (
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="inline-flex items-center gap-2 rounded-lg border border-[var(--rf-border)] px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/80"
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/80"
               >
                 Settings
               </button>
@@ -842,14 +933,16 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
       />
 
       <div className="mx-auto max-w-6xl space-y-2">
-        <div className="rf-card overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,250,248,0.84))] px-3 py-2">
+        <div className="rf-card overflow-hidden border border-[rgba(43,89,74,0.12)] shadow-[0_22px_52px_rgba(15,23,42,0.08)]">
+          <div className="relative border-b border-[rgba(43,89,74,0.1)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.18),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,245,0.92))] px-3 py-2.5">
+            <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.3),transparent)]" />
+            <div className="flex flex-wrap items-start justify-between gap-2.5">
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">
                 {surface === 'issue-action' ? 'Issue Action' : 'Issue Panel'}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-[30px] leading-none font-semibold text-[var(--rf-text)]">Quick Refine</h1>
+                <h1 className="text-[30px] leading-none font-semibold text-[var(--rf-text)]">Quick Refinely</h1>
                 {issueKey ? (
                   <span className="rounded-full bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-sm font-semibold text-[var(--rf-brand)]">
                     {issueKey}
@@ -861,6 +954,9 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   </span>
                 ) : null}
               </div>
+              <p className="mt-1 max-w-2xl text-[12px] leading-5 text-[var(--rf-text-secondary)]">
+                Dense, context-aware issue rewriting for Jira stories that need a tighter scope, sharper user story, and cleaner acceptance requirements.
+              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {stage === 'draft' ? (
@@ -893,7 +989,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                       <option key={option.id} value={option.id}>{option.label}</option>
                     ))}
                   </select>
-                </label>
+                  </label>
               ) : null}
               {onOpenSettings ? (
                 <button
@@ -904,7 +1000,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   Settings
                 </button>
               ) : null}
-              {!busy && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
+              {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
                 <button
                   type="button"
                   onClick={() => void handleStart({ restart: true })}
@@ -924,7 +1020,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   Collapse
                 </button>
               ) : null}
-              {!busy && stage === 'draft' ? (
+              {!busy && !isSessionProcessing && stage === 'draft' ? (
                 <button
                   type="button"
                   onClick={() => setAiDialogOpen(true)}
@@ -936,7 +1032,8 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
               ) : null}
             </div>
           </div>
-          <div className="p-2.5 space-y-2 bg-[linear-gradient(180deg,rgba(248,251,249,0.78),rgba(255,255,255,0.9))]">
+          </div>
+          <div className="space-y-2 bg-[linear-gradient(180deg,rgba(248,251,249,0.82),rgba(255,255,255,0.92))] p-2.5">
             {error ? (
               <div className="rounded-2xl border border-[var(--rf-danger)]/25 bg-[var(--rf-danger-subtle)] px-4 py-3 text-sm text-[var(--rf-danger)]">
                 {error}
@@ -967,25 +1064,70 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
               </div>
             ) : null}
 
-            {busy ? (
-              <div className="rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-sm text-[var(--rf-text-secondary)] inline-flex items-center gap-2">
+            {busy && !isSessionProcessing ? (
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/75 px-3 py-2 text-sm text-[var(--rf-text-secondary)]">
                 <Loader2 className="w-4 h-4 animate-spin text-[var(--rf-brand)]" />
                 {busyLabel}
               </div>
             ) : null}
 
-            {stage === 'idle' && !busy ? (
-              <div className="rounded-xl border border-dashed border-[var(--rf-border-strong)] bg-white/65 px-4 py-4 text-center">
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Ready</p>
-                <h2 className="mt-1 text-xl font-semibold text-[var(--rf-text)]">Generate a quick rewrite preview</h2>
-                <button
-                  type="button"
-                  onClick={() => void handleStart()}
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[var(--rf-brand)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--rf-brand-hover)]"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Start Quick Rewrite
-                </button>
+            {stage === 'idle' && !busy && !isSessionProcessing ? (
+              <div className="relative overflow-hidden rounded-[24px] border border-[rgba(43,89,74,0.14)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,249,246,0.92))] px-4 py-4">
+                <div className="pointer-events-none absolute inset-y-0 left-0 w-[120px] bg-[linear-gradient(90deg,rgba(43,89,74,0.06),transparent)]" />
+                <div className="relative flex flex-wrap items-center justify-between gap-3">
+                  <div className="max-w-xl space-y-1.5">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Quick Refinely</p>
+                    <h2 className="text-2xl leading-tight font-semibold text-[var(--rf-text)]">Turn a rough Jira issue into a clean story in one pass.</h2>
+                    <p className="text-sm leading-6 text-[var(--rf-text-secondary)]">
+                      We’ll use your project context, WI sources, and backlog signals to draft a sharper user story and compact acceptance requirements.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleStart()}
+                    className="group inline-flex min-w-[220px] items-center justify-between rounded-[22px] border border-[rgba(43,89,74,0.16)] bg-[linear-gradient(135deg,var(--rf-brand),#3b715f)] px-4 py-3 text-left text-white shadow-[0_24px_44px_rgba(43,89,74,0.24)] transition hover:-translate-y-0.5 hover:shadow-[0_28px_52px_rgba(43,89,74,0.3)]"
+                  >
+                    <span className="flex items-center gap-3">
+                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/14 ring-1 ring-white/20">
+                        <Sparkles className="w-4.5 h-4.5" />
+                      </span>
+                      <span>
+                        <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-white/72">Primary action</span>
+                        <span className="block text-base font-semibold">Quick Refine</span>
+                      </span>
+                    </span>
+                    <ArrowRight className="h-4.5 w-4.5 transition group-hover:translate-x-0.5" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {isSessionProcessing ? (
+              <div className="relative overflow-hidden rounded-[24px] border border-[rgba(43,89,74,0.14)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,245,0.94))] px-4 py-4">
+                <div className="pointer-events-none absolute inset-x-4 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.26),transparent)]" />
+                <div className="relative flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1.5">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(43,89,74,0.12)] bg-white/80 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)]">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {session?.status === 'queued' ? 'Queued' : 'Running'}
+                    </div>
+                    <h2 className="text-xl font-semibold text-[var(--rf-text)]">
+                      {session?.status === 'queued' ? 'Quick refine is lining up context.' : 'Quick refine is building your rewrite.'}
+                    </h2>
+                    <p className="max-w-xl text-sm leading-6 text-[var(--rf-text-secondary)]">
+                      {busyLabel || 'We are pulling project signals, similar backlog items, and WI context before drafting the updated issue.'}
+                    </p>
+                  </div>
+                  <div className="min-w-[220px] rounded-[20px] border border-white/70 bg-white/80 px-3.5 py-3 shadow-[0_14px_30px_rgba(43,89,74,0.08)]">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">In progress</div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--rf-brand-subtle)]">
+                      <div className="h-full w-1/2 animate-pulse rounded-full bg-[var(--rf-brand)]" />
+                    </div>
+                    <div className="mt-2 text-[12px] leading-5 text-[var(--rf-text-secondary)]">
+                      Keep this panel open or come back later. Your session will resume automatically.
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : null}
 

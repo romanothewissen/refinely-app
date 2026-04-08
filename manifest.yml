@@ -30,6 +30,9 @@ modules:
   function:
     - key: resolver
       handler: resolvers/index.handler
+    - key: quick-refine-consumer
+      handler: queues/quick-refine.handler
+      timeoutSeconds: 180
     - key: generation-consumer
       handler: queues/generation.handler
       timeoutSeconds: 900
@@ -43,6 +46,9 @@ modules:
       handler: queues/backlog-cache-refresh.handler
       timeoutSeconds: 900
   consumer:
+    - key: quick-refine-consumer-listener
+      queue: quick-refine-queue
+      function: quick-refine-consumer
     - key: generation-consumer-listener
       queue: generation-queue
       function: generation-consumer

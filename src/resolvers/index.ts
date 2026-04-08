@@ -55,7 +55,6 @@ import {
   loadQuickRefineIssueContext,
   refineQuickRefineDraft,
   resolveQuickRefineProjectMapping,
-  startQuickRefine,
   submitQuickRefineAnswers,
 } from '../core/quick-refine';
 import {
@@ -64,6 +63,7 @@ import {
   GenerationEvent,
   ClarifyEvent,
   QuickRefineDraft,
+  QuickRefineEvent,
   QuickRefineSession,
   QuickRefineSurface,
   RefineEvent,
@@ -1039,7 +1039,13 @@ resolver.define('getQuickRefineSession', async ({ payload, context }) => {
 
 resolver.define('startQuickRefine', async ({ payload, context }) => {
   try {
-    const config = await getConfig();
+    const rawConfig = await getConfig();
+    const config = {
+      ...rawConfig,
+      generatorConfig: resolveEffectiveGeneratorConfig(rawConfig.generatorConfig),
+      tier: getEffectiveTier(rawConfig, context),
+    };
+    const quickRefineQueue = new Queue({ key: 'quick-refine-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     const surface = (payload?.surface === 'issue-panel' ? 'issue-panel' : 'issue-action') as QuickRefineSurface;
     const issueKey = String(payload?.issueKey ?? '').trim();
@@ -1057,18 +1063,8 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
     const issueContext = await loadQuickRefineIssueContext({
       issueKey,
       surface,
-      config,
+      config: rawConfig,
       projectKeys: authorizedProjects.projectKeys.length ? authorizedProjects.projectKeys : [projectKey],
-    });
-
-    const result = await startQuickRefine({
-      context: issueContext,
-      config: {
-        ...config,
-        generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
-        tier: getEffectiveTier(config, context),
-      },
-      modelOverride,
     });
 
     const now = new Date().toISOString();
@@ -1082,58 +1078,30 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
       modelOverride,
       originalIssue: issueContext.originalIssue,
       context: issueContext,
-      status: result.route === 'clarify' ? 'needs_clarification' : result.route === 'handoff' ? 'handoff' : 'draft',
-      questions: result.route === 'clarify' ? result.questions : undefined,
-      draft: result.route === 'rewrite' ? result.draft : undefined,
-      handoffReason: result.route === 'handoff' ? result.reason : undefined,
+      status: 'queued',
+      questions: undefined,
+      draft: undefined,
+      handoffReason: undefined,
+      error: undefined,
       createdAt: now,
       updatedAt: now,
     };
     await persistQuickRefineSession(accountId, session);
 
-    if (result.route === 'rewrite' && config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
-      await saveTransparencyReport({
-        sessionId,
-        turnType: 'refine',
-        actorAccountId: accountId,
-        provider: config.generatorConfig.provider,
-        model: modelOverride || config.generatorConfig.refineModel,
-        projectKey: issueContext.projectKey,
-        requirementExcerpt: issueContext.originalIssue.summary.slice(0, 240),
-        decisionSummary: [
-          'Quick refine generated a preview rewrite for the current Jira issue.',
-        ],
-        contextUsage: {
-          issueKey,
-          similarStoriesCount: issueContext.contextMeta.similarStoriesCount ?? 0,
-          wiDocsCount: issueContext.contextMeta.wiDocsCount ?? 0,
-        },
-        tokenUsage: result.draft?.tokenUsage,
-        piiMasking: { enabled: false, totalRedactions: 0, byType: {} },
-      });
-    }
-
-    await recordProjectActivity({
-      action: 'refine',
-      projectKeys: [issueContext.projectKey],
-      projectKey: issueContext.projectKey,
+    const event: QuickRefineEvent = {
       sessionId,
-      model: modelOverride || config.generatorConfig.refineModel,
-      tokenUsage: result.route === 'rewrite' ? (result.draft?.tokenUsage ?? null) : (result.tokenUsage ?? null),
-      metadata: {
-        issueKey,
-        quickRefine: true,
-        route: result.route,
-      },
-    });
+      accountId,
+      context: issueContext,
+      config,
+      modelOverride,
+    };
+    await quickRefineQueue.push({ body: event });
 
     return {
       success: true,
-      route: result.route,
+      queued: true,
       sessionId,
-      questions: result.route === 'clarify' ? result.questions : undefined,
-      reason: result.route === 'handoff' ? result.reason : result.route === 'clarify' ? result.reason : undefined,
-      draft: result.route === 'rewrite' ? result.draft : undefined,
+      session,
     };
   } catch (err) {
     return {
