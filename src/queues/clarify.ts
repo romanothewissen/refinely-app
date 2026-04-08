@@ -152,7 +152,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       projectKeys: selectedProjectKeys,
       projectCount: selectedProjectKeys.length,
       domainRolesUsed: [],
-      discoveryStatus: 'ready',
+      discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
@@ -187,6 +187,12 @@ export async function handler(event: { body: ClarifyEvent }) {
     };
 
     await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
+    if (questions.length === 0) {
+      console.info('[clarify-queue] discovery completed without clarifying questions', {
+        sessionId,
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      });
+    }
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
         sessionId,
@@ -197,7 +203,9 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
-          `Generated ${questions.length} initial discovery questions with a ${discoveryProfile.followupCap}-question follow-up cap.`,
+          questions.length > 0
+            ? `Generated ${questions.length} initial discovery questions with a ${discoveryProfile.followupCap}-question follow-up cap.`
+            : 'Discovery determined no clarifying questions were needed before generation.',
           `Discovery profile: ${discoveryProfile.scope} scope, ${discoveryProfile.complexity} complexity, ${discoveryProfile.ambiguity} ambiguity.`,
         ],
         contextUsage: {
@@ -247,7 +255,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       type: 'blocked',
       error: message,
       reasonCode: failureReasonCode,
-      contextMeta: buildBlockedClarifyContext(projectKey, failureReasonCode),
+      contextMeta: buildBlockedClarifyContext(resolvePrimaryProjectKey(projectKey, projectKeys), failureReasonCode),
       ...(inputSignature ? { inputSignature } : {}),
       updatedAt: Date.now(),
     });
@@ -292,7 +300,7 @@ function buildBlockedClarifyContext(
   return {
     projectKey,
     domainRolesUsed: [],
-    discoveryStatus: 'blocked',
+    discoveryStatus: 'discovery_failed',
     failureReasonCode,
     roundsCompleted: 0,
     initialQuestionCount: 0,

@@ -313,12 +313,13 @@ export type ClarifyCategoryKey =
   | 'state_lifecycle'
   | 'edge_cases_exceptions';
 
-export type ClarifyDiscoveryStatus = 'ready' | 'blocked';
+export type ClarifyDiscoveryStatus = 'needs_clarification' | 'ready_for_generation' | 'discovery_failed';
 export type ClarifyFailureReasonCode =
   | 'timeout'
   | 'queue_error'
   | 'invalid_empty_questions'
-  | 'invalid_underpowered_questions';
+  | 'invalid_underpowered_questions'
+  | 'invalid_generic_questions';
 
 export interface DiscoveryProfile {
   scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';

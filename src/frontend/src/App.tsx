@@ -778,6 +778,10 @@ function LegacyApp({
       setIsEvaluatingDiscovery(false);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
       if (questions.length > 0) {
+        setClarifyContext(nextClarifyContext ? {
+          ...nextClarifyContext,
+          discoveryStatus: 'needs_clarification',
+        } : nextClarifyContext);
         setClarifyQuestions(questions as ClarifyQuestion[]);
         setWorkflowStage('clarify_round_1');
         setIsWorking(false);
@@ -786,6 +790,7 @@ function LegacyApp({
       setClarifyQuestions([]);
       setClarifyContext((prev) => prev ? {
         ...prev,
+        discoveryStatus: 'ready_for_generation',
         roundsCompleted: 1,
         totalQuestionCount: 0,
         followupQuestionCount: 0,
@@ -804,7 +809,7 @@ function LegacyApp({
         ?? {
           projectKey,
           domainRolesUsed: [],
-          discoveryStatus: 'blocked',
+          discoveryStatus: 'discovery_failed',
           failureReasonCode: reasonCode,
         },
       );
@@ -1071,7 +1076,7 @@ function LegacyApp({
         setClarifyContext({
           projectKey,
           domainRolesUsed: [],
-          discoveryStatus: 'blocked',
+          discoveryStatus: 'discovery_failed',
           failureReasonCode: 'queue_error',
         });
         setClarifyBlockingError({
@@ -1085,7 +1090,7 @@ function LegacyApp({
       setClarifyContext({
         projectKey,
         domainRolesUsed: [],
-        discoveryStatus: 'blocked',
+        discoveryStatus: 'discovery_failed',
         failureReasonCode: 'queue_error',
       });
       setClarifyBlockingError({
@@ -1128,7 +1133,7 @@ function LegacyApp({
         setClarifyContext({
           projectKey,
           domainRolesUsed: [],
-          discoveryStatus: 'blocked',
+          discoveryStatus: 'discovery_failed',
           failureReasonCode: 'queue_error',
         });
         setClarifyBlockingError({
@@ -1143,7 +1148,7 @@ function LegacyApp({
       setClarifyContext({
         projectKey,
         domainRolesUsed: [],
-        discoveryStatus: 'blocked',
+        discoveryStatus: 'discovery_failed',
         failureReasonCode: 'queue_error',
       });
       setClarifyBlockingError({

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  allowsZeroQuestionDiscovery,
   calibrateDiscoveryProfile,
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
@@ -124,7 +125,22 @@ test('finalizeInitialDiscoveryQuestions preserves the llm question set without p
   assert.equal(questions[0].categoryKey, 'context_trigger');
 });
 
-test('validateAndRepairInitialDiscovery repairs an empty model output into a valid initial batch', () => {
+test('finalizeInitialDiscoveryQuestions returns an empty set instead of synthesizing fallback questions', () => {
+  const profile = normalizeDiscoveryProfile({
+    ambiguity: 'high',
+    missingCategoryKeys: ['context_trigger', 'business_rules'],
+    recommendedInitialCount: 6,
+    followupCap: 4,
+  });
+
+  const questions = finalizeInitialDiscoveryQuestions([], profile, {
+    requirement: 'Automatically assign service contract sales opportunities to the appropriate sales rep.',
+  });
+
+  assert.deepEqual(questions, []);
+});
+
+test('validateAndRepairInitialDiscovery rejects an empty model output when discovery is still needed', () => {
   const profile = normalizeDiscoveryProfile({
     scope: 'moderate',
     complexity: 'medium',
@@ -138,12 +154,8 @@ test('validateAndRepairInitialDiscovery repairs an empty model output into a val
     requirement: 'As a TSS, I need to manage various input channels and have cases created automatically.',
   });
 
-  assert.equal(repaired.failureReasonCode, null);
-  assert.ok(repaired.questions.length >= 4);
-  assert.ok(repaired.questions.some((question) => question.categoryKey === 'context_trigger'));
-  assert.ok(repaired.questions.some((question) => question.categoryKey === 'user_personas'));
-  assert.ok(repaired.questions.some((question) => question.categoryKey === 'business_rules'));
-  assert.ok(repaired.questions.some((question) => question.categoryKey === 'state_lifecycle'));
+  assert.equal(repaired.failureReasonCode, 'invalid_empty_questions');
+  assert.deepEqual(repaired.questions, []);
 });
 
 test('calibrateDiscoveryProfile preserves the llm question count while raising scope metadata from taxonomy breadth', () => {
@@ -213,7 +225,7 @@ test('calibrateDiscoveryProfile does not inflate implementation complexity solel
   assert.equal(calibrated.ambiguity, 'high');
 });
 
-test('broad multi-input automation asks infer a non-trivial unresolved-category set', () => {
+test('broad multi-input automation asks still infer unresolved discovery categories without synthesizing questions', () => {
   const profile = normalizeDiscoveryProfile({
     scope: 'moderate',
     complexity: 'medium',
@@ -227,36 +239,28 @@ test('broad multi-input automation asks infer a non-trivial unresolved-category 
     requirement: 'As a TSS, I need to be able to manage my various input channels efficiently (phone, whatsapp, text, email) and have cases created from it automatically',
   });
 
-  assert.equal(repaired.failureReasonCode, null);
+  assert.equal(repaired.failureReasonCode, 'invalid_empty_questions');
   assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
-  assert.ok(['broad', 'very_broad'].includes(repaired.discoveryProfile.scope));
+  assert.ok(['moderate', 'broad', 'very_broad'].includes(repaired.discoveryProfile.scope));
   assert.equal(repaired.discoveryProfile.ambiguity, 'high');
-  assert.ok(repaired.questions.length >= 6);
+  assert.deepEqual(repaired.questions, []);
 });
 
-test('validateAndRepairInitialDiscovery uses contextual fallback questions and suggestions for multichannel case creation', () => {
+test('validateAndRepairInitialDiscovery allows explicit zero-question discovery only when the profile is fully clear', () => {
   const profile = normalizeDiscoveryProfile({
-    scope: 'moderate',
-    complexity: 'medium',
-    ambiguity: 'medium',
+    scope: 'narrow',
+    complexity: 'low',
+    ambiguity: 'low',
     missingCategoryKeys: [],
-    recommendedInitialCount: 6,
-    followupCap: 4,
+    recommendedInitialCount: 0,
+    followupCap: 0,
   });
 
-  const repaired = validateAndRepairInitialDiscovery([], profile, {
-    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email interactions and have cases created automatically while avoiding duplicates.',
-  });
+  const repaired = validateAndRepairInitialDiscovery([], profile);
 
-  const renderedQuestions = repaired.questions.map((question) => question.question).join(' | ');
-  const renderedSuggestions = repaired.questions.flatMap((question) => question.suggestions).join(' | ');
-
-  assert.match(renderedQuestions, /phone|whatsapp|text|email/i);
-  assert.match(renderedQuestions, /case/i);
-  assert.match(renderedSuggestions, /phone|whatsapp|text|email|case/i);
-  assert.ok(repaired.questions.every((question) => !question.question.includes('1.')));
-  assert.ok(repaired.questions.every((question) => question.suggestions.length >= 2 && question.suggestions.length <= 4));
-  assert.ok(repaired.questions.some((question) => question.suggestions.some((suggestion) => suggestion.length > 30 && suggestion.length < 96)));
+  assert.equal(repaired.failureReasonCode, null);
+  assert.deepEqual(repaired.questions, []);
+  assert.equal(allowsZeroQuestionDiscovery(repaired.discoveryProfile), true);
 });
 
 test('finalizeInitialDiscoveryQuestions preserves coherent model question and suggestion pairs', () => {

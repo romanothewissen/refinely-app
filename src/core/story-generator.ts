@@ -38,6 +38,7 @@ import {
 import { validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import {
+  allowsZeroQuestionDiscovery,
   extractDiscoverySignals,
   expandRawQuestionCandidate,
   calibrateDiscoveryProfile,
@@ -266,6 +267,14 @@ function followupQuestionsLookWeak(
     const questionLooksGeneric = /\b(capability|process|system|workflow|handling|business outcome)\b/i.test(normalizedQuestion);
     return hits === 0 || (questionLooksGeneric && hits < 2);
   });
+}
+
+function initialQuestionsLookWeak(
+  questions: ClarifyQuestion[],
+  groundingTerms: Set<string>,
+): boolean {
+  if (!questions.length) return false;
+  return followupQuestionsLookWeak(questions, groundingTerms);
 }
 
 function pushPromptSection(parts: string[], heading: string, text: string, maxChars: number) {
@@ -1505,6 +1514,13 @@ export async function generateClarifyingQuestions(opts: {
     similarStoriesText.slice(0, 5000),
     ...(config.domainRoles ?? []),
   ]);
+  const groundingTerms = collectDiscoveryGroundingTerms([
+    requirement,
+    attachmentText.slice(0, 2200),
+    wiContextText.slice(0, 6000),
+    similarStoriesText.slice(0, 5000),
+    ...(config.domainRoles ?? []),
+  ]);
 
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
@@ -1554,11 +1570,38 @@ export async function generateClarifyingQuestions(opts: {
     domainSignals,
     domainRoles: config.domainRoles,
   });
-  if (!repairedDiscovery.questions.length || repairedDiscovery.failureReasonCode) {
+  if (repairedDiscovery.questions.length > 0 && initialQuestionsLookWeak(repairedDiscovery.questions, groundingTerms)) {
+    console.warn('[discovery] rejected generic initial question set', {
+      generatedQuestions: repairedDiscovery.questions.length,
+      requirementExcerpt: requirement.slice(0, 180),
+    });
     throw new ClarifyDiscoveryError(
-      repairedDiscovery.failureReasonCode ?? 'invalid_underpowered_questions',
+      'invalid_generic_questions',
+      'Discovery produced questions that were too generic to present safely.',
+    );
+  }
+
+  const zeroQuestionDiscoveryAllowed = allowsZeroQuestionDiscovery(repairedDiscovery.discoveryProfile);
+  if ((!repairedDiscovery.questions.length && !zeroQuestionDiscoveryAllowed) || repairedDiscovery.failureReasonCode) {
+    const rejectionReasonCode = repairedDiscovery.failureReasonCode
+      ?? (repairedDiscovery.questions.length === 0 ? 'invalid_empty_questions' : 'invalid_underpowered_questions');
+    console.warn('[discovery] rejected initial discovery result', {
+      failureReasonCode: rejectionReasonCode,
+      generatedQuestions: repairedDiscovery.questions.length,
+      recommendedInitialCount: repairedDiscovery.discoveryProfile.recommendedInitialCount,
+      ambiguity: repairedDiscovery.discoveryProfile.ambiguity,
+      missingCategoryKeys: repairedDiscovery.discoveryProfile.missingCategoryKeys,
+    });
+    throw new ClarifyDiscoveryError(
+      rejectionReasonCode,
       'Discovery did not produce a valid question set.',
     );
+  }
+  if (!repairedDiscovery.questions.length && zeroQuestionDiscoveryAllowed) {
+    console.info('[discovery] accepted explicit zero-question discovery result', {
+      ambiguity: repairedDiscovery.discoveryProfile.ambiguity,
+      recommendedInitialCount: repairedDiscovery.discoveryProfile.recommendedInitialCount,
+    });
   }
   const filteredQuestions = repairedDiscovery.questions;
   const discoveryProfile: DiscoveryProfile = calibrateDiscoveryProfile(

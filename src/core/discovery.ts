@@ -932,56 +932,6 @@ function questionComparator(left: ClarifyQuestion, right: ClarifyQuestion): numb
   return left.question.localeCompare(right.question);
 }
 
-function buildFallbackQuestions(
-  categoryKeys: ClarifyCategoryKey[],
-  alreadyAsked: Set<string>,
-  needed: number,
-  input?: DiscoveryFallbackInput,
-): ClarifyQuestion[] {
-  if (needed <= 0) return [];
-
-  const orderedKeys = uniqueCategoryKeys(categoryKeys);
-  const primaryTemplates = [
-    ...orderedKeys.map((categoryKey) => categoryTemplates(categoryKey)[0]).filter(Boolean),
-    ...CLARIFY_CATEGORY_ORDER
-      .filter((categoryKey) => !orderedKeys.includes(categoryKey))
-      .map((categoryKey) => categoryTemplates(categoryKey)[0])
-      .filter(Boolean),
-  ];
-  const secondaryTemplates = [
-    ...orderedKeys.flatMap((categoryKey) => categoryTemplates(categoryKey).slice(1)),
-    ...CLARIFY_CATEGORY_ORDER
-      .filter((categoryKey) => !orderedKeys.includes(categoryKey))
-      .flatMap((categoryKey) => categoryTemplates(categoryKey).slice(1)),
-  ];
-  const templates = [...primaryTemplates, ...secondaryTemplates];
-
-  const questions: ClarifyQuestion[] = [];
-  for (const template of templates) {
-    const contextualTemplate = contextualizeDiscoveryTemplate(template, input);
-    const normalizedQuestion = normalizeQuestionText(contextualTemplate.question);
-    const key = normalizeKey(normalizedQuestion);
-    if (!key || alreadyAsked.has(key)) continue;
-    alreadyAsked.add(key);
-    questions.push({
-      categoryKey: contextualTemplate.categoryKey,
-      category: labelForCategoryKey(contextualTemplate.categoryKey),
-      intent: contextualTemplate.intent,
-      question: normalizedQuestion,
-      suggestions: normalizeSuggestionChoices(
-        contextualTemplate.categoryKey,
-        contextualTemplate.intent,
-        contextualTemplate.suggestions,
-        input,
-        { allowTemplateFallback: true },
-      ),
-    });
-    if (questions.length >= needed) break;
-  }
-
-  return questions;
-}
-
 function inferRequiredCategoryKeys(input: {
   requirement?: string;
   attachmentText?: string;
@@ -1165,7 +1115,21 @@ function validateInitialDiscoveryQuestions(
   input?: DiscoveryFallbackInput,
 ): InitialDiscoveryValidation {
   const requiredCategoryKeys = categoryCoverageKeys(profile, input);
-  if (!questions.length && profile.recommendedInitialCount > 0) {
+  const explicitZeroQuestionDiscovery =
+    questions.length === 0
+    && profile.recommendedInitialCount === 0
+    && profile.ambiguity === 'low'
+    && requiredCategoryKeys.length === 0;
+
+  if (explicitZeroQuestionDiscovery) {
+    return {
+      valid: true,
+      requiredCategoryKeys,
+      failureReasonCode: null,
+    };
+  }
+
+  if (!questions.length) {
     return {
       valid: false,
       requiredCategoryKeys,
@@ -1198,48 +1162,23 @@ export function validateAndRepairInitialDiscovery(
   });
   const finalizedQuestions = finalizeInitialDiscoveryQuestions(questions, calibratedProfile, input);
   const finalizedValidation = validateInitialDiscoveryQuestions(finalizedQuestions, calibratedProfile, input);
-  const initialRepairApplied =
-    !initialValidation.valid
-    || questions.length !== finalizedQuestions.length;
-
-  if (finalizedValidation.valid) {
-    return {
-      questions: finalizedQuestions,
-      discoveryProfile: calibrateDiscoveryProfile(
-        {
-          ...calibratedProfile,
-          recommendedInitialCount: finalizedQuestions.length,
-        },
-        {
-          requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
-          repairApplied: initialRepairApplied,
-          repairedQuestionCount: finalizedQuestions.length,
-        },
-      ),
-      repairApplied: initialRepairApplied,
-      failureReasonCode: null,
-    };
-  }
-
-  const repairedProfile = calibrateDiscoveryProfile(
-    calibratedProfile,
-    {
-      requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
-      repairApplied: true,
-      repairedQuestionCount: finalizedQuestions.length,
-    },
-  );
-  const repairedQuestions = finalizeInitialDiscoveryQuestions([], repairedProfile, input);
-  const repairedValidation = validateInitialDiscoveryQuestions(repairedQuestions, repairedProfile, input);
+  const initialRepairApplied = questions.length !== finalizedQuestions.length;
 
   return {
-    questions: repairedValidation.valid ? repairedQuestions : [],
-    discoveryProfile: {
-      ...repairedProfile,
-      recommendedInitialCount: repairedQuestions.length || repairedProfile.recommendedInitialCount,
-    },
-    repairApplied: true,
-    failureReasonCode: repairedValidation.failureReasonCode,
+    questions: finalizedValidation.valid ? finalizedQuestions : [],
+    discoveryProfile: calibrateDiscoveryProfile(
+      {
+        ...calibratedProfile,
+        recommendedInitialCount: finalizedQuestions.length,
+      },
+      {
+        requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
+        repairApplied: false,
+        repairedQuestionCount: finalizedQuestions.length,
+      },
+    ),
+    repairApplied: initialRepairApplied,
+    failureReasonCode: finalizedValidation.failureReasonCode,
   };
 }
 
@@ -1285,16 +1224,14 @@ export function finalizeInitialDiscoveryQuestions(
   profile: DiscoveryProfile,
   input?: DiscoveryFallbackInput,
 ): ClarifyQuestion[] {
-  const deduped = normalizeQuestions(questions, new Set<string>(), input).sort(questionComparator);
-  if (deduped.length > 0) return deduped;
-  if (profile.recommendedInitialCount <= 0) return [];
+  void profile;
+  return normalizeQuestions(questions, new Set<string>(), input).sort(questionComparator);
+}
 
-  return buildFallbackQuestions(
-    categoryCoverageKeys(profile, input),
-    new Set<string>(),
-    Math.max(1, Math.round(profile.recommendedInitialCount)),
-    input,
-  ).sort(questionComparator);
+export function allowsZeroQuestionDiscovery(profile: DiscoveryProfile): boolean {
+  return profile.recommendedInitialCount === 0
+    && profile.ambiguity === 'low'
+    && profile.missingCategoryKeys.length === 0;
 }
 
 export function finalizeFollowupDiscoveryQuestions(
