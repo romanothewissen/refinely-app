@@ -44,6 +44,7 @@ export async function handler(event: { body: RefineEvent }) {
       features,
       feedback: maskedFeedback.text,
       config,
+      onProgress: (message) => sendRefineProgress(sessionId, message),
     });
 
     if (await isWorkflowCancelled(sessionId)) {

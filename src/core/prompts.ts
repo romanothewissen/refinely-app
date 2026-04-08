@@ -286,6 +286,71 @@ OUTPUT FORMAT (strict):
 Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
 }
 
+export function buildSizingAssessmentSystemPrompt(): string {
+  return `You are a principal business analyst judging whether a generated backlog is proportionate to the original requirement.
+
+Your job is to determine whether the current output is appropriately sized, oversized, undersized, or uncertain.
+
+ARCHETYPES:
+- guard_rule: a focused constraint, prevention, validation, or block rule
+- focused_capability: one primary user capability with limited branching
+- workflow_area: a short ask that names a workflow domain whose real rules are mostly unstated
+- broad_platform: a clearly multi-capability or multi-workflow request
+
+CALIBRATION RULES:
+- A short guard or constraint ask is usually one strong feature, sometimes two when an explicitly separate override or exception workflow is stated.
+- If the same guard rule applies to two closely related work item types, that does NOT automatically require separate features.
+- Supporting visibility, audit, notification, policy-definition, reason capture, and override behavior usually belong inside the parent feature unless they are independently valuable workflows.
+- A short workflow-area ask may still justify several features when the operating logic is mostly unstated and multiple handling paths are implied.
+- Only call the result oversized when the output appears fragmented, repetitive, or inflated beyond what the ask independently requires.
+
+Return JSON only:
+{
+  "archetype": "guard_rule | focused_capability | workflow_area | broad_platform",
+  "verdict": "ok | oversized | undersized | uncertain",
+  "confidence": "low | medium | high",
+  "preferred_feature_min": 1,
+  "preferred_feature_max": 2,
+  "preferred_ar_depth": "minimal | lean | standard | thorough | comprehensive",
+  "reason_codes": ["..."],
+  "reasons": ["..."]
+}`;
+}
+
+export function buildSizingRepairSystemPrompt(opts: {
+  domainContext: string;
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? processTaxonomyBlock(opts.processTaxonomy)
+    : '';
+
+  return `You are a principal business analyst repairing an oversized generated Jira backlog.
+${platformContextBlock(opts.domainContext)}
+YOUR JOB: Rewrite the feature set into a smaller, better-scoped backlog that preserves the original business intent and all still-relevant business rules.
+
+CONSOLIDATION RULES:
+- Prefer the smallest set of strong, independently valuable features that fully covers the ask
+- Merge sibling features when they express the same core rule with only minor wording, target-object, support, or exception differences
+- Keep override, exemption, reason-capture, visibility, audit, notification, and policy-definition behavior inside the parent feature unless it is clearly an independently deliverable workflow
+- If the same guard rule applies to multiple closely related work item types, you may keep them in one feature when the business rule is the same
+- Do not drop valid business rules or edge cases just to reduce count
+- Do not invent adjacent scope that the requirement did not ask for
+
+QUALITY RULES:
+- Return the COMPLETE final feature set
+- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Every feature MUST include complete acceptance_requirements with standalone GIVEN/WHEN/THEN triples
+- No solution language, no system names, no implementation detail
+${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy above\n' : ''}
+
+${taxonomySection}
+
+Output JSON only:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+}
+
 // ─── Requirement Triage (fast LLM-based assessment) ─────────────────────────
 
 export function buildTriageSystemPrompt(): string {
@@ -341,6 +406,7 @@ WHAT TO LOOK FOR WHEN REASONING:
 - Named tools, systems, or platforms are environment context when they are the setting in which a single capability operates — they do not expand scope or complexity on their own. Count what is being built within or between them.
 - However, when a requirement explicitly enumerates multiple instances of the same category (channels, methods, types, modes, sources, destinations, etc.) that must each be handled with distinct behavior or rules, that enumeration defines deliverable scope. Ask: would each instance require a distinct implementation path, routing rule, or behavioral constraint? If yes, count them toward scope and complexity.
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
+- If the same guard rule applies to two closely related work item types, that is usually one feature unless the requirement states different actor ownership, lifecycle rules, or approval paths.
 - Do not split one narrowly scoped rule into multiple features just because it has states, timing, or unblock conditions. Count those as acceptance-requirement depth unless they are independently deliverable workflows.
 - Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two systems communicating via an interface is one process, not two actor groups.
 - Short capability-area asks that name a workflow domain without stating its rules, actors, or decision logic are often HIGH complexity when the business behavior is mostly unstated. The hidden workflow logic matters more than the word count.
@@ -654,6 +720,7 @@ PRESERVATION AND STRUCTURE RULES:
 - Return the COMPLETE final feature set after applying the feedback, not just the changed fragments
 - Every returned feature must be fully written out with a complete description and complete acceptance_requirements
 - If the feedback implies consolidating, splitting, adding, or removing features, do that explicitly in the returned final feature set
+- If the feedback is only about tone, clarity, audience, or technicality, preserve the exact feature boundaries and AR ownership. Do not split, merge, add, remove, or move ARs between features for stylistic feedback alone.
 - Do not silently drop still-relevant business rules, edge cases, or outcomes from the existing features during consolidation
 - Preserve unchanged business meaning and coverage unless the feedback explicitly narrows or removes it
 - Never output partial AR text, truncated THEN statements, or placeholder rewrites
@@ -690,16 +757,29 @@ export function buildSingleFeatureRefineSystemPrompt(opts: {
   domainContext: string;
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
+  allowStructuralChanges?: boolean;
 }): string {
   const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? processTaxonomyBlock(opts.processTaxonomy)
     : '';
+
+  const structureSection = opts.allowStructuralChanges === false
+    ? `STRUCTURE RULES:
+- Return EXACTLY ONE feature in the features array
+- Do not split this feature into multiple features
+- Do not invent new sibling features or move acceptance requirements into other features
+`
+    : `STRUCTURE RULES:
+- Return one feature unless the feedback explicitly asks to split it into multiple features
+- Do not invent unrelated sibling features
+`;
 
   return `You are a principal business analyst refining ONE Jira feature based on user feedback.
 ${platformContextBlock(opts.domainContext)}
 YOUR JOB: Decide what needs to change to satisfy the user's feedback, then rewrite only the necessary parts while preserving the feature's intent, scope, and business meaning.
 If an ORIGINAL REQUIREMENT is provided in the user message, treat that as the source of truth for actor labels, scope, and business intent.
 
+${structureSection}
 PRESERVATION RULES — do NOT change any of the following unless the feedback explicitly mentions them:
 - process_code: preserve exactly as-is
 - suggested_story_points: preserve exactly as-is

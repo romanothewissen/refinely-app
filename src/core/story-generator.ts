@@ -17,6 +17,13 @@ import {
   ClarifyFailureReasonCode,
   TenantConfig,
   GenerationResult,
+  GenerationSizingAssessment,
+  SizingAssessmentArDepth,
+  SizingAssessmentArchetype,
+  SizingAssessmentConfidence,
+  SizingAssessmentReason,
+  SizingAssessmentSnapshot,
+  SizingAssessmentVerdict,
   TokenUsageSummary,
   DiscoveryProfile,
 } from '../types';
@@ -30,6 +37,7 @@ import {
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
   buildRefineSystemPrompt,
+  buildSizingRepairSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
 } from './prompts';
@@ -80,6 +88,13 @@ interface ArPlan {
   max: number;
   target: number;
   depth: 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
+}
+
+type SizingStage = 'decomposition' | 'final';
+
+interface SizingAssessmentComputation {
+  assessment: SizingAssessmentSnapshot;
+  oversizeScore: number;
 }
 
 export interface RequirementAssessment {
@@ -169,6 +184,18 @@ const GENERIC_ROLE_WORDS = new Set([
   'technician',
   'engineer',
 ]);
+
+const SIZING_STOPWORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'i', 'in', 'is', 'it',
+  'its', 'need', 'of', 'on', 'or', 'so', 'that', 'the', 'their', 'this', 'to', 'when', 'with',
+]);
+
+const SUPPORTING_BEHAVIOR_TERMS = [
+  'audit', 'notification', 'visibility', 'report', 'reporting', 'reason', 'policy', 'status',
+  'monitor', 'monitoring', 'history', 'log', 'logging',
+];
+
+const OVERRIDE_TERMS = ['override', 'exempt', 'exception', 'allow', 'reason', 'approval'];
 
 const PASS1_CONTEXT_LIMITS = {
   requirement: 5000,
@@ -730,10 +757,531 @@ export async function assessRequirementWithLlm(input: {
       reasoningEffort: 'medium',
       ...input.providerOpts,
     });
-    return parseTriageResult(result.data);
+    return applySmallAskTriageGuardrails({
+      requirement: input.requirement,
+      clarifyAnswers: input.clarifyAnswers,
+      triage: parseTriageResult(result.data),
+    });
   } catch {
     return null;
   }
+}
+
+const TRIAGE_SHAPE_ORDER: FeaturePlan['shape'][] = ['minimal', 'narrow', 'balanced', 'broad', 'epic'];
+const TRIAGE_COMPLEXITY_ORDER: FeaturePlan['complexity'][] = ['trivial', 'low', 'medium', 'high', 'very_high'];
+const SIZING_AR_DEPTH_ORDER: SizingAssessmentArDepth[] = ['minimal', 'lean', 'standard', 'thorough', 'comprehensive'];
+
+function tokensForSimilarity(text: string): Set<string> {
+  const tokens = String(text ?? '')
+    .toLowerCase()
+    .match(/\b[a-z][a-z0-9/-]{2,}\b/g) ?? [];
+
+  return new Set(
+    tokens.filter((token) => !SIZING_STOPWORDS.has(token)),
+  );
+}
+
+function jaccard(left: Set<string>, right: Set<string>): number {
+  if (left.size === 0 && right.size === 0) return 1;
+  if (left.size === 0 || right.size === 0) return 0;
+  let overlap = 0;
+  left.forEach((token) => {
+    if (right.has(token)) overlap += 1;
+  });
+  return overlap / (left.size + right.size - overlap);
+}
+
+function countDistinctRoleMentions(text: string): number {
+  const roleMatches = (String(text ?? '').match(
+    /\b(admin|administrator|manager|planner|dispatcher|technician|fse|field service engineer|customer|analyst|qa|developer|operator|supervisor|coordinator|lead|director|reviewer|approver|scheduler|engineer)\b/gi,
+  ) ?? []);
+
+  return new Set(
+    roleMatches.map((role) => role.toLowerCase()).filter((role) => !GENERIC_ROLE_WORDS.has(role)),
+  ).size;
+}
+
+function countCapabilityAreas(requirement: string): number {
+  const matches = String(requirement ?? '').match(
+    /\b(view|raise|track|manage|update|create|edit|approve|reject|route|assign|dispatch|schedule|monitor|report|notify|sync|export|import)\b/gi,
+  ) ?? [];
+  return new Set(matches.map((match) => match.toLowerCase())).size;
+}
+
+function expectedAverageArLimit(depth: SizingAssessmentArDepth): number {
+  switch (depth) {
+    case 'minimal': return 2;
+    case 'lean': return 3;
+    case 'standard': return 4;
+    case 'thorough': return 5;
+    case 'comprehensive': return 6;
+    default: return 4;
+  }
+}
+
+function cappedByOrder<T extends string>(value: T, cap: T, order: readonly T[]): T {
+  return order.indexOf(value) <= order.indexOf(cap) ? value : cap;
+}
+
+function featureNarrative(feature: Pick<Feature, 'summary' | 'description' | 'acceptanceRequirements'>): string {
+  return [
+    feature.summary,
+    feature.description,
+    ...(feature.acceptanceRequirements ?? []).flatMap((ar) => [ar.given, ar.when, ar.then]),
+  ].join(' ');
+}
+
+function countNearDuplicateFeaturePairs(features: Feature[]): number {
+  let duplicates = 0;
+  for (let i = 0; i < features.length; i += 1) {
+    for (let j = i + 1; j < features.length; j += 1) {
+      const titleSimilarity = jaccard(
+        tokensForSimilarity(features[i]?.summary ?? ''),
+        tokensForSimilarity(features[j]?.summary ?? ''),
+      );
+      const narrativeSimilarity = jaccard(
+        tokensForSimilarity(featureNarrative(features[i])),
+        tokensForSimilarity(featureNarrative(features[j])),
+      );
+      if (titleSimilarity >= 0.58 || narrativeSimilarity >= 0.72) {
+        duplicates += 1;
+      }
+    }
+  }
+  return duplicates;
+}
+
+function countFeaturesMatchingTerms(features: Feature[], terms: string[]): number {
+  const pattern = new RegExp(`\\b(${terms.join('|')})\\b`, 'i');
+  return features.filter((feature) => pattern.test(`${feature.summary} ${feature.description}`)).length;
+}
+
+function requirementMentionsAny(requirement: string, terms: string[]): boolean {
+  const pattern = new RegExp(`\\b(${terms.join('|')})\\b`, 'i');
+  return pattern.test(requirement);
+}
+
+export function classifyRequirementArchetype(input: {
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+}): SizingAssessmentArchetype {
+  const requirement = String(input.requirement ?? '').trim();
+  const answersText = (input.clarifyAnswers ?? []).map((answer) => answer.answer).join(' ');
+  const combined = `${requirement} ${answersText}`.trim();
+  const wordCount = requirement ? requirement.split(/\s+/).length : 0;
+  const sentenceCount = requirement
+    ? requirement.split(/[.!?]\s+/).map((part) => part.trim()).filter(Boolean).length
+    : 0;
+  const roleCount = countDistinctRoleMentions(combined);
+  const capabilityAreaCount = countCapabilityAreas(requirement);
+  const hasGuardLanguage = /\b(prevent|ensure no|must ensure no|must not|cannot|can't|should not|block|disallow|only allow|no .+ can be created)\b/i
+    .test(requirement);
+  const hasWorkflowAreaLanguage = /\b(one place|workflow|manage incoming|incoming communications|channels|triage|onboarding|portal|end[- ]to[- ]end|create or update)\b/i
+    .test(requirement);
+  const commaSeparatedClauses = (requirement.match(/,\s/g) ?? []).length;
+
+  if (capabilityAreaCount >= 4 || (capabilityAreaCount >= 3 && commaSeparatedClauses >= 2)) {
+    return 'broad_platform';
+  }
+
+  if (hasGuardLanguage && wordCount <= 45 && sentenceCount <= 2 && roleCount <= 2) {
+    return 'guard_rule';
+  }
+
+  if (hasWorkflowAreaLanguage && !hasGuardLanguage) {
+    return 'workflow_area';
+  }
+
+  return 'focused_capability';
+}
+
+function determinePreferredFeatureRange(input: {
+  archetype: SizingAssessmentArchetype;
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  triage?: TriageResult | null;
+}): { min: number; max: number } {
+  const combined = [
+    input.requirement,
+    ...(input.clarifyAnswers ?? []).map((answer) => answer.answer),
+  ].join(' ');
+  const roleCount = countDistinctRoleMentions(combined);
+  const hasExplicitExceptionFlow = /\b(override|exception|exempt|approval|reason|grace period|manual review)\b/i.test(combined);
+  const capabilityAreas = countCapabilityAreas(input.requirement);
+
+  switch (input.archetype) {
+    case 'guard_rule': {
+      const max = Math.min(2, 1 + (hasExplicitExceptionFlow ? 1 : 0) + (roleCount >= 2 ? 1 : 0));
+      return { min: 1, max: Math.max(1, max) };
+    }
+    case 'focused_capability':
+      return { min: 1, max: Math.min(3, 2 + (roleCount >= 2 ? 1 : 0)) };
+    case 'workflow_area': {
+      const highComplexity = input.triage?.complexity === 'high' || input.triage?.complexity === 'very_high';
+      return highComplexity ? { min: 3, max: 6 } : { min: 2, max: 4 };
+    }
+    case 'broad_platform':
+    default: {
+      const min = Math.max(4, capabilityAreas || 4);
+      return { min, max: Math.max(min + 2, Math.min(9, min + 4)) };
+    }
+  }
+}
+
+function determinePreferredArDepth(input: {
+  archetype: SizingAssessmentArchetype;
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  triage?: TriageResult | null;
+}): SizingAssessmentArDepth {
+  const combined = [
+    input.requirement,
+    ...(input.clarifyAnswers ?? []).map((answer) => answer.answer),
+  ].join(' ');
+  const hasExplicitExceptions = /\b(override|exception|exempt|approval|reason|grace period|manual review)\b/i.test(combined);
+
+  switch (input.archetype) {
+    case 'guard_rule':
+      return hasExplicitExceptions ? 'standard' : 'lean';
+    case 'focused_capability':
+      return input.triage?.complexity === 'high' ? 'standard' : 'lean';
+    case 'workflow_area':
+      return input.triage?.complexity === 'high' || input.triage?.complexity === 'very_high'
+        ? 'thorough'
+        : 'standard';
+    case 'broad_platform':
+    default:
+      return input.triage?.complexity === 'very_high' ? 'comprehensive' : 'thorough';
+  }
+}
+
+function buildSizingReason(code: string, detail: string): SizingAssessmentReason {
+  return { code, detail };
+}
+
+function computeSizingHeuristics(input: {
+  stage: SizingStage;
+  requirement: string;
+  features: Feature[];
+  clarifyAnswers?: ClarifyAnswer[];
+  triage?: TriageResult | null;
+}): SizingAssessmentComputation {
+  const archetype = classifyRequirementArchetype({
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers,
+  });
+  const preferredFeatureRange = determinePreferredFeatureRange({
+    archetype,
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers,
+    triage: input.triage,
+  });
+  const preferredArDepth = determinePreferredArDepth({
+    archetype,
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers,
+    triage: input.triage,
+  });
+
+  const featureCount = input.features.length;
+  const acceptanceRequirementCount = input.features.reduce((sum, feature) => sum + (feature.acceptanceRequirements?.length ?? 0), 0);
+  const averageAcceptanceRequirementsPerFeature = featureCount > 0 ? acceptanceRequirementCount / featureCount : 0;
+  const averageArLimit = expectedAverageArLimit(preferredArDepth);
+  const reasonItems: SizingAssessmentReason[] = [];
+  let oversizeScore = 0;
+  let undersizeScore = 0;
+
+  if (featureCount > preferredFeatureRange.max) {
+    oversizeScore += 2;
+    reasonItems.push(buildSizingReason(
+      'feature_count_above_preferred_range',
+      `Generated ${featureCount} features where this ask archetype usually fits within ${preferredFeatureRange.min}-${preferredFeatureRange.max}.`,
+    ));
+  }
+
+  if (featureCount >= preferredFeatureRange.max + 2) {
+    oversizeScore += 2;
+    reasonItems.push(buildSizingReason(
+      'feature_count_far_above_preferred_range',
+      'The feature count is materially above the preferred range for this kind of ask.',
+    ));
+  }
+
+  if (featureCount < preferredFeatureRange.min && preferredFeatureRange.min > 1) {
+    undersizeScore += 2;
+    reasonItems.push(buildSizingReason(
+      'feature_count_below_preferred_range',
+      `Generated ${featureCount} features where this ask archetype usually needs at least ${preferredFeatureRange.min}.`,
+    ));
+  }
+
+  if (input.stage === 'final' && averageAcceptanceRequirementsPerFeature > averageArLimit + 0.75) {
+    oversizeScore += averageAcceptanceRequirementsPerFeature >= averageArLimit + 1.5 ? 2 : 1;
+    reasonItems.push(buildSizingReason(
+      'average_acceptance_requirements_high',
+      `The average of ${averageAcceptanceRequirementsPerFeature.toFixed(1)} ARs per feature is high for a ${preferredArDepth} depth target.`,
+    ));
+  }
+
+  if (input.stage === 'final' && acceptanceRequirementCount > (Math.max(featureCount, preferredFeatureRange.max) * averageArLimit) + 2) {
+    oversizeScore += 1;
+    reasonItems.push(buildSizingReason(
+      'acceptance_requirements_excessive',
+      `The total of ${acceptanceRequirementCount} acceptance requirements is high relative to the feature count and preferred depth.`,
+    ));
+  }
+
+  const duplicatePairs = countNearDuplicateFeaturePairs(input.features);
+  if (duplicatePairs > 0) {
+    oversizeScore += duplicatePairs >= 2 ? 2 : 1;
+    reasonItems.push(buildSizingReason(
+      'duplicate_guard_features',
+      `${duplicatePairs} pair${duplicatePairs === 1 ? '' : 's'} of features appear to cover nearly the same business behavior.`,
+    ));
+  }
+
+  const overrideSplitCount = countFeaturesMatchingTerms(input.features, OVERRIDE_TERMS);
+  if (archetype === 'guard_rule' && overrideSplitCount >= 1 && featureCount >= 2) {
+    oversizeScore += 1;
+    reasonItems.push(buildSizingReason(
+      'override_split_without_independent_scope',
+      'Override or exception handling appears to have been split into sibling features instead of staying inside the parent guard rule.',
+    ));
+  }
+
+  const supportSplitCount = countFeaturesMatchingTerms(input.features, SUPPORTING_BEHAVIOR_TERMS);
+  if (archetype !== 'broad_platform' && supportSplitCount >= 2 && !requirementMentionsAny(input.requirement, SUPPORTING_BEHAVIOR_TERMS)) {
+    oversizeScore += 1;
+    reasonItems.push(buildSizingReason(
+      'supporting_behavior_split_out',
+      'Support behavior like visibility, audit, reporting, or reason capture appears to have become standalone features without being asked for explicitly.',
+    ));
+  }
+
+  let verdict: SizingAssessmentVerdict;
+  let confidence: SizingAssessmentConfidence;
+
+  if (oversizeScore >= 4) {
+    verdict = 'oversized';
+    confidence = 'high';
+  } else if (oversizeScore >= 2) {
+    verdict = 'oversized';
+    confidence = 'medium';
+  } else if (undersizeScore >= 2) {
+    verdict = 'undersized';
+    confidence = 'medium';
+  } else if (featureCount >= preferredFeatureRange.min
+    && featureCount <= preferredFeatureRange.max
+    && (input.stage === 'decomposition' || averageAcceptanceRequirementsPerFeature <= averageArLimit + 0.75)) {
+    verdict = 'ok';
+    confidence = 'high';
+    reasonItems.push(buildSizingReason(
+      'counts_within_expected_range',
+      'The feature count and acceptance depth fit the expected range for this kind of ask.',
+    ));
+  } else {
+    verdict = 'uncertain';
+    confidence = 'low';
+  }
+
+  return {
+    oversizeScore,
+    assessment: {
+      stage: input.stage,
+      archetype,
+      verdict,
+      confidence,
+      preferredFeatureRange,
+      preferredArDepth,
+      featureCount,
+      acceptanceRequirementCount,
+      averageAcceptanceRequirementsPerFeature,
+      reasonCodes: reasonItems.map((reason) => reason.code),
+      reasons: reasonItems,
+    },
+  };
+}
+
+export function assessSizingHeuristics(input: {
+  stage: SizingStage;
+  requirement: string;
+  features: Feature[];
+  clarifyAnswers?: ClarifyAnswer[];
+  triage?: TriageResult | null;
+}): SizingAssessmentSnapshot {
+  return computeSizingHeuristics(input).assessment;
+}
+
+export function applySmallAskTriageGuardrails(input: {
+  requirement: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  triage: TriageResult | null;
+}): TriageResult | null {
+  if (!input.triage) return null;
+
+  const archetype = classifyRequirementArchetype({
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers,
+  });
+
+  if (archetype !== 'guard_rule') {
+    return input.triage;
+  }
+
+  const preferredRange = determinePreferredFeatureRange({
+    archetype,
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers,
+    triage: input.triage,
+  });
+  const cappedFeatureMax = Math.max(1, preferredRange.max);
+  const shapeCap: FeaturePlan['shape'] = cappedFeatureMax <= 1 ? 'minimal' : 'narrow';
+
+  return {
+    estimatedFeatures: Math.min(input.triage.estimatedFeatures, cappedFeatureMax),
+    estimatedQuestions: Math.min(input.triage.estimatedQuestions, 6),
+    shape: cappedByOrder(input.triage.shape, shapeCap, TRIAGE_SHAPE_ORDER),
+    complexity: cappedByOrder(input.triage.complexity, 'medium', TRIAGE_COMPLEXITY_ORDER),
+    arDepth: cappedByOrder(input.triage.arDepth, 'standard', SIZING_AR_DEPTH_ORDER) as ArPlan['depth'],
+  };
+}
+
+function shouldAutoRepairOversizedAssessment(assessment: SizingAssessmentSnapshot): boolean {
+  return assessment.verdict === 'oversized'
+    && assessment.confidence === 'high'
+    && assessment.featureCount > 1;
+}
+
+function buildGenerationSizingAssessment(input: {
+  decomposition: SizingAssessmentSnapshot;
+  final: SizingAssessmentSnapshot;
+  repairApplied: boolean;
+  preRepairFeatureCount?: number;
+  preRepairAcceptanceRequirementCount?: number;
+}): GenerationSizingAssessment {
+  return {
+    archetype: input.final.archetype,
+    verdict: input.final.verdict,
+    confidence: input.final.confidence,
+    preferredFeatureRange: input.final.preferredFeatureRange,
+    preferredArDepth: input.final.preferredArDepth,
+    reasonCodes: input.final.reasonCodes,
+    reasons: input.final.reasons,
+    repairApplied: input.repairApplied,
+    preRepairFeatureCount: input.preRepairFeatureCount,
+    preRepairAcceptanceRequirementCount: input.preRepairAcceptanceRequirementCount,
+    decomposition: input.decomposition,
+    final: input.final,
+  };
+}
+
+async function repairOversizedFeatureSet(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  similarStoriesText: string;
+  wiContextText: string;
+  features: Feature[];
+  sizingAssessment: SizingAssessmentSnapshot;
+  config: TenantConfig;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+  shouldCancel?: () => Promise<boolean> | boolean;
+}): Promise<{ features: Feature[]; usage: { input: number; output: number }; applied: boolean }> {
+  const {
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    similarStoriesText,
+    wiContextText,
+    features,
+    sizingAssessment,
+    config,
+    providerOpts,
+    shouldCancel,
+  } = opts;
+
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      limits: PASS2_CONTEXT_LIMITS,
+    }),
+    `SIZING SIGNAL:\nArchetype: ${sizingAssessment.archetype}\nPreferred feature range: ${sizingAssessment.preferredFeatureRange.min}-${sizingAssessment.preferredFeatureRange.max}\nPreferred AR depth: ${sizingAssessment.preferredArDepth}\nReasons:\n${sizingAssessment.reasons.map((reason) => `- ${reason.detail}`).join('\n')}`,
+    `CURRENT FEATURES:\n${JSON.stringify(features, null, 2)}`,
+  ].join('\n\n---\n\n');
+
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(config.generatorConfig.refineModel, config.tier),
+    systemPrompt: buildSizingRepairSystemPrompt({
+      domainContext: config.domainContext,
+      processTaxonomy: config.processTaxonomy,
+      processTaxonomyEnabled: config.processTaxonomyEnabled,
+    }),
+    userMessage,
+    maxTokens: Math.max(config.generatorConfig.maxTokens ?? 8192, 4096),
+    reasoningEffort: 'medium',
+    ...providerOpts,
+  });
+
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+
+  const rawFeatures = result.data.features ?? [];
+  if (rawFeatures.length === 0) {
+    return {
+      features,
+      usage: { input: result.usage.input, output: result.usage.output },
+      applied: false,
+    };
+  }
+
+  const backfilled = await backfillMissingAcceptanceRequirements({
+    features: rawFeatures,
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    wiContextText,
+    similarStoriesText,
+    domainContext: config.domainContext,
+    arPlan: {
+      min: 0,
+      max: 0,
+      target: 0,
+      depth: sizingAssessment.preferredArDepth as ArPlan['depth'],
+    },
+    generatorConfig: config.generatorConfig,
+    tier: config.tier,
+    providerOpts,
+  });
+
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+
+  const repairedFeatures = backfilled.features.map(normaliseFeature);
+  const originalArCount = features.reduce((sum, feature) => sum + feature.acceptanceRequirements.length, 0);
+  const repairedArCount = repairedFeatures.reduce((sum, feature) => sum + feature.acceptanceRequirements.length, 0);
+  const improved = repairedFeatures.length < features.length || repairedArCount < originalArCount;
+
+  return {
+    features: improved ? repairedFeatures : features,
+    usage: {
+      input: result.usage.input + backfilled.usage.input,
+      output: result.usage.output + backfilled.usage.output,
+    },
+    applied: improved,
+  };
 }
 
 // ─── Heuristic Fallback Assessment ───────────────────────────────────────────
@@ -1081,9 +1629,23 @@ export async function generateFeatures(opts: {
   onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions: number }) => Promise<void>;
   onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
   onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
+  onSizingAssessment?: (assessment: GenerationSizingAssessment) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
-  const { requirement, clarifyAnswers, attachmentText, similarStoriesText, wiContextText, config, precomputedTriage, onTriageComplete, onPass1Complete, onArProgress, shouldCancel } = opts;
+  const {
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    similarStoriesText,
+    wiContextText,
+    config,
+    precomputedTriage,
+    onTriageComplete,
+    onPass1Complete,
+    onArProgress,
+    onSizingAssessment,
+    shouldCancel,
+  } = opts;
   const { generatorConfig } = config;
   const providerOpts = {
     provider: generatorConfig.provider,
@@ -1157,9 +1719,17 @@ export async function generateFeatures(opts: {
   });
 
   const pass1Features = pass1Result.features;
+  const pass1DraftFeatures = pass1Features.map(normaliseFeature);
+  const decompositionSizingAssessment = assessSizingHeuristics({
+    stage: 'decomposition',
+    requirement,
+    features: pass1DraftFeatures,
+    clarifyAnswers,
+    triage: triageResult,
+  });
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
-  if (onPass1Complete) await onPass1Complete(pass1Features.map(normaliseFeature));
+  if (onPass1Complete) await onPass1Complete(pass1DraftFeatures);
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
   // ── Pass 2: Acceptance Requirements ──
@@ -1260,7 +1830,46 @@ export async function generateFeatures(opts: {
     if (onArProgress) await onArProgress(pass1Features.length, pass1Features.length, pass1Features.length - 1);
   }
 
-  const features = rawFeatures.map(normaliseFeature);
+  let features = rawFeatures.map(normaliseFeature);
+  let finalSizingAssessment = assessSizingHeuristics({
+    stage: 'final',
+    requirement,
+    features,
+    clarifyAnswers,
+    triage: triageResult,
+  });
+  let repairApplied = false;
+  let repairUsage = { input: 0, output: 0 };
+  let preRepairFeatureCount: number | undefined;
+  let preRepairAcceptanceRequirementCount: number | undefined;
+
+  if (shouldAutoRepairOversizedAssessment(finalSizingAssessment)) {
+    preRepairFeatureCount = finalSizingAssessment.featureCount;
+    preRepairAcceptanceRequirementCount = finalSizingAssessment.acceptanceRequirementCount;
+    const repairResult = await repairOversizedFeatureSet({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      features,
+      sizingAssessment: finalSizingAssessment,
+      config,
+      providerOpts,
+      shouldCancel,
+    });
+    repairUsage = repairResult.usage;
+    repairApplied = repairResult.applied;
+    features = repairResult.features;
+    finalSizingAssessment = assessSizingHeuristics({
+      stage: 'final',
+      requirement,
+      features,
+      clarifyAnswers,
+      triage: triageResult,
+    });
+  }
+
   const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   if (failedFeatureIndexes.length > 0) {
     const failedCount = failedFeatureIndexes.length;
@@ -1273,14 +1882,29 @@ export async function generateFeatures(opts: {
   const violations = validateFeatures(features, config);
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Result.usage.input + pass2Usage.input,
-    output: pass1Result.usage.output + pass2Usage.output,
-    total: pass1Result.usage.input + pass1Result.usage.output + pass2Usage.input + pass2Usage.output,
+    input: pass1Result.usage.input + pass2Usage.input + repairUsage.input,
+    output: pass1Result.usage.output + pass2Usage.output + repairUsage.output,
+    total: pass1Result.usage.input + pass1Result.usage.output + pass2Usage.input + pass2Usage.output + repairUsage.input + repairUsage.output,
     byStage: {
       decomposition: toStageUsage(pass1Result.usage),
       acceptanceRequirements: toStageUsage(pass2Usage),
+      ...(repairUsage.input || repairUsage.output
+        ? { sizingRepair: toStageUsage(repairUsage) }
+        : {}),
     },
   };
+
+  const sizingAssessment = buildGenerationSizingAssessment({
+    decomposition: decompositionSizingAssessment,
+    final: finalSizingAssessment,
+    repairApplied,
+    preRepairFeatureCount,
+    preRepairAcceptanceRequirementCount,
+  });
+
+  if (onSizingAssessment) {
+    await onSizingAssessment(sizingAssessment);
+  }
 
   return {
     features,
@@ -1646,13 +2270,53 @@ export async function evaluateSufficiency(opts: {
 
 // ─── Refinement ───────────────────────────────────────────────────────────────
 
+const STRUCTURAL_REFINEMENT_PATTERNS = [
+  /\bmerge\b/i,
+  /\bconsolidat(?:e|ion)\b/i,
+  /\bcombine\b/i,
+  /\bdeduplicat(?:e|ion)\b/i,
+  /\boverlap(?:ping)?\b/i,
+  /\bsplit\b/i,
+  /\bbreak\b[\s\S]{0,40}\binto\b/i,
+  /\breorgani[sz]e\b/i,
+  /\brestructur(?:e|ing)\b/i,
+  /\bregroup\b/i,
+  /\breorder\b/i,
+  /\bremove\b[\s\S]{0,40}\bfeature\b/i,
+  /\bdelete\b[\s\S]{0,40}\bfeature\b/i,
+  /\bdrop\b[\s\S]{0,40}\bfeature\b/i,
+  /\badd\b[\s\S]{0,40}\bfeature\b/i,
+  /\bnew feature\b/i,
+  /\bcreate\b[\s\S]{0,40}\bfeature\b/i,
+  /\bmove\b[\s\S]{0,40}\bacceptance requirement/i,
+  /\bmove\b[\s\S]{0,40}\bar\b/i,
+  /\bfeature set\b/i,
+];
+
+export function feedbackRequestsStructuralRefinement(feedback: string): boolean {
+  const normalized = String(feedback ?? '').trim();
+  if (!normalized) return false;
+  return STRUCTURAL_REFINEMENT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 export async function refineFeatures(opts: {
   requirement: string;
   features: Feature[];
   feedback: string;
   config: TenantConfig;
+  onProgress?: (message: string) => Promise<void> | void;
 }): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
-  const { requirement, features, feedback, config } = opts;
+  const { requirement, features, feedback, config, onProgress } = opts;
+
+  if (!feedbackRequestsStructuralRefinement(feedback)) {
+    return refineFeaturesIndividually({
+      requirement,
+      features,
+      feedback,
+      config,
+      onProgress,
+    });
+  }
 
   const system = buildRefineSystemPrompt({
     domainContext: config.domainContext,
@@ -1704,13 +2368,21 @@ export async function refineSingleFeature(opts: {
   feature: Feature;
   feedback: string;
   config: TenantConfig;
+  allowSplit?: boolean;
 }): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
-  const { requirement, feature, feedback, config } = opts;
+  const {
+    requirement,
+    feature,
+    feedback,
+    config,
+    allowSplit = true,
+  } = opts;
 
   const system = buildSingleFeatureRefineSystemPrompt({
     domainContext: config.domainContext,
     processTaxonomy: config.processTaxonomy,
     processTaxonomyEnabled: config.processTaxonomyEnabled,
+    allowStructuralChanges: allowSplit,
   });
 
   const userMessage = [
@@ -1729,11 +2401,16 @@ export async function refineSingleFeature(opts: {
   });
 
   const rawFeatures = result.data.features ?? [];
+  const effectiveRawFeatures = allowSplit ? rawFeatures : rawFeatures.slice(0, 1);
+
+  if (!allowSplit && rawFeatures.length > 1) {
+    console.warn(`refineSingleFeature: ignoring ${rawFeatures.length - 1} unexpected split feature(s)`);
+  }
 
   // Build the result feature list. The first returned feature replaces the original
   // (preserving its id). Any additional features (e.g. when the user asks to split)
   // are returned as new features with fresh ids.
-  const features: Feature[] = rawFeatures.map((raw, index) => {
+  const features: Feature[] = effectiveRawFeatures.map((raw, index) => {
     const candidate = normaliseFeature(raw);
     if (index === 0) {
       // Preserve the original feature's id and fall back gracefully.
@@ -1767,6 +2444,64 @@ export async function refineSingleFeature(opts: {
       output: result.usage.output,
       total: result.usage.input + result.usage.output,
       byStage: { refineSingle: toStageUsage(result.usage) },
+    },
+  };
+}
+
+async function refineFeaturesIndividually(opts: {
+  requirement: string;
+  features: Feature[];
+  feedback: string;
+  config: TenantConfig;
+  onProgress?: (message: string) => Promise<void> | void;
+}): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
+  const { requirement, features, feedback, config, onProgress } = opts;
+
+  if (!features.length) {
+    return {
+      features: [],
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        total: 0,
+        byStage: {},
+      },
+    };
+  }
+
+  const refinedFeatures: Feature[] = [];
+  let totalInput = 0;
+  let totalOutput = 0;
+  const byStage: Record<string, { input: number; output: number; total: number }> = {};
+
+  for (const [index, feature] of features.entries()) {
+    await onProgress?.(`Refining feature ${index + 1} of ${features.length}…`);
+
+    const result = await refineSingleFeature({
+      requirement,
+      feature,
+      feedback,
+      config,
+      allowSplit: false,
+    });
+
+    refinedFeatures.push(result.features[0] ?? feature);
+    totalInput += result.tokenUsage.input;
+    totalOutput += result.tokenUsage.output;
+    byStage[`refine_${index + 1}`] = {
+      input: result.tokenUsage.input,
+      output: result.tokenUsage.output,
+      total: result.tokenUsage.total,
+    };
+  }
+
+  return {
+    features: refinedFeatures,
+    tokenUsage: {
+      input: totalInput,
+      output: totalOutput,
+      total: totalInput + totalOutput,
+      byStage,
     },
   };
 }

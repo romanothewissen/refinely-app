@@ -399,11 +399,51 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   tokenUsage?: TokenUsageSummary;
 }
 
+export type SizingAssessmentArchetype = 'guard_rule' | 'focused_capability' | 'workflow_area' | 'broad_platform';
+export type SizingAssessmentVerdict = 'ok' | 'oversized' | 'undersized' | 'uncertain';
+export type SizingAssessmentConfidence = 'low' | 'medium' | 'high';
+export type SizingAssessmentArDepth = 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
+
+export interface SizingAssessmentReason {
+  code: string;
+  detail: string;
+}
+
+export interface SizingAssessmentSnapshot {
+  stage: 'decomposition' | 'final';
+  archetype: SizingAssessmentArchetype;
+  verdict: SizingAssessmentVerdict;
+  confidence: SizingAssessmentConfidence;
+  preferredFeatureRange: { min: number; max: number };
+  preferredArDepth: SizingAssessmentArDepth;
+  featureCount: number;
+  acceptanceRequirementCount: number;
+  averageAcceptanceRequirementsPerFeature: number;
+  reasonCodes: string[];
+  reasons: SizingAssessmentReason[];
+}
+
+export interface GenerationSizingAssessment {
+  archetype: SizingAssessmentArchetype;
+  verdict: SizingAssessmentVerdict;
+  confidence: SizingAssessmentConfidence;
+  preferredFeatureRange: { min: number; max: number };
+  preferredArDepth: SizingAssessmentArDepth;
+  reasonCodes: string[];
+  reasons: SizingAssessmentReason[];
+  repairApplied: boolean;
+  preRepairFeatureCount?: number;
+  preRepairAcceptanceRequirementCount?: number;
+  decomposition: SizingAssessmentSnapshot;
+  final: SizingAssessmentSnapshot;
+}
+
 export interface GenerationContextMeta extends ContextSourceMeta {
   goldExamplesCount?: number;
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  sizingAssessment?: GenerationSizingAssessment;
   tokenUsage?: TokenUsageSummary;
 }
 

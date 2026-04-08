@@ -1818,14 +1818,14 @@ export function MainContent({
                   )}
                 </div>
                 <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
-                  Apply one instruction across every feature in this canvas. Use this when the same refinement should land everywhere.
+                  Apply one instruction across every feature in this canvas. Use this for wording, clarity, scope, or rule updates that should be applied feature by feature.
                 </p>
               </div>
 
               <div className="space-y-4 px-5 py-5">
                 <textarea
                   autoFocus
-                  placeholder="For example: tighten scope for implementation teams, add regulatory guardrails, or make the ARs more technical."
+                  placeholder="For example: make the language less technical, add regulatory guardrails, or tighten scope for implementation teams."
                   value={bulkInput}
                   onChange={(e) => setBulkInput(e.target.value)}
                   onKeyDown={(e) => {

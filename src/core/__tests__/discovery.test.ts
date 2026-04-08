@@ -18,6 +18,8 @@ import {
   buildCoverageRepairSystemPrompt,
   buildDecompositionSystemPrompt,
   buildEvaluateSystemPrompt,
+  buildSizingAssessmentSystemPrompt,
+  buildSizingRepairSystemPrompt,
   buildTriageSystemPrompt,
 } from '../prompts';
 import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
@@ -605,6 +607,7 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.doesNotMatch(triagePrompt, /\bServiceMax\b/i);
   assert.match(triagePrompt, /Short capability-area asks that name a workflow domain without stating its rules, actors, or decision logic are often HIGH complexity/i);
   assert.match(triagePrompt, /Short but capability-heavy workflow area/i);
+  assert.match(triagePrompt, /same guard rule applies to two closely related work item types/i);
 });
 
 test('decomposition prompt treats feature counts as hints and keeps support behavior inside the parent feature', () => {
@@ -650,6 +653,20 @@ test('ar prompt uses range guidance without exact-count pressure', () => {
   assert.match(prompt, /state transitions, preconditions, exception behavior, and downstream impacts/i);
   assert.doesNotMatch(prompt, /\(target 3\)/i);
   assert.doesNotMatch(prompt, /roughly 1-5 acceptance requirements/i);
+});
+
+test('sizing prompts calibrate consolidation around independently valuable scope', () => {
+  const assessmentPrompt = buildSizingAssessmentSystemPrompt();
+  const repairPrompt = buildSizingRepairSystemPrompt({
+    domainContext: 'Use context only to reason about business scope.',
+    processTaxonomy: [],
+    processTaxonomyEnabled: false,
+  });
+
+  assert.match(assessmentPrompt, /If the same guard rule applies to two closely related work item types, that does NOT automatically require separate features/i);
+  assert.match(assessmentPrompt, /Supporting visibility, audit, notification, policy-definition, reason capture, and override behavior usually belong inside the parent feature/i);
+  assert.match(repairPrompt, /Prefer the smallest set of strong, independently valuable features/i);
+  assert.match(repairPrompt, /Merge sibling features when they express the same core rule/i);
 });
 
 test('generation fallback is operational only when triage is unavailable', () => {

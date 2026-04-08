@@ -7,7 +7,7 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { DiscoveryProfile, Feature, GenerationContextMeta, GenerationEvent, TokenUsageSummary } from '../types';
+import { DiscoveryProfile, Feature, GenerationContextMeta, GenerationEvent, GenerationSizingAssessment, TokenUsageSummary } from '../types';
 import { TriageResult } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import {
@@ -224,6 +224,7 @@ export async function handler(event: { body: GenerationEvent }) {
   let stopHeartbeat: (() => void) | null = null;
   let triageSnapshot: Awaited<ReturnType<typeof assessRequirementWithLlm>> = null;
   let progressSourcesSnapshot: GenerationProgressPayload['sources'] | undefined;
+  let sizingAssessmentSnapshot: GenerationSizingAssessment | undefined;
 
   try {
     let currentProgress: { message?: string; pass?: 1 | 2; payload?: GenerationProgressPayload } = {};
@@ -408,6 +409,9 @@ export async function handler(event: { body: GenerationEvent }) {
           sources: progressSources,
         });
       },
+      onSizingAssessment: async (sizingAssessment) => {
+        sizingAssessmentSnapshot = sizingAssessment;
+      },
     });
 
     result.similarStories = similarStories;
@@ -427,6 +431,7 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
+      sizingAssessment: sizingAssessmentSnapshot,
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
