@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildQuickRefineReadFields,
+  detectQuickRefineActorAmbiguity,
   ensureUserStoryDescription,
   parseAcceptanceRequirementsFromText,
   resolveQuickRefineModel,
@@ -87,6 +88,28 @@ test('ensureUserStoryDescription normalizes loose story phrasing into strict use
     description,
     'As a System Administrator, I need to restrict create and update access to IM&T records so that data integrity.',
   );
+});
+
+test('detectQuickRefineActorAmbiguity flags permission-driven requirements without a named actor', () => {
+  const ambiguous = detectQuickRefineActorAmbiguity({
+    summary: 'Restrict IM&T tool maintenance access',
+    description: `The system shall be configured to only allow users with a specific permission set to create/modify IM&T/Tools (Equipment) Records.
+
+All other Roles/Profiles/Permission sets for the system shall have Read access only IM&T/Tools (Equipment) Records.`,
+    acceptanceRequirements: [],
+  });
+
+  assert.equal(ambiguous, true);
+});
+
+test('detectQuickRefineActorAmbiguity ignores requirements that already name the actor in story form', () => {
+  const ambiguous = detectQuickRefineActorAmbiguity({
+    summary: 'Restrict IM&T tool maintenance access',
+    description: 'As a System Administrator, I need to manage IM&T tool record permissions so that only authorized users can edit records.',
+    acceptanceRequirements: [],
+  });
+
+  assert.equal(ambiguous, false);
 });
 
 test('buildQuickRefineReadFields includes mapped fields only once', () => {

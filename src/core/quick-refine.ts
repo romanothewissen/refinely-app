@@ -29,7 +29,11 @@ import type {
 } from '../types';
 import { callLlmJsonWithUsage } from './llm';
 import { buildAdfContentOnly, buildAdfDocument, createFeatureIssue, createIssueLink } from './jira-creator';
-import { repairAcceptanceRequirements } from './story-generator';
+import {
+  assessRequirementWithLlmWithUsage,
+  repairAcceptanceRequirements,
+  triageToAssessment,
+} from './story-generator';
 
 interface QuickRefineRawIssueFields {
   summary?: unknown;
@@ -63,6 +67,8 @@ interface QuickRefineQuestionResponse {
 const QUICK_REFINE_WI_TOP_K = 2;
 const QUICK_REFINE_WI_MAX_CHARS = 2500;
 const QUICK_REFINE_SIMILAR_MAX_RESULTS = 2;
+const QUICK_REFINE_GENERIC_ACTOR_PATTERN = /\b(user|users|team|member|staff|operator|personnel|user group)\b/i;
+const QUICK_REFINE_PERMISSION_ACTOR_PATTERN = /\b(permission set|permission sets|profile|profiles|role|roles|read access|write access|create access|modify access|edit access|view access)\b/i;
 
 function buildProviderOpts(config: TenantConfig) {
   return {
@@ -385,11 +391,18 @@ function buildContextMessage(input: {
   return sections.filter(Boolean).join('\n\n---\n\n');
 }
 
-function buildQuickRefineQuestionsPrompt(domainContext: string, domainRoles: string[]): string {
+function buildQuickRefineQuestionsPrompt(
+  domainContext: string,
+  domainRoles: string[],
+  suggestedQuestionCount?: number,
+): string {
   return `You are a principal business analyst preparing a very short clarification step before rewriting a Jira issue.
 
 ${domainContext.trim() ? `DOMAIN CONTEXT:\n${domainContext.trim()}\n` : ''}
 ${domainRoles.length ? `DOMAIN ROLES: ${domainRoles.join(', ')}\n` : ''}
+${typeof suggestedQuestionCount === 'number' && suggestedQuestionCount > 0
+    ? `TRIAGE SIGNAL: prior assessment suggests about ${suggestedQuestionCount} focused follow-up question${suggestedQuestionCount === 1 ? '' : 's'}.\n`
+    : ''}
 RULES:
 - Ask at most 3 questions.
 - Ask only the minimum questions needed to improve the rewrite quality.
@@ -478,6 +491,76 @@ function quickRefineText(issue: QuickRefineIssueFields): string {
   return [issue.summary, issue.description].filter(Boolean).join('\n').trim();
 }
 
+function getQuickRefineHeuristicClarifyReason(issue: QuickRefineIssueFields): string | null {
+  const summary = issue.summary.trim();
+  const description = issue.description.trim();
+  const text = quickRefineText(issue).toLowerCase();
+  if (!summary || summary.length < 12) return 'The issue summary is too thin for a confident rewrite.';
+  if (!description || description.length < 120) return 'The issue description is still too short for a confident rewrite.';
+  if (issue.acceptanceRequirements.length === 0 && description.length < 220) return 'A little more detail will improve the rewrite quality.';
+  if (/\b(tbd|todo|need details|figure out|something like|etc\.?)\b/.test(text)) return 'The issue still contains placeholder language that needs clarification.';
+  if ((text.match(/\?/g) ?? []).length >= 3) return 'The issue reads as open questions rather than settled scope.';
+  return null;
+}
+
+export function detectQuickRefineActorAmbiguity(issue: QuickRefineIssueFields): boolean {
+  const text = quickRefineText(issue);
+  if (!text.trim()) return false;
+  if (parseStoryLikeDescription(issue.description) || parseStoryLikeDescription(issue.summary)) return false;
+  if (!QUICK_REFINE_PERMISSION_ACTOR_PATTERN.test(text)) return false;
+
+  const hasGenericActor = QUICK_REFINE_GENERIC_ACTOR_PATTERN.test(text);
+  const hasNamedActor = /\b(administrator|manager|planner|dispatcher|technician|specialist|analyst|operator|supervisor|coordinator|lead|director|reviewer|approver|scheduler|engineer|owner|agent)\b/i.test(text);
+  return hasGenericActor || !hasNamedActor;
+}
+
+async function assessQuickRefineClarifyNeed(opts: {
+  issue: QuickRefineIssueFields;
+  config: TenantConfig;
+}): Promise<{
+  shouldClarify: boolean;
+  suggestedQuestionCount?: number;
+  reason?: string;
+  usage?: TokenUsageSummary;
+}> {
+  const requirement = buildRequirementText(opts.issue);
+  const triage = await assessRequirementWithLlmWithUsage({
+    requirement,
+    generatorConfig: opts.config.generatorConfig,
+    tier: opts.config.tier,
+    providerOpts: buildProviderOpts(opts.config),
+  });
+  const suggestedQuestionCount = triage.triage
+    ? triageToAssessment(triage.triage).questionPlan.target
+    : 0;
+  const usage = triage.usage ? buildTokenUsage('quick_refine_triage', triage.usage) : undefined;
+  const actorAmbiguity = detectQuickRefineActorAmbiguity(opts.issue);
+
+  if (actorAmbiguity && suggestedQuestionCount > 0) {
+    return {
+      shouldClarify: true,
+      suggestedQuestionCount,
+      reason: 'A couple of focused questions will help avoid guessing the actor and permission model.',
+      usage,
+    };
+  }
+
+  if (suggestedQuestionCount >= 2) {
+    return {
+      shouldClarify: true,
+      suggestedQuestionCount,
+      reason: 'A couple of focused questions will improve the quick rewrite.',
+      usage,
+    };
+  }
+
+  return {
+    shouldClarify: false,
+    suggestedQuestionCount,
+    usage,
+  };
+}
+
 function shouldHandoffQuickRefine(issue: QuickRefineIssueFields): boolean {
   const text = quickRefineText(issue).toLowerCase();
   const broadSignals = [
@@ -490,18 +573,6 @@ function shouldHandoffQuickRefine(issue: QuickRefineIssueFields): boolean {
   ];
   const numberedBullets = (text.match(/\n\s*(?:\d+\.|-|\*)\s+/g) ?? []).length;
   return broadSignals.some((pattern) => pattern.test(text)) || numberedBullets >= 6 || text.length > 6000;
-}
-
-function shouldClarifyQuickRefine(issue: QuickRefineIssueFields): boolean {
-  const summary = issue.summary.trim();
-  const description = issue.description.trim();
-  const text = quickRefineText(issue).toLowerCase();
-  if (!summary || summary.length < 12) return true;
-  if (!description || description.length < 120) return true;
-  if (issue.acceptanceRequirements.length === 0 && description.length < 220) return true;
-  if (/\b(tbd|todo|need details|figure out|something like|etc\.?)\b/.test(text)) return true;
-  if ((text.match(/\?/g) ?? []).length >= 3) return true;
-  return false;
 }
 
 function normalizeIssueFields(raw: QuickRefineRawIssueFields | undefined, fallback: QuickRefineIssueFields): QuickRefineIssueFields {
@@ -833,10 +904,25 @@ export async function startQuickRefine(opts: {
   const projectKeys = [opts.context.projectKey];
   const domainContext = buildCombinedDomainContext(opts.config, projectKeys);
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
-  if (shouldClarifyQuickRefine(opts.context.originalIssue)) {
+  const heuristicClarifyReason = getQuickRefineHeuristicClarifyReason(opts.context.originalIssue);
+  const clarifyAssessment = heuristicClarifyReason
+    ? {
+        shouldClarify: true,
+        reason: heuristicClarifyReason,
+      }
+    : await assessQuickRefineClarifyNeed({
+        issue: opts.context.originalIssue,
+        config: opts.config,
+      });
+
+  if (clarifyAssessment.shouldClarify) {
     const questionsResult = await callLlmJsonWithUsage<QuickRefineQuestionResponse>({
       model: resolveQuickRefineModel(opts.config, 'clarifyModel', opts.modelOverride),
-      systemPrompt: buildQuickRefineQuestionsPrompt(domainContext, domainRoles),
+      systemPrompt: buildQuickRefineQuestionsPrompt(
+        domainContext,
+        domainRoles,
+        clarifyAssessment.suggestedQuestionCount,
+      ),
       userMessage: buildContextMessage({
         issueKey: opts.context.issueKey,
         issueType: opts.context.issueType,
@@ -852,9 +938,12 @@ export async function startQuickRefine(opts: {
     const questions = normalizeTriageQuestions(questionsResult.data.questions);
     return {
       route: 'clarify',
-      reason: 'A little more specificity will improve the quick rewrite.',
+      reason: clarifyAssessment.reason || 'A little more specificity will improve the quick rewrite.',
       questions,
-      tokenUsage: buildTokenUsage('quick_refine_questions', questionsResult.usage),
+      tokenUsage: mergeTokenUsage(
+        clarifyAssessment.usage,
+        buildTokenUsage('quick_refine_questions', questionsResult.usage),
+      ),
     };
   }
 
@@ -888,7 +977,10 @@ export async function startQuickRefine(opts: {
       enrichQuickRefineContextMeta(opts.context.contextMeta, wiContext, similarStories),
       [],
       rewrite.data,
-      buildTokenUsage('quick_refine_rewrite', rewrite.usage),
+      mergeTokenUsage(
+        clarifyAssessment.usage,
+        buildTokenUsage('quick_refine_rewrite', rewrite.usage),
+      ),
     ),
   };
 }
