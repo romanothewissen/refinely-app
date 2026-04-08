@@ -104,7 +104,19 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: #F4F5F7;
+    background:
+      /* Forest-green wash — top-left anchor */
+      radial-gradient(ellipse 72% 58% at 8% 4%,  rgba(43, 89, 74, 0.12), transparent 62%),
+      /* Warm peach/sand — bottom-right lift */
+      radial-gradient(ellipse 65% 52% at 93% 96%, rgba(210, 168, 125, 0.09), transparent 58%),
+      /* Sage/mint — centre-right breath */
+      radial-gradient(ellipse 55% 48% at 88% 32%, rgba(100, 172, 140, 0.07), transparent 52%),
+      /* Soft lavender — bottom-left whisper */
+      radial-gradient(ellipse 48% 42% at 12% 82%, rgba(145, 148, 190, 0.05), transparent 48%),
+      /* Warm green — mid anchor */
+      radial-gradient(ellipse 60% 50% at 50% 50%, rgba(43, 89, 74, 0.04), transparent 70%),
+      /* Base: clean off-white with the lightest green tint */
+      linear-gradient(165deg, #f6f9f7 0%, #f2f5f3 55%, #f5f3ef 100%);
   }
 }
 
@@ -113,33 +125,64 @@
 ═══════════════════════════════════════════════════════════════════ */
 @layer utilities {
 
-  /* ── Glass card (Jira-native, flat) ─────────────────────────── */
+  /* ── Glass card ──────────────────────────────────────────────── */
   .rf-card {
-    background: #FFFFFF;
-    border: 1px solid var(--jira-border);
-    border-radius: 4px;
-    box-shadow: var(--jira-shadow-xs);
-    transition: box-shadow 0.2s ease;
+    position: relative;
+    background: var(--rf-glass-card);
+    border: 1px solid var(--rf-border);
+    border-radius: var(--rf-radius-2xl);
+    box-shadow: var(--rf-shadow-md);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
+
+  .rf-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255,255,255,0.46) 0%, transparent 42%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .rf-card > * { position: relative; z-index: 1; }
 
   .rf-card:hover,
   .rf-card-hover:hover {
-    box-shadow: var(--jira-shadow-sm);
+    border-color: var(--rf-border-strong);
+    box-shadow: var(--rf-shadow-lg);
+    background: var(--rf-glass-hover);
   }
 
-  /* ── Glass card alias (flat) ────────────────────────────────── */
+  /* ── Glass card (alias) ──────────────────────────────────────── */
   .rf-glass-card {
-    background: #FFFFFF;
-    border: 1px solid var(--jira-border);
-    border-radius: 4px;
-    box-shadow: var(--jira-shadow-xs);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    transition: box-shadow 0.2s ease;
+    position: relative;
+    background: var(--rf-glass-card);
+    border: 1px solid var(--rf-border);
+    border-radius: var(--rf-radius-2xl);
+    box-shadow: var(--rf-shadow-md);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
+
+  .rf-glass-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255,255,255,0.42) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .rf-glass-card > * { position: relative; z-index: 1; }
 
   .rf-glass-card:hover {
-    box-shadow: var(--jira-shadow-sm);
+    border-color: var(--rf-border-strong);
+    box-shadow: var(--rf-shadow-lg);
   }
 
   /* ── Sidebar shell ───────────────────────────────────────────── */
@@ -188,22 +231,23 @@
   .rf-pane-header {
     position: relative;
     z-index: 1;
-    height: 40px;
-    padding: 0 12px;
+    height: 56px;
+    padding: 10px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    background: #FFFFFF;
-    border-bottom: 1px solid var(--jira-border);
+    gap: 16px;
+    border-bottom: 1px solid var(--rf-border-subtle);
+    backdrop-filter: blur(24px) saturate(130%);
+    -webkit-backdrop-filter: blur(24px) saturate(130%);
   }
 
   .rf-pane-header--sidebar {
-    background: #FFFFFF;
+    background: rgba(255, 255, 255, 0.68);
   }
 
   .rf-pane-header--canvas {
-    background: #FFFFFF;
+    background: rgba(255, 255, 255, 0.72);
   }
 
   .rf-pane-header-cluster {
@@ -231,12 +275,12 @@
   }
 
   .rf-pane-header-title {
-    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14px;
+    font-family: 'Fraunces', serif;
+    font-size: 21px;
     line-height: 1;
-    font-weight: 600;
-    letter-spacing: -0.005em;
-    color: var(--jira-text);
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    color: var(--rf-text);
     white-space: nowrap;
   }
 
@@ -415,7 +459,7 @@
     padding-inline: 14px;
   }
   .rf-pane-header-title {
-    font-size: 18px;
+    font-size: 18px; /* down from 21px on small viewports */
   }
 }
 
