@@ -19,6 +19,7 @@ import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
 import {
   DEFAULT_BUCKET_CLASSES,
+  GENERATOR_ROLE_ORDER,
   getCatalogEntriesForProvider,
   MODEL_STRATEGY_VERSION,
   resolveUiGeneratorStrategyState,
@@ -317,6 +318,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [triageModel, setTriageModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.triageModel);
   const [refineModel, setRefineModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.refineModel);
   const [themeModel, setThemeModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.themeModel);
+  const roleModelValues = {
+    triageModel,
+    clarifyModel,
+    evaluateModel,
+    decompositionModel,
+    arModel,
+    themeModel,
+    refineModel,
+  };
+  const roleModelSetters = {
+    triageModel: setTriageModel,
+    clarifyModel: setClarifyModel,
+    evaluateModel: setEvaluateModel,
+    decompositionModel: setDecompositionModel,
+    arModel: setArModel,
+    themeModel: setThemeModel,
+    refineModel: setRefineModel,
+  };
 
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiBaseUrl, setGeminiBaseUrl] = useState('');
@@ -1311,22 +1330,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                   {strategyState.modelStrategy === 'advanced' ? (
                     <div className="divide-y divide-[var(--rf-border-subtle)]">
-                      {[
-                        { label: 'Clarifying Questions', val: clarifyModel, set: setClarifyModel, sub: 'Round 1 discovery and follow-ups' },
-                        { label: 'Sufficiency Check', val: evaluateModel, set: setEvaluateModel, sub: 'Gate before generation continues' },
-                        { label: 'Triage', val: triageModel, set: setTriageModel, sub: 'Scope, complexity, and routing' },
-                        { label: 'Feature Breakdown', val: decompositionModel, set: setDecompositionModel, sub: 'Draft feature structure' },
-                        { label: 'Acceptance Requirements', val: arModel, set: setArModel, sub: 'Write Given / When / Then' },
-                        { label: 'Theme Analysis & Titles', val: themeModel, set: setThemeModel, sub: 'Cluster themes and title features' },
-                        { label: 'Refinement', val: refineModel, set: setRefineModel, sub: 'Interactive edits on a single feature' },
-                      ].map((item, i) => (
-                        <div key={i} className="flex items-center justify-between gap-4 py-2.5">
+                      {GENERATOR_ROLE_ORDER.map((item) => (
+                        <div key={item.field} className="flex items-center justify-between gap-4 py-2.5">
                           <div>
                             <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
-                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
+                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.description}</div>
                           </div>
                           <div className="relative w-[220px] shrink-0">
-                            <select value={item.val} disabled={availableModels.length === 0 || !isAdmin} onChange={e => item.set(e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
+                            <select value={roleModelValues[item.field]} disabled={availableModels.length === 0 || !isAdmin} onChange={e => roleModelSetters[item.field](e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
                               {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                             </select>
                             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
@@ -1366,18 +1377,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3 space-y-2">
                         <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced role breakdown</div>
                         <div className="grid gap-2 sm:grid-cols-2">
-                          {[
-                            ['Clarifying Questions', strategyState.resolvedModels.clarifyModel],
-                            ['Sufficiency Check', strategyState.resolvedModels.evaluateModel],
-                            ['Triage', strategyState.resolvedModels.triageModel],
-                            ['Theme Analysis & Titles', strategyState.resolvedModels.themeModel],
-                            ['Feature Breakdown', strategyState.resolvedModels.decompositionModel],
-                            ['Acceptance Requirements', strategyState.resolvedModels.arModel],
-                            ['Refinement', strategyState.resolvedModels.refineModel],
-                          ].map(([label, model]) => (
-                            <div key={label} className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
-                              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{label}</div>
-                              <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{model}</div>
+                          {GENERATOR_ROLE_ORDER.map((item) => (
+                            <div key={item.field} className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
+                              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
+                              <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{strategyState.resolvedModels[item.field]}</div>
                             </div>
                           ))}
                         </div>
@@ -2570,7 +2573,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                   </div>
                   {indexedCount <= 0 && (
                     <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-[13px] font-medium text-[var(--rf-text-tertiary)]">
-                      Build backlog context first to infer roles from cached project history.
+                      Build backlog context first to infer roles from a broad cached backlog sample.
                     </div>
                   )}
                   {roleInferenceResult && (
@@ -2579,7 +2582,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                         <div>
                           <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Backlog suggestions</div>
                           <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
-                            Reviewed suggestions from {roleInferenceResult.sampledIssueCount} sampled backlog item{roleInferenceResult.sampledIssueCount === 1 ? '' : 's'}.
+                            Reviewed suggestions from {roleInferenceResult.sampledIssueCount} sampled backlog item{roleInferenceResult.sampledIssueCount === 1 ? '' : 's'} across the cached project backlog.
                           </div>
                           {(roleInferenceResult.message || roleInferenceResult.error) && (
                             <div className={`mt-1 text-[13px] font-medium ${roleInferenceResult.error ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-text-tertiary)]'}`}>

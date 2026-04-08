@@ -1237,10 +1237,6 @@ function LegacyApp({
 
   const restoreSession = async (sid: string) => {
     try {
-      if (sid === sessionIdRef.current && features.length > 0) {
-        setViewMode('generate');
-        return;
-      }
       const res = await api.getConversation(sid) as any;
       if (res.success && res.conversation) {
         setWorkflowRunId(prev => prev + 1);

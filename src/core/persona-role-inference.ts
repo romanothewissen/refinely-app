@@ -59,14 +59,14 @@ export interface RoleInferenceSample {
   candidateSummary: string;
 }
 
-export const MAX_ROLE_INFERENCE_DOCS = 15;
-export const MAX_ROLE_INFERENCE_SHARDS = 5;
-export const MAX_ROLE_INFERENCE_THEMES = 6;
-export const MAX_ROLE_INFERENCE_CORPUS_CHARS = 6000;
+export const MAX_ROLE_INFERENCE_DOCS = 36;
+export const MAX_ROLE_INFERENCE_SHARDS = 12;
+export const MAX_ROLE_INFERENCE_THEMES = 12;
+export const MAX_ROLE_INFERENCE_CORPUS_CHARS = 11000;
 const MAX_ROLE_CANDIDATE_SUMMARY_CHARS = 2200;
-const FALLBACK_ROLE_INFERENCE_DOCS = 8;
-const PRIMARY_ROLE_INFERENCE_TOKENS = 1600;
-const FALLBACK_ROLE_INFERENCE_TOKENS = 1800;
+const FALLBACK_ROLE_INFERENCE_DOCS = 18;
+const PRIMARY_ROLE_INFERENCE_TOKENS = 2200;
+const FALLBACK_ROLE_INFERENCE_TOKENS = 2200;
 
 const MAX_DOC_SUMMARY_CHARS = 140;
 const MAX_DOC_DESCRIPTION_CHARS = 220;
@@ -487,7 +487,7 @@ export function sampleBacklogDocsForRoleInference(
     docs,
     corpus: JSON.stringify(entries),
     candidateSummary: buildRoleCandidateSummary({
-      docs: candidateSourceDocs.slice().sort(compareUpdatedDescending).slice(0, 120),
+      docs: candidateSourceDocs.slice().sort(compareUpdatedDescending).slice(0, 240),
       maxChars: MAX_ROLE_CANDIDATE_SUMMARY_CHARS,
     }),
   };
@@ -667,6 +667,12 @@ export async function inferProjectPersonaRolesFromBacklog(
   try {
     let suggestions: ProjectPersonaRoleSuggestion[];
     try {
+      console.info('[persona-role-inference] primary sample prepared', {
+        projectKey,
+        sampledDocs: sample.docs.length,
+        sampledChars: sample.corpus.length,
+        candidateSummaryChars: sample.candidateSummary.length,
+      });
       suggestions = await requestRoleSuggestionsFromCorpus({
         corpus: sample.corpus,
         candidateSummary: sample.candidateSummary,
@@ -679,11 +685,16 @@ export async function inferProjectPersonaRolesFromBacklog(
     } catch (primaryError) {
       const fallbackSample = sampleBacklogDocsForRoleInference(cache, {
         maxDocs: Math.min(FALLBACK_ROLE_INFERENCE_DOCS, sample.docs.length),
-        maxChars: Math.min(3600, MAX_ROLE_INFERENCE_CORPUS_CHARS),
+        maxChars: Math.min(5400, MAX_ROLE_INFERENCE_CORPUS_CHARS),
       });
       if (!fallbackSample.docs.length || !fallbackSample.corpus.trim()) {
         throw primaryError;
       }
+      console.warn('[persona-role-inference] falling back to smaller sample', {
+        projectKey,
+        sampledDocs: fallbackSample.docs.length,
+        sampledChars: fallbackSample.corpus.length,
+      });
       suggestions = await requestRoleSuggestionsFromCorpus({
         corpus: fallbackSample.corpus,
         candidateSummary: fallbackSample.candidateSummary,

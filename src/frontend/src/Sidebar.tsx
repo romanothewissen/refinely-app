@@ -261,29 +261,6 @@ export function Sidebar({
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
               </div>
-              {contextMode !== 'undecided' && (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                  {selectedProjects.length ? (
-                    selectedProjects.map((project) => (
-                      <span
-                        key={project.key}
-                        className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]"
-                      >
-                        <span className="max-w-[120px] truncate">
-                          {project.key}{project.name ? ` · ${project.name}` : ''}
-                        </span>
-                      </span>
-                    ))
-                  ) : (
-                    <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/60 px-2.5 py-0.5 text-[12px] font-medium text-[var(--rf-text-secondary)]">
-                      Workspace-wide
-                    </span>
-                  )}
-                  <span className="text-[12px] text-[var(--rf-text-tertiary)]">
-                    {activeWiDocs.length > 0 ? `${activeWiDocs.length} docs linked` : 'No docs linked'}
-                  </span>
-                </div>
-              )}
             </motion.button>
 
             <AnimatePresence initial={false}>

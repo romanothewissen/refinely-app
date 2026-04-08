@@ -1,17 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { utils as XLSXUtils, write } from 'xlsx';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
 import type { ClarifyContextMeta, ClarifyProgressPayload } from './types';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
-
-function buildExcerpt(text: string, maxChars = 180): string {
-  const compact = normalizeDisplayText(text).replace(/\s+/g, ' ').trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars).trimEnd()}...`;
-}
 
 function normalizeDisplayText(value: string): string {
   const trimmed = String(value ?? '').trim();
@@ -341,16 +336,6 @@ function DiscoveryPipeline({
 }) {
   const stageIndex = Math.max(0, getDiscoveryStageIndex(meta, workflowStage, progress));
   const pct = [8, 24, 46, 66, 82, 96][stageIndex] ?? 8;
-  const sources = meta?.sources ?? (context
-    ? {
-        projectKey: context.projectKey,
-        projectCount: context.projectCount,
-        domainContextApplied: context.domainContextApplied,
-        attachmentIncluded: context.attachmentIncluded,
-        wiDocsCount: context.wiDocsCount,
-        similarStoriesCount: context.similarStoriesCount,
-      }
-    : null);
 
   return (
     <motion.div
@@ -436,32 +421,8 @@ function DiscoveryPipeline({
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
-          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
-            <DiscoveryScoreCard meta={meta} context={context} />
-          </div>
-
-          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
-            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Context</div>
-            <div className="space-y-2.5">
-              <div className="flex justify-between items-baseline">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">Backlog</span>
-                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.similarStoriesCount ?? 0}</span>
-              </div>
-              <div className="flex justify-between items-baseline">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">Instructions</span>
-                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.wiDocsCount ?? 0}</span>
-              </div>
-              <div className="flex justify-between items-baseline">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">Attachment</span>
-                <span className="text-[13px] font-bold text-[var(--rf-text)]">{sources?.attachmentIncluded ? 'Included' : 'None'}</span>
-              </div>
-              <div className="flex justify-between items-baseline">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">Workspace</span>
-                <span className="text-[13px] font-bold text-[var(--rf-text)]">{sources?.projectKey || projectKey}</span>
-              </div>
-            </div>
-          </div>
+        <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
+          <DiscoveryScoreCard meta={meta} context={context} />
         </div>
       </div>
     </motion.div>
@@ -486,7 +447,6 @@ function GeneratingPipeline({
   const arProgress = meta?.arProgress;
   const draftFeatures = meta?.draftFeatures ?? [];
   const featureProgress = meta?.featureProgress ?? [];
-  const sources = meta?.sources ?? null;
   const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
   const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
 
@@ -584,28 +544,8 @@ function GeneratingPipeline({
         </div>
 
         {/* Triage scores + Context */}
-        <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
-          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
-            <TriageScoreCard triage={triage} />
-          </div>
-
-          <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
-            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-3">Context</div>
-            <div className="space-y-2.5">
-              <div className="flex justify-between items-baseline">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">Backlog</span>
-                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.similarStoriesCount ?? 0}</span>
-              </div>
-              <div className="flex justify-between items-baseline">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">WI snippets</span>
-                <span className="text-[16px] font-black text-[var(--rf-text)]">{sources?.referencedWiSections?.length ?? 0}</span>
-              </div>
-              <div className="flex justify-between items-baseline pt-2 border-t border-[var(--rf-border-subtle)]">
-                <span className="text-[13px] text-[var(--rf-text-secondary)]">Scope</span>
-                <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">{sources?.projectKey === '*' ? 'Global' : sources?.projectKey || projectKey}</span>
-              </div>
-            </div>
-          </div>
+        <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
+          <TriageScoreCard triage={triage} />
         </div>
 
         {/* Features list (once sketched) */}
@@ -635,22 +575,6 @@ function GeneratingPipeline({
                 </div>
               );
             })}
-          </motion.div>
-        )}
-
-        {/* Backlog signal (once ingested) */}
-        {sources?.referencedSimilarStories && sources.referencedSimilarStories.length > 0 && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5">
-                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Backlog signal</div>
-            {sources.referencedSimilarStories.slice(0, 2).map((s, i) => (
-              <div key={s.key || i} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 backdrop-blur-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase">Pattern {i + 1}</span>
-                  <span className="text-[13px] text-[var(--rf-text-tertiary)]">{Math.round((s.relevanceScore || 0) * 100)}% match</span>
-                </div>
-                <div className="text-[12px] text-[var(--rf-text-secondary)] truncate mt-0.5">{buildExcerpt(s.summary, 120)}</div>
-              </div>
-            ))}
           </motion.div>
         )}
 
@@ -974,7 +898,6 @@ export function MainContent({
 
   const [diffMode, setDiffMode] = useState<'redline' | 'blackline'>('redline');
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
-  const [showContextDetails, setShowContextDetails] = useState(false);
 
   const toggleExpand = (idx: number) => {
     setExpandedIndices(prev => {
@@ -993,61 +916,26 @@ export function MainContent({
   const [bulkRefineProgress, setBulkRefineProgress] = useState('');
   const bulkRefinePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bulkRefineStartedAtRef = useRef<number>(0);
-  const escapeSpreadsheetValue = (value: string | number | boolean | null | undefined) =>
-    String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
-
-  type SpreadsheetCell = {
-    value: string | number | boolean | null | undefined;
-    styleId?: string;
-    type?: 'String' | 'Number' | 'Boolean';
-    mergeAcross?: number;
-    href?: string;
-  };
-
-  const buildSpreadsheetCell = ({ value, styleId, type, mergeAcross, href }: SpreadsheetCell) => {
-    const resolvedType = type || (typeof value === 'number' ? 'Number' : typeof value === 'boolean' ? 'Boolean' : 'String');
-    const attrs = [
-      styleId ? ` ss:StyleID="${styleId}"` : '',
-      typeof mergeAcross === 'number' && mergeAcross > 0 ? ` ss:MergeAcross="${mergeAcross}"` : '',
-      href ? ` ss:HRef="${escapeSpreadsheetValue(href)}"` : '',
-    ].join('');
-    return `<Cell${attrs}><Data ss:Type="${resolvedType}">${escapeSpreadsheetValue(value)}</Data></Cell>`;
-  };
-
-  const buildSpreadsheetRow = (cells: SpreadsheetCell[]) => `<Row>${cells.map(buildSpreadsheetCell).join('')}</Row>`;
 
   const exportFeaturesToExcel = () => {
     if (!features.length) return;
 
-    const exportedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    try {
+      const exportedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      const headerRowIndex = 4;
+      const rows: Array<Array<string | number>> = [
+        ['Refinely Feature Export'],
+        [`Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`],
+        [`Exported at (UTC): ${exportedAt}`],
+        [`Features: ${features.length} | Acceptance requirements: ${totalArCount}`],
+        ['Type', 'Feature #', 'Feature Title', 'Feature Description / Note', 'AR #', 'Given', 'When', 'Then', 'Status', 'Jira Issue'],
+      ];
 
-    const rows = [
-      buildSpreadsheetRow([{ value: 'Refinely Feature Export', styleId: 'title', mergeAcross: 9 }]),
-      buildSpreadsheetRow([{ value: `Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`, styleId: 'meta', mergeAcross: 9 }]),
-      buildSpreadsheetRow([{ value: `Exported at (UTC): ${exportedAt}`, styleId: 'meta', mergeAcross: 9 }]),
-      buildSpreadsheetRow([{ value: `Features: ${features.length} · Acceptance requirements: ${totalArCount}`, styleId: 'meta', mergeAcross: 9 }]),
-      buildSpreadsheetRow([
-        { value: 'Type', styleId: 'header' },
-        { value: 'Feature #', styleId: 'header' },
-        { value: 'Feature Title', styleId: 'header' },
-        { value: 'Summary / AR Note', styleId: 'header' },
-        { value: 'Given', styleId: 'header' },
-        { value: 'When', styleId: 'header' },
-        { value: 'Then', styleId: 'header' },
-        { value: 'Status', styleId: 'header' },
-        { value: 'Jira Issue', styleId: 'header' },
-        { value: 'Jira URL', styleId: 'header' },
-      ]),
-      ...features.flatMap((feature, idx) => {
+      const baseRowByFeature = new Map<number, number>();
+
+      features.forEach((feature, idx) => {
         const featureNumber = idx + 1;
         const featureTitle = feature.title || feature.summary || `Feature ${featureNumber}`;
-        const featureDescription = feature.description || feature.markdown || '';
-        const jiraUrl = feature.jiraIssueUrl || '';
         const status = feature.pendingRemoval
           ? 'Pending removal'
           : feature.pendingAddition
@@ -1058,111 +946,87 @@ export function MainContent({
               ? 'Accepted'
               : 'Draft';
 
-        const featureRows = [
-          buildSpreadsheetRow([
-            { value: 'Feature', styleId: 'featureLabel' },
-            { value: featureNumber, styleId: 'featureLabel', type: 'Number' },
-            { value: featureTitle, styleId: 'featureLabel' },
-            { value: featureDescription, styleId: 'featureValue' },
-            { value: `ARs: ${feature.acceptanceRequirements?.length || 0}`, styleId: 'featureValue' },
-            { value: '', styleId: 'featureValue' },
-            { value: '', styleId: 'featureValue' },
-            { value: status, styleId: 'featureValue' },
-            { value: feature.jiraIssueKey || '', styleId: jiraUrl ? 'link' : 'featureValue', href: jiraUrl || undefined },
-            { value: jiraUrl || '', styleId: jiraUrl ? 'link' : 'featureValue', href: jiraUrl || undefined },
-          ]),
-        ];
+        baseRowByFeature.set(idx, rows.length);
+        rows.push([
+          'Feature',
+          featureNumber,
+          featureTitle,
+          feature.description || feature.markdown || '',
+          feature.acceptanceRequirements?.length || 0,
+          '',
+          '',
+          '',
+          status,
+          feature.jiraIssueKey || '',
+        ]);
 
-        const arRows = (feature.acceptanceRequirements || []).map((ar, arIdx) => buildSpreadsheetRow([
-          { value: 'AR', styleId: 'arLabel' },
-          { value: featureNumber, styleId: 'arLabel', type: 'Number' },
-          { value: featureTitle, styleId: 'arLabel' },
-          { value: `Acceptance requirement ${arIdx + 1}`, styleId: 'arValue' },
-          { value: ar.given || '', styleId: 'arValue' },
-          { value: ar.when || '', styleId: 'arValue' },
-          { value: ar.then || '', styleId: 'arValue' },
-          { value: status, styleId: 'arValue' },
-          { value: feature.jiraIssueKey || '', styleId: jiraUrl ? 'link' : 'arValue', href: jiraUrl || undefined },
-          { value: jiraUrl || '', styleId: jiraUrl ? 'link' : 'arValue', href: jiraUrl || undefined },
-        ]));
+        (feature.acceptanceRequirements || []).forEach((ar, arIdx) => {
+          rows.push([
+            'AR',
+            featureNumber,
+            featureTitle,
+            `Acceptance requirement ${arIdx + 1}`,
+            arIdx + 1,
+            ar.given || '',
+            ar.when || '',
+            ar.then || '',
+            status,
+            feature.jiraIssueKey || '',
+          ]);
+        });
 
-        return [...featureRows, ...arRows];
-      }),
-    ].join('');
+        rows.push(['', '', '', '', '', '', '', '', '', '']);
+      });
 
-    const workbook = `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:html="http://www.w3.org/TR/REC-html40">
- <Styles>
-  <Style ss:ID="title">
-   <Font ss:Bold="1" ss:Size="14" ss:Color="#173a2e"/>
-   <Interior ss:Color="#f5f2ea" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Center"/>
-  </Style>
-  <Style ss:ID="meta">
-   <Font ss:Size="10" ss:Color="#5b6570"/>
-   <Interior ss:Color="#fbfaf6" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="header">
-   <Font ss:Bold="1" ss:Color="#ffffff"/>
-   <Interior ss:Color="#234a3d" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Center" ss:WrapText="1"/>
-  </Style>
-  <Style ss:ID="featureLabel">
-   <Font ss:Bold="1" ss:Color="#234a3d"/>
-   <Interior ss:Color="#e8f2ec" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
-  </Style>
-  <Style ss:ID="featureValue">
-   <Font ss:Color="#1f2937"/>
-   <Interior ss:Color="#fbf9f4" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
-  </Style>
-  <Style ss:ID="arLabel">
-   <Font ss:Bold="1" ss:Color="#7c5e00"/>
-   <Interior ss:Color="#fff8e8" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
-  </Style>
-  <Style ss:ID="arValue">
-   <Font ss:Color="#1f2937"/>
-   <Interior ss:Color="#ffffff" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
-  </Style>
-  <Style ss:ID="link">
-   <Font ss:Color="#0f766e" ss:Underline="Single"/>
-   <Interior ss:Color="#ffffff" ss:Pattern="Solid"/>
-   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
-  </Style>
- </Styles>
- <Worksheet ss:Name="Features and ARs">
-  <Table>
-   <Column ss:Width="70"/>
-   <Column ss:Width="68"/>
-   <Column ss:Width="220"/>
-   <Column ss:Width="280"/>
-   <Column ss:Width="240"/>
-   <Column ss:Width="240"/>
-   <Column ss:Width="280"/>
-   <Column ss:Width="110"/>
-   <Column ss:Width="150"/>
-   <Column ss:Width="260"/>
-   ${rows}
-  </Table>
- </Worksheet>
-</Workbook>`;
+      const workbook = XLSXUtils.book_new();
+      const worksheet = XLSXUtils.aoa_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 28 },
+        { wch: 52 },
+        { wch: 8 },
+        { wch: 28 },
+        { wch: 28 },
+        { wch: 36 },
+        { wch: 18 },
+        { wch: 18 },
+      ];
+      worksheet['!rows'] = rows.map((_, index) => ({ hpt: index <= 3 ? 20 : 42 }));
+      worksheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 9 } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 9 } },
+      ];
+      worksheet['!autofilter'] = { ref: `A${headerRowIndex + 1}:J${rows.length}` };
+      (worksheet as any)['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
 
-    try {
-      const blob = new Blob([workbook], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      features.forEach((feature, idx) => {
+        if (!feature.jiraIssueKey || !feature.jiraIssueUrl) return;
+        const baseRow = baseRowByFeature.get(idx);
+        if (typeof baseRow !== 'number') return;
+        const featureCellRef = XLSXUtils.encode_cell({ r: baseRow, c: 9 });
+        if (worksheet[featureCellRef]) {
+          worksheet[featureCellRef].l = { Target: feature.jiraIssueUrl, Tooltip: `Open ${feature.jiraIssueKey}` };
+        }
+        (feature.acceptanceRequirements || []).forEach((_, arIdx) => {
+          const arCellRef = XLSXUtils.encode_cell({ r: baseRow + arIdx + 1, c: 9 });
+          if (worksheet[arCellRef]) {
+            worksheet[arCellRef].l = { Target: feature.jiraIssueUrl!, Tooltip: `Open ${feature.jiraIssueKey}` };
+          }
+        });
+      });
+
+      XLSXUtils.book_append_sheet(workbook, worksheet, 'Features');
+      const arrayBuffer = write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       const safeScope = (projectKey === '*' ? 'workspace' : projectKey).replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
       const dateStamp = new Date().toISOString().slice(0, 10);
       link.href = url;
-      link.download = `refinely-feature-canvas-${safeScope}-${dateStamp}.xls`;
+      link.download = `refinely-feature-canvas-${safeScope}-${dateStamp}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1572,21 +1436,15 @@ export function MainContent({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                {/* Slim source stack strip */}
                 <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--rf-border)] bg-white/65 px-4 py-2.5 backdrop-blur-sm">
-                  <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Source stack</span>
+                  <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Run context</span>
                   <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
                     <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
                       {generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}
                     </span>
-                    {(generationContext.similarStoriesCount ?? 0) > 0 && (
+                    {(generationContext.wiDocsCount ?? 0) > 0 && (
                       <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.similarStoriesCount} backlog items
-                      </span>
-                    )}
-                    {(generationContext.referencedWiSections?.length ?? 0) > 0 && (
-                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.referencedWiSections!.length} WI excerpts
+                        {generationContext.wiDocsCount} docs
                       </span>
                     )}
                     {generationContext.domainContextApplied && (
@@ -1594,108 +1452,18 @@ export function MainContent({
                         Guidance on
                       </span>
                     )}
+                    {generationContext.attachmentIncluded && (
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
+                        Attachment included
+                      </span>
+                    )}
+                    {generationContext.tokenUsage && (
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
+                        {generationContext.tokenUsage.total.toLocaleString()} tokens
+                      </span>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowContextDetails(prev => !prev)}
-                    className="text-[13px] font-semibold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors shrink-0"
-                  >
-                    {showContextDetails ? 'Hide' : 'Details'}
-                  </button>
                 </div>
-                <AnimatePresence initial={false}>
-                  {showContextDetails && (
-                    <motion.div
-                      className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/65 overflow-hidden backdrop-blur-sm"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                    <div className="space-y-4 p-4">
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <div className="rf-card p-4">
-                          <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Backlog patterns</div>
-                            <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
-                              {generationContext.referencedSimilarStories?.length || 0}
-                            </div>
-                          </div>
-                          {(generationContext.referencedSimilarStories?.length ?? 0) > 0 ? (
-                            <div className="space-y-2.5">
-                              {generationContext.referencedSimilarStories!.slice(0, 4).map((story, i) => (
-                                <div key={`${story.key}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="text-xs font-bold text-[var(--rf-text)]">Pattern {i + 1}</div>
-                                    {typeof story.relevanceScore === 'number' && (
-                                      <div className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white px-2 py-1 text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
-                                        {Math.min(100, Math.round(story.relevanceScore * 100))}% match
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
-                                    {buildExcerpt(story.summary, 160)}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No backlog patterns were available.</div>
-                          )}
-                        </div>
-
-                        <div className="rf-card p-4">
-                          <div className="flex items-center justify-between gap-3 mb-3">
-                            <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Work instruction excerpts</div>
-                            <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-full px-2.5 py-1">
-                              {generationContext.referencedWiSections?.length || 0}
-                            </div>
-                          </div>
-                          {(generationContext.referencedWiSections?.length ?? 0) > 0 ? (
-                            <div className="space-y-2.5">
-                              {generationContext.referencedWiSections!.map((section, i) => (
-                                <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <div className="text-[13px] font-bold text-[var(--rf-text)] truncate">Instruction excerpt {i + 1}</div>
-                                    </div>
-                                  </div>
-                                  <div className="mt-2 text-xs text-[var(--rf-text-secondary)] leading-relaxed">
-                                    {buildExcerpt(section.excerpt, 180)}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-xs italic text-[var(--rf-text-tertiary)]">No work instruction excerpts were used.</div>
-                          )}
-                        </div>
-
-                        <div className="rf-card p-4">
-                          <div className="text-[12px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">Run profile</div>
-                          <div className="mt-3 space-y-2.5">
-                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                              <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Attachment context</div>
-                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.attachmentIncluded ? 'Included in reasoning' : 'No attachment used'}</div>
-                            </div>
-                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                              <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Work instruction docs</div>
-                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{generationContext.wiDocsCount ?? 0} document{(generationContext.wiDocsCount ?? 0) !== 1 ? 's' : ''} scanned</div>
-                            </div>
-                            <div className="rounded-2xl border border-[rgba(35,74,61,0.1)] bg-[linear-gradient(135deg,rgba(35,74,61,0.04),rgba(255,255,255,0.92))] p-3">
-                              <div className="text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Token usage</div>
-                              <div className="mt-1.5 text-sm font-semibold text-[var(--rf-text)]">{(generationContext.tokenUsage?.total ?? 0).toLocaleString()} tokens total</div>
-                              <div className="mt-1 text-[13px] text-[var(--rf-text-tertiary)]">
-                                {(generationContext.tokenUsage?.input ?? 0).toLocaleString()} in / {(generationContext.tokenUsage?.output ?? 0).toLocaleString()} out
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </motion.div>
             )}
 
@@ -1737,9 +1505,9 @@ export function MainContent({
                           : 'bg-[var(--rf-brand)]'
                     } opacity-30`} />
 
-                    <div className="flex-1 p-4">
+                    <div className="flex-1 p-3.5">
                       {/* Header Row */}
-                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
+                      <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         {isEditing ? (
                           <input
                             type="text"
@@ -1748,11 +1516,11 @@ export function MainContent({
                             className="flex-1 text-lg font-bold text-[var(--rf-text)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
                           />
                         ) : (
-                          <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
+                          <div className="flex flex-1 min-w-0 items-start gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
                             <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
-                            <div className="shrink-0 flex items-center gap-2">
+                            <div className="shrink-0 flex items-center gap-2 pt-0.5">
                               <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-white/60 text-[var(--rf-text-secondary)] text-[12px] font-semibold tracking-widest border border-[var(--rf-border)]">
                                 {feature.acceptanceRequirements?.length || 0} ARs
                               </span>
@@ -1761,7 +1529,7 @@ export function MainContent({
                           </div>
                         )}
 
-                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <div className="flex shrink-0 flex-wrap items-center gap-2 lg:self-start lg:justify-end">
                           {isEditing ? (
                             <>
                               <motion.button onClick={cancelEditing} className="px-3 py-1.5 text-xs font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] hover:bg-[var(--rf-surface-soft)] rounded-lg transition" whileTap={{ scale: 0.97 }}>Cancel</motion.button>
@@ -1855,7 +1623,7 @@ export function MainContent({
                           proposed?.acceptanceRequirements || [],
                         );
                         return (
-                          <div className="mb-5 rounded-2xl border border-[rgba(179,94,48,0.16)] bg-[linear-gradient(180deg,rgba(255,248,243,0.92),rgba(255,255,255,0.88))] p-4 shadow-[0_18px_50px_-40px_rgba(160,81,30,0.35)]">
+                        <div className="mb-4 rounded-2xl border border-[rgba(179,94,48,0.16)] bg-[linear-gradient(180deg,rgba(255,248,243,0.92),rgba(255,255,255,0.88))] p-4 shadow-[0_18px_50px_-40px_rgba(160,81,30,0.35)]">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                               <h4 className="text-[var(--rf-warning)] font-bold text-xs uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-4 h-4" /> {isAddedFeature ? 'AI Suggested New Feature' : isRemovedFeature ? 'AI Suggested Feature Removal' : 'AI Suggested Refinements'}</h4>
 
@@ -1943,7 +1711,7 @@ export function MainContent({
 
                       {/* Feature body */}
                       {(expandedIndices.has(idx) || isEditing) && (
-                        <div className={`mt-4 ${feature.pendingRefinement ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <div className={`mt-3 ${feature.pendingRefinement ? 'opacity-50 pointer-events-none' : ''}`}>
                           {isEditing ? (
                             <textarea
                               value={draft?.description || ''}
@@ -1951,7 +1719,7 @@ export function MainContent({
                               className="w-full text-[var(--rf-text-secondary)] text-sm bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-3 min-h-[120px] mb-6 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none resize-y transition"
                             />
                           ) : (
-                            <div className="text-[var(--rf-text-secondary)] text-[13px] sm:text-sm mb-6 whitespace-pre-wrap leading-relaxed border-l-2 border-[var(--rf-brand)]/20 pl-4 py-1">
+                            <div className="mb-4 whitespace-pre-wrap border-l-2 border-[var(--rf-brand)]/20 py-1 pl-4 text-[13px] sm:text-sm leading-relaxed text-[var(--rf-text-secondary)]">
                               {feature.markdown || feature.description}
                             </div>
                           )}

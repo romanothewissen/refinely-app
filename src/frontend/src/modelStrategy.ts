@@ -19,6 +19,12 @@ export type GeneratorRoleModelField =
   | 'triageModel'
   | 'themeModel';
 
+export interface GeneratorRoleDescriptor {
+  field: GeneratorRoleModelField;
+  label: string;
+  description: string;
+}
+
 type StrategyCatalogData = typeof strategyCatalog;
 type StrategyCatalogProvider = keyof StrategyCatalogData['providers'];
 
@@ -42,6 +48,44 @@ export const SIMPLE_BUCKET_DESCRIPTIONS: Record<GeneratorBucketKey, string> = {
   generation: 'Feature breakdown and acceptance requirements',
   refinement: 'Interactive edits on existing features',
 };
+
+export const GENERATOR_ROLE_ORDER: GeneratorRoleDescriptor[] = [
+  {
+    field: 'triageModel',
+    label: 'Triage',
+    description: 'Scope, complexity, and routing',
+  },
+  {
+    field: 'clarifyModel',
+    label: 'Clarifying Questions',
+    description: 'Round 1 discovery and follow-ups',
+  },
+  {
+    field: 'evaluateModel',
+    label: 'Sufficiency Check',
+    description: 'Gate before generation continues',
+  },
+  {
+    field: 'decompositionModel',
+    label: 'Feature Breakdown',
+    description: 'Draft feature structure',
+  },
+  {
+    field: 'arModel',
+    label: 'Acceptance Requirements',
+    description: 'Write Given / When / Then',
+  },
+  {
+    field: 'themeModel',
+    label: 'Theme Analysis & Titles',
+    description: 'Cluster themes and title features',
+  },
+  {
+    field: 'refineModel',
+    label: 'Refinement',
+    description: 'Interactive edits on a single feature',
+  },
+];
 
 function getPresetProvider(provider: LlmProvider): StrategyCatalogProvider {
   if (provider === 'forge_llms') return 'anthropic';

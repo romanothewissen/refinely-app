@@ -66,12 +66,6 @@ type LocalAnswerState = {
   customAnswer: string;
 };
 
-function buildExcerpt(text: string, maxChars = 180): string {
-  const compact = normalizeDisplayText(text).replace(/\s+/g, ' ').trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars).trimEnd()}...`;
-}
-
 function normalizeDisplayText(value: string): string {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) return '';
@@ -278,16 +272,6 @@ export function ClarifyQuestionsView({
                   <span className="inline-flex items-center gap-1 rounded-md border border-[var(--rf-border)] bg-white/55 px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
                     {contextMeta.projectKey === '*' ? 'Global' : contextMeta.projectKey}
                   </span>
-                  {(contextMeta.wiDocsCount ?? 0) > 0 && (
-                    <span className="inline-flex items-center gap-1 rounded-md border border-[var(--rf-border)] bg-white/55 px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      {contextMeta.wiDocsCount} docs
-                    </span>
-                  )}
-                  {(contextMeta.similarStoriesCount ?? 0) > 0 && (
-                    <span className="inline-flex items-center gap-1 rounded-md border border-[var(--rf-border)] bg-white/55 px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      {contextMeta.similarStoriesCount} backlog items
-                    </span>
-                  )}
                   <button
                     type="button"
                     onClick={() => setShowContextDetails(v => !v)}
@@ -380,26 +364,6 @@ export function ClarifyQuestionsView({
                       <span>Roles: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.domainRolesUsed.join(', ')}</span></span>
                     )}
                   </div>
-                  {(contextMeta.referencedSimilarStories?.length ?? 0) > 0 && (
-                    <div>
-                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1.5">Backlog patterns</div>
-                      <div className="grid gap-2 xl:grid-cols-2">
-                        {contextMeta.referencedSimilarStories!.map((story, i) => (
-                          <div key={`${story.key}-${i}`} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2 backdrop-blur-sm">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-xs font-bold text-[var(--rf-text)]">Pattern {i + 1}</div>
-                              {typeof story.relevanceScore === 'number' && (
-                                <span className="text-[13px] text-[var(--rf-text-tertiary)]">{(story.relevanceScore * 100).toFixed(0)}%</span>
-                              )}
-                            </div>
-                            <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                              {buildExcerpt(story.summary, 140)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   {(contextMeta.referencedWiSections?.length ?? 0) > 0 && (
                     <div>
                       <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1.5">
