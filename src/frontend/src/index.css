@@ -68,6 +68,15 @@
 
     /* ── Header shadow ──────────────────────────────────────────── */
     --rf-header-shadow: 0 1px 0 rgba(43, 89, 74, 0.07);
+
+    /* ── Jira-native surface tokens (used in Quick Refine panel) ── */
+    --jira-bg:          #F4F5F7;
+    --jira-bg-white:    #FFFFFF;
+    --jira-border:      #DFE1E6;
+    --jira-text:        #172B4D;
+    --jira-text-subtle: #6B778C;
+    --jira-shadow-xs:   0 1px 2px rgba(9,30,66,0.08);
+    --jira-shadow-sm:   0 2px 4px rgba(9,30,66,0.10);
   }
 
   html, body {
@@ -95,19 +104,7 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background:
-      /* Forest-green wash — top-left anchor */
-      radial-gradient(ellipse 72% 58% at 8% 4%,  rgba(43, 89, 74, 0.12), transparent 62%),
-      /* Warm peach/sand — bottom-right lift */
-      radial-gradient(ellipse 65% 52% at 93% 96%, rgba(210, 168, 125, 0.09), transparent 58%),
-      /* Sage/mint — centre-right breath */
-      radial-gradient(ellipse 55% 48% at 88% 32%, rgba(100, 172, 140, 0.07), transparent 52%),
-      /* Soft lavender — bottom-left whisper */
-      radial-gradient(ellipse 48% 42% at 12% 82%, rgba(145, 148, 190, 0.05), transparent 48%),
-      /* Warm green — mid anchor */
-      radial-gradient(ellipse 60% 50% at 50% 50%, rgba(43, 89, 74, 0.04), transparent 70%),
-      /* Base: clean off-white with the lightest green tint */
-      linear-gradient(165deg, #f6f9f7 0%, #f2f5f3 55%, #f5f3ef 100%);
+    background: #F4F5F7;
   }
 }
 
@@ -116,64 +113,33 @@
 ═══════════════════════════════════════════════════════════════════ */
 @layer utilities {
 
-  /* ── Glass card ──────────────────────────────────────────────── */
+  /* ── Glass card (Jira-native, flat) ─────────────────────────── */
   .rf-card {
-    position: relative;
-    background: var(--rf-glass-card);
-    border: 1px solid var(--rf-border);
-    border-radius: var(--rf-radius-2xl);
-    box-shadow: var(--rf-shadow-md);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
-    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    background: #FFFFFF;
+    border: 1px solid var(--jira-border);
+    border-radius: 4px;
+    box-shadow: var(--jira-shadow-xs);
+    transition: box-shadow 0.2s ease;
   }
-
-  .rf-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(180deg, rgba(255,255,255,0.46) 0%, transparent 42%);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  .rf-card > * { position: relative; z-index: 1; }
 
   .rf-card:hover,
   .rf-card-hover:hover {
-    border-color: var(--rf-border-strong);
-    box-shadow: var(--rf-shadow-lg);
-    background: var(--rf-glass-hover);
+    box-shadow: var(--jira-shadow-sm);
   }
 
-  /* ── Glass card (alias) ──────────────────────────────────────── */
+  /* ── Glass card alias (flat) ────────────────────────────────── */
   .rf-glass-card {
-    position: relative;
-    background: var(--rf-glass-card);
-    border: 1px solid var(--rf-border);
-    border-radius: var(--rf-radius-2xl);
-    box-shadow: var(--rf-shadow-md);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
-    transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    background: #FFFFFF;
+    border: 1px solid var(--jira-border);
+    border-radius: 4px;
+    box-shadow: var(--jira-shadow-xs);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    transition: box-shadow 0.2s ease;
   }
-
-  .rf-glass-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(180deg, rgba(255,255,255,0.42) 0%, transparent 40%);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  .rf-glass-card > * { position: relative; z-index: 1; }
 
   .rf-glass-card:hover {
-    border-color: var(--rf-border-strong);
-    box-shadow: var(--rf-shadow-lg);
+    box-shadow: var(--jira-shadow-sm);
   }
 
   /* ── Sidebar shell ───────────────────────────────────────────── */
@@ -222,23 +188,22 @@
   .rf-pane-header {
     position: relative;
     z-index: 1;
-    height: 56px;
-    padding: 10px 20px;
+    height: 40px;
+    padding: 0 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    border-bottom: 1px solid var(--rf-border-subtle);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    gap: 12px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--jira-border);
   }
 
   .rf-pane-header--sidebar {
-    background: rgba(255, 255, 255, 0.68);
+    background: #FFFFFF;
   }
 
   .rf-pane-header--canvas {
-    background: rgba(255, 255, 255, 0.72);
+    background: #FFFFFF;
   }
 
   .rf-pane-header-cluster {
@@ -266,12 +231,12 @@
   }
 
   .rf-pane-header-title {
-    font-family: 'Fraunces', serif;
-    font-size: 21px;
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
     line-height: 1;
-    font-weight: 500;
-    letter-spacing: -0.025em;
-    color: var(--rf-text);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    color: var(--jira-text);
     white-space: nowrap;
   }
 

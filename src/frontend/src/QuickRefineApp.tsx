@@ -5,7 +5,6 @@ import {
   AlertCircle,
   ArrowRight,
   Check,
-  ClipboardPenLine,
   CopyCheck,
   ExternalLink,
   Loader2,
@@ -181,20 +180,20 @@ function CompactArEditor({
   return (
     <div className="space-y-2">
       {ars.map((ar, index) => (
-        <div key={`ar-${index}`} className="rounded-[18px] border border-[rgba(43,89,74,0.12)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(245,249,246,0.86))] p-2.5 space-y-2 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+        <div key={`ar-${index}`} className="rounded border border-[var(--jira-border)] bg-white p-2.5 space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">AR {index + 1}</span>
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-[11px] text-[var(--rf-danger)]"
+              className="inline-flex items-center gap-1 text-[11px] text-[var(--rf-danger)] hover:underline"
               onClick={() => onChange(ars.filter((_, candidateIndex) => candidateIndex !== index))}
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3 h-3" />
               Delete
             </button>
           </div>
-          <label className="block rounded-[16px] border border-[var(--rf-border-subtle)] bg-white/92 px-2.5 py-2 space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Acceptance Requirement</span>
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold text-[var(--jira-text-subtle)]">Acceptance Requirement</span>
             <textarea
               rows={4}
               value={formatArText(ar)}
@@ -204,15 +203,15 @@ function CompactArEditor({
                 onChange(next);
               }}
               placeholder={'GIVEN ...\nWHEN ...\nTHEN ...'}
-              className="w-full min-h-[88px] resize-y rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm leading-6 text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+              className="w-full min-h-[80px] resize-y rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)]"
             />
-          </label>
+          </div>
         </div>
       ))}
       <button
         type="button"
         onClick={() => onChange([...(ars.length ? ars : []), emptyAr()])}
-        className="inline-flex items-center gap-2 rounded-lg border border-dashed border-[var(--rf-border-strong)] px-3 py-1.5 text-sm font-semibold text-[var(--rf-brand)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)]"
+        className="inline-flex items-center gap-1.5 rounded border border-dashed border-[var(--jira-border)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] transition hover:border-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)]"
       >
         <Plus className="w-4 h-4" />
         Add AR
@@ -242,21 +241,21 @@ function CompactArDiff({
         return (
           <div
             key={`${row.type}-${index}`}
-            className={`rounded-xl border px-3 py-2 text-sm ${
+            className={`rounded border px-3 py-2 text-[13px] ${
               isRemoved
                 ? 'border-[rgba(155,53,69,0.16)] bg-[rgba(155,53,69,0.05)]'
                 : isAdded
                   ? 'border-[rgba(46,125,86,0.16)] bg-[rgba(46,125,86,0.05)]'
-                  : 'border-[var(--rf-border)] bg-white/70'
+                  : 'border-[var(--jira-border)] bg-white'
             }`}
           >
             <div className="mb-1.5 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">AR {index + 1}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--jira-text-subtle)]">
                 {isRemoved ? 'Removed' : isAdded ? 'Added' : 'Updated'}
               </span>
             </div>
-            <div className="rounded-lg border border-[var(--rf-border-subtle)] bg-white/80 px-2.5 py-2 leading-6 text-[var(--rf-text)] whitespace-pre-wrap">
+            <div className="rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] px-2.5 py-2 leading-5 text-[var(--jira-text)] whitespace-pre-wrap">
               <DiffText
                 oldText={formatArText(previous || current)}
                 newText={isRemoved ? '' : formatArText(current)}
@@ -268,7 +267,7 @@ function CompactArDiff({
         );
       })}
       {!rows.length ? (
-        <div className="rounded-xl border border-dashed border-[var(--rf-border-strong)] px-3 py-2 text-sm text-[var(--rf-text-tertiary)]">
+        <div className="rounded border border-dashed border-[var(--jira-border)] px-3 py-2 text-[12px] text-[var(--jira-text-subtle)]">
           No acceptance requirements yet.
         </div>
       ) : null}
@@ -289,47 +288,47 @@ function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[var(--rf-text)]/35 backdrop-blur-sm" onClick={busy ? undefined : onClose} />
+      <div className="absolute inset-0 bg-[rgba(9,30,66,0.4)] backdrop-blur-sm" onClick={busy ? undefined : onClose} />
       <motion.div
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="relative rf-card w-full max-w-xl p-5 space-y-4"
+        className="relative bg-white rounded-lg border border-[var(--jira-border)] shadow-[0_8px_24px_rgba(9,30,66,0.14)] w-full max-w-lg p-4 space-y-3"
       >
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">AI Refine</p>
-            <h3 className="text-xl font-semibold text-[var(--rf-text)]">{title}</h3>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">AI Refine</p>
+            <h3 className="text-[15px] font-semibold text-[var(--jira-text)]">{title}</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+            className="rounded border border-[var(--jira-border)] bg-white p-1.5 text-[var(--jira-text-subtle)] transition hover:bg-[var(--jira-bg)] disabled:opacity-50"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
         <textarea
-          rows={5}
+          rows={4}
           value={instructions}
           onChange={(event) => setInstructions(event.target.value)}
           placeholder='Example: "Tighten the scope to internal users only and add one AR for invalid input."'
-          className="w-full rounded-2xl border border-[var(--rf-border)] bg-white/80 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+          className="w-full rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] px-3 py-2 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)] resize-y"
         />
         {error ? (
-          <div className="rounded-2xl border border-[var(--rf-danger)]/20 bg-[var(--rf-danger-subtle)] px-4 py-3 text-sm text-[var(--rf-danger)]">
+          <div className="rounded border border-[rgba(155,53,69,0.2)] bg-[var(--rf-danger-subtle)] px-3 py-2 text-[12px] text-[var(--rf-danger)]">
             {error}
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm text-[var(--rf-text-tertiary)]">Refines the current draft without discarding your manual edits.</p>
+          <p className="text-[12px] text-[var(--jira-text-subtle)]">Refines the current draft without discarding your manual edits.</p>
           <button
             type="button"
             disabled={busy || !instructions.trim()}
             onClick={() => onSubmit(instructions)}
-            className="inline-flex items-center gap-2 rounded-2xl bg-[var(--rf-brand)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <WandSparkles className="w-4 h-4" />}
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <WandSparkles className="w-3.5 h-3.5" />}
             Refine Draft
           </button>
         </div>
@@ -350,19 +349,19 @@ function DraftCard({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="rf-card overflow-hidden border border-[rgba(43,89,74,0.12)] shadow-[0_16px_40px_rgba(16,24,40,0.07)]">
-      <div className="flex items-center justify-between gap-3 border-b border-[rgba(43,89,74,0.1)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,249,246,0.9))] px-4 py-3">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-[var(--rf-text)]">{title}</h3>
+    <div className="overflow-hidden rounded border border-[var(--jira-border)] bg-white shadow-[var(--jira-shadow-xs)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--jira-border)] bg-[var(--jira-bg)] px-3 py-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[13px] font-semibold text-[var(--jira-text)]">{title}</h3>
           {typeof changed === 'boolean' ? (
-            <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] ${changed ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'}`}>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${changed ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'bg-white border border-[var(--jira-border)] text-[var(--jira-text-subtle)]'}`}>
               {changed ? 'Updated' : 'Unchanged'}
             </span>
           ) : null}
         </div>
         {actions}
       </div>
-      <div className="p-4 space-y-3">{children}</div>
+      <div className="p-3 space-y-2">{children}</div>
     </div>
   );
 }
@@ -830,13 +829,13 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
 
   if (loadError) {
     return (
-      <div className="h-full w-full flex items-center justify-center p-6">
-        <div className="rf-card max-w-xl p-6 space-y-3">
-          <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)]">
-            <AlertCircle className="w-5 h-5" />
+      <div className="h-full w-full flex items-center justify-center p-4">
+        <div className="rounded border border-[var(--jira-border)] bg-white p-4 max-w-md w-full shadow-[var(--jira-shadow-sm)] space-y-2">
+          <div className="flex items-center gap-2 text-[var(--rf-danger)]">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <p className="text-[13px] font-semibold">Quick Refine unavailable</p>
           </div>
-          <h2 className="text-2xl font-semibold text-[var(--rf-text)]">Quick Refine unavailable</h2>
-          <p className="text-sm text-[var(--rf-text-secondary)]">{loadError}</p>
+          <p className="text-[12px] text-[var(--jira-text-subtle)] leading-5">{loadError}</p>
         </div>
       </div>
     );
@@ -844,85 +843,55 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
 
   if (!active && surface === 'issue-panel') {
     return (
-      <div className="h-full w-full p-2">
-        <div className="rf-card relative h-full overflow-hidden border border-[rgba(43,89,74,0.12)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.2),transparent_42%),linear-gradient(180deg,rgba(252,253,252,0.96),rgba(243,248,245,0.96))] p-3">
-          <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.35),transparent)]" />
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-[var(--rf-brand)] shadow-[0_12px_28px_rgba(43,89,74,0.12)]">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--rf-text-tertiary)]">Issue Panel</p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                    <h2 className="truncate text-[22px] leading-none font-semibold text-[var(--rf-text)]">Quick Refinely</h2>
-                    <span className="rounded-full border border-[rgba(43,89,74,0.14)] bg-white/85 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-brand)]">
-                      {getSessionBadgeCopy(session)}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[11px] leading-5 text-[var(--rf-text-secondary)]">
-                    Rewrite this issue with project context, WI guidance, and tighter acceptance requirements.
-                  </div>
-                </div>
-              </div>
-              <div className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
-                {formatRelativeTimestamp(context?.updatedAt)}
-              </div>
-            </div>
-            {isSessionProcessing ? (
-              <div className="rounded-2xl border border-[rgba(43,89,74,0.14)] bg-white/82 px-3 py-3 shadow-[0_18px_36px_rgba(43,89,74,0.08)]">
-                <div className="flex items-center gap-2 text-[var(--rf-brand)]">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm font-semibold">{busyLabel || 'Quick refine is running'}</span>
-                </div>
-                <p className="mt-1 text-[12px] leading-5 text-[var(--rf-text-secondary)]">
-                  We are retrieving backlog signals and composing a rewrite in the background.
-                </p>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  openEditor();
-                  if (!hasResume) void handleStart();
-                }}
-                disabled={busy}
-                className="group inline-flex w-full items-center justify-between rounded-[22px] border border-[rgba(43,89,74,0.18)] bg-[linear-gradient(135deg,var(--rf-brand),#3b715f)] px-4 py-3 text-left text-white shadow-[0_22px_42px_rgba(43,89,74,0.22)] transition hover:-translate-y-0.5 hover:shadow-[0_26px_48px_rgba(43,89,74,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/14 ring-1 ring-white/20">
-                    <ClipboardPenLine className="h-4.5 w-4.5" />
-                  </span>
-                  <span>
-                    <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-white/72">
-                      {hasResume ? 'Continue where you left off' : 'Refine this story now'}
-                    </span>
-                    <span className="block text-base font-semibold">
-                      {hasResume ? 'Open Quick Refine draft' : 'Launch Quick Refine'}
-                    </span>
-                  </span>
-                </span>
-                <ArrowRight className="h-4.5 w-4.5 transition group-hover:translate-x-0.5" />
-              </button>
-            )}
-            {onOpenSettings && !isSessionProcessing ? (
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/80"
-              >
-                Settings
-              </button>
-            ) : null}
+      <div className="w-full px-3 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
+            <Sparkles className="w-3.5 h-3.5" />
           </div>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="text-[13px] font-semibold text-[var(--jira-text)]">Quick Refine</span>
+            <span className="rounded-full bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)] whitespace-nowrap">
+              {getSessionBadgeCopy(session)}
+            </span>
+          </div>
+          {isSessionProcessing ? (
+            <div className="flex items-center gap-1.5 text-[12px] text-[var(--jira-text-subtle)]">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--rf-brand)] flex-shrink-0" />
+              <span>Running…</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                openEditor();
+                if (!hasResume) void handleStart();
+              }}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {hasResume ? 'Resume' : 'Refine'}
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          )}
+          {onOpenSettings && !isSessionProcessing ? (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="text-[11px] font-medium text-[var(--jira-text-subtle)] hover:text-[var(--jira-text)] transition"
+            >
+              Settings
+            </button>
+          ) : null}
         </div>
+        <p className="mt-0.5 pl-9 text-[11px] text-[var(--jira-text-subtle)]">
+          {formatRelativeTimestamp(context?.updatedAt)}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className={`h-full w-full ${surface === 'issue-action' ? 'p-2.5' : 'p-2'} overflow-auto`}>
+    <div className="h-full w-full overflow-auto">
       <AiPromptDialog
         open={aiDialogOpen}
         title="Refine this quick-rewrite draft"
@@ -932,44 +901,37 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
         onSubmit={handleAiRefine}
       />
 
-      <div className="mx-auto max-w-6xl space-y-2">
-        <div className="rf-card overflow-hidden border border-[rgba(43,89,74,0.12)] shadow-[0_22px_52px_rgba(15,23,42,0.08)]">
-          <div className="relative border-b border-[rgba(43,89,74,0.1)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.18),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,245,0.92))] px-3 py-2.5">
-            <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.3),transparent)]" />
-            <div className="flex flex-wrap items-start justify-between gap-2.5">
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">
-                {surface === 'issue-action' ? 'Issue Action' : 'Issue Panel'}
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-[30px] leading-none font-semibold text-[var(--rf-text)]">Quick Refinely</h1>
-                {issueKey ? (
-                  <span className="rounded-full bg-[var(--rf-brand-subtle)] px-2.5 py-1 text-sm font-semibold text-[var(--rf-brand)]">
-                    {issueKey}
-                  </span>
-                ) : null}
-                {context?.issueType ? (
-                  <span className="rounded-full bg-white px-2.5 py-1 text-sm text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
-                    {context.issueType}
-                  </span>
-                ) : null}
+      <div className="mx-auto max-w-6xl space-y-1.5">
+        <div className="overflow-hidden border-b border-[var(--jira-border)] bg-white">
+          <div className="flex flex-wrap items-center gap-2 border-b border-[var(--jira-border)] px-3 py-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
+                <Sparkles className="w-3 h-3" />
               </div>
-              <p className="mt-1 max-w-2xl text-[12px] leading-5 text-[var(--rf-text-secondary)]">
-                Dense, context-aware issue rewriting for Jira stories that need a tighter scope, sharper user story, and cleaner acceptance requirements.
-              </p>
+              <span className="text-[13px] font-semibold text-[var(--jira-text)]">Quick Refine</span>
+              {issueKey ? (
+                <span className="rounded bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
+                  {issueKey}
+                </span>
+              ) : null}
+              {context?.issueType ? (
+                <span className="rounded border border-[var(--jira-border)] px-2 py-0.5 text-[11px] text-[var(--jira-text-subtle)]">
+                  {context.issueType}
+                </span>
+              ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               {stage === 'draft' ? (
-                <div className="inline-flex items-center gap-1 rounded-xl border border-[var(--rf-border)] bg-white p-1">
+                <div className="inline-flex rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-0.5">
                   {(['diff', 'result'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
                       onClick={() => setDraftViewMode(mode)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] transition ${
+                      className={`rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wide transition ${
                         draftViewMode === mode
-                          ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                          : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text)]'
+                          ? 'bg-white text-[var(--jira-text)] shadow-[var(--jira-shadow-xs)]'
+                          : 'text-[var(--jira-text-subtle)] hover:text-[var(--jira-text)]'
                       }`}
                     >
                       {mode}
@@ -978,26 +940,27 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                 </div>
               ) : null}
               {modelOptions.length ? (
-                <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-1 text-sm text-[var(--rf-text-secondary)]">
-                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Model</span>
+                <label className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-2 py-1">
+                  <span className="text-[11px] text-[var(--jira-text-subtle)]">Model</span>
                   <select
                     value={modelOverride}
                     onChange={(event) => handleModelChange(event.target.value)}
-                    className="min-w-[170px] bg-transparent text-sm font-semibold text-[var(--rf-text)] outline-none"
+                    className="bg-transparent text-[12px] font-medium text-[var(--jira-text)] outline-none"
                   >
                     {modelOptions.map((option) => (
                       <option key={option.id} value={option.id}>{option.label}</option>
                     ))}
                   </select>
-                  </label>
+                </label>
               ) : null}
-              {onOpenSettings ? (
+              {!busy && !isSessionProcessing && stage === 'draft' ? (
                 <button
                   type="button"
-                  onClick={onOpenSettings}
-                  className="rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-1 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                  onClick={() => setAiDialogOpen(true)}
+                  className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]"
                 >
-                  Settings
+                  <WandSparkles className="w-3.5 h-3.5" />
+                  AI Refine
                 </button>
               ) : null}
               {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
@@ -1005,45 +968,43 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   type="button"
                   onClick={() => void handleStart({ restart: true })}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-1 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)] disabled:opacity-50"
                 >
-                  <RefreshCcw className="w-4 h-4" />
+                  <RefreshCcw className="w-3 h-3" />
                   Restart
+                </button>
+              ) : null}
+              {onOpenSettings ? (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
+                >
+                  Settings
                 </button>
               ) : null}
               {surface === 'issue-panel' ? (
                 <button
                   type="button"
                   onClick={() => setActive(false)}
-                  className="rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-1 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                  className="rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
                 >
                   Collapse
                 </button>
               ) : null}
-              {!busy && !isSessionProcessing && stage === 'draft' ? (
-                <button
-                  type="button"
-                  onClick={() => setAiDialogOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-2.5 py-1 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
-                >
-                  <WandSparkles className="w-4 h-4 text-[var(--rf-brand)]" />
-                  AI Refine
-                </button>
-              ) : null}
             </div>
           </div>
-          </div>
-          <div className="space-y-2 bg-[linear-gradient(180deg,rgba(248,251,249,0.82),rgba(255,255,255,0.92))] p-2.5">
+          <div className="space-y-1.5 bg-[var(--jira-bg)] p-2">
             {error ? (
-              <div className="rounded-2xl border border-[var(--rf-danger)]/25 bg-[var(--rf-danger-subtle)] px-4 py-3 text-sm text-[var(--rf-danger)]">
+              <div className="rounded border border-[var(--rf-danger)]/25 bg-[var(--rf-danger-subtle)] px-3 py-2 text-[12px] text-[var(--rf-danger)]">
                 {error}
               </div>
             ) : null}
 
             {applyResult ? (
-              <div className="rounded-2xl border border-[var(--rf-success)]/20 bg-[var(--rf-success-subtle)] px-4 py-3 text-sm text-[var(--rf-success)] space-y-2">
+              <div className="rounded border border-[var(--rf-success)]/20 bg-[var(--rf-success-subtle)] px-3 py-2 text-[12px] text-[var(--rf-success)] space-y-2">
                 <div className="flex items-center gap-2 font-semibold">
-                  <CopyCheck className="w-4 h-4" />
+                  <CopyCheck className="w-3.5 h-3.5" />
                   Quick refine applied to {applyResult.updatedIssueKey}
                 </div>
                 {applyResult.createdIssues.length ? (
@@ -1053,10 +1014,10 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                         key={created.issueKey}
                         type="button"
                         onClick={() => void router.navigate(created.issueUrl)}
-                        className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[var(--rf-brand)]"
+                        className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-[var(--rf-brand)]"
                       >
                         {created.issueKey}
-                        <ExternalLink className="w-3.5 h-3.5" />
+                        <ExternalLink className="w-3 h-3" />
                       </button>
                     ))}
                   </div>
@@ -1065,119 +1026,95 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
             ) : null}
 
             {busy && !isSessionProcessing ? (
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/75 px-3 py-2 text-sm text-[var(--rf-text-secondary)]">
-                <Loader2 className="w-4 h-4 animate-spin text-[var(--rf-brand)]" />
+              <div className="inline-flex items-center gap-2 rounded border border-[var(--jira-border)] bg-white px-3 py-2 text-[12px] text-[var(--jira-text-subtle)]">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--rf-brand)]" />
                 {busyLabel}
               </div>
             ) : null}
 
             {stage === 'idle' && !busy && !isSessionProcessing ? (
-              <div className="relative overflow-hidden rounded-[24px] border border-[rgba(43,89,74,0.14)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,249,246,0.92))] px-4 py-4">
-                <div className="pointer-events-none absolute inset-y-0 left-0 w-[120px] bg-[linear-gradient(90deg,rgba(43,89,74,0.06),transparent)]" />
-                <div className="relative flex flex-wrap items-center justify-between gap-3">
-                  <div className="max-w-xl space-y-1.5">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--rf-text-tertiary)]">Quick Refinely</p>
-                    <h2 className="text-2xl leading-tight font-semibold text-[var(--rf-text)]">Turn a rough Jira issue into a clean story in one pass.</h2>
-                    <p className="text-sm leading-6 text-[var(--rf-text-secondary)]">
-                      We’ll use your project context, WI sources, and backlog signals to draft a sharper user story and compact acceptance requirements.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleStart()}
-                    className="group inline-flex min-w-[220px] items-center justify-between rounded-[22px] border border-[rgba(43,89,74,0.16)] bg-[linear-gradient(135deg,var(--rf-brand),#3b715f)] px-4 py-3 text-left text-white shadow-[0_24px_44px_rgba(43,89,74,0.24)] transition hover:-translate-y-0.5 hover:shadow-[0_28px_52px_rgba(43,89,74,0.3)]"
-                  >
-                    <span className="flex items-center gap-3">
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/14 ring-1 ring-white/20">
-                        <Sparkles className="w-4.5 h-4.5" />
-                      </span>
-                      <span>
-                        <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-white/72">Primary action</span>
-                        <span className="block text-base font-semibold">Quick Refine</span>
-                      </span>
-                    </span>
-                    <ArrowRight className="h-4.5 w-4.5 transition group-hover:translate-x-0.5" />
-                  </button>
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-[var(--jira-border)] bg-white px-3 py-2.5">
+                <span className="text-[13px] text-[var(--jira-text-subtle)]">
+                  Rewrite this issue with backlog context and tighter acceptance requirements.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleStart()}
+                  className="inline-flex items-center gap-2 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] brainstorm-shimmer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Quick Refine
+                </button>
               </div>
             ) : null}
 
             {isSessionProcessing ? (
-              <div className="relative overflow-hidden rounded-[24px] border border-[rgba(43,89,74,0.14)] bg-[radial-gradient(circle_at_top_left,rgba(96,154,127,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,248,245,0.94))] px-4 py-4">
-                <div className="pointer-events-none absolute inset-x-4 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(43,89,74,0.26),transparent)]" />
-                <div className="relative flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-1.5">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(43,89,74,0.12)] bg-white/80 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)]">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      {session?.status === 'queued' ? 'Queued' : 'Running'}
-                    </div>
-                    <h2 className="text-xl font-semibold text-[var(--rf-text)]">
-                      {session?.status === 'queued' ? 'Quick refine is lining up context.' : 'Quick refine is building your rewrite.'}
-                    </h2>
-                    <p className="max-w-xl text-sm leading-6 text-[var(--rf-text-secondary)]">
-                      {busyLabel || 'We are pulling project signals, similar backlog items, and WI context before drafting the updated issue.'}
-                    </p>
-                  </div>
-                  <div className="min-w-[220px] rounded-[20px] border border-white/70 bg-white/80 px-3.5 py-3 shadow-[0_14px_30px_rgba(43,89,74,0.08)]">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">In progress</div>
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--rf-brand-subtle)]">
-                      <div className="h-full w-1/2 animate-pulse rounded-full bg-[var(--rf-brand)]" />
-                    </div>
-                    <div className="mt-2 text-[12px] leading-5 text-[var(--rf-text-secondary)]">
-                      Keep this panel open or come back later. Your session will resume automatically.
-                    </div>
-                  </div>
+              <div className="rounded border border-[var(--jira-border)] bg-white px-3 py-2.5 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--rf-brand)] flex-shrink-0" />
+                  <span className="text-[13px] font-semibold text-[var(--jira-text)]">
+                    {session?.status === 'queued' ? 'Queued — loading context' : 'Building rewrite'}
+                  </span>
+                  <span className="ml-auto rounded-full bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
+                    {session?.status === 'queued' ? 'Queued' : 'Running'}
+                  </span>
                 </div>
+                <div className="h-1 overflow-hidden rounded-full bg-[var(--rf-brand-subtle)]">
+                  <div className="h-full w-2/5 animate-pulse rounded-full bg-[var(--rf-brand)]" />
+                </div>
+                <p className="text-[12px] leading-5 text-[var(--jira-text-subtle)]">
+                  {busyLabel || 'Keep this panel open or come back later — your session auto-resumes.'}
+                </p>
               </div>
             ) : null}
 
             {stage === 'handoff' ? (
-              <div className="rf-card p-4 space-y-3">
-                <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]">
-                  <MessagesSquare className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-semibold text-[var(--rf-text)]">This issue needs the full workflow</h2>
-                  <p className="mt-1 text-sm leading-relaxed text-[var(--rf-text-secondary)]">
-                    {handoffReason || 'The issue is too broad or too ambiguous for the fast rewrite flow.'}
-                  </p>
+              <div className="rounded border border-[rgba(160,81,30,0.25)] bg-[var(--rf-warning-subtle)] px-3 py-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <MessagesSquare className="w-4 h-4 text-[var(--rf-warning)] mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-[13px] font-semibold text-[var(--rf-warning)]">This issue needs the full workflow</p>
+                    <p className="mt-0.5 text-[12px] leading-5 text-[var(--jira-text-subtle)]">
+                      {handoffReason || 'Too broad or ambiguous for the fast rewrite flow.'}
+                    </p>
+                  </div>
                 </div>
                 {onOpenFullWorkflow ? (
                   <button
                     type="button"
                     onClick={onOpenFullWorkflow}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[var(--rf-brand)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--rf-brand-hover)]"
+                    className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)]"
                   >
-                    Open Full Refinely Workflow
-                    <ArrowRight className="w-4 h-4" />
+                    Open Full Refinely
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 ) : (
-                  <p className="text-sm text-[var(--rf-text-tertiary)]">
-                    Open the <span className="font-semibold text-[var(--rf-text)]">Refine Stories</span> issue action to continue in the full workflow.
+                  <p className="text-[12px] text-[var(--jira-text-subtle)]">
+                    Use <span className="font-semibold text-[var(--jira-text)]">Refine Stories</span> to continue.
                   </p>
                 )}
               </div>
             ) : null}
 
             {stage === 'questions' ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {questions.map((question) => {
                   const answer = answers.find((entry) => entry.questionId === question.id);
                   return (
-                    <div key={question.id} className="rf-card p-3 space-y-2.5">
-                      <div className="flex items-center gap-2 text-[var(--rf-brand)]">
-                        <MessagesSquare className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-[0.18em]">Clarify</span>
+                    <div key={question.id} className="rounded border border-[var(--jira-border)] bg-white px-3 py-2.5 space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <MessagesSquare className="w-3.5 h-3.5 text-[var(--rf-brand)] flex-shrink-0" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--rf-brand)]">Clarify</span>
                       </div>
-                      <h3 className="text-lg font-semibold text-[var(--rf-text)]">{question.question}</h3>
+                      <p className="text-[13px] font-semibold text-[var(--jira-text)] leading-snug">{question.question}</p>
                       {question.suggestions.length ? (
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-1.5">
                           {question.suggestions.map((suggestion) => (
                             <button
                               key={suggestion}
                               type="button"
                               onClick={() => setQuestionAnswer(question, suggestion, suggestion)}
-                              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${answer?.selectedSuggestions?.includes(suggestion) ? 'bg-[var(--rf-brand)] text-white' : 'border border-[var(--rf-border)] bg-white text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]'}`}
+                              className={`rounded-full px-2.5 py-1 text-[12px] font-medium transition ${answer?.selectedSuggestions?.includes(suggestion) ? 'bg-[var(--rf-brand)] text-white' : 'border border-[var(--jira-border)] bg-[var(--jira-bg)] text-[var(--jira-text-subtle)] hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]'}`}
                             >
                               {suggestion}
                             </button>
@@ -1185,10 +1122,10 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                         </div>
                       ) : null}
                       <textarea
-                        rows={3}
+                        rows={2}
                         value={answer?.answer || ''}
                         onChange={(event) => setQuestionAnswer(question, event.target.value)}
-                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                        className="w-full rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] px-2.5 py-1.5 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)] resize-y"
                         placeholder="Answer in one or two sentences."
                       />
                     </div>
@@ -1199,9 +1136,9 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                     type="button"
                     disabled={busy || answers.some((answer) => !answer.answer.trim())}
                     onClick={() => void handleSubmitAnswers()}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[var(--rf-brand)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <ArrowRight className="w-4 h-4" />
+                    <ArrowRight className="w-3.5 h-3.5" />
                     Build Rewrite Preview
                   </button>
                 </div>
@@ -1209,9 +1146,9 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
             ) : null}
 
             {stage === 'draft' && draft && originalIssue ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {draft.handoffRecommended ? (
-                  <div className="rounded-2xl border border-[var(--rf-warning)]/25 bg-[var(--rf-warning-subtle)] px-4 py-3 text-sm text-[var(--rf-warning)]">
+                  <div className="rounded border border-[var(--rf-warning)]/25 bg-[var(--rf-warning-subtle)] px-3 py-2 text-[12px] text-[var(--rf-warning)]">
                     {draft.handoffReason || 'This draft is usable, but the issue still looks like it would benefit from the full Refinely workflow.'}
                   </div>
                 ) : null}
@@ -1220,28 +1157,28 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   title="Current Issue Rewrite"
                   changed={currentIssueChanged}
                   actions={(
-                    <div className="flex items-center gap-2 text-sm text-[var(--rf-text-tertiary)]">
-                      <PencilLine className="w-4 h-4" />
+                    <div className="flex items-center gap-1.5 text-[12px] text-[var(--jira-text-subtle)]">
+                      <PencilLine className="w-3.5 h-3.5" />
                       {draftViewMode === 'diff' ? 'Compact diff' : 'Editable result'}
                     </div>
                   )}
                 >
                   {draftViewMode === 'diff' ? (
                     <div className="space-y-2">
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
-                        <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Summary</p>
-                        <div className="text-sm text-[var(--rf-text)]">
+                      <div className="rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-2.5">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Summary</p>
+                        <div className="text-[13px] text-[var(--jira-text)]">
                           <DiffText oldText={(draft.diffBaseIssue ?? diffBaseIssue ?? originalIssue).summary} newText={draft.currentIssue.summary} mode="redline" />
                         </div>
                       </div>
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
-                        <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Description</p>
-                        <div className="text-sm leading-7 text-[var(--rf-text)] whitespace-pre-wrap">
+                      <div className="rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-2.5">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Description</p>
+                        <div className="text-[13px] leading-6 text-[var(--jira-text)] whitespace-pre-wrap">
                           <DiffText oldText={(draft.diffBaseIssue ?? diffBaseIssue ?? originalIssue).description} newText={draft.currentIssue.description} mode="redline" />
                         </div>
                       </div>
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-2.5">
-                        <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Acceptance Requirements</p>
+                      <div className="rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-2.5">
+                        <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Acceptance Requirements</p>
                         <CompactArDiff
                           original={(draft.diffBaseIssue ?? diffBaseIssue ?? originalIssue).acceptanceRequirements}
                           proposed={draft.currentIssue.acceptanceRequirements}
@@ -1252,7 +1189,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   ) : (
                     <>
                       <label className="block space-y-1">
-                        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Summary</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--jira-text-subtle)]">Summary</span>
                         <input
                           value={draft.currentIssue.summary}
                           onChange={(event) => setDraft({
@@ -1262,12 +1199,12 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                               summary: event.target.value,
                             },
                           })}
-                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                          className="w-full rounded border border-[var(--jira-border)] bg-white px-3 py-1.5 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)]"
                         />
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Description</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--jira-text-subtle)]">Description</span>
                         <textarea
                           rows={4}
                           value={draft.currentIssue.description}
@@ -1278,7 +1215,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                               description: event.target.value,
                             },
                           })}
-                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                          className="w-full rounded border border-[var(--jira-border)] bg-white px-3 py-1.5 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)]"
                         />
                       </label>
 
@@ -1306,32 +1243,32 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                         ...draft,
                         splitCandidates: [...draft.splitCandidates, emptySplitCandidate()],
                       })}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                      className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
                     >
-                      <Plus className="w-4 h-4" />
-                      Add Split Candidate
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Split
                     </button>
                   )}
                 >
                   {draft.splitCandidates.length ? (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {draft.splitCandidates.map((candidate, index) => (
-                        <div key={candidate.id} className="rounded-xl border border-[var(--rf-border)] bg-white/85 p-2.5 space-y-2.5 shadow-[0_6px_18px_rgba(16,24,40,0.05)]">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
+                        <div key={candidate.id} className="rounded border border-[var(--jira-border)] bg-white p-2.5 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
                                 onClick={() => setDraft({
                                   ...draft,
                                   splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, selected: !item.selected } : item),
                                 })}
-                                className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition ${candidate.selected ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)]'}`}
+                                className={`inline-flex h-7 w-7 items-center justify-center rounded border transition ${candidate.selected ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'border-[var(--jira-border)] bg-white text-[var(--jira-text-subtle)]'}`}
                               >
-                                {candidate.selected ? <Check className="w-4 h-4" /> : <SplitSquareVertical className="w-4 h-4" />}
+                                {candidate.selected ? <Check className="w-3.5 h-3.5" /> : <SplitSquareVertical className="w-3.5 h-3.5" />}
                               </button>
                               <div>
-                                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Split {index + 1}</p>
-                                <p className="text-sm font-semibold text-[var(--rf-text)]">{candidate.selected ? 'Will be created as a linked issue' : 'Draft only'}</p>
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Split {index + 1}</p>
+                                <p className="text-[12px] font-semibold text-[var(--jira-text)]">{candidate.selected ? 'Will be created as a linked issue' : 'Draft only'}</p>
                               </div>
                             </div>
                             <button
@@ -1340,34 +1277,34 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                                 ...draft,
                                 splitCandidates: draft.splitCandidates.filter((item) => item.id !== candidate.id),
                               })}
-                              className="inline-flex items-center gap-1 text-xs text-[var(--rf-danger)]"
+                              className="inline-flex items-center gap-1 text-[11px] text-[var(--rf-danger)] hover:underline"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3 h-3" />
                               Delete
                             </button>
                           </div>
 
-                          <div className="grid gap-2.5 md:grid-cols-[minmax(0,1fr),128px]">
+                          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr),128px]">
                             <label className="block space-y-1">
-                              <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Summary</span>
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--jira-text-subtle)]">Summary</span>
                               <input
                                 value={candidate.summary}
                                 onChange={(event) => setDraft({
                                   ...draft,
                                   splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, summary: event.target.value } : item),
                                 })}
-                                className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                                className="w-full rounded border border-[var(--jira-border)] bg-white px-2.5 py-1.5 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)]"
                               />
                             </label>
                             <label className="block space-y-1">
-                              <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Issue Type</span>
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--jira-text-subtle)]">Issue Type</span>
                               <select
                                 value={candidate.issueType}
                                 onChange={(event) => setDraft({
                                   ...draft,
                                   splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, issueType: event.target.value } : item),
                                 })}
-                                className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                                className="w-full rounded border border-[var(--jira-border)] bg-white px-2.5 py-1.5 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)]"
                               >
                                 <option>Story</option>
                                 <option>Task</option>
@@ -1378,15 +1315,15 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                           </div>
 
                           <label className="block space-y-1">
-                            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Description</span>
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--jira-text-subtle)]">Description</span>
                             <textarea
-                              rows={4}
+                              rows={3}
                               value={candidate.description}
                               onChange={(event) => setDraft({
                                 ...draft,
                                 splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, description: event.target.value } : item),
                               })}
-                              className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                              className="w-full rounded border border-[var(--jira-border)] bg-white px-2.5 py-1.5 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)]"
                             />
                           </label>
 
@@ -1401,19 +1338,19 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                       ))}
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-[var(--rf-border-strong)] px-4 py-6 text-center text-sm text-[var(--rf-text-tertiary)]">
+                    <div className="rounded border border-dashed border-[var(--jira-border)] px-3 py-4 text-center text-[12px] text-[var(--jira-text-subtle)]">
                       No split candidates yet. Keep this flow focused on rewriting the current issue unless you really need linked follow-on items.
                     </div>
                   )}
                 </DraftCard>
 
                 {draft.changeSummary?.length ? (
-                  <div className="rf-card p-3">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Change Summary</p>
-                    <ul className="mt-3 space-y-2 text-sm text-[var(--rf-text-secondary)]">
+                  <div className="rounded border border-[var(--jira-border)] bg-white p-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Change Summary</p>
+                    <ul className="mt-2 space-y-1.5 text-[12px] text-[var(--jira-text-subtle)]">
                       {draft.changeSummary.map((item) => (
                         <li key={item} className="flex gap-2">
-                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)]" />
+                          <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--rf-brand)]" />
                           <span>{item}</span>
                         </li>
                       ))}
@@ -1421,18 +1358,18 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                   </div>
                 ) : null}
 
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm text-[var(--rf-text-tertiary)]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[12px] text-[var(--jira-text-subtle)]">
                     {selectedSplitCount
                       ? `${selectedSplitCount} split candidate${selectedSplitCount === 1 ? '' : 's'} selected for linked issue creation.`
                       : 'This apply will only update the current issue.'}
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {draft.handoffRecommended && onOpenFullWorkflow ? (
                       <button
                         type="button"
                         onClick={onOpenFullWorkflow}
-                        className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                        className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
                       >
                         Open Full Refinely
                       </button>
@@ -1441,7 +1378,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                       <button
                         type="button"
                         onClick={onOpenSettings}
-                        className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                        className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
                       >
                         Settings
                       </button>
@@ -1450,9 +1387,9 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                       type="button"
                       onClick={() => void handleApply()}
                       disabled={busy}
-                      className="inline-flex items-center gap-2 rounded-xl bg-[var(--rf-brand)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <CopyCheck className="w-4 h-4" />
+                      <CopyCheck className="w-3.5 h-3.5" />
                       {selectedSplitCount ? 'Save + Create Linked Items' : 'Save Current Issue'}
                     </button>
                   </div>
