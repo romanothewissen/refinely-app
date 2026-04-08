@@ -4,9 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { utils as XLSXUtils, write } from 'xlsx';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyProgressPayload } from './types';
+import type { ClarifyContextMeta, ClarifyProgressPayload, GenerationContextMeta } from './types';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
+import {
+  formatGenerationFeatureTarget,
+  getDraftFeatureHeading,
+  getDraftFeatureNote,
+  getGenerationFeatureTargetLabel,
+  getSizingRunContextNote,
+} from './generation-progress-copy';
 
 function normalizeDisplayText(value: string): string {
   const trimmed = String(value ?? '').trim();
@@ -50,6 +57,8 @@ type GenerationProgressMeta = {
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  draftFeaturesProvisional?: boolean;
+  consolidationPending?: boolean;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: {
     projectKey: string;
@@ -214,8 +223,8 @@ function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] 
           <div className="text-[14px] font-black text-[var(--rf-text)]">{SHAPE_LABELS[triage.shape] ?? triage.shape}</div>
         </div>
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Features</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">~{triage.featureTarget}</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{getGenerationFeatureTargetLabel()}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{formatGenerationFeatureTarget(triage.featureTarget)}</div>
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions asked</div>
@@ -446,9 +455,12 @@ function GeneratingPipeline({
   const triage = meta?.triage;
   const arProgress = meta?.arProgress;
   const draftFeatures = meta?.draftFeatures ?? [];
+  const draftFeaturesProvisional = Boolean(meta?.draftFeaturesProvisional);
+  const consolidationPending = Boolean(meta?.consolidationPending);
   const featureProgress = meta?.featureProgress ?? [];
   const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
   const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
+  const draftFeatureNote = getDraftFeatureNote(consolidationPending);
 
   // Anchored progress: context=5%, triage=25%, features=50%, ARs=72→100%
   const STAGE_PCT = [5, 25, 50, 72];
@@ -555,7 +567,16 @@ function GeneratingPipeline({
             animate={{ opacity: 1, y: 0 }}
             className="space-y-1.5"
           >
-            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Features</div>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                {getDraftFeatureHeading(draftFeaturesProvisional)}
+              </div>
+              {draftFeatureNote && (
+                <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                  {draftFeatureNote}
+                </div>
+              )}
+            </div>
             {draftFeatures.slice(0, 6).map((f, i) => {
               const status = featureProgressById.get(f.id) || (i === 0 ? 'active' : 'pending');
               return (
@@ -862,18 +883,7 @@ interface MainContentProps {
   setSidebarOpen: (o: boolean) => void;
   sessionId: string;
   requirement: string;
-  generationContext?: {
-    domainRolesUsed: string[];
-    projectKey: string;
-    domainContextApplied?: boolean;
-    attachmentIncluded?: boolean;
-    wiDocsCount?: number;
-    referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
-    similarStoriesCount?: number;
-    referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
-    tokenUsage?: { input: number; output: number; total: number; byStage?: Record<string, { input: number; output: number; total: number }> };
-  } | null;
+  generationContext?: GenerationContextMeta | null;
   generationProgressMeta?: GenerationProgressMeta | null;
   clarifyContext?: ClarifyContextMeta | null;
   clarifyProgressMeta?: DiscoveryProgressMeta | null;
@@ -910,6 +920,7 @@ export function MainContent({
 
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
+  const sizingRunContextNote = getSizingRunContextNote(generationContext?.sizingAssessment);
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
@@ -1460,6 +1471,11 @@ export function MainContent({
                     {generationContext.tokenUsage && (
                       <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
                         {generationContext.tokenUsage.total.toLocaleString()} tokens
+                      </span>
+                    )}
+                    {sizingRunContextNote && (
+                      <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
+                        {sizingRunContextNote}
                       </span>
                     )}
                   </div>

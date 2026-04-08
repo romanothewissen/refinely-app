@@ -16,6 +16,8 @@ export interface GenerationProgressPayload {
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  draftFeaturesProvisional?: boolean;
+  consolidationPending?: boolean;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: {
     projectKey: string;
@@ -75,6 +77,8 @@ function mergeGenerationPayload(
     triage: next.triage ?? previous.triage,
     arProgress: next.arProgress ?? previous.arProgress,
     draftFeatures: next.draftFeatures?.length ? next.draftFeatures : previous.draftFeatures,
+    draftFeaturesProvisional: next.draftFeaturesProvisional ?? previous.draftFeaturesProvisional,
+    consolidationPending: next.consolidationPending ?? previous.consolidationPending,
     featureProgress: next.featureProgress?.length ? next.featureProgress : previous.featureProgress,
     sources: mergeGenerationSources(previous.sources, next.sources),
   };

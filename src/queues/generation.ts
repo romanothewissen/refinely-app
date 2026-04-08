@@ -13,6 +13,7 @@ import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
   assessRequirementWithLlm,
+  capDiscoveryProfileFloorForSmallAsk,
   GenerationCancelledError,
   generateFeatures,
   generateSessionTitle,
@@ -68,6 +69,8 @@ function complexityToArDepth(c: Complexity): ArDepth {
 function applyDiscoveryProfileFloor(
   triage: TriageResult | null,
   profile: DiscoveryProfile,
+  requirement?: string,
+  clarifyAnswers?: Array<{ answer?: string }>,
 ): TriageResult {
   // Map clarify scope → minimum triage shape + feature count
   const scopeToShape: Record<DiscoveryProfile['scope'], { shape: Shape; minFeatures: number }> = {
@@ -99,13 +102,27 @@ function applyDiscoveryProfileFloor(
   const finalFeatures = Math.max(baseFeatures, profileShape.minFeatures);
   const finalArDepth = maxArDepth(baseArDepth, complexityToArDepth(finalComplexity));
 
-  return {
+  const floored = {
     estimatedFeatures: finalFeatures,
     estimatedQuestions: baseQuestions,
     shape: finalShape,
     complexity: finalComplexity,
     arDepth: finalArDepth,
   };
+
+  if (!requirement) {
+    return floored;
+  }
+
+  return capDiscoveryProfileFloorForSmallAsk({
+    requirement,
+    clarifyAnswers: clarifyAnswers?.map((answer) => ({
+      question: '',
+      answer: String(answer.answer ?? ''),
+      selectedSuggestions: [],
+    })),
+    triage: floored,
+  }) ?? floored;
 }
 
 interface RealtimeEvent {
@@ -121,6 +138,8 @@ interface GenerationProgressPayload {
   triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
+  draftFeaturesProvisional?: boolean;
+  consolidationPending?: boolean;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   failedFeatureIds?: string[];
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
@@ -265,12 +284,17 @@ export async function handler(event: { body: GenerationEvent }) {
     // already assessed scope and complexity with a richer prompt. Derive the effective
     // triage directly from the discovery profile and fire the progress message immediately.
     const triagePromise: Promise<Awaited<ReturnType<typeof assessRequirementWithLlm>>> = clarifyDiscoveryProfile
-      ? Promise.resolve(applyDiscoveryProfileFloor(null, clarifyDiscoveryProfile)).then(async result => {
+      ? Promise.resolve(applyDiscoveryProfileFloor(
+          null,
+          clarifyDiscoveryProfile,
+          maskedRequirement.text,
+          maskedAnswers.answers,
+        )).then(async result => {
           const triage = buildTriagePayload(result);
           if (triage) {
             const arText = ` with ${triage.arDepth} acceptance depth`;
             await updateProgress(
-              `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — likely ${triage.featureTarget} features${arText}`,
+              `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — drafting about ${triage.featureTarget} features${arText}`,
               1,
               { stage: 'triage', triage, sources: baseSources },
             );
@@ -376,7 +400,7 @@ export async function handler(event: { body: GenerationEvent }) {
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
         if (!effectiveTriageResult) {
-          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — targeting ~${triage.featureTarget} features, ~${triage.arTarget} ARs each`, 1, {
+          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — drafting about ${triage.featureTarget} features, about ${triage.arTarget} ARs each`, 1, {
             stage: 'triage',
             triage,
             sources: progressSources,
@@ -394,6 +418,8 @@ export async function handler(event: { body: GenerationEvent }) {
           stage: 'acceptance_requirements',
           triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
+          draftFeaturesProvisional: true,
+          consolidationPending: true,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, 0),
           arProgress: { completed: 0, total: draftFeatures.length },
           sources: progressSources,
@@ -404,6 +430,8 @@ export async function handler(event: { body: GenerationEvent }) {
           stage: 'acceptance_requirements',
           triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
+          draftFeaturesProvisional: true,
+          consolidationPending: true,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, completed),
           arProgress: { completed, total },
           sources: progressSources,

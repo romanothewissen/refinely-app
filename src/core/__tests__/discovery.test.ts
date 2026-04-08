@@ -667,6 +667,8 @@ test('sizing prompts calibrate consolidation around independently valuable scope
   assert.match(assessmentPrompt, /Supporting visibility, audit, notification, policy-definition, reason capture, and override behavior usually belong inside the parent feature/i);
   assert.match(repairPrompt, /Prefer the smallest set of strong, independently valuable features/i);
   assert.match(repairPrompt, /Merge sibling features when they express the same core rule/i);
+  assert.match(repairPrompt, /Preserve workflow splits only when they are explicitly supported by the requirement or clarifying answers/i);
+  assert.match(repairPrompt, /Do not use domain expectations, generic best practices, or organizational heuristics as a reason to create or preserve separate features/i);
 });
 
 test('generation fallback is operational only when triage is unavailable', () => {

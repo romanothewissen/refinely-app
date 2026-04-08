@@ -7,10 +7,19 @@ import {
   AcceptanceRequirementsGenerationError,
   applySmallAskTriageGuardrails,
   assessSizingHeuristics,
+  capDiscoveryProfileFloorForSmallAsk,
+  deriveSizingGuidance,
   feedbackRequestsStructuralRefinement,
   findFeaturesMissingCompleteAcceptanceRequirements,
   repairAcceptanceRequirements,
 } from '../story-generator';
+import {
+  formatGenerationFeatureTarget,
+  getDraftFeatureHeading,
+  getDraftFeatureNote,
+  getGenerationFeatureTargetLabel,
+  getSizingRunContextNote,
+} from '../../frontend/src/generation-progress-copy';
 
 function makeFeature(summary: string, arCount: number, description?: string) {
   return {
@@ -196,4 +205,119 @@ test('applySmallAskTriageGuardrails narrows precise guard-rule triage estimates'
   assert.equal(guarded?.shape, 'minimal');
   assert.equal(guarded?.complexity, 'medium');
   assert.equal(guarded?.arDepth, 'standard');
+});
+
+test('deriveSizingGuidance preserves explicit manual vs automated workflow splits', () => {
+  const guidance = deriveSizingGuidance({
+    requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
+  });
+
+  assert.equal(guidance.minimumPreservedFeatureCount, 2);
+  assert.match(guidance.explicitSplitSignals.join(' '), /manual_vs_automated_workflows/);
+  assert.deepEqual(guidance.preferredFeatureRange, { min: 2, max: 2 });
+});
+
+test('applySmallAskTriageGuardrails keeps explicitly split small asks above one feature', () => {
+  const guarded = applySmallAskTriageGuardrails({
+    requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
+    triage: {
+      estimatedFeatures: 5,
+      estimatedQuestions: 10,
+      shape: 'balanced',
+      complexity: 'high',
+      arDepth: 'thorough',
+    },
+  });
+
+  assert.equal(guarded?.estimatedFeatures, 2);
+  assert.equal(guarded?.shape, 'narrow');
+});
+
+test('capDiscoveryProfileFloorForSmallAsk prevents broad floor inflation for focused guard rules', () => {
+  const capped = capDiscoveryProfileFloorForSmallAsk({
+    requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
+    triage: {
+      estimatedFeatures: 7,
+      estimatedQuestions: 6,
+      shape: 'broad',
+      complexity: 'medium',
+      arDepth: 'thorough',
+    },
+  });
+
+  assert.equal(capped?.estimatedFeatures, 1);
+  assert.equal(capped?.shape, 'minimal');
+  assert.equal(capped?.complexity, 'medium');
+});
+
+test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors from discovery', () => {
+  const capped = capDiscoveryProfileFloorForSmallAsk({
+    requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
+    triage: {
+      estimatedFeatures: 7,
+      estimatedQuestions: 6,
+      shape: 'broad',
+      complexity: 'medium',
+      arDepth: 'thorough',
+    },
+  });
+
+  assert.equal(capped?.estimatedFeatures, 2);
+  assert.equal(capped?.shape, 'narrow');
+});
+
+test('generation progress copy labels draft output as provisional', () => {
+  assert.equal(getGenerationFeatureTargetLabel(), 'Draft target');
+  assert.equal(formatGenerationFeatureTarget(7), 'About 7');
+  assert.equal(getDraftFeatureHeading(true), 'Draft features');
+  assert.equal(getDraftFeatureNote(true), 'Draft may consolidate before final output.');
+});
+
+test('generation progress copy surfaces consolidation notes after generation', () => {
+  assert.equal(
+    getSizingRunContextNote({
+      archetype: 'guard_rule',
+      verdict: 'ok',
+      confidence: 'high',
+      preferredFeatureRange: { min: 1, max: 2 },
+      preferredArDepth: 'standard',
+      minimumPreservedFeatureCount: 1,
+      explicitSplitSignals: [],
+      reasonCodes: [],
+      reasons: [],
+      repairApplied: true,
+      preRepairFeatureCount: 7,
+      decomposition: {
+        stage: 'decomposition',
+        archetype: 'guard_rule',
+        verdict: 'oversized',
+        confidence: 'high',
+        preferredFeatureRange: { min: 1, max: 2 },
+        preferredArDepth: 'standard',
+        minimumPreservedFeatureCount: 1,
+        explicitSplitSignals: [],
+        featureCount: 7,
+        acceptanceRequirementCount: 0,
+        averageAcceptanceRequirementsPerFeature: 0,
+        reasonCodes: [],
+        reasons: [],
+      },
+      final: {
+        stage: 'final',
+        archetype: 'guard_rule',
+        verdict: 'ok',
+        confidence: 'high',
+        preferredFeatureRange: { min: 1, max: 2 },
+        preferredArDepth: 'standard',
+        minimumPreservedFeatureCount: 1,
+        explicitSplitSignals: [],
+        featureCount: 2,
+        acceptanceRequirementCount: 8,
+        averageAcceptanceRequirementsPerFeature: 4,
+        reasonCodes: [],
+        reasons: [],
+      },
+    }),
+    'Draft consolidated from 7 to 2 features before final output.',
+  );
 });

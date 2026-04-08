@@ -416,6 +416,8 @@ export interface SizingAssessmentSnapshot {
   confidence: SizingAssessmentConfidence;
   preferredFeatureRange: { min: number; max: number };
   preferredArDepth: SizingAssessmentArDepth;
+  minimumPreservedFeatureCount: number;
+  explicitSplitSignals: string[];
   featureCount: number;
   acceptanceRequirementCount: number;
   averageAcceptanceRequirementsPerFeature: number;
@@ -429,9 +431,12 @@ export interface GenerationSizingAssessment {
   confidence: SizingAssessmentConfidence;
   preferredFeatureRange: { min: number; max: number };
   preferredArDepth: SizingAssessmentArDepth;
+  minimumPreservedFeatureCount: number;
+  explicitSplitSignals: string[];
   reasonCodes: string[];
   reasons: SizingAssessmentReason[];
   repairApplied: boolean;
+  repairRejectedReason?: string;
   preRepairFeatureCount?: number;
   preRepairAcceptanceRequirementCount?: number;
   decomposition: SizingAssessmentSnapshot;
