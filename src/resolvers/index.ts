@@ -649,7 +649,6 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
       total: 0,
       byStage: {},
     },
-    warning: 'Discovery sufficiency could not be evaluated, so generation will continue with your current answers. For workflow-heavy requests, the result may be under-scoped until discovery can confirm the missing business rules and exceptions.',
   } as const;
 
   const withResolverBudget = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
@@ -670,7 +669,7 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
     });
 
   try {
-    return await withResolverBudget(evaluateSufficiency(input), 12000);
+    return await withResolverBudget(evaluateSufficiency(input), 20000);
   } catch (firstErr) {
     console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
     const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
@@ -679,7 +678,7 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
       return failOpen;
     }
     try {
-      return await withResolverBudget(evaluateSufficiency(input), 8000);
+      return await withResolverBudget(evaluateSufficiency(input), 10000);
     } catch (retryErr) {
       console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
       return failOpen;

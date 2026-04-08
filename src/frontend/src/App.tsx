@@ -961,11 +961,7 @@ function LegacyApp({
       console.error('Discovery sufficiency evaluation failed', err);
       markDiscoveryRoundComplete(1);
       setWorkflowStage('generation');
-      await startGeneration(
-        requirement,
-        mergedAnswers,
-        'Discovery sufficiency could not be evaluated, so generation continued with your current answers. For workflow-heavy requests, the result may be under-scoped until discovery can confirm the missing business rules and exceptions.',
-      );
+      await startGeneration(requirement, mergedAnswers);
     } finally {
       setIsEvaluatingDiscovery(false);
     }
