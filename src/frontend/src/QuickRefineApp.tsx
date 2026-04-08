@@ -137,6 +137,28 @@ function buildModelOptions(
     .sort((left, right) => collator.compare(left.label, right.label));
 }
 
+function formatArText(ar: AcceptanceRequirement): string {
+  const parts = [
+    ar.given.trim() ? `GIVEN ${ar.given.trim()}` : '',
+    ar.when.trim() ? `WHEN ${ar.when.trim()}` : '',
+    ar.then.trim() ? `THEN ${ar.then.trim()}` : '',
+  ].filter(Boolean);
+  return parts.join('\n');
+}
+
+function parseArText(value: string): AcceptanceRequirement {
+  const text = String(value ?? '').trim();
+  const givenMatch = text.match(/GIVEN\s+([\s\S]+?)(?=\s+(?:WHEN|THEN)\b|$)/i);
+  const whenMatch = text.match(/WHEN\s+([\s\S]+?)(?=\s+THEN\b|$)/i);
+  const thenMatch = text.match(/THEN\s+([\s\S]+)$/i);
+
+  return {
+    given: (givenMatch?.[1] ?? '').replace(/\s+/g, ' ').trim(),
+    when: (whenMatch?.[1] ?? '').replace(/\s+/g, ' ').trim(),
+    then: (thenMatch?.[1] ?? text.replace(/^(GIVEN|WHEN|THEN)\s+/i, '')).replace(/\s+/g, ' ').trim(),
+  };
+}
+
 function CompactArEditor({
   ars,
   onChange,
@@ -159,26 +181,20 @@ function CompactArEditor({
               Delete
             </button>
           </div>
-          <div className="space-y-2">
-            {(['given', 'when', 'then'] as const).map((field) => (
-              <label key={field} className="block rounded-lg border border-[var(--rf-border-subtle)] bg-white px-2.5 py-2 space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{field}</span>
-                <textarea
-                  rows={2}
-                  value={ar[field]}
-                  onChange={(event) => {
-                    const next = [...ars];
-                    next[index] = {
-                      ...next[index],
-                      [field]: event.target.value,
-                    };
-                    onChange(next);
-                  }}
-                  className="w-full min-h-[58px] resize-y rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
-                />
-              </label>
-            ))}
-          </div>
+          <label className="block rounded-lg border border-[var(--rf-border-subtle)] bg-white px-2.5 py-2 space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Acceptance Requirement</span>
+            <textarea
+              rows={4}
+              value={formatArText(ar)}
+              onChange={(event) => {
+                const next = [...ars];
+                next[index] = parseArText(event.target.value);
+                onChange(next);
+              }}
+              placeholder={'GIVEN ...\nWHEN ...\nTHEN ...'}
+              className="w-full min-h-[92px] resize-y rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm leading-6 text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+            />
+          </label>
         </div>
       ))}
       <button
@@ -203,7 +219,6 @@ function CompactArDiff({
   mode: DraftViewMode;
 }) {
   const rows = alignAcceptanceRequirementsDetailed(original, proposed);
-  const labelTone = 'text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]';
 
   return (
     <div className="space-y-2">
@@ -229,20 +244,13 @@ function CompactArDiff({
                 {isRemoved ? 'Removed' : isAdded ? 'Added' : 'Updated'}
               </span>
             </div>
-            <div className="space-y-2">
-              {(['given', 'when', 'then'] as const).map((field) => (
-                <div key={field} className="rounded-lg border border-[var(--rf-border-subtle)] bg-white/80 px-2.5 py-2">
-                  <span className={labelTone}>{field}</span>
-                  <div className="mt-1 leading-6 text-[var(--rf-text)]">
-                    <DiffText
-                      oldText={previous?.[field] || current[field]}
-                      newText={isRemoved ? '' : current[field]}
-                      fullHighlight={isAdded}
-                      mode={mode === 'diff' ? 'redline' : 'blackline'}
-                    />
-                  </div>
-                </div>
-              ))}
+            <div className="rounded-lg border border-[var(--rf-border-subtle)] bg-white/80 px-2.5 py-2 leading-6 text-[var(--rf-text)] whitespace-pre-wrap">
+              <DiffText
+                oldText={formatArText(previous || current)}
+                newText={isRemoved ? '' : formatArText(current)}
+                fullHighlight={isAdded}
+                mode={mode === 'diff' ? 'redline' : 'blackline'}
+              />
             </div>
           </div>
         );
