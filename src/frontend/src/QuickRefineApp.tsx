@@ -125,9 +125,9 @@ function CompactArEditor({
   onChange: (next: AcceptanceRequirement[]) => void;
 }) {
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
       {ars.map((ar, index) => (
-        <div key={`ar-${index}`} className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-2.5 space-y-2">
+        <div key={`ar-${index}`} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)]/70 p-2.5 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">AR {index + 1}</span>
             <button
@@ -139,9 +139,9 @@ function CompactArEditor({
               Delete
             </button>
           </div>
-          <div className="grid gap-2 md:grid-cols-3">
+          <div className="space-y-2">
             {(['given', 'when', 'then'] as const).map((field) => (
-              <label key={field} className="space-y-1">
+              <label key={field} className="block rounded-lg border border-[var(--rf-border-subtle)] bg-white px-2.5 py-2 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{field}</span>
                 <textarea
                   rows={2}
@@ -154,7 +154,7 @@ function CompactArEditor({
                     };
                     onChange(next);
                   }}
-                  className="w-full min-h-[72px] resize-y rounded-lg border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                  className="w-full min-h-[58px] resize-y rounded-md border border-[var(--rf-border)] bg-white px-2.5 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                 />
               </label>
             ))}
@@ -183,6 +183,7 @@ function CompactArDiff({
   mode: DraftViewMode;
 }) {
   const rows = alignAcceptanceRequirementsDetailed(original, proposed);
+  const labelTone = 'text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]';
 
   return (
     <div className="space-y-2">
@@ -208,11 +209,11 @@ function CompactArDiff({
                 {isRemoved ? 'Removed' : isAdded ? 'Added' : 'Updated'}
               </span>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {(['given', 'when', 'then'] as const).map((field) => (
-                <div key={field} className="grid gap-2 md:grid-cols-[56px_minmax(0,1fr)]">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">{field}</span>
-                  <div className="leading-6 text-[var(--rf-text)]">
+                <div key={field} className="rounded-lg border border-[var(--rf-border-subtle)] bg-white/80 px-2.5 py-2">
+                  <span className={labelTone}>{field}</span>
+                  <div className="mt-1 leading-6 text-[var(--rf-text)]">
                     <DiffText
                       oldText={previous?.[field] || current[field]}
                       newText={isRemoved ? '' : current[field]}
@@ -309,10 +310,10 @@ function DraftCard({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="rf-card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--rf-border-subtle)] px-5 py-4 bg-white/50">
+    <div className="rf-card overflow-hidden border border-[var(--rf-border)] shadow-[0_12px_36px_rgba(16,24,40,0.08)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--rf-border)] px-4 py-3 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,250,248,0.88))]">
         <div className="flex items-center gap-3">
-          <h3 className="text-xl font-semibold text-[var(--rf-text)]">{title}</h3>
+          <h3 className="text-lg font-semibold text-[var(--rf-text)]">{title}</h3>
           {typeof changed === 'boolean' ? (
             <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] ${changed ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'}`}>
               {changed ? 'Updated' : 'Unchanged'}
@@ -321,7 +322,7 @@ function DraftCard({
         </div>
         {actions}
       </div>
-      <div className="p-5 space-y-4">{children}</div>
+      <div className="p-4 space-y-3">{children}</div>
     </div>
   );
 }
@@ -456,10 +457,6 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
   }, [surface]);
 
   const modelOptions = useMemo(() => buildModelOptions(provider, modelCatalogs, []), [provider, modelCatalogs]);
-
-  const selectedModelLabel = useMemo(() => {
-    return modelOptions.find((option) => option.id === modelOverride)?.label || modelOverride || 'Default model';
-  }, [modelOptions, modelOverride]);
 
   const hasResume = Boolean(session && (session.questions?.length || session.draft || session.status === 'handoff'));
   const originalIssue = context?.originalIssue;
@@ -702,19 +699,11 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                     {hasResume ? 'Draft ready' : 'Ready'}
                   </span>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--rf-text-tertiary)]">
-                  <span>{selectedModelLabel}</span>
-                  <span>{context?.contextMeta.similarStoriesCount ?? 0} similar</span>
-                  <span>{context?.contextMeta.wiDocsCount ?? 0} WI docs</span>
-                  <span>{formatRelativeTimestamp(context?.updatedAt)}</span>
+                <div className="text-[11px] text-[var(--rf-text-tertiary)]">
+                  {formatRelativeTimestamp(context?.updatedAt)}
                 </div>
               </div>
             </div>
-            {context?.contextMeta.domainContextApplied ? (
-              <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2 py-0.5 text-[10px] text-[var(--rf-text-tertiary)]">
-                Project context on
-              </span>
-            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -745,7 +734,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
   }
 
   return (
-    <div className={`h-full w-full ${surface === 'issue-action' ? 'p-4' : 'p-3'} overflow-auto`}>
+    <div className={`h-full w-full ${surface === 'issue-action' ? 'p-3' : 'p-2.5'} overflow-auto`}>
       <AiPromptDialog
         open={aiDialogOpen}
         title="Refine this quick-rewrite draft"
@@ -755,9 +744,9 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
         onSubmit={handleAiRefine}
       />
 
-      <div className="mx-auto max-w-6xl space-y-3">
+      <div className="mx-auto max-w-6xl space-y-2.5">
         <div className="rf-card overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rf-border-subtle)] bg-white/55 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rf-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,250,248,0.84))] px-4 py-2.5">
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--rf-text-tertiary)]">
                 {surface === 'issue-action' ? 'Issue Action' : 'Issue Panel'}
@@ -796,7 +785,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                 </div>
               ) : null}
               {modelOptions.length ? (
-                <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm text-[var(--rf-text-secondary)]">
+                <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm text-[var(--rf-text-secondary)]">
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Model</span>
                   <select
                     value={modelOverride}
@@ -813,7 +802,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                 <button
                   type="button"
                   onClick={onOpenSettings}
-                  className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                  className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
                 >
                   Settings
                 </button>
@@ -823,7 +812,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                   type="button"
                   onClick={() => void handleStart({ restart: true })}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <RefreshCcw className="w-4 h-4" />
                   Restart
@@ -833,7 +822,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                 <button
                   type="button"
                   onClick={() => setActive(false)}
-                  className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                  className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
                 >
                   Collapse
                 </button>
@@ -842,7 +831,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                 <button
                   type="button"
                   onClick={() => setAiDialogOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
                 >
                   <WandSparkles className="w-4 h-4 text-[var(--rf-brand)]" />
                   AI Refine
@@ -850,23 +839,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
               ) : null}
             </div>
           </div>
-
-          <div className="flex flex-wrap gap-2 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-brand-muted)]/60 px-4 py-3 text-xs text-[var(--rf-text-secondary)]">
-            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
-              {context?.contextMeta.domainContextApplied ? 'project context on' : 'project context off'}
-            </span>
-            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
-              {selectedModelLabel}
-            </span>
-            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
-              {context?.contextMeta.similarStoriesCount ?? 0} similar
-            </span>
-            <span className="rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1">
-              {context?.contextMeta.wiDocsCount ?? 0} WI docs
-            </span>
-          </div>
-
-          <div className="p-4 space-y-3">
+          <div className="p-3.5 space-y-2.5 bg-[linear-gradient(180deg,rgba(248,251,249,0.78),rgba(255,255,255,0.9))]">
             {error ? (
               <div className="rounded-2xl border border-[var(--rf-danger)]/25 bg-[var(--rf-danger-subtle)] px-4 py-3 text-sm text-[var(--rf-danger)]">
                 {error}
@@ -976,7 +949,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                         rows={3}
                         value={answer?.answer || ''}
                         onChange={(event) => setQuestionAnswer(question, event.target.value)}
-                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                         placeholder="Answer in one or two sentences."
                       />
                     </div>
@@ -1016,19 +989,19 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                 >
                   {draftViewMode === 'diff' ? (
                     <div className="space-y-3">
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-3">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
                         <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Summary</p>
                         <div className="text-sm text-[var(--rf-text)]">
                           <DiffText oldText={originalIssue.summary} newText={draft.currentIssue.summary} mode="redline" />
                         </div>
                       </div>
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-3">
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
                         <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Description</p>
                         <div className="text-sm leading-7 text-[var(--rf-text)] whitespace-pre-wrap">
                           <DiffText oldText={originalIssue.description} newText={draft.currentIssue.description} mode="redline" />
                         </div>
                       </div>
-                      <div>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-white/75 p-3">
                         <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Acceptance Requirements</p>
                         <CompactArDiff
                           original={originalIssue.acceptanceRequirements}
@@ -1050,7 +1023,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                               summary: event.target.value,
                             },
                           })}
-                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                         />
                       </label>
 
@@ -1066,7 +1039,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                               description: event.target.value,
                             },
                           })}
-                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                         />
                       </label>
 
@@ -1094,7 +1067,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                         ...draft,
                         splitCandidates: [...draft.splitCandidates, emptySplitCandidate()],
                       })}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
+                      className="inline-flex items-center gap-2 rounded-2xl border border-[var(--rf-border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)]"
                     >
                       <Plus className="w-4 h-4" />
                       Add Split Candidate
@@ -1104,7 +1077,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                   {draft.splitCandidates.length ? (
                     <div className="space-y-4">
                       {draft.splitCandidates.map((candidate, index) => (
-                        <div key={candidate.id} className="rounded-2xl border border-[var(--rf-border)] bg-white/70 p-3 space-y-3">
+                        <div key={candidate.id} className="rounded-2xl border border-[var(--rf-border)] bg-white/85 p-3 space-y-3 shadow-[0_6px_18px_rgba(16,24,40,0.05)]">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
                               <button
@@ -1144,7 +1117,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                                   ...draft,
                                   splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, summary: event.target.value } : item),
                                 })}
-                                className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                                className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                               />
                             </label>
                             <label className="block space-y-1">
@@ -1155,7 +1128,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                                   ...draft,
                                   splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, issueType: event.target.value } : item),
                                 })}
-                                className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                                className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                               >
                                 <option>Story</option>
                                 <option>Task</option>
@@ -1174,7 +1147,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                                 ...draft,
                                 splitCandidates: draft.splitCandidates.map((item) => item.id === candidate.id ? { ...item, description: event.target.value } : item),
                               })}
-                              className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
+                              className="w-full rounded-2xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)]"
                             />
                           </label>
 
@@ -1196,7 +1169,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings }: 
                 </DraftCard>
 
                 {draft.changeSummary?.length ? (
-                  <div className="rf-card p-5">
+                  <div className="rf-card p-4">
                     <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--rf-text-tertiary)]">Change Summary</p>
                     <ul className="mt-3 space-y-2 text-sm text-[var(--rf-text-secondary)]">
                       {draft.changeSummary.map((item) => (

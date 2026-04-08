@@ -1172,6 +1172,10 @@ resolver.define('submitQuickRefineAnswers', async ({ payload, context }) => {
     const nextSession: QuickRefineSession = {
       ...existing.session,
       modelOverride,
+      context: {
+        ...existing.session.context,
+        contextMeta: draft.contextMeta ?? existing.session.context.contextMeta,
+      },
       draft,
       questions: undefined,
       status: draft.handoffRecommended ? 'handoff' : 'draft',
@@ -1259,6 +1263,10 @@ resolver.define('refineQuickRefineDraft', async ({ payload, context }) => {
     const nextSession: QuickRefineSession = {
       ...existing.session,
       modelOverride,
+      context: {
+        ...existing.session.context,
+        contextMeta: nextDraft.contextMeta ?? existing.session.context.contextMeta,
+      },
       draft: nextDraft,
       status: nextDraft.handoffRecommended ? 'handoff' : 'draft',
       handoffReason: nextDraft.handoffReason,

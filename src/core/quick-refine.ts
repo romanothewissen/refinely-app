@@ -20,9 +20,12 @@ import type {
   QuickRefineIssueFields,
   QuickRefineQuestion,
   QuickRefineSurface,
+  SimilarStory,
   SplitCandidate,
   TenantConfig,
   TokenUsageSummary,
+  WiChunk,
+  WiDoc,
 } from '../types';
 import { callLlmJsonWithUsage } from './llm';
 import { buildAdfContentOnly, buildAdfDocument, createFeatureIssue, createIssueLink } from './jira-creator';
@@ -520,6 +523,55 @@ function buildQuickRefineSessionDraft(
   };
 }
 
+function enrichQuickRefineContextMeta(
+  contextMeta: QuickRefineContextMeta,
+  wiContext: { docs: WiDoc[]; chunks: WiChunk[] },
+  similarStories: SimilarStory[],
+): QuickRefineContextMeta {
+  return {
+    ...contextMeta,
+    wiDocsCount: wiContext.docs.length,
+    referencedWiDocs: wiContext.docs.map((doc) => ({
+      docId: doc.docId,
+      filename: doc.filename,
+      chunkCount: doc.chunkCount,
+    })),
+    referencedWiSections: summarizeReferencedWiSections(wiContext.chunks, 140),
+    similarStoriesCount: similarStories.length,
+    referencedSimilarStories: summarizeReferencedSimilarStories(similarStories),
+  };
+}
+
+async function resolveQuickRefineSignals(opts: {
+  issue: QuickRefineIssueFields;
+  answers?: QuickRefineAnswer[];
+  config: TenantConfig;
+  projectKeys: string[];
+}) {
+  const requirement = buildRequirementText(opts.issue, opts.answers ?? []);
+  const [wiContext, similarStories] = await Promise.all([
+    retrieveScopedWiContext(
+      requirement,
+      QUICK_REFINE_WI_TOP_K,
+      QUICK_REFINE_WI_MAX_CHARS,
+      opts.projectKeys,
+    ),
+    retrieveScopedSimilarStories({
+      requirement,
+      clarifyAnswers: (opts.answers ?? []).map((answer) => ({
+        question: answer.question,
+        answer: answer.answer,
+        selectedSuggestions: answer.selectedSuggestions,
+      })),
+      config: opts.config,
+      projectKeys: opts.projectKeys,
+      maxResults: QUICK_REFINE_SIMILAR_MAX_RESULTS,
+    }),
+  ]);
+
+  return { wiContext, similarStories };
+}
+
 function buildWriteFields(issue: QuickRefineIssueFields, mapping: ProjectFieldMapping) {
   const featureLike = {
     id: 'quick-refine-current',
@@ -719,20 +771,11 @@ export async function startQuickRefine(opts: {
     };
   }
 
-  const [wiContext, similarStories] = await Promise.all([
-    retrieveScopedWiContext(
-      buildRequirementText(opts.context.originalIssue),
-      QUICK_REFINE_WI_TOP_K,
-      QUICK_REFINE_WI_MAX_CHARS,
-      projectKeys,
-    ),
-    retrieveScopedSimilarStories({
-      requirement: buildRequirementText(opts.context.originalIssue),
-      config: opts.config,
-      projectKeys,
-      maxResults: QUICK_REFINE_SIMILAR_MAX_RESULTS,
-    }),
-  ]);
+  const { wiContext, similarStories } = await resolveQuickRefineSignals({
+    issue: opts.context.originalIssue,
+    config: opts.config,
+    projectKeys,
+  });
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
     model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
@@ -754,18 +797,7 @@ export async function startQuickRefine(opts: {
     route: 'rewrite',
     draft: buildQuickRefineSessionDraft(
       opts.context.originalIssue,
-      {
-        ...opts.context.contextMeta,
-        wiDocsCount: wiContext.docs.length,
-        referencedWiDocs: wiContext.docs.map((doc) => ({
-          docId: doc.docId,
-          filename: doc.filename,
-          chunkCount: doc.chunkCount,
-        })),
-        referencedWiSections: summarizeReferencedWiSections(wiContext.chunks, 140),
-        similarStoriesCount: similarStories.length,
-        referencedSimilarStories: summarizeReferencedSimilarStories(similarStories),
-      },
+      enrichQuickRefineContextMeta(opts.context.contextMeta, wiContext, similarStories),
       [],
       rewrite.data,
       buildTokenUsage('quick_refine_rewrite', rewrite.usage),
@@ -782,23 +814,13 @@ export async function submitQuickRefineAnswers(opts: {
   const projectKeys = [opts.context.projectKey];
   const domainContext = buildCombinedDomainContext(opts.config, projectKeys);
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
-  const wiContext = await retrieveScopedWiContext(
-    buildRequirementText(opts.context.originalIssue, opts.answers),
-    QUICK_REFINE_WI_TOP_K,
-    QUICK_REFINE_WI_MAX_CHARS,
-    projectKeys,
-  );
-  const similarStories = await retrieveScopedSimilarStories({
-    requirement: buildRequirementText(opts.context.originalIssue, opts.answers),
-    clarifyAnswers: opts.answers.map((answer) => ({
-      question: answer.question,
-      answer: answer.answer,
-      selectedSuggestions: answer.selectedSuggestions,
-    })),
+  const { wiContext, similarStories } = await resolveQuickRefineSignals({
+    issue: opts.context.originalIssue,
+    answers: opts.answers,
     config: opts.config,
     projectKeys,
-    maxResults: QUICK_REFINE_SIMILAR_MAX_RESULTS,
   });
+  const contextMeta = enrichQuickRefineContextMeta(opts.context.contextMeta, wiContext, similarStories);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
     model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
@@ -819,7 +841,7 @@ export async function submitQuickRefineAnswers(opts: {
 
   return buildQuickRefineSessionDraft(
     opts.context.originalIssue,
-    opts.context.contextMeta,
+    contextMeta,
     opts.answers,
     rewrite.data,
     buildTokenUsage('quick_refine_answered_rewrite', rewrite.usage),
@@ -836,13 +858,28 @@ export async function refineQuickRefineDraft(opts: {
   const projectKeys = [opts.context.projectKey];
   const domainContext = buildCombinedDomainContext(opts.config, projectKeys);
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
+  const answers = opts.draft.clarifyAnswers ?? [];
+  const { wiContext, similarStories } = await resolveQuickRefineSignals({
+    issue: opts.draft.currentIssue,
+    answers,
+    config: opts.config,
+    projectKeys,
+  });
+  const contextMeta = enrichQuickRefineContextMeta(opts.draft.contextMeta ?? opts.context.contextMeta, wiContext, similarStories);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
     model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
     systemPrompt: buildQuickRefineRewritePrompt(domainContext, domainRoles, 'refine'),
     userMessage: [
-      `ISSUE KEY: ${opts.context.issueKey}`,
-      `ISSUE TYPE: ${opts.context.issueType}`,
+      buildContextMessage({
+        issueKey: opts.context.issueKey,
+        issueType: opts.context.issueType,
+        originalIssue: opts.draft.currentIssue,
+        domainContext,
+        similarStories,
+        wiContextText: wiContext.text,
+        answers,
+      }),
       `USER INSTRUCTIONS: ${opts.instructions.trim()}`,
       `ORIGINAL ISSUE:\n${JSON.stringify(opts.context.originalIssue, null, 2)}`,
       `CURRENT QUICK-REFINE DRAFT:\n${JSON.stringify(opts.draft, null, 2)}`,
@@ -854,8 +891,8 @@ export async function refineQuickRefineDraft(opts: {
 
   return buildQuickRefineSessionDraft(
     opts.context.originalIssue,
-    opts.context.contextMeta,
-    opts.draft.clarifyAnswers,
+    contextMeta,
+    answers,
     rewrite.data,
     mergeTokenUsage(opts.draft.tokenUsage, buildTokenUsage('quick_refine_refine', rewrite.usage)),
   );
