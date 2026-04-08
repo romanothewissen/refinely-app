@@ -799,10 +799,13 @@ function parseTriageResult(raw: unknown): TriageResult | null {
 
 export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan; questionPlan: ClarifyQuestionPlan } {
   const est = Math.max(1, triage.estimatedFeatures);
-  const buffer = (triage.complexity === 'high' || triage.complexity === 'very_high') ? 2 : 1;
+  const isHighComplexity = triage.complexity === 'high' || triage.complexity === 'very_high';
+  const upwardBuffer = isHighComplexity
+    ? Math.max(4, Math.ceil(est * 0.8))
+    : Math.max(2, Math.ceil(est * 0.5));
   const featurePlan: FeaturePlan = {
     min: Math.max(1, est - 1),
-    max: est + buffer,
+    max: est + upwardBuffer,
     target: est,
     shape: triage.shape,
     complexity: triage.complexity,
@@ -816,9 +819,12 @@ export function triageToAssessment(triage: TriageResult): { featurePlan: Feature
   };
 
   const q = Math.max(0, triage.estimatedQuestions);
+  const isHighQ = triage.complexity === 'high' || triage.complexity === 'very_high';
+  const qMin = Math.max(0, q - 2);
+  const qMax = isHighQ ? Math.min(q + 8, 20) : Math.min(q + 4, 16);
   const questionPlan: ClarifyQuestionPlan = {
-    min: q,
-    max: q,
+    min: qMin,
+    max: qMax,
     target: q,
     clarity: q >= 10 ? 'vague' : q >= 7 ? 'medium' : 'clear',
   };
@@ -853,7 +859,6 @@ export async function assessRequirementWithLlm(input: {
       model: getTierModel(input.generatorConfig.triageModel, input.tier),
       systemPrompt: buildTriageSystemPrompt(),
       userMessage,
-      maxTokens: 1000,
       reasoningEffort: 'medium',
       ...input.providerOpts,
     });
@@ -1506,7 +1511,7 @@ export async function generateClarifyingQuestions(opts: {
   ];
   if (questionPlan) {
     contextParts.push(
-      `DISCOVERY SIGNAL: the prior assessment estimates around ${desiredQuestionCount} clarifying questions for this request. Treat that estimate as guidance only and return however many questions are materially needed.`,
+      `DISCOVERY SIGNAL: the prior assessment estimates ${questionPlan.min}-${questionPlan.max} clarifying questions for this request (midpoint: ${desiredQuestionCount}). Treat that range as guidance only — return however many questions are materially needed to close the ambiguity gaps you identify. More is better than fewer when genuine business ambiguity remains.`,
     );
   }
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);

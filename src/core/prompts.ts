@@ -95,13 +95,13 @@ export function buildDecompositionSystemPrompt(opts: {
 
   const planningGuidance = (() => {
     if (!opts.featurePlan) return '';
-    const { shape, complexity, target } = opts.featurePlan;
+    const { shape, complexity, target, min, max } = opts.featurePlan;
     const base = `OUTPUT CALIBRATION:
 - The requirement shape appears: ${shape.toUpperCase()}
 - The requirement complexity appears: ${complexity.toUpperCase()}
-- The prior assessment estimates around ${target} independently valuable features.
-- Treat that estimate as reasoning context, not as a quota or upper bound. If the requirement is genuinely focused, return fewer features. If the requirement clearly contains more independently deliverable capabilities, return more.
-- Return as few features as needed to cover the independent business value cleanly.`;
+- The prior assessment estimates ${min}-${max} independently valuable features (midpoint: ${target}).
+- Treat that range as reasoning context, not as a quota or upper bound. If the requirement is genuinely focused, return fewer features — even below the range. If deep analysis reveals more independently deliverable capabilities than the initial estimate anticipated, return more — even above the range.
+- Your own decomposition reasoning takes priority over the triage estimate. The triage was a fast shallow pass; you have the full context.`;
 
     if (shape === 'minimal')
       return `${base}
@@ -115,7 +115,8 @@ export function buildDecompositionSystemPrompt(opts: {
       return `${base}
 ${isHighComplexity
   ? `- This requirement is tightly scoped in surface area but HIGH in complexity. More independently deliverable capabilities may exist beneath the surface — apply the decomposition framework carefully before consolidating.
-- When distinct handling paths, actor groups with different responsibilities, or independently testable workflows are implied, each is a candidate feature. Do not collapse them just to keep the count low.`
+- When distinct handling paths, actor groups with different responsibilities, or independently testable workflows are implied, each is a candidate feature. Do not collapse them just to keep the count low.
+- When the triage signals high complexity within a narrow shape, the real feature count is often 2-3x the surface-level estimate because unstated decision logic, actor-specific paths, and exception handling each tend to surface as independently deliverable capabilities. Let your decomposition reasoning drive the count, not the triage estimate.`
   : `- This is a tightly scoped requirement. One or two strong features is often the right outcome, even if the planning hint is higher.`}
 - Apply the decomposition framework to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
 - A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context unless each requires distinct handling rules — in that case, the distinct handling IS the deliverable scope.
@@ -153,7 +154,7 @@ ${isHighComplexity
       ? `DISCOVERY SIGNAL:
 - Clarifying context is still THIN or incomplete.
 - Do not silently compress away workflow-defining ambiguity just to keep feature count low.
-- When channel handling, routing logic, case typing, matching, required captured information, lifecycle handling, or exception behavior are core to the requested capability, preserve that scope explicitly in the feature set and/or acceptance coverage.
+- When multi-step workflows, decision logic, actor-specific handling paths, state transitions, or exception behavior are core to the requested capability, preserve that scope explicitly in the feature set and/or acceptance coverage.
 - If work instructions are present in the user message, treat their operational guidance as high-authority context for what must be preserved, even when the requirement itself is brief.
 - If one strong feature can still cover the ask, make its scope rich enough that those workflow branches are clearly retained.`
       : `DISCOVERY SIGNAL:
@@ -185,7 +186,7 @@ RULES:
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
 - Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
-- If work instructions or operational guidance in the user message define relevant business rules, required captured information, routing behavior, lifecycle handling, matching logic, case typing, or exception paths, preserve that scope explicitly rather than generalizing it away.
+- If work instructions or operational guidance in the user message define relevant business rules, decision logic, handling paths, state transitions, actor responsibilities, or exception behavior, preserve that scope explicitly rather than generalizing it away.
 - Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
 - If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
@@ -254,6 +255,7 @@ For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that ca
 
 RULES:
 - Every AR MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
+- Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - No system-specific terms: no product names, module names, system object names
 - Write as if describing business outcomes to someone who has never seen the system
@@ -262,7 +264,7 @@ RULES:
 - If an AR refers to the same actor named in the feature description, use that exact same role label
 - Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
 - If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
-- When relevant to the requirement and provided context, explicitly cover channel differences, required captured information, new-versus-existing record decisions, matching confidence, missing identifier behavior, case typing, routing logic, duplicate handling, follow-up handling, and exception paths.
+- When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
@@ -318,18 +320,18 @@ Output: {"reasoning": "...", "estimatedFeatures": 4, "estimatedQuestions": 7, "s
 
 EXAMPLE 4 — Short but capability-heavy workflow area:
 Requirement: "As a support coordinator, I need one place to manage incoming customer communications and create or update cases from them."
-Reasoning: The actor is stated, but the operating logic is mostly not. Channel differences, case creation vs linking, duplicate handling, case typing, required captured information, matching rules, missing identifiers, and lifecycle handling are all materially unresolved. This is not just one focused rule; it is a short prompt that names a workflow area whose real behavior must largely be inferred. That should push complexity to high and require more discovery, even if the final feature count is still moderate.
-Output: {"reasoning": "...", "estimatedFeatures": 3, "estimatedQuestions": 10, "shape": "narrow", "complexity": "high", "arDepth": "thorough"}
+Reasoning: The actor is stated, but the operating logic is mostly not. Channel differences, case creation vs linking, duplicate handling, case typing, required captured information, matching rules, missing identifiers, and lifecycle handling are all materially unresolved. This is not just one focused rule; it is a short prompt that names a workflow area whose real behavior must largely be inferred. Each distinct handling path (new vs existing, different source types, matching confidence levels, exception paths) tends to surface as an independently deliverable capability. That should push complexity to high and require extensive discovery.
+Output: {"reasoning": "...", "estimatedFeatures": 5, "estimatedQuestions": 12, "shape": "narrow", "complexity": "high", "arDepth": "thorough"}
 
 EXAMPLE 5 — Broad self-service platform:
 Requirement: "Build a self-service portal where customers can view their account, raise support tickets, track order status, manage their subscription, and update billing details."
-Reasoning: Five named capability areas, each implying multiple sub-features — this genuinely yields 8+ independently deliverable items. Authentication, permissions, and notification behaviour all unstated. For this to be "epic", the scope boundary itself would need to be unknown.
-Output: {"reasoning": "...", "estimatedFeatures": 8, "estimatedQuestions": 12, "shape": "broad", "complexity": "high", "arDepth": "thorough"}
+Reasoning: Five named capability areas, each implying multiple sub-features (e.g. account view includes profile, history, and preferences; support tickets include creation, tracking, and updates). Authentication, permissions, and notification behaviour are cross-cutting but independently deliverable. This genuinely yields 9+ independently deliverable items with 15+ questions needed to close the gaps across all five areas. For this to be "epic", the scope boundary itself would need to be unknown.
+Output: {"reasoning": "...", "estimatedFeatures": 9, "estimatedQuestions": 15, "shape": "broad", "complexity": "high", "arDepth": "thorough"}
 
 EXAMPLE 6 — Open-ended strategic initiative:
 Requirement: "We need to modernise our entire customer onboarding process."
-Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every discovery dimension is open. This is genuinely epic — the scope is unknown, not just large.
-Output: {"reasoning": "...", "estimatedFeatures": 11, "estimatedQuestions": 14, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
+Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every discovery dimension is open. This is genuinely epic — the scope is unknown, not just large. The question count must be high enough to establish scope boundaries, identify actor groups, and surface decision logic before any decomposition can happen. Expect 13+ features spanning multiple workflow areas once scope is established.
+Output: {"reasoning": "...", "estimatedFeatures": 13, "estimatedQuestions": 17, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
 
 WHAT TO LOOK FOR WHEN REASONING:
 - Named tools, systems, or platforms are environment context when they are the setting in which a single capability operates — they do not expand scope or complexity on their own. Count what is being built within or between them.
@@ -337,9 +339,9 @@ WHAT TO LOOK FOR WHEN REASONING:
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
 - Do not split one narrowly scoped rule into multiple features just because it has states, timing, or unblock conditions. Count those as acceptance-requirement depth unless they are independently deliverable workflows.
 - Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two systems communicating via an interface is one process, not two actor groups.
-- Short capability-area asks about intake, channel consolidation, routing, matching, deduplication, case creation, prioritization, or case-type determination are often HIGH complexity when the business rules are mostly unstated. The hidden workflow logic matters more than the word count.
+- Short capability-area asks that name a workflow domain without stating its rules, actors, or decision logic are often HIGH complexity when the business behavior is mostly unstated. The hidden workflow logic matters more than the word count.
 - Do not anchor to word count alone. Distinguish two kinds of brevity: (1) precise brevity — short because the trigger, actor, and outcome are stated clearly — complexity comes from what is stated, not from what is missing; (2) vague brevity — short because the requirement names a capability area without stating actors, rules, states, or edge cases. In case (2), most behaviour must be inferred from domain knowledge — rate it as high, not medium, because the unknown-unknowns dominate. This affects both estimatedQuestions (more questions needed to uncover the unstated scope) and arDepth (implied behaviour must be covered). A long requirement can still be narrow if it is repetitive or over-specified; a short one can be high complexity if any practitioner in that domain would immediately recognise it implies multiple sub-workflows.
-- If you cannot decide between two adjacent values, the lower one is more accurate — your reasoning step will show you why.
+- If you cannot decide between two adjacent values, choose the one your reasoning step supports more strongly. Do not default to the lower value — that creates systematic under-sizing for complex asks.
 
 Output JSON with reasoning first: {"reasoning": "...", "estimatedFeatures": N, "estimatedQuestions": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
 }
@@ -403,7 +405,7 @@ export function buildClarifySystemPrompt(opts: {
     ? `Important domain signals from the requirement and supporting evidence: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they sharpen the question.`
     : '';
   const questionPlanHint = opts.questionPlan
-    ? `Prior assessment signal: this request may need around ${opts.questionPlan.target} discovery questions. Treat that as a sizing clue, not a quota. Return however many questions are materially needed, including zero when the requirement is already precise enough.`
+    ? `Prior assessment signal: this request may need ${opts.questionPlan.min}-${opts.questionPlan.max} discovery questions (initial estimate: ${opts.questionPlan.target}). Treat that range as guidance, not a quota. Return however many questions are materially needed — if deep reasoning reveals more unresolved ambiguity than the initial estimate anticipated, go higher within or even beyond the range. Your deep reasoning takes priority over the triage estimate. Return zero only when the requirement is already precise enough to write testable acceptance requirements.`
     : 'Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.';
 
   return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
@@ -463,7 +465,7 @@ DISCOVERY RULES:
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
-- For intake, communication-channel, case-creation, matching, linking, or deduplication asks, you usually need coverage across channel differences, identifiers, case-typing rules, required captured information, routing logic, missing-data handling, and duplicate or follow-up behavior when those details remain ambiguous.
+- For requirements that name a broad workflow area without stating its rules, you usually need coverage across actor responsibilities, decision logic, handling path differences, data requirements, state transitions, exception behavior, and downstream impacts when those details remain ambiguous.
 - Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
 - Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
 - Provide exactly 4 suggestions per question.
@@ -473,7 +475,7 @@ DISCOVERY PROFILE DEFINITIONS — reason through these before populating discove
 - complexity: low = 1-2 decisions, one actor, rules stated; medium = several decisions, 1-2 actor groups, some rules implied; high = many decisions, 2-3 groups, significant behaviour unstated; very_high = most behaviour must be inferred, many groups, no rules stated. Named systems, teams, or platforms alone do not raise complexity.
 - ambiguity: low = trigger, actors, rules, and outcome all stated; medium = trigger and outcome clear but rules or edge cases missing; high = trigger, actors, or the core rules are genuinely unknown.
 - A single well-bounded rule can require questions in several taxonomy categories without becoming broad or high complexity. Discovery breadth is not the same as delivery breadth.
-- When the request names a capability area but leaves channel handling, identifiers, routing logic, case typing, missing-data handling, duplicate handling, or minimum required information unresolved, treat that as materially missing business logic rather than implementation detail.
+- When the request names a capability area but leaves actor responsibilities, decision logic, handling paths, state transitions, exception behavior, or required data unresolved, treat that as materially missing business logic rather than implementation detail.
 
 OUTPUT CONTRACT:
 Reason before scoring. Populate "profileReasoning" first: (1) what is explicitly stated — actors, trigger, rules, outcome; (2) what is genuinely missing vs merely an unstated detail; (3) why the chosen scope level fits and what would have to be true for a higher level to apply.
@@ -507,7 +509,7 @@ OUTPUT RULES:
 - Every question should be a single focused prompt even when the wording is richer than a short atomic sentence.
 - Each question should read like one clear business decision, not a request for an exhaustive list.
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".
-- Anti-bias: most requirements score narrow/moderate scope with low/medium complexity. Do not default to high — justify it explicitly in profileReasoning.`;
+- Anti-bias: most requirements score narrow/moderate scope with low/medium complexity. Do not default to high — justify it explicitly in profileReasoning. However, when the requirement names a broad capability area with mostly unstated business rules, actors, or decision logic, do not under-score complexity or question count just because the requirement text is short. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
@@ -585,14 +587,12 @@ RULES:
 - Return sufficient=true only when the current feature set and ARs clearly cover the main workflow, core decision paths, required inputs, and important exception handling for this request.
 
 When evaluating coverage, explicitly check for relevant branches such as:
-- channel-specific handling
-- required captured information
-- new versus existing record decisions
-- matching or linking logic
-- missing identifier or missing-data handling
-- case typing or routing logic
-- duplicates, follow-up behavior, and uncertain matches
-- lifecycle and exception behavior
+- actor-specific handling paths and responsibilities
+- required data inputs and outputs
+- decision logic and business rules
+- state transitions and lifecycle behavior
+- exception handling and fallback paths
+- downstream impacts and visibility requirements
 
 Return JSON only:
 {"sufficient": true, "missingCoverage": [], "reasoning": "..."}
@@ -614,6 +614,7 @@ RULES:
 - Treat clarified answers and work instructions in the user message as obligations to cover when relevant.
 - Preserve business meaning that already exists; add missing coverage without dropping valid current behavior.
 - Every returned feature must have complete acceptance_requirements using GIVEN/WHEN/THEN.
+- Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective.
 - No solution language, no system names, no implementation detail.
 ${opts.processTaxonomyEnabled ? '- Preserve existing process_code values exactly as provided.\n' : ''}
 
@@ -654,6 +655,7 @@ FEATURE RULES:
 ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
 ACCEPTANCE REQUIREMENT RULES:
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
 - Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split one logical AR across multiple array items.
 - Every returned feature MUST include at least one complete GIVEN/WHEN/THEN acceptance requirement. A feature with an empty acceptance_requirements array is invalid. If splitting a feature moves all ARs to the new features, either write the missing ARs for the original or consolidate it into one of the other features.
 - If you consolidate multiple features into fewer features, merge the coverage cleanly and rewrite the final ARs as complete standalone triples.
@@ -705,6 +707,7 @@ QUALITY RULES:
 - Feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
 - Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split a single AR across multiple entries.
 - Be CONCEPTUAL — describe behavior patterns, not specific instances
 - Preserve role wording exactly: if the feature description says "As a [role]", do not rename that actor inside related ARs unless the feedback explicitly changes the role
