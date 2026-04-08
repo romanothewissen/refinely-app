@@ -43,4 +43,4 @@ Under GDPR, CCPA, and other data protection laws, you may have rights regarding 
 
 ## 7. Contact Us
 
-If you have any questions about this Privacy Policy, please contact us at: <romano.thewissen@gmail.com>
+If you have any questions about this Privacy Policy, please contact us at: <support@smartif.ai>

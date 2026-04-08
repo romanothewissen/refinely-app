@@ -6,7 +6,7 @@ Last updated: April 7, 2026
 
 For security reports, vulnerability disclosures, or urgent trust questions, contact:
 
-- `romano.thewissen@gmail.com`
+- `support@smartif.ai`
 
 ## Vulnerability Reporting
 

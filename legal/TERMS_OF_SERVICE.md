@@ -42,4 +42,4 @@ The Developer reserves the right to terminate your license and access to the App
 
 ## 11. Contact Information
 For any legal or licensing inquiries, please contact:
-<romano.thewissen@gmail.com>
+<support@smartif.ai>

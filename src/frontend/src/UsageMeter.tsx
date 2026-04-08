@@ -96,7 +96,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
 
       {!isUnlimited && (
         <a
-          href="mailto:romano.thewissen@gmail.com?subject=Refinely%20higher%20limits"
+          href="mailto:support@smartif.ai?subject=Refinely%20higher%20limits"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-2 w-full py-2.5 bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] rounded-xl text-[11px] font-bold uppercase tracking-wider hover:bg-[var(--rf-brand)]/15 transition-colors border border-[var(--rf-border)]"

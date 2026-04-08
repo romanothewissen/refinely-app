@@ -1711,7 +1711,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     <div className="text-[12px] text-[var(--rf-text-tertiary)]">We are keeping the launch offer simple, then expanding into larger-organization controls based on customer demand.</div>
                   </div>
                   <a
-                    href="mailto:romano.thewissen@gmail.com?subject=Refinely%20Advanced%20Tier%20Inquiry"
+                    href="mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry"
                     className="shrink-0 inline-flex items-center justify-center rounded-lg border border-[var(--rf-text)] bg-[var(--rf-text)] px-3 py-2 text-[12px] font-bold text-white transition hover:bg-black"
                   >
                     Contact support
@@ -1763,7 +1763,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
                     { key: 'standard', name: 'Standard', price: 'Marketplace launch tier', highlights: ['Full core workflow', 'Shared workspace setup', 'Soft monthly usage guidance'], cta: 'Included in trial', href: 'https://marketplace.atlassian.com' },
-                    { key: 'advanced', name: 'Advanced', price: 'Later / contact us', highlights: ['Higher limits', 'Larger-team controls', 'Priority roadmap input'], cta: 'Talk to support', href: 'mailto:romano.thewissen@gmail.com?subject=Refinely%20Advanced%20Tier%20Inquiry' },
+                    { key: 'advanced', name: 'Advanced', price: 'Later / contact us', highlights: ['Higher limits', 'Larger-team controls', 'Priority roadmap input'], cta: 'Talk to support', href: 'mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry' },
                   ].map(plan => {
                     const isCurrent = plan.key === 'standard' && tier === 'standard';
                     return (
