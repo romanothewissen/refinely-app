@@ -197,6 +197,7 @@ const PASS2_CONTEXT_LIMITS = {
 } as const;
 
 const MAX_CLARIFY_QUESTION_CHARS = 250;
+const MAX_CLARIFY_DETAILS_CHARS = 280;
 const MAX_CLARIFY_SUGGESTION_CHARS = 130;
 const FOLLOWUP_GROUNDING_STOPWORDS = new Set([
   'a', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'by', 'can', 'do', 'does', 'first', 'for',
@@ -939,6 +940,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
       category: (candidate as any).category,
       intent: (candidate as any).intent,
       question: trimClarifyCopy(String((candidate as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
+      details: trimClarifyCopy(String((candidate as any).details ?? ''), MAX_CLARIFY_DETAILS_CHARS),
       suggestions: Array.isArray((candidate as any).suggestions)
         ? (candidate as any).suggestions
           .map((suggestion: unknown) => trimClarifyCopy(String(suggestion ?? ''), MAX_CLARIFY_SUGGESTION_CHARS))
@@ -949,6 +951,7 @@ function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
     .map((question) => ({
       ...question,
       question: trimClarifyCopy(question.question, MAX_CLARIFY_QUESTION_CHARS),
+      details: trimClarifyCopy(question.details ?? '', MAX_CLARIFY_DETAILS_CHARS) || undefined,
       suggestions: question.suggestions
         .map((suggestion) => trimClarifyCopy(suggestion, MAX_CLARIFY_SUGGESTION_CHARS))
         .filter(Boolean)

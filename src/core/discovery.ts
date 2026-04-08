@@ -262,6 +262,10 @@ function simplifyQuestionCopy(value: string): string {
     .replace(/\bwhat other events or conditions should\b/gi, 'which policy should')
     .replace(/\bso the team knows this flow is solving the right problem\b/gi, 'first')
     .replace(/\bthat is already present in the supporting evidence\b/gi, 'already in the evidence')
+    .replace(/\bplease clarify whether\b/gi, 'clarify whether')
+    .replace(/\bin order to\b/gi, 'to')
+    .replace(/\bwith regard to\b/gi, 'for')
+    .replace(/\bfor the purpose of determining\b/gi, 'to determine')
     .replace(/\s+([,?.!])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
@@ -271,6 +275,16 @@ function sentenceCaseQuestion(value: string): string {
   const normalized = ensureQuestionMark(simplifyQuestionCopy(value));
   if (!normalized) return '';
   return normalized.replace(/^[a-z]/, (letter) => letter.toUpperCase());
+}
+
+function normalizeDetailsText(value: string): string {
+  const cleaned = cleanText(value)
+    .replace(/["“”'‘’]/g, '')
+    .replace(/\s+([,?.!])/g, '$1')
+    .trim();
+
+  if (!cleaned) return '';
+  return cleaned.replace(/^[a-z]/, (letter) => letter.toUpperCase());
 }
 
 function isLikelyCompleteQuestion(value: string): boolean {
@@ -897,6 +911,55 @@ function normalizeQuestionText(question: string): string {
   return isLikelyCompleteQuestion(normalized) ? normalized : '';
 }
 
+function splitQuestionIntoPrimaryAndDetails(question: string): { question: string; details?: string } {
+  const normalized = normalizeQuestionText(question);
+  if (!normalized) return { question: '' };
+
+  const shortEnough = normalized.length <= 120 && normalized.split(/\s+/).length <= 18;
+  if (shortEnough) {
+    return { question: normalized };
+  }
+
+  const ifPattern = normalized.match(/^If\s+(.+?),\s*(is|are|should|can|could|would|will)\s+(.+)\?$/i);
+  if (ifPattern) {
+    return {
+      question: sentenceCaseQuestion(`${ifPattern[2]} ${ifPattern[3]}?`),
+      details: normalizeDetailsText(`Scenario: ${ifPattern[1]}.`),
+    };
+  }
+
+  const whenPattern = normalized.match(/^When\s+(.+?),\s*(what|which|who|how|where|why)\s+(.+)\?$/i);
+  if (whenPattern) {
+    return {
+      question: sentenceCaseQuestion(`${whenPattern[2]} ${whenPattern[3]}?`),
+      details: normalizeDetailsText(`Context: ${whenPattern[1]}.`),
+    };
+  }
+
+  const doesMeanPattern = normalized.match(/^Does\s+(.+?)\s+mean\s+(.+)\?$/i);
+  if (doesMeanPattern) {
+    return {
+      question: sentenceCaseQuestion(`How should ${doesMeanPattern[1]} be interpreted?`),
+      details: normalizeDetailsText(`Clarify whether it means ${doesMeanPattern[2]}.`),
+    };
+  }
+
+  const delimiterMatch = normalized.match(/^(.{40,120}?)\s+(but|while|unless|except when|except if|especially when)\s+(.+)\?$/i);
+  if (delimiterMatch) {
+    return {
+      question: sentenceCaseQuestion(delimiterMatch[1]),
+      details: normalizeDetailsText(`${delimiterMatch[2].replace(/^[a-z]/, (letter) => letter.toUpperCase())} ${delimiterMatch[3]}.`),
+    };
+  }
+
+  return { question: normalized };
+}
+
+function normalizeQuestionDetails(details?: string): string | undefined {
+  const normalized = normalizeDetailsText(details ?? '');
+  return normalized || undefined;
+}
+
 function normalizeQuestions(
   questions: ClarifyQuestion[],
   alreadyAsked: Set<string>,
@@ -906,9 +969,11 @@ function normalizeQuestions(
   const result: ClarifyQuestion[] = [];
 
   questions.forEach((question) => {
-    const normalizedQuestion = normalizeQuestionText(question.question);
+    const normalizedCopy = splitQuestionIntoPrimaryAndDetails(question.question);
+    const normalizedQuestion = normalizedCopy.question;
     if (!normalizedQuestion) return;
-    const key = normalizeKey(normalizedQuestion);
+    const normalizedDetails = normalizeQuestionDetails(question.details ?? normalizedCopy.details);
+    const key = normalizeKey(`${normalizedQuestion} ${normalizedDetails ?? ''}`);
     if (!key || seen.has(key)) return;
     seen.add(key);
     const normalizedIntent = normalizeQuestionIntent(question.intent, question.categoryKey, normalizedQuestion);
@@ -918,6 +983,7 @@ function normalizeQuestions(
       category: labelForCategoryKey(question.categoryKey),
       intent: normalizedIntent,
       question: normalizedQuestion,
+      details: normalizedDetails,
       suggestions: normalizeSuggestionChoices(question.categoryKey, normalizedIntent, providedSuggestions, input),
     });
   });
@@ -1187,6 +1253,7 @@ export function expandRawQuestionCandidate(raw: {
   category?: unknown;
   intent?: unknown;
   question?: unknown;
+  details?: unknown;
   suggestions?: unknown[];
 }): ClarifyQuestion[] {
   const rawQuestion = cleanText(raw.question);
@@ -1201,11 +1268,16 @@ export function expandRawQuestionCandidate(raw: {
     ? uniqueStrings(raw.suggestions).slice(0, 4)
     : [];
   const splitQuestions = splitGroupedQuestion(rawQuestion);
+  const normalizedDetails = normalizeQuestionDetails(cleanText(raw.details));
 
   return splitQuestions
-    .map((question, index) => {
-      const normalizedQuestion = normalizeQuestionText(question);
+    .map((question, index): ClarifyQuestion | null => {
+      const normalizedCopy = splitQuestionIntoPrimaryAndDetails(question);
+      const normalizedQuestion = normalizedCopy.question;
       if (!normalizedQuestion) return null;
+      const details = index === 0
+        ? (normalizedDetails ?? normalizedCopy.details)
+        : normalizedCopy.details;
       return {
         categoryKey,
         category: labelForCategoryKey(categoryKey),
@@ -1213,6 +1285,7 @@ export function expandRawQuestionCandidate(raw: {
           ? normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)
           : `${normalizeQuestionIntent(raw.intent, categoryKey, normalizedQuestion)}_part_${index + 1}`,
         question: normalizedQuestion,
+        ...(details ? { details } : {}),
         suggestions: baseSuggestions.length ? baseSuggestions : [],
       };
     })

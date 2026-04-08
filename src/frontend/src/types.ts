@@ -441,6 +441,7 @@ export interface ClarifyQuestion {
   category: string;
   intent: string;
   question: string;
+  details?: string;
   suggestions: string[];
 }
 

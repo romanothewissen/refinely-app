@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Check, Menu, AlertCircle } from 'lucide-react';
+import { ArrowRight, Check, Menu, AlertCircle, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
 
@@ -111,6 +111,7 @@ export function ClarifyQuestionsView({
   const [answers, setAnswers] = useState<Record<number, LocalAnswerState>>({});
   const [showContextDetails, setShowContextDetails] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  const [expandedQuestionDetails, setExpandedQuestionDetails] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     const priorByQuestion = new Map(
@@ -139,6 +140,7 @@ export function ClarifyQuestionsView({
 
   useEffect(() => {
     setCurrentPage(0);
+    setExpandedQuestionDetails({});
   }, [questions, round]);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
@@ -169,6 +171,10 @@ export function ClarifyQuestionsView({
 
   function handleCustomChange(qIdx: number, val: string) {
     setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), customAnswer: val } }));
+  }
+
+  function toggleQuestionDetails(qIdx: number) {
+    setExpandedQuestionDetails((prev) => ({ ...prev, [qIdx]: !prev[qIdx] }));
   }
 
   function handleSubmit() {
@@ -462,6 +468,8 @@ export function ClarifyQuestionsView({
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
                   const suggestions = q.suggestions.slice(0, 4);
+                  const hasDetails = Boolean(q.details?.trim());
+                  const detailsOpen = Boolean(expandedQuestionDetails[idx]);
 
                   return (
                     <div
@@ -477,9 +485,28 @@ export function ClarifyQuestionsView({
                           <div className={`flex h-6 w-6 rounded-lg items-center justify-center shrink-0 transition-all text-xs font-bold ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-white/60 text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
                             {isAnswered ? <Check className="w-3 h-3" /> : <span>{idx + 1}</span>}
                           </div>
-                          <p className="text-[14px] font-semibold text-[var(--rf-text)] leading-snug pt-0.5">
-                            {normalizeDisplayText(q.question)}
-                          </p>
+                          <div className="min-w-0 flex-1 pt-0.5">
+                            <p className="text-[14px] font-semibold text-[var(--rf-text)] leading-snug">
+                              {normalizeDisplayText(q.question)}
+                            </p>
+                            {hasDetails && (
+                              <div className="mt-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleQuestionDetails(idx)}
+                                  className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--rf-brand)] hover:text-[var(--rf-brand-hover)] transition-colors"
+                                >
+                                  {detailsOpen ? 'Hide context' : 'More context'}
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+                                </button>
+                                {detailsOpen && (
+                                  <p className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                                    {normalizeDisplayText(q.details ?? '')}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {suggestions.length > 0 && (

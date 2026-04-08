@@ -456,21 +456,24 @@ DISCOVERY RULES:
 - Never write discovery questions in first person. Do not use I, my, me, we, our, or I need phrasing in the question text or suggestions.
 - When a named role is available, ask in role-based BA wording such as What should the TSS do when... rather than mirroring the original user-story sentence.
 - Use supporting evidence to avoid redundant questions and to understand the business context, not to inject jargon for its own sake.
+- Preserve requirement-native domain wording when it sharpens meaning. Keep the business object, actor labels, workflow verbs, and policy nouns from the requirement or supporting evidence unless they are obvious noise.
 - Evaluate all 6 taxonomy categories, then ask only from the ones that are still materially unresolved.
 - ${questionPlanHint}
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
 - Prefer one visible question per main business decision.
 - CRITICAL: Each question must cover exactly one business decision. Never bundle two questions using numbers (1. ... 2. ...), letters ((a)...(b)...), semicolons, bullets, or "and also" constructions. If you find yourself wanting to ask two related things, pick the more important one for this card — the other can be a separate question if it is genuinely distinct.
-- A question may be rich and specific when that makes the ambiguity clearer, but it must end with a single answerable prompt.
-- A question may be longer than a terse chip-style prompt when the tradeoff needs that extra clarity.
-- Questions should usually be rich, specific business prompts rather than clipped one-liners. Use enough wording to make the tradeoff or ambiguity concrete, while keeping the card focused on one main decision.
+- The visible "question" field must be short and plain-language first. Aim for one sentence and usually under 16 words when possible.
+- If preserving nuance needs extra wording, put that wording into an optional "details" field instead of overloading the main question.
+- The "details" field should be 1-2 short sentences max and should preserve the same domain terminology as the question.
+- Simplify syntax, not business meaning. Do not genericize domain-rich wording into vague terms like capability, process, system, item, thing, or record when a better business noun is already available.
 - Do not use quotation marks (" " ' ') around any terms, values, or phrases. Write the word directly without wrapping it in quotes. Do not include parenthetical evidence references or stacked qualifiers.
 - Name the actual business object, actor, rule, exception, or downstream impact whenever the evidence supports it.
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
 - For requirements that name a broad workflow area without stating its rules, you usually need coverage across actor responsibilities, decision logic, handling path differences, data requirements, state transitions, exception behavior, and downstream impacts when those details remain ambiguous.
 - Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
+- Suggestions must preserve the domain-specific wording already present in the requirement, question, or details. Do not rewrite them into generic fallback terminology unless the original wording is unusable.
 - Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
 - Provide exactly 4 suggestions per question.
 
@@ -500,6 +503,7 @@ Return JSON in this shape:
       "categoryKey": "context_trigger",
       "intent": "trigger_event",
       "question": "...",
+      "details": "...",
       "suggestions": ["...", "...", "...", "..."]
     }
   ]
@@ -510,7 +514,9 @@ OUTPUT RULES:
 - "followupCap" should reflect how many additional delta questions might still be needed later if answers remain materially incomplete.
 - "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
-- Every question should be a single focused prompt even when the wording is richer than a short atomic sentence.
+- Every question should be a single focused prompt.
+- "question" is the short primary prompt shown on the card.
+- "details" is optional and should only be included when extra business context is needed to avoid losing domain fidelity.
 - Each question should read like one clear business decision, not a request for an exhaustive list.
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".
 - Anti-bias: most requirements score narrow/moderate scope with low/medium complexity. Do not default to high — justify it explicitly in profileReasoning. However, when the requirement names a broad capability area with mostly unstated business rules, actors, or decision logic, do not under-score complexity or question count just because the requirement text is short. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;
@@ -562,15 +568,17 @@ RULES:
 - If the requirement already names the actor, business object, or workflow in a clear way, keep that wording instead of replacing it with a ref/doc term.
 - Avoid quotes, parenthetical evidence references, and “list everything that applies” wording unless the evidence truly requires it.
 - Avoid generic umbrella terms like "the capability", "the process", or "the system" when a concrete noun is available.
-- Keep the wording direct and business-focused, but detailed enough to make the unresolved tradeoff explicit.
+- Keep the visible question direct, short, and business-focused.
+- Preserve the domain wording already present in the requirement or prior answers. Shorter wording must not flatten the business meaning.
+- If extra nuance is needed, put it in an optional "details" field instead of making the main question long.
 - Provide exactly 4 suggestions per follow-up question, and make them medium-length starter answers that reflect likely business tradeoffs in this request.
-- Keep follow-up suggestions tightly aligned to the exact follow-up question being asked.
+- Keep follow-up suggestions tightly aligned to the exact follow-up question being asked, and preserve the domain-specific wording already in play.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 
 Return JSON only in one of these shapes:
 {"sufficient": true, "missingCategoryKeys": [], "reasonCodes": []}
-{"sufficient": false, "missingCategoryKeys": ["business_rules"], "reasonCodes": ["MISSING_RULES"], "questions": [{"categoryKey": "business_rules", "intent": "decision_logic", "question": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
+{"sufficient": false, "missingCategoryKeys": ["business_rules"], "reasonCodes": ["MISSING_RULES"], "questions": [{"categoryKey": "business_rules", "intent": "decision_logic", "question": "...", "details": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
 }
 
 export function buildCoverageCheckSystemPrompt(opts: {

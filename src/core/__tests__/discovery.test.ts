@@ -74,6 +74,7 @@ test('expandRawQuestionCandidate splits numbered grouped prompts into single-foc
     ],
   );
   assert.equal(questions[0].intent, 'trigger_and_inputs');
+  assert.equal(questions[0].details, undefined);
   assert.ok(questions[1].intent.startsWith('trigger_and_inputs_part_'));
   assert.ok(questions[2].intent.startsWith('trigger_and_inputs_part_'));
   assert.deepEqual(
@@ -123,6 +124,57 @@ test('finalizeInitialDiscoveryQuestions preserves the llm question set without p
 
   assert.equal(questions.length, 1);
   assert.equal(questions[0].categoryKey, 'context_trigger');
+});
+
+test('expandRawQuestionCandidate preserves provided details alongside a short main question', () => {
+  const questions = expandRawQuestionCandidate({
+    categoryKey: 'business_rules',
+    intent: 'decision_logic',
+    question: 'When is the product considered past its end of service date?',
+    details: 'Clarify whether this starts on the date itself or only after the date has passed.',
+    suggestions: [
+      'Treat the product as past end of service on the stated date',
+      'Treat it as past end of service only after the stated date has passed',
+      'Use a configurable cut-off time on the end of service date',
+      'Use the local time zone of the user creating the service case',
+    ],
+  });
+
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].question, 'When is the product considered past its end of service date?');
+  assert.equal(questions[0].details, 'Clarify whether this starts on the date itself or only after the date has passed.');
+});
+
+test('finalizeInitialDiscoveryQuestions moves scenario-heavy wording into details without losing domain terms', () => {
+  const profile = normalizeDiscoveryProfile({
+    ambiguity: 'high',
+    missingCategoryKeys: ['state_lifecycle'],
+    recommendedInitialCount: 1,
+    followupCap: 2,
+  });
+
+  const questions = finalizeInitialDiscoveryQuestions([
+    {
+      categoryKey: 'state_lifecycle',
+      category: 'State & Lifecycle',
+      intent: 'timing_rule',
+      question: 'If a service case or work order is created before the end of service date of the product but the actual service is performed after that date, is this permissible?',
+      suggestions: [
+        'Yes, as long as the creation date was before the end of service date',
+        'No, if the Service Occurred Date is after the end of service date',
+        'Allow it only when both dates fall within a grace period',
+        'Require an explicit override approval for this scenario',
+      ],
+    },
+  ], profile, {
+    requirement: 'Clarify whether service cases and work orders remain valid when the product passes end of service.',
+  });
+
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].question, 'Is this permissible?');
+  assert.match(questions[0].details ?? '', /service case or work order/i);
+  assert.match(questions[0].details ?? '', /end of service date/i);
+  assert.match(questions[0].suggestions[1], /Service Occurred Date/);
 });
 
 test('finalizeInitialDiscoveryQuestions returns an empty set instead of synthesizing fallback questions', () => {
@@ -489,7 +541,7 @@ test('finalizeFollowupDiscoveryQuestions does not invent a generic fallback ques
   assert.deepEqual(followups, []);
 });
 
-test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery contract', () => {
+test('discovery prompts enforce the fixed taxonomy and short-question contract with domain fidelity', () => {
   const triagePrompt = buildTriageSystemPrompt();
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
@@ -516,8 +568,9 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Prefer one visible question per main business decision/i);
   assert.match(clarifyPrompt, /principal business analyst running a structured discovery session/i);
-  assert.match(clarifyPrompt, /Questions should usually be rich, specific business prompts/i);
-  assert.match(clarifyPrompt, /A question may be longer than a terse chip-style prompt/i);
+  assert.match(clarifyPrompt, /visible "question" field must be short and plain-language first/i);
+  assert.match(clarifyPrompt, /optional "details" field/i);
+  assert.match(clarifyPrompt, /Preserve requirement-native domain wording/i);
   assert.match(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
   assert.match(clarifyPrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
   assert.match(clarifyPrompt, /Never write discovery questions in first person/i);
@@ -529,8 +582,8 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
   assert.match(clarifyPrompt, /Important domain signals from the requirement and supporting evidence/i);
   assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
   assert.match(clarifyPrompt, /company-specific internal terms/i);
-  assert.match(clarifyPrompt, /Return however many questions are materially needed, including zero/i);
-  assert.doesNotMatch(clarifyPrompt, /one short sentence/i);
+  assert.match(clarifyPrompt, /Return however many questions are materially needed/i);
+  assert.match(clarifyPrompt, /Simplify syntax, not business meaning/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
   assert.doesNotMatch(clarifyPrompt, /Provide 2-3 suggestions by default/i);
 
@@ -542,13 +595,15 @@ test('discovery prompts enforce the fixed taxonomy and richer BA-style discovery
   assert.match(evaluatePrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
   assert.match(evaluatePrompt, /medium-length starter answers/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
+  assert.match(evaluatePrompt, /optional "details" field/i);
+  assert.match(evaluatePrompt, /Preserve the domain wording already present/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);
   assert.doesNotMatch(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
 
   assert.doesNotMatch(triagePrompt, /\bSAP\b/i);
   assert.doesNotMatch(triagePrompt, /\bServiceMax\b/i);
-  assert.match(triagePrompt, /Short capability-area asks about intake, channel consolidation, routing, matching, deduplication, case creation, prioritization, or case-type determination are often HIGH complexity/i);
+  assert.match(triagePrompt, /Short capability-area asks that name a workflow domain without stating its rules, actors, or decision logic are often HIGH complexity/i);
   assert.match(triagePrompt, /Short but capability-heavy workflow area/i);
 });
 
@@ -592,7 +647,7 @@ test('ar prompt uses range guidance without exact-count pressure', () => {
   assert.match(prompt, /Do not target a fixed count for its own sake/i);
   assert.match(prompt, /Prefer fewer ARs when one concise set fully covers the feature/i);
   assert.match(prompt, /work-instruction guidance/i);
-  assert.match(prompt, /new-versus-existing record decisions/i);
+  assert.match(prompt, /state transitions, preconditions, exception behavior, and downstream impacts/i);
   assert.doesNotMatch(prompt, /\(target 3\)/i);
   assert.doesNotMatch(prompt, /roughly 1-5 acceptance requirements/i);
 });
@@ -637,7 +692,7 @@ test('decomposition prompt preserves workflow-defining scope when clarifying con
 
   assert.match(prompt, /Clarifying context is still THIN or incomplete/i);
   assert.match(prompt, /Do not silently compress away workflow-defining ambiguity/i);
-  assert.match(prompt, /channel handling, routing logic, case typing, matching, required captured information, lifecycle handling, or exception behavior/i);
+  assert.match(prompt, /multi-step workflows, decision logic, actor-specific handling paths, state transitions, or exception behavior/i);
   assert.match(prompt, /work instructions are present in the user message/i);
 });
 
@@ -675,7 +730,8 @@ test('coverage prompts require WI-backed workflow branches to be checked and rep
 
   assert.match(checkPrompt, /work-instruction or operational guidance/i);
   assert.match(checkPrompt, /Treat work instructions as higher-authority operational guidance/i);
-  assert.match(checkPrompt, /missing identifier or missing-data handling/i);
+  assert.match(checkPrompt, /required data inputs and outputs/i);
+  assert.match(checkPrompt, /exception handling and fallback paths/i);
   assert.match(repairPrompt, /Prefer enriching the existing feature description and acceptance requirements/i);
   assert.match(repairPrompt, /Treat clarified answers and work instructions in the user message as obligations to cover/i);
 });
