@@ -1,11 +1,11 @@
 import type { GenerationSizingAssessment } from './types';
 
 export function getGenerationFeatureTargetLabel(): string {
-  return 'Feature target';
+  return 'Triage estimate';
 }
 
 export function formatGenerationFeatureTarget(featureTarget?: number): string {
-  return typeof featureTarget === 'number' ? `About ${featureTarget}` : 'Assessing';
+  return typeof featureTarget === 'number' ? `Forecast ${featureTarget}` : 'Assessing';
 }
 
 export function getDraftFeatureHeading(): string {

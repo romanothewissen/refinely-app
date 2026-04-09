@@ -28,6 +28,10 @@ export const api = {
     clarifyDiscoveryProfile?: unknown;
     clarifySizingContract?: unknown;
   }) => invoke('startGeneration', payload),
+  resumeGeneration: (payload: {
+    sessionId: string;
+    decision: 'keep' | 'consolidate';
+  }) => invoke('resumeGeneration', payload),
 
   // Clarify (async queue)
   startClarify: (

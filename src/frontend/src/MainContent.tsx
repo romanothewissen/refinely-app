@@ -53,11 +53,16 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 type GenerationProgressMeta = {
-  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
+  sizingAssessment?: unknown;
+  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; total?: number };
+  reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
+  resumeContext?: unknown;
   sources?: {
     projectKey: string;
     domainContextApplied?: boolean;
@@ -76,6 +81,7 @@ const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: str
   { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
   { key: 'triage', label: 'Assessing scope', shortLabel: 'Triage' },
   { key: 'decomposition', label: 'Sketching features', shortLabel: 'Features' },
+  { key: 'draft_review', label: 'Reviewing drafted features', shortLabel: 'Review' },
   { key: 'acceptance_requirements', label: 'Writing acceptance requirements', shortLabel: 'ARs' },
 ];
 
@@ -142,12 +148,6 @@ const DISCOVERY_AMBIGUITY_LABELS: Record<string, string> = {
   low: 'Low ambiguity',
   medium: 'Moderate ambiguity',
   high: 'High ambiguity',
-};
-
-const DISCOVERY_CLARITY_LABELS: Record<string, string> = {
-  clear: 'Clear ask',
-  medium: 'Some ambiguity',
-  vague: 'Vague ask',
 };
 
 function ComplexityBar({ current }: { current?: string | null }) {
@@ -233,6 +233,83 @@ function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] 
           <div className="text-[14px] font-black text-[var(--rf-text)]">
             {typeof triage.arTarget === 'number' ? triage.arTarget : 'LLM-led'} <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">({AR_DEPTH_LABELS[triage.arDepth] ?? triage.arDepth})</span>
           </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function DraftReviewCard({
+  meta,
+  onDecision,
+}: {
+  meta: GenerationProgressMeta | null;
+  onDecision: (decision: 'keep' | 'consolidate') => void;
+}) {
+  const draftFeatures = meta?.draftFeatures ?? [];
+  const draftFeatureCount = meta?.draftFeatureCount ?? draftFeatures.length;
+  const forecast = meta?.triage?.featureTarget;
+  const reason = meta?.reviewDecision?.reason ?? 'The draft is larger than expected for this ask.';
+
+  return (
+    <motion.div
+      className="w-full flex flex-col items-center py-8 px-4"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <div className="w-full max-w-3xl rounded-[22px] border border-[var(--rf-border)] backdrop-blur-2xl p-6 space-y-4" style={{ background: 'var(--rf-glass-card)', boxShadow: 'var(--rf-shadow-lg)' }}>
+        <div>
+          <div className="inline-flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-[0.2em] text-[var(--rf-brand)] mb-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+            Draft Review
+          </div>
+          <h2 className="text-[20px] font-black text-[var(--rf-text)] tracking-tight" style={{ fontFamily: 'Fraunces, serif' }}>
+            Review drafted features before AR generation
+          </h2>
+          <p className="mt-1.5 text-[14px] font-medium text-[var(--rf-text-secondary)] leading-relaxed">
+            {normalizeDisplayText(reason)}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Triage estimate</div>
+              <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof forecast === 'number' ? `Forecast ${forecast}` : 'Assessing'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>
+              <div className="text-[14px] font-black text-[var(--rf-text)]">{draftFeatureCount}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Draft titles</div>
+          {draftFeatures.map((feature) => (
+            <div key={feature.id} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 text-[13px] font-medium text-[var(--rf-text)]">
+              {feature.summary}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => onDecision('consolidate')}
+            className="brainstorm-shimmer px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
+          >
+            Consolidate Before ARs
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecision('keep')}
+            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
+          >
+            Keep Draft And Continue
+          </button>
         </div>
       </div>
     </motion.div>
@@ -555,6 +632,18 @@ function GeneratingPipeline({
         {/* Triage scores + Context */}
         <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
           <TriageScoreCard triage={triage} />
+          {typeof meta?.draftFeatureCount === 'number' && meta.stage !== 'triage' && (
+            <div className="mt-3 pt-3 border-t border-[var(--rf-border)] grid grid-cols-2 gap-x-4 gap-y-2">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Triage estimate</div>
+                <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof triage?.featureTarget === 'number' ? `Forecast ${triage.featureTarget}` : 'Assessing'}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>
+                <div className="text-[14px] font-black text-[var(--rf-text)]">{meta.draftFeatureCount}</div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Features list (once sketched) */}
@@ -884,12 +973,13 @@ interface MainContentProps {
   generationProgressMeta?: GenerationProgressMeta | null;
   clarifyContext?: ClarifyContextMeta | null;
   clarifyProgressMeta?: DiscoveryProgressMeta | null;
-  workflowStage?: 'idle' | 'clarify_round_1' | 'sufficiency_check' | 'clarify_round_2' | 'generation' | 'blocked';
+  workflowStage?: 'idle' | 'clarify_round_1' | 'sufficiency_check' | 'clarify_round_2' | 'generation' | 'generation_review' | 'blocked';
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
   isAdmin?: boolean;
   onOpenSettings?: () => void;
+  onDraftReviewDecision?: (decision: 'keep' | 'consolidate') => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -897,7 +987,7 @@ export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  isAdmin, onOpenSettings
+  isAdmin, onOpenSettings, onDraftReviewDecision
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -917,7 +1007,12 @@ export function MainContent({
 
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
-  const sizingRunContextNote = getSizingRunContextNote(generationContext?.sizingAssessment);
+  const sizingRunContextNote =
+    generationContext?.draftReviewDecision === 'keep'
+      ? 'Draft kept as sketched before acceptance requirements were written.'
+      : generationContext?.draftReviewDecision === 'consolidate'
+        ? 'Draft consolidated before acceptance requirements were written.'
+        : getSizingRunContextNote(generationContext?.sizingAssessment);
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
@@ -1414,6 +1509,11 @@ export function MainContent({
                 projectKey={projectKey}
               />
             )
+          ) : workflowStage === 'generation_review' && generationProgressMeta ? (
+            <DraftReviewCard
+              meta={generationProgressMeta || null}
+              onDecision={(decision) => onDraftReviewDecision?.(decision)}
+            />
           ) : !hasFeatures ? (
             <motion.div
               key="empty-state"

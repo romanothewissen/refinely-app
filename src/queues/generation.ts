@@ -7,7 +7,7 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { EffectiveSizingContract, Feature, GenerationContextMeta, GenerationEvent, GenerationSizingAssessment, TokenUsageSummary } from '../types';
+import { ClarifyAnswer, EffectiveSizingContract, Feature, GenerationContextMeta, GenerationEvent, GenerationSizingAssessment, GenerationStageDurationsMs, TokenUsageSummary } from '../types';
 import { TriageResult, triageToSizingContract } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import {
@@ -16,6 +16,8 @@ import {
   GenerationCancelledError,
   generateFeatures,
   generateSessionTitle,
+  Pass1DraftReviewRequiredError,
+  shouldPauseForDraftReview,
 } from '../core/story-generator';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
@@ -45,7 +47,7 @@ function sizingContractToTriage(contract: EffectiveSizingContract): TriageResult
 }
 
 interface RealtimeEvent {
-  type: 'progress' | 'complete' | 'error' | 'cancelled';
+  type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
   sessionId: string;
   message?: string;
   pass?: 1 | 2;
@@ -53,12 +55,26 @@ interface RealtimeEvent {
 }
 
 interface GenerationProgressPayload {
-  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
+  draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   failedFeatureIds?: string[];
+  sizingAssessment?: GenerationSizingAssessment | GenerationSizingAssessment['decomposition'];
+  stageDurationsMs?: GenerationStageDurationsMs;
+  reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
+  resumeContext?: {
+    requirement: string;
+    clarifyAnswers: ClarifyAnswer[];
+    attachmentText: string;
+    projectKey: string;
+    projectKeys: string[];
+    draftFeatures: Feature[];
+    triage: EffectiveSizingContract;
+    priorStageDurationsMs?: GenerationStageDurationsMs;
+  };
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
 }
 
@@ -142,7 +158,22 @@ function buildFeatureProgressState(
 }
 
 export async function handler(event: { body: GenerationEvent }) {
-  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey, projectKeys, clarifySizingContract } = event.body;
+  const {
+    sessionId,
+    accountId,
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    license,
+    config: eventConfig,
+    projectKey,
+    projectKeys,
+    clarifySizingContract,
+    reviewedDraftFeatures,
+    reviewedDraftDecision,
+    reviewedTriageSizingContract,
+    priorStageDurationsMs,
+  } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
@@ -155,6 +186,10 @@ export async function handler(event: { body: GenerationEvent }) {
   let triageSnapshot: Awaited<ReturnType<typeof assessRequirementWithLlm>> = null;
   let progressSourcesSnapshot: GenerationProgressPayload['sources'] | undefined;
   let sizingAssessmentSnapshot: GenerationSizingAssessment | undefined;
+  const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+  const maskedRequirement = maskPiiText(requirement, piiEnabled);
+  const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
+  const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
 
   try {
     let currentProgress: { message?: string; pass?: 1 | 2; payload?: GenerationProgressPayload } = {};
@@ -163,10 +198,6 @@ export async function handler(event: { body: GenerationEvent }) {
       await sendProgress(sessionId, message, pass, payload);
     };
     stopHeartbeat = startProgressHeartbeat(sessionId, () => currentProgress);
-    const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
-    const maskedRequirement = maskPiiText(requirement, piiEnabled);
-    const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
-    const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
     const projectLabel = selectedProjectKeys.length === 1
       ? selectedProjectKeys[0]
       : selectedProjectKeys.length > 1
@@ -191,8 +222,9 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentIncluded: Boolean(attachmentText?.trim()),
     };
 
-    const triagePromise: Promise<Awaited<ReturnType<typeof assessRequirementWithLlm>>> = clarifySizingContract
-      ? Promise.resolve(sizingContractToTriage(clarifySizingContract)).then(async result => {
+    const committedSizingContract = reviewedTriageSizingContract ?? clarifySizingContract;
+    const triagePromise: Promise<Awaited<ReturnType<typeof assessRequirementWithLlm>>> = committedSizingContract
+      ? Promise.resolve(sizingContractToTriage(committedSizingContract)).then(async result => {
           const triage = buildTriagePayload(result);
           if (triage) {
             const arText = ` with ${triage.arDepth} acceptance depth`;
@@ -284,8 +316,8 @@ export async function handler(event: { body: GenerationEvent }) {
     progressSourcesSnapshot = progressSources;
 
     // Progress: pass 1
-    await updateProgress('Planning feature structure from gathered context…', 1, {
-      stage: 'decomposition',
+    await updateProgress(reviewedDraftFeatures?.length ? 'Resuming generation from reviewed draft features…' : 'Planning feature structure from gathered context…', 1, {
+      stage: reviewedDraftFeatures?.length ? 'draft_review' : 'decomposition',
       triage: buildTriagePayload(effectiveTriageResult),
       sources: progressSources,
     });
@@ -300,6 +332,9 @@ export async function handler(event: { body: GenerationEvent }) {
       wiContextText: wiContext.text,
       config,
       precomputedTriage: effectiveTriageResult,
+      precomputedDraftFeatures: reviewedDraftFeatures,
+      draftReviewDecision: reviewedDraftDecision,
+      priorStageDurationsMs,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
         if (!effectiveTriageResult) {
@@ -313,19 +348,52 @@ export async function handler(event: { body: GenerationEvent }) {
           });
         }
       },
-      onPass1Complete: async (draftFeatures) => {
+      onPass1Complete: async (draftFeatures, decompositionSizingAssessment, triageContract, stageDurationsMs) => {
         liveDraftFeatures = draftFeatures.map(feature => ({
           id: feature.id,
           summary: feature.summary,
           description: feature.description,
           storyPoints: feature.storyPoints,
         }));
+        const needsReview = !reviewedDraftFeatures?.length && shouldPauseForDraftReview({
+          draftFeatureCount: draftFeatures.length,
+          triageFeatureTarget: triageContract.featureTarget,
+          sizingAssessment: decompositionSizingAssessment,
+        });
+        if (needsReview) {
+          await updateProgress(`Draft review required: ${draftFeatures.length} features were sketched before AR generation.`, 1, {
+            stage: 'draft_review',
+            triage: triageContract,
+            draftFeatures: liveDraftFeatures,
+            draftFeatureCount: draftFeatures.length,
+            sizingAssessment: decompositionSizingAssessment,
+            stageDurationsMs,
+            reviewDecision: {
+              suggestedAction: 'consolidate',
+              reason: `The draft exceeds the earlier forecast and looks oversized for this ask.`,
+            },
+            resumeContext: {
+              requirement,
+              clarifyAnswers: maskedAnswers.answers,
+              attachmentText: maskedAttachment.text,
+              projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+              projectKeys: selectedProjectKeys,
+              draftFeatures,
+              triage: triageContract,
+              priorStageDurationsMs: stageDurationsMs,
+            },
+            sources: progressSources,
+          });
+          return;
+        }
         await updateProgress(`Writing acceptance requirements for ${draftFeatures.length} feature${draftFeatures.length !== 1 ? 's' : ''}…`, 2, {
           stage: 'acceptance_requirements',
-          triage: buildTriagePayload(effectiveTriageResult),
+          triage: triageContract,
           draftFeatures: liveDraftFeatures,
+          draftFeatureCount: draftFeatures.length,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, 0),
           arProgress: { completed: 0, total: draftFeatures.length },
+          stageDurationsMs,
           sources: progressSources,
         });
       },
@@ -334,6 +402,7 @@ export async function handler(event: { body: GenerationEvent }) {
           stage: 'acceptance_requirements',
           triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
+          draftFeatureCount: liveDraftFeatures.length,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, completed),
           arProgress: { completed, total },
           sources: progressSources,
@@ -363,6 +432,10 @@ export async function handler(event: { body: GenerationEvent }) {
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
       sizingContract: buildTriagePayload(effectiveTriageResult),
       sizingAssessment: sizingAssessmentSnapshot,
+      pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
+      draftReviewTriggered: Boolean(reviewedDraftDecision || false),
+      draftReviewDecision: reviewedDraftDecision,
+      stageDurationsMs: result.generationContext?.stageDurationsMs ?? priorStageDurationsMs,
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
@@ -457,6 +530,43 @@ export async function handler(event: { body: GenerationEvent }) {
   } catch (err) {
     if (await isWorkflowCancelled(sessionId) || err instanceof GenerationCancelledError || String((err as { name?: string })?.name ?? '') === 'GenerationCancelledError') {
       await markCancelled(sessionId);
+      return;
+    }
+    if (err instanceof Pass1DraftReviewRequiredError) {
+      await entitySet(KEYS.generationProgress(sessionId), {
+        type: 'review',
+        sessionId,
+        message: 'Review drafted features before continuing.',
+        payload: {
+          stage: 'draft_review',
+          triage: err.triage,
+          draftFeatures: err.draftFeatures.map((feature) => ({
+            id: feature.id,
+            summary: feature.summary,
+            description: feature.description,
+            storyPoints: feature.storyPoints,
+          })),
+          draftFeatureCount: err.draftFeatures.length,
+          sizingAssessment: err.sizingAssessment,
+          stageDurationsMs: err.stageDurationsMs,
+          reviewDecision: {
+            suggestedAction: 'consolidate',
+            reason: 'This draft looks inflated relative to the earlier estimate or preferred sizing range.',
+          },
+          resumeContext: {
+            requirement,
+            clarifyAnswers: maskedAnswers.answers,
+            attachmentText: maskedAttachment.text,
+            projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+            projectKeys: selectedProjectKeys,
+            draftFeatures: err.draftFeatures,
+            triage: err.triage,
+            priorStageDurationsMs: err.stageDurationsMs,
+          },
+          sources: progressSourcesSnapshot,
+        } satisfies GenerationProgressPayload,
+        updatedAt: Date.now(),
+      } as RealtimeEvent);
       return;
     }
     if (err instanceof AcceptanceRequirementsGenerationError) {

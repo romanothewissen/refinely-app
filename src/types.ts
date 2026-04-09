@@ -458,6 +458,15 @@ export interface GenerationSizingAssessment {
   final: SizingAssessmentSnapshot;
 }
 
+export interface GenerationStageDurationsMs {
+  triage?: number;
+  decomposition?: number;
+  acceptanceRequirements?: number;
+  backfill?: number;
+  repair?: number;
+  total?: number;
+}
+
 export interface GenerationContextMeta extends ContextSourceMeta {
   goldExamplesCount?: number;
   referencedGoldExamples?: ReferencedGoldExample[];
@@ -465,6 +474,10 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   referencedSimilarStories?: ReferencedSimilarStory[];
   sizingContract?: EffectiveSizingContract;
   sizingAssessment?: GenerationSizingAssessment;
+  pass1DraftFeatureCount?: number;
+  draftReviewTriggered?: boolean;
+  draftReviewDecision?: 'keep' | 'consolidate';
+  stageDurationsMs?: GenerationStageDurationsMs;
   tokenUsage?: TokenUsageSummary;
 }
 
@@ -742,6 +755,11 @@ export interface GenerationEvent {
   clarifyDiscoveryProfile?: DiscoveryProfile;
   /** Shared LLM sizing contract captured during discovery. */
   clarifySizingContract?: EffectiveSizingContract;
+  /** Resume generation from an already-reviewed pass-1 draft. */
+  reviewedDraftFeatures?: Feature[];
+  reviewedDraftDecision?: 'keep' | 'consolidate';
+  reviewedTriageSizingContract?: EffectiveSizingContract;
+  priorStageDurationsMs?: GenerationStageDurationsMs;
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

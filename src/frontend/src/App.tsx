@@ -63,6 +63,7 @@ type WorkflowStage =
   | 'sufficiency_check'
   | 'clarify_round_2'
   | 'generation'
+  | 'generation_review'
   | 'blocked';
 
 function normalizeProjectKeys(projectKeys: string[]): string[] {
@@ -714,6 +715,12 @@ function LegacyApp({
       window.setTimeout(() => { void loadHistory(); }, 1500);
       loadUsage();
     },
+    ({ payload }) => {
+      setGenerationProgressMeta(payload ?? null);
+      setPendingSessionId(null);
+      setIsWorking(false);
+      setWorkflowStage('generation_review');
+    },
     (errMsg) => {
       setGenerationError(errMsg);
       setGenerationProgressMeta(null);
@@ -1220,6 +1227,36 @@ function LegacyApp({
     }
   };
 
+  const resumeGenerationFromDraftReview = async (decision: 'keep' | 'consolidate') => {
+    const sid = sessionIdRef.current;
+    setIsWorking(true);
+    setWorkflowRunId(prev => prev + 1);
+    setGenerationError(null);
+    setPendingClarifySessionId(null);
+    setWorkflowStage('generation');
+
+    try {
+      setPendingSessionId(sid);
+      const res = await api.resumeGeneration({
+        sessionId: sid,
+        decision,
+      }) as any;
+      if (!res?.success) {
+        setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
+        setIsWorking(false);
+        setPendingSessionId(null);
+        setWorkflowStage('blocked');
+        return;
+      }
+      setGenerationWarning(res?.warning || null);
+    } catch (err: any) {
+      setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
+      setIsWorking(false);
+      setPendingSessionId(null);
+      setWorkflowStage('blocked');
+    }
+  };
+
   const handleCreateJiraFeature = async (formData: any) => {
     if (formData && formData.key && activePushFeatureIdx !== null) {
       const updatedFeatures = [...features];
@@ -1541,6 +1578,7 @@ function LegacyApp({
                   workflowTokenUsage={workflowTokenUsage}
                   isAdmin={isAdmin}
                   onOpenSettings={openSettings}
+                  onDraftReviewDecision={resumeGenerationFromDraftReview}
                   onWorkflowTokenUsage={(usageDelta) => {
                     setWorkflowTokenUsage(prev => {
                       const base = prev || { input: 0, output: 0, total: 0 };

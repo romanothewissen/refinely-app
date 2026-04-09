@@ -16,6 +16,7 @@ import {
   followupQuestionsLookWeak,
   initialQuestionsLookWeak,
   repairAcceptanceRequirements,
+  shouldPauseForDraftReview,
   triageToSizingContract,
 } from '../story-generator';
 import {
@@ -325,10 +326,76 @@ test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors fro
 });
 
 test('generation progress copy labels draft output as provisional', () => {
-  assert.equal(getGenerationFeatureTargetLabel(), 'Feature target');
-  assert.equal(formatGenerationFeatureTarget(7), 'About 7');
+  assert.equal(getGenerationFeatureTargetLabel(), 'Triage estimate');
+  assert.equal(formatGenerationFeatureTarget(7), 'Forecast 7');
   assert.equal(getDraftFeatureHeading(), 'Features');
   assert.equal(getDraftFeatureNote(), null);
+});
+
+test('shouldPauseForDraftReview pauses when pass-1 draft materially exceeds the triage forecast', () => {
+  assert.equal(shouldPauseForDraftReview({
+    draftFeatureCount: 7,
+    triageFeatureTarget: 4,
+    sizingAssessment: {
+      stage: 'decomposition',
+      archetype: 'workflow_area',
+      verdict: 'ok',
+      confidence: 'medium',
+      preferredFeatureRange: { min: 3, max: 6 },
+      preferredArDepth: 'standard',
+      minimumPreservedFeatureCount: 3,
+      explicitSplitSignals: [],
+      featureCount: 7,
+      acceptanceRequirementCount: 0,
+      averageAcceptanceRequirementsPerFeature: 0,
+      reasonCodes: [],
+      reasons: [],
+    },
+  }), true);
+});
+
+test('shouldPauseForDraftReview does not pause for normal pass-1 variance', () => {
+  assert.equal(shouldPauseForDraftReview({
+    draftFeatureCount: 5,
+    triageFeatureTarget: 4,
+    sizingAssessment: {
+      stage: 'decomposition',
+      archetype: 'workflow_area',
+      verdict: 'ok',
+      confidence: 'medium',
+      preferredFeatureRange: { min: 3, max: 6 },
+      preferredArDepth: 'standard',
+      minimumPreservedFeatureCount: 3,
+      explicitSplitSignals: [],
+      featureCount: 5,
+      acceptanceRequirementCount: 0,
+      averageAcceptanceRequirementsPerFeature: 0,
+      reasonCodes: [],
+      reasons: [],
+    },
+  }), false);
+});
+
+test('shouldPauseForDraftReview pauses when sizing assessment confidently marks the draft oversized', () => {
+  assert.equal(shouldPauseForDraftReview({
+    draftFeatureCount: 6,
+    triageFeatureTarget: 6,
+    sizingAssessment: {
+      stage: 'decomposition',
+      archetype: 'guard_rule',
+      verdict: 'oversized',
+      confidence: 'high',
+      preferredFeatureRange: { min: 2, max: 4 },
+      preferredArDepth: 'standard',
+      minimumPreservedFeatureCount: 2,
+      explicitSplitSignals: [],
+      featureCount: 6,
+      acceptanceRequirementCount: 0,
+      averageAcceptanceRequirementsPerFeature: 0,
+      reasonCodes: ['too_many_features'],
+      reasons: [{ code: 'too_many_features', detail: 'The draft contains more features than the preferred sizing range.' }],
+    },
+  }), true);
 });
 
 test('generation progress copy surfaces consolidation notes after generation', () => {

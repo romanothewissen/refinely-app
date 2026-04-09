@@ -3,7 +3,7 @@ import { invoke } from '@forge/bridge';
 import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, EffectiveSizingContract } from '../types';
 
 export interface GenerationProgress {
-  type: 'progress' | 'complete' | 'error' | 'cancelled';
+  type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
   sessionId: string;
   message?: string;
   pass?: 1 | 2;
@@ -12,11 +12,16 @@ export interface GenerationProgress {
 }
 
 export interface GenerationProgressPayload {
-  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
+  sizingAssessment?: unknown;
+  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; total?: number };
+  reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
+  resumeContext?: unknown;
   sources?: {
     projectKey: string;
     domainContextApplied?: boolean;
@@ -33,6 +38,7 @@ const GENERATION_STAGE_ORDER: Array<NonNullable<GenerationProgressPayload['stage
   'context',
   'triage',
   'decomposition',
+  'draft_review',
   'acceptance_requirements',
 ];
 
@@ -75,7 +81,12 @@ function mergeGenerationPayload(
     triage: next.triage ?? previous.triage,
     arProgress: next.arProgress ?? previous.arProgress,
     draftFeatures: next.draftFeatures?.length ? next.draftFeatures : previous.draftFeatures,
+    draftFeatureCount: next.draftFeatureCount ?? previous.draftFeatureCount,
     featureProgress: next.featureProgress?.length ? next.featureProgress : previous.featureProgress,
+    sizingAssessment: next.sizingAssessment ?? previous.sizingAssessment,
+    stageDurationsMs: next.stageDurationsMs ?? previous.stageDurationsMs,
+    reviewDecision: next.reviewDecision ?? previous.reviewDecision,
+    resumeContext: next.resumeContext ?? previous.resumeContext,
     sources: mergeGenerationSources(previous.sources, next.sources),
   };
 }
@@ -271,6 +282,7 @@ export function useGenerationRealtime(
   sessionId: string | null,
   runId: number,
   onComplete: (payload: unknown) => void,
+  onReview: (payload: { message?: string; payload?: GenerationProgressPayload }) => void,
   onError: (message: string) => void,
   onCancel?: (message: string) => void,
 ) {
@@ -285,6 +297,8 @@ export function useGenerationRealtime(
   // Keep callbacks in refs so the polling interval always calls the latest version
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  const onReviewRef = useRef(onReview);
+  onReviewRef.current = onReview;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const onCancelRef = useRef(onCancel);
@@ -382,6 +396,16 @@ export function useGenerationRealtime(
             previous,
             (event.payload as GenerationProgressPayload | undefined) ?? null,
           ));
+        } else if (event.type === 'review') {
+          clearInterval(timerRef.current!);
+          timerRef.current = null;
+          setIsGenerating(false);
+          clearPendingProgressTimer();
+          visibleProgressRef.current = '';
+          setProgress('');
+          const reviewPayload = (event.payload as GenerationProgressPayload | undefined) ?? undefined;
+          setProgressPayload(reviewPayload ?? null);
+          onReviewRef.current({ message: event.message, payload: reviewPayload });
         } else if (event.type === 'cancelled') {
           clearInterval(timerRef.current!);
           timerRef.current = null;

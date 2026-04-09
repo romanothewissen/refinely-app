@@ -27,6 +27,7 @@ import {
   SizingAssessmentVerdict,
   TokenUsageSummary,
   DiscoveryProfile,
+  GenerationStageDurationsMs,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
@@ -158,6 +159,27 @@ export class AcceptanceRequirementsGenerationError extends Error {
     this.name = 'AcceptanceRequirementsGenerationError';
     this.draftFeatures = draftFeatures;
     this.failedFeatureIndexes = failedFeatureIndexes;
+  }
+}
+
+export class Pass1DraftReviewRequiredError extends Error {
+  draftFeatures: Feature[];
+  sizingAssessment: SizingAssessmentSnapshot;
+  triage: EffectiveSizingContract;
+  stageDurationsMs: GenerationStageDurationsMs;
+
+  constructor(
+    draftFeatures: Feature[],
+    sizingAssessment: SizingAssessmentSnapshot,
+    triage: EffectiveSizingContract,
+    stageDurationsMs: GenerationStageDurationsMs,
+  ) {
+    super('Generation paused for draft review.');
+    this.name = 'Pass1DraftReviewRequiredError';
+    this.draftFeatures = draftFeatures;
+    this.sizingAssessment = sizingAssessment;
+    this.triage = triage;
+    this.stageDurationsMs = stageDurationsMs;
   }
 }
 
@@ -498,7 +520,7 @@ async function generateAcceptanceRequirementsForFeature(input: {
         systemPrompt: input.systemPrompt,
         userMessage: input.userMessage,
         maxTokens: input.maxTokens,
-        reasoningEffort: 'medium',
+        reasoningEffort: 'low',
         ...input.providerOpts,
       });
 
@@ -1388,6 +1410,31 @@ function buildGenerationSizingAssessment(input: {
   };
 }
 
+export function shouldPauseForDraftReview(input: {
+  draftFeatureCount: number;
+  triageFeatureTarget?: number;
+  sizingAssessment: SizingAssessmentSnapshot;
+}): boolean {
+  const triageTarget = Math.max(1, Math.round(input.triageFeatureTarget ?? 0));
+  const exceedsForecast = triageTarget > 0 && input.draftFeatureCount > Math.ceil(triageTarget * 1.5);
+  const assessmentSignalsInflation =
+    input.sizingAssessment.verdict === 'oversized'
+    && (input.sizingAssessment.confidence === 'high' || input.sizingAssessment.confidence === 'medium')
+    && input.sizingAssessment.featureCount > input.sizingAssessment.preferredFeatureRange.max;
+
+  return exceedsForecast || assessmentSignalsInflation;
+}
+
+function toRawFeature(feature: Feature): RawFeature {
+  return {
+    summary: feature.summary,
+    description: feature.description,
+    acceptance_requirements: feature.acceptanceRequirements.map((ar) => `GIVEN ${ar.given} WHEN ${ar.when} THEN ${ar.then}`),
+    suggested_story_points: feature.storyPoints,
+    process_code: feature.processCode,
+  };
+}
+
 function repairedOutputViolatesExplicitSplitEvidence(features: Feature[], evidence: ExplicitSplitEvidence[]): string | null {
   for (const item of evidence) {
     if (features.length < item.minimumFeatureCount) {
@@ -1537,6 +1584,125 @@ async function repairOversizedFeatureSet(opts: {
       input: result.usage.input + backfilled.usage.input,
       output: result.usage.output + backfilled.usage.output,
     },
+    applied: improved && !rejectedReason,
+    rejectedReason: rejectedReason ?? undefined,
+  };
+}
+
+async function consolidateDraftFeatureSet(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  similarStoriesText: string;
+  wiContextText: string;
+  features: Feature[];
+  sizingAssessment: SizingAssessmentSnapshot;
+  config: TenantConfig;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+  shouldCancel?: () => Promise<boolean> | boolean;
+}): Promise<{ features: Feature[]; usage: { input: number; output: number }; applied: boolean; rejectedReason?: string }> {
+  const {
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    similarStoriesText,
+    wiContextText,
+    features,
+    sizingAssessment,
+    config,
+    providerOpts,
+    shouldCancel,
+  } = opts;
+  const guidance = deriveSizingGuidance({
+    requirement,
+    clarifyAnswers,
+  });
+
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      limits: PASS1_CONTEXT_LIMITS,
+    }),
+    `SIZING SIGNAL:\nArchetype: ${sizingAssessment.archetype}\nPreferred feature range: ${sizingAssessment.preferredFeatureRange.min}-${sizingAssessment.preferredFeatureRange.max}\nMinimum preserved feature count: ${sizingAssessment.minimumPreservedFeatureCount}\nReasons:\n${sizingAssessment.reasons.map((reason) => `- ${reason.detail}`).join('\n')}`,
+    `CURRENT DRAFT FEATURES:\n${JSON.stringify(features.map((feature) => ({
+      summary: feature.summary,
+      description: feature.description,
+      suggested_story_points: feature.storyPoints,
+      process_code: feature.processCode,
+    })), null, 2)}`,
+  ].join('\n\n---\n\n');
+
+  const systemPrompt = [
+    buildDecompositionSystemPrompt({
+      domainContext: config.domainContext,
+      domainRoles: config.domainRoles,
+      processTaxonomy: config.processTaxonomy,
+      processTaxonomyEnabled: config.processTaxonomyEnabled,
+      clarifyAnswerCount: clarifyAnswers.length,
+      featurePlan: {
+        min: sizingAssessment.preferredFeatureRange.min,
+        max: sizingAssessment.preferredFeatureRange.max,
+        target: Math.min(sizingAssessment.preferredFeatureRange.max, Math.max(sizingAssessment.preferredFeatureRange.min, features.length)),
+        shape: sizingAssessment.featureCount >= 9 ? 'epic' : sizingAssessment.featureCount >= 6 ? 'broad' : sizingAssessment.featureCount >= 4 ? 'balanced' : sizingAssessment.featureCount >= 2 ? 'narrow' : 'minimal',
+        complexity: sizingAssessment.stage === 'decomposition' ? 'high' : 'medium',
+      },
+    }),
+    'DRAFT REVIEW INSTRUCTION:',
+    '- You are consolidating pass-1 draft features before acceptance requirements are written.',
+    '- Return ONLY the revised draft feature set.',
+    '- Keep acceptance_requirements empty arrays for every feature.',
+    '- Prefer the smallest strong set of features that preserves the intended workflow boundaries.',
+    '- Do not silently drop explicit exception, approval, or manual-vs-automated path evidence.',
+  ].join('\n\n');
+
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(config.generatorConfig.decompositionModel, config.tier),
+    systemPrompt,
+    userMessage,
+    maxTokens: Math.max(config.generatorConfig.maxTokens ?? 8192, 4096),
+    reasoningEffort: 'medium',
+    ...providerOpts,
+  });
+
+  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+
+  const repairedFeatures = (result.data.features ?? []).map((feature) => normaliseFeature({
+    ...feature,
+    acceptance_requirements: [],
+  }, {
+    requirement,
+    clarifyAnswers,
+    domainRoles: config.domainRoles,
+  })).map((feature) => ({
+    ...feature,
+    acceptanceRequirements: [],
+  }));
+
+  if (!repairedFeatures.length) {
+    return { features, usage: result.usage, applied: false };
+  }
+
+  const rejectedReason = repairedOutputViolatesExplicitSplitEvidence(repairedFeatures, guidance.explicitSplitEvidence);
+  const improved = repairedFeatures.length < features.length;
+
+  return {
+    features: improved && !rejectedReason ? repairedFeatures : features,
+    usage: result.usage,
     applied: improved && !rejectedReason,
     rejectedReason: rejectedReason ?? undefined,
   };
@@ -1884,8 +2050,11 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   precomputedTriage?: TriageResult | null;
+  precomputedDraftFeatures?: Feature[];
+  draftReviewDecision?: 'keep' | 'consolidate';
+  priorStageDurationsMs?: GenerationStageDurationsMs;
   onTriageComplete?: (assessment: EffectiveSizingContract) => Promise<void>;
-  onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
+  onPass1Complete?: (draftFeatures: Feature[], sizingAssessment: SizingAssessmentSnapshot, triage: EffectiveSizingContract, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
   onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
   onSizingAssessment?: (assessment: GenerationSizingAssessment) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
@@ -1898,6 +2067,9 @@ export async function generateFeatures(opts: {
     wiContextText,
     config,
     precomputedTriage,
+    precomputedDraftFeatures,
+    draftReviewDecision,
+    priorStageDurationsMs,
     onTriageComplete,
     onPass1Complete,
     onArProgress,
@@ -1918,7 +2090,11 @@ export async function generateFeatures(opts: {
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
 
+  const stageDurationsMs: GenerationStageDurationsMs = { ...(priorStageDurationsMs ?? {}) };
+  const totalStartedAt = Date.now();
+
   // ── Triage: LLM assessment of scope, complexity, feature count, AR depth ──
+  const triageStartedAt = Date.now();
   const triageResult = precomputedTriage !== undefined
     ? precomputedTriage
     : await assessRequirementWithLlm({
@@ -1928,6 +2104,7 @@ export async function generateFeatures(opts: {
         tier: config.tier,
         providerOpts,
       });
+  stageDurationsMs.triage = (stageDurationsMs.triage ?? 0) + (Date.now() - triageStartedAt);
 
   const assessment: RequirementAssessment = triageResult
     ? { ...DEFAULT_GENERATION_TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
@@ -1955,38 +2132,48 @@ export async function generateFeatures(opts: {
 
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
-  const pass1UserMessage = buildGenerationUserMessage({
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    similarStoriesText,
-    limits: (assessment.featurePlan.shape === 'minimal' || assessment.featurePlan.shape === 'narrow')
-      ? PASS1_CONTEXT_LIMITS_COMPACT
-      : PASS1_CONTEXT_LIMITS,
-  });
+  let pass1ResultUsage = { input: 0, output: 0 };
+  let pass1Features: RawFeature[];
+  let pass1DraftFeatures: Feature[];
+  if (precomputedDraftFeatures?.length) {
+    pass1DraftFeatures = precomputedDraftFeatures;
+    pass1Features = precomputedDraftFeatures.map(toRawFeature);
+  } else {
+    const pass1StartedAt = Date.now();
+    const pass1UserMessage = buildGenerationUserMessage({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      limits: (assessment.featurePlan.shape === 'minimal' || assessment.featurePlan.shape === 'narrow')
+        ? PASS1_CONTEXT_LIMITS_COMPACT
+        : PASS1_CONTEXT_LIMITS,
+    });
 
-  // ── Pass 1: Decomposition ──
-  const pass1System = buildDecompositionSystemPrompt({
-    domainContext: config.domainContext,
-    domainRoles: config.domainRoles,
-    processTaxonomy: config.processTaxonomy,
-    processTaxonomyEnabled: config.processTaxonomyEnabled,
-    clarifyAnswerCount: clarifyAnswers.length,
-    featurePlan: assessment.featurePlan,
-  });
+    // ── Pass 1: Decomposition ──
+    const pass1System = buildDecompositionSystemPrompt({
+      domainContext: config.domainContext,
+      domainRoles: config.domainRoles,
+      processTaxonomy: config.processTaxonomy,
+      processTaxonomyEnabled: config.processTaxonomyEnabled,
+      clarifyAnswerCount: clarifyAnswers.length,
+      featurePlan: assessment.featurePlan,
+    });
 
-  const pass1Result = await runDecompositionPass({
-    userMessage: pass1UserMessage,
-    systemPrompt: pass1System,
-    shape: assessment.featurePlan.shape,
-    generatorConfig,
-    tier: config.tier,
-    providerOpts,
-  });
-
-  const pass1Features = pass1Result.features;
-  const pass1DraftFeatures = pass1Features.map((feature) => normaliseFeature(feature, roleGrounding));
+    const pass1Result = await runDecompositionPass({
+      userMessage: pass1UserMessage,
+      systemPrompt: pass1System,
+      shape: assessment.featurePlan.shape,
+      generatorConfig,
+      tier: config.tier,
+      providerOpts,
+    });
+    pass1ResultUsage = pass1Result.usage;
+    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
+    pass1Features = pass1Result.features;
+    pass1DraftFeatures = pass1Features.map((feature) => normaliseFeature(feature, roleGrounding));
+  }
   const decompositionSizingAssessment = assessSizingHeuristics({
     stage: 'decomposition',
     requirement,
@@ -1996,8 +2183,44 @@ export async function generateFeatures(opts: {
   });
 
   // Notify caller so it can emit a progress event before the slow pass 2 LLM call
-  if (onPass1Complete) await onPass1Complete(pass1DraftFeatures);
+  const triageSizingContract = triageResult
+    ? triageToSizingContract(triageResult)
+    : {
+        shape: assessment.featurePlan.shape,
+        complexity: assessment.featurePlan.complexity,
+        featureTarget: assessment.featurePlan.target,
+        arDepth: assessment.arPlan.depth,
+        arTarget: assessment.arPlan.target || undefined,
+        estimatedQuestions: assessment.questionPlan.target,
+      };
+  if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, decompositionSizingAssessment, triageSizingContract, stageDurationsMs);
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+  if (!precomputedDraftFeatures?.length && shouldPauseForDraftReview({
+    draftFeatureCount: pass1DraftFeatures.length,
+    triageFeatureTarget: triageSizingContract.featureTarget,
+    sizingAssessment: decompositionSizingAssessment,
+  })) {
+    throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, decompositionSizingAssessment, triageSizingContract, stageDurationsMs);
+  }
+
+  if (precomputedDraftFeatures?.length && draftReviewDecision === 'consolidate') {
+    const repairStartedAt = Date.now();
+    const draftRepairResult = await consolidateDraftFeatureSet({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      features: pass1DraftFeatures,
+      sizingAssessment: decompositionSizingAssessment,
+      config,
+      providerOpts,
+      shouldCancel,
+    });
+    stageDurationsMs.repair = (stageDurationsMs.repair ?? 0) + (Date.now() - repairStartedAt);
+    pass1DraftFeatures = draftRepairResult.features;
+    pass1Features = draftRepairResult.features.map(toRawFeature);
+  }
 
   // ── Pass 2: Acceptance Requirements ──
   // Use parallel per-feature AR generation for 2+ features (faster);
@@ -2008,6 +2231,7 @@ export async function generateFeatures(opts: {
 
   if (pass1Features.length >= 2) {
     // Parallel path: one small LLM call per feature
+    const arStartedAt = Date.now();
     const parallelResult = await runParallelArPass({
       features: pass1Features,
       requirement,
@@ -2023,6 +2247,8 @@ export async function generateFeatures(opts: {
       onArProgress,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    stageDurationsMs.acceptanceRequirements = (stageDurationsMs.acceptanceRequirements ?? 0) + (Date.now() - arStartedAt);
+    const backfillStartedAt = Date.now();
     const backfillResult = await backfillMissingAcceptanceRequirements({
       features: parallelResult.features,
       requirement,
@@ -2037,6 +2263,7 @@ export async function generateFeatures(opts: {
       providerOpts,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
     rawFeatures = backfillResult.features;
     pass2Usage = {
       input: parallelResult.usage.input + backfillResult.usage.input,
@@ -2063,6 +2290,7 @@ export async function generateFeatures(opts: {
 
     const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 4096);
 
+    const arStartedAt = Date.now();
     const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
       model: getTierModel(generatorConfig.arModel, config.tier),
       systemPrompt: pass2System,
@@ -2072,10 +2300,12 @@ export async function generateFeatures(opts: {
       ...providerOpts,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    stageDurationsMs.acceptanceRequirements = (stageDurationsMs.acceptanceRequirements ?? 0) + (Date.now() - arStartedAt);
 
     rawFeatures = pass2Result.data.features?.length
       ? mergeFeatures(pass1Features, pass2Result.data.features)
       : pass1Features;
+    const backfillStartedAt = Date.now();
     const backfillResult = await backfillMissingAcceptanceRequirements({
       features: rawFeatures,
       requirement,
@@ -2089,6 +2319,7 @@ export async function generateFeatures(opts: {
       tier: config.tier,
       providerOpts,
     });
+    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
     rawFeatures = backfillResult.features;
     pass2Usage = {
       input: pass2Result.usage.input + backfillResult.usage.input,
@@ -2111,7 +2342,9 @@ export async function generateFeatures(opts: {
   let preRepairFeatureCount: number | undefined;
   let preRepairAcceptanceRequirementCount: number | undefined;
 
-  if (shouldAutoRepairOversizedAssessment(finalSizingAssessment)) {
+  const allowAutoRepair = draftReviewDecision !== 'keep';
+  if (allowAutoRepair && shouldAutoRepairOversizedAssessment(finalSizingAssessment)) {
+    const repairStartedAt = Date.now();
     preRepairFeatureCount = finalSizingAssessment.featureCount;
     preRepairAcceptanceRequirementCount = finalSizingAssessment.acceptanceRequirementCount;
     const repairResult = await repairOversizedFeatureSet({
@@ -2130,6 +2363,7 @@ export async function generateFeatures(opts: {
     repairApplied = repairResult.applied;
     repairRejectedReason = repairResult.rejectedReason;
     features = repairResult.features;
+    stageDurationsMs.repair = (stageDurationsMs.repair ?? 0) + (Date.now() - repairStartedAt);
     finalSizingAssessment = assessSizingHeuristics({
       stage: 'final',
       requirement,
@@ -2151,17 +2385,18 @@ export async function generateFeatures(opts: {
   const violations = validateFeatures(features, config);
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1Result.usage.input + pass2Usage.input + repairUsage.input,
-    output: pass1Result.usage.output + pass2Usage.output + repairUsage.output,
-    total: pass1Result.usage.input + pass1Result.usage.output + pass2Usage.input + pass2Usage.output + repairUsage.input + repairUsage.output,
+    input: pass1ResultUsage.input + pass2Usage.input + repairUsage.input,
+    output: pass1ResultUsage.output + pass2Usage.output + repairUsage.output,
+    total: pass1ResultUsage.input + pass1ResultUsage.output + pass2Usage.input + pass2Usage.output + repairUsage.input + repairUsage.output,
     byStage: {
-      decomposition: toStageUsage(pass1Result.usage),
+      decomposition: toStageUsage(pass1ResultUsage),
       acceptanceRequirements: toStageUsage(pass2Usage),
       ...(repairUsage.input || repairUsage.output
         ? { sizingRepair: toStageUsage(repairUsage) }
         : {}),
     },
   };
+  stageDurationsMs.total = (priorStageDurationsMs?.total ?? 0) + (Date.now() - totalStartedAt);
 
   const sizingAssessment = buildGenerationSizingAssessment({
     decomposition: decompositionSizingAssessment,
@@ -2181,6 +2416,11 @@ export async function generateFeatures(opts: {
     violations,
     similarStories: [],   // filled in by the caller after this returns
     sessionId: uuidv4(),
+    generationContext: {
+      projectKey: '',
+      domainRolesUsed: [],
+      stageDurationsMs,
+    },
     tokenUsage,
   };
 }

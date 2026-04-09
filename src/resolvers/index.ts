@@ -513,6 +513,66 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   return { success: true, sessionId: payload.sessionId, warning: check.reason };
 });
 
+resolver.define('resumeGeneration', async ({ payload, context }) => {
+  const progress = await entityGet(KEYS.generationProgress(payload.sessionId)) as {
+    type?: string;
+    payload?: {
+      resumeContext?: {
+        requirement: string;
+        clarifyAnswers: ClarifyAnswer[];
+        attachmentText: string;
+        projectKey: string;
+        projectKeys: string[];
+        draftFeatures: Feature[];
+        triage: EffectiveSizingContract;
+        priorStageDurationsMs?: GenerationStageDurationsMs;
+      };
+    };
+  } | null;
+
+  const resumeContext = progress?.payload?.resumeContext;
+  const reviewDecision = payload?.decision === 'consolidate' ? 'consolidate' : 'keep';
+  if (progress?.type !== 'review' || !resumeContext) {
+    return { success: false, error: 'No paused draft review is available for this session.' };
+  }
+
+  const config = await getConfig();
+  const check = await checkGenerationAllowed(config, context);
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
+    projectKey: resumeContext.projectKey,
+    projectKeys: resumeContext.projectKeys,
+  });
+  const event: GenerationEvent = {
+    sessionId: payload.sessionId,
+    accountId,
+    requirement: resumeContext.requirement,
+    clarifyAnswers: resumeContext.clarifyAnswers,
+    attachmentText: resumeContext.attachmentText,
+    config,
+    license: context?.license,
+    goldExamples: '',
+    wiContext: '',
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: authorizedProjects.projectKeys,
+    reviewedDraftFeatures: resumeContext.draftFeatures,
+    reviewedDraftDecision: reviewDecision,
+    reviewedTriageSizingContract: resumeContext.triage,
+    priorStageDurationsMs: resumeContext.priorStageDurationsMs,
+  };
+
+  await entitySet(KEYS.generationProgress(payload.sessionId), {
+    type: 'progress',
+    sessionId: payload.sessionId,
+    message: reviewDecision === 'consolidate' ? 'Consolidating drafted features before AR generation…' : 'Continuing with drafted features…',
+    updatedAt: Date.now(),
+  });
+
+  const generationQueue = new Queue({ key: 'generation-queue' });
+  await generationQueue.push({ body: event });
+  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+});
+
 async function cancelWorkflowProgress(
   sessionId: string,
   type: 'generation' | 'clarify' | 'refine',
