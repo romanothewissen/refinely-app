@@ -2239,9 +2239,9 @@ export function MainContent({
                                 <div className="space-y-2">
                                   {(isAddedFeature ? [] : feature.acceptanceRequirements).map((ar, i) => (
                                     <div key={i} className="bg-[#f8faf9] border border-[var(--rf-border)] p-3 rounded-xl text-[13px] text-[var(--rf-text-secondary)] leading-6">
-                                      {ar.given && <div className="mb-1"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
-                                      {ar.when && <div className="mb-1"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
-                                      <div><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
+                                      {ar.given && <div className="mb-1 whitespace-pre-wrap break-words"><strong className="text-[var(--rf-text)]">Given</strong> {ar.given}</div>}
+                                      {ar.when && <div className="mb-1 whitespace-pre-wrap break-words"><strong className="text-[var(--rf-text)]">When</strong> {ar.when}</div>}
+                                      <div className="whitespace-pre-wrap break-words"><strong className="text-[var(--rf-text)]">Then</strong> {ar.then}</div>
                                     </div>
                                   ))}
                                 </div>
@@ -2268,9 +2268,9 @@ export function MainContent({
                                       <div key={`${i}-${row.type === 'removed' ? row.oldIndex : row.type === 'added' ? row.newIndex : row.oldIndex}`} className={`p-3 rounded-xl text-[13px] border leading-6 ${isRemoved ? 'bg-[rgba(155,53,69,0.08)] border-[rgba(155,53,69,0.18)] text-[#7d2232]' : isNew ? 'bg-[rgba(46,125,86,0.08)] border-[rgba(46,125,86,0.18)] text-[var(--rf-text)]' : 'bg-[#f8faf9] border-[rgba(43,89,74,0.12)] text-[var(--rf-text)]'}`}>
                                         {isNew && <div className="text-[12px] font-bold text-[var(--rf-success)] uppercase tracking-widest mb-2">New AR</div>}
                                         {isRemoved && <div className="text-[12px] font-bold text-[var(--rf-danger)] uppercase tracking-widest mb-2">Removed AR</div>}
-                                        {ar.given && <div className="mb-1"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Given</strong>{' '}<DiffText oldText={oldAr?.given || ar.given} newText={isRemoved ? '' : ar.given} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
-                                        {ar.when && <div className="mb-1"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>When</strong>{' '}<DiffText oldText={oldAr?.when || ar.when} newText={isRemoved ? '' : ar.when} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
-                                        <div><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Then</strong>{' '}<DiffText oldText={oldAr?.then || ar.then} newText={isRemoved ? '' : ar.then} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>
+                                        {ar.given && <div className="mb-1 whitespace-pre-wrap break-words"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Given</strong>{' '}<DiffText oldText={oldAr?.given || ar.given} newText={isRemoved ? '' : ar.given} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
+                                        {ar.when && <div className="mb-1 whitespace-pre-wrap break-words"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>When</strong>{' '}<DiffText oldText={oldAr?.when || ar.when} newText={isRemoved ? '' : ar.when} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>}
+                                        <div className="whitespace-pre-wrap break-words"><strong className={isRemoved ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-brand-hover)]'}>Then</strong>{' '}<DiffText oldText={oldAr?.then || ar.then} newText={isRemoved ? '' : ar.then} fullHighlight={isNew || isAddedFeature} mode={diffMode} /></div>
                                       </div>
                                     );
                                   })}
@@ -2317,8 +2317,8 @@ export function MainContent({
                                           <div key={field} className="flex items-start gap-3">
                                             <strong className="text-[var(--rf-text-tertiary)] w-12 pt-2 text-[12px] font-bold uppercase tracking-widest">{field}</strong>
                                             {field === 'then'
-                                              ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] resize-none transition" />
-                                              : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition" />
+                                              ? <textarea value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} rows={2} className="min-w-0 flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] resize-none transition" />
+                                              : <input value={ar[field]} onChange={e => updateDraftAr(i, field, e.target.value)} className="min-w-0 flex-1 bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition" />
                                             }
                                           </div>
                                         ))}
@@ -2326,20 +2326,20 @@ export function MainContent({
                                     ) : (
                                       <div className="space-y-1.5 text-[13px] sm:text-sm">
                                         {ar.given?.trim() && (
-                                          <div className="flex gap-4">
+                                          <div className="flex items-start gap-4">
                                             <div className="w-12 shrink-0 text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">Given</div>
-                                            <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.given}</div>
+                                            <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.given}</div>
                                           </div>
                                         )}
                                         {ar.when?.trim() && (
-                                          <div className="flex gap-4">
+                                          <div className="flex items-start gap-4">
                                             <div className="w-12 shrink-0 text-[12px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest pt-0.5">When</div>
-                                            <div className="text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.when}</div>
+                                            <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--rf-text-secondary)] leading-relaxed font-medium">{ar.when}</div>
                                           </div>
                                         )}
-                                        <div className="flex gap-4">
+                                        <div className="flex items-start gap-4">
                                           <div className="w-12 shrink-0 text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-widest pt-0.5">Then</div>
-                                          <div className="text-[var(--rf-text)] leading-relaxed whitespace-pre-wrap font-medium">{ar.then}</div>
+                                          <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--rf-text)] leading-relaxed font-medium">{ar.then}</div>
                                         </div>
                                       </div>
                                     )}
