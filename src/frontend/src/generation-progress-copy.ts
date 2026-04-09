@@ -1,19 +1,19 @@
 import type { GenerationSizingAssessment } from './types';
 
 export function getGenerationFeatureTargetLabel(): string {
-  return 'Draft target';
+  return 'Feature target';
 }
 
 export function formatGenerationFeatureTarget(featureTarget?: number): string {
   return typeof featureTarget === 'number' ? `About ${featureTarget}` : 'Assessing';
 }
 
-export function getDraftFeatureHeading(isProvisional: boolean): string {
-  return isProvisional ? 'Draft features' : 'Features';
+export function getDraftFeatureHeading(): string {
+  return 'Features';
 }
 
-export function getDraftFeatureNote(consolidationPending: boolean): string | null {
-  return consolidationPending ? 'Draft may consolidate before final output.' : null;
+export function getDraftFeatureNote(): string | null {
+  return null;
 }
 
 export function getSizingRunContextNote(

@@ -5,6 +5,7 @@ import { isCompleteAcceptanceRequirement } from '../ar-validation';
 import { buildSingleFeatureRefineSystemPrompt } from '../prompts';
 import {
   AcceptanceRequirementsGenerationError,
+  applyFeatureOutputGuardrails,
   applySmallAskTriageGuardrails,
   assessSizingHeuristics,
   capDiscoveryProfileFloorForSmallAsk,
@@ -12,6 +13,7 @@ import {
   feedbackRequestsStructuralRefinement,
   findFeaturesMissingCompleteAcceptanceRequirements,
   repairAcceptanceRequirements,
+  triageToSizingContract,
 } from '../story-generator';
 import {
   formatGenerationFeatureTarget,
@@ -267,10 +269,10 @@ test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors fro
 });
 
 test('generation progress copy labels draft output as provisional', () => {
-  assert.equal(getGenerationFeatureTargetLabel(), 'Draft target');
+  assert.equal(getGenerationFeatureTargetLabel(), 'Feature target');
   assert.equal(formatGenerationFeatureTarget(7), 'About 7');
-  assert.equal(getDraftFeatureHeading(true), 'Draft features');
-  assert.equal(getDraftFeatureNote(true), 'Draft may consolidate before final output.');
+  assert.equal(getDraftFeatureHeading(), 'Features');
+  assert.equal(getDraftFeatureNote(), null);
 });
 
 test('generation progress copy surfaces consolidation notes after generation', () => {
@@ -320,4 +322,45 @@ test('generation progress copy surfaces consolidation notes after generation', (
     }),
     'Draft consolidated from 7 to 2 features before final output.',
   );
+});
+
+test('triageToSizingContract preserves the committed LLM sizing contract', () => {
+  assert.deepEqual(triageToSizingContract({
+    estimatedFeatures: 4,
+    estimatedQuestions: 9,
+    shape: 'balanced',
+    complexity: 'high',
+    arDepth: 'thorough',
+  }), {
+    shape: 'balanced',
+    complexity: 'high',
+    featureTarget: 4,
+    arDepth: 'thorough',
+    estimatedQuestions: 9,
+  });
+});
+
+test('applyFeatureOutputGuardrails falls back to authorized user when the role is not evidence-backed', () => {
+  const guarded = applyFeatureOutputGuardrails({
+    id: 'feature-1',
+    summary: 'Prevent creation after end of service',
+    description: 'As a Field Service Engineer, I need to be prevented from creating service cases or work orders when the primary installed product has reached its designated end of service date so that unsupported requests are blocked and users receive clear feedback about the policy.',
+    acceptanceRequirements: [
+      {
+        given: 'a primary installed product has an end of service date that has already passed',
+        when: 'a Field Service Engineer attempts to create a service case or work order for that product, with an explanatory error message shown for example to clarify the exact date and the policy reason',
+        then: 'the creation is prevented and the system explains why the request is blocked and what should happen next',
+      },
+    ],
+  }, {
+    requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
+    domainRoles: ['Field Service Engineer', 'Technical Support Specialist'],
+  });
+
+  assert.match(guarded.description, /^As an authorized user, I need to /);
+  assert.notEqual(
+    guarded.description,
+    'As a Field Service Engineer, I need to be prevented from creating service cases or work orders when the primary installed product has reached its designated end of service date so that unsupported requests are blocked and users receive clear feedback about the policy.',
+  );
+  assert.equal(guarded.acceptanceRequirements[0].when.includes('for example'), false);
 });

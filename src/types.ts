@@ -330,6 +330,15 @@ export interface DiscoveryProfile {
   followupCap: number;
 }
 
+export interface EffectiveSizingContract {
+  shape: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
+  complexity: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+  featureTarget: number;
+  arDepth: 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
+  arTarget?: number;
+  estimatedQuestions: number;
+}
+
 export interface DiscoverySufficiencyResult {
   evaluated: boolean;
   sufficient: boolean | null;
@@ -339,8 +348,12 @@ export interface DiscoverySufficiencyResult {
 }
 
 export interface ClarifyAssessmentSummary {
-  shape?: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
-  complexity?: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+  shape?: EffectiveSizingContract['shape'];
+  complexity?: EffectiveSizingContract['complexity'];
+  featureTarget?: number;
+  arDepth?: EffectiveSizingContract['arDepth'];
+  arTarget?: number;
+  estimatedQuestions?: number;
   clarity?: 'clear' | 'medium' | 'vague';
   questionPlan?: { min: number; max: number; target: number };
 }
@@ -348,6 +361,7 @@ export interface ClarifyAssessmentSummary {
 export interface ClarifyProgressPayload {
   stage?: 'context' | 'assessment' | 'question_generation' | 'finalize' | 'sufficiency' | 'followup';
   assessment?: ClarifyAssessmentSummary;
+  sizingContract?: EffectiveSizingContract;
   discoveryProfile?: DiscoveryProfile;
   ambiguityAssessment?: ClarifyContextMeta['ambiguityAssessment'];
   sources?: {
@@ -379,6 +393,7 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  sizingContract?: EffectiveSizingContract;
   discoveryProfile?: DiscoveryProfile;
   ambiguityAssessment?: {
     level: 'clear' | 'medium' | 'vague';
@@ -448,6 +463,7 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  sizingContract?: EffectiveSizingContract;
   sizingAssessment?: GenerationSizingAssessment;
   tokenUsage?: TokenUsageSummary;
 }
@@ -722,8 +738,10 @@ export interface GenerationEvent {
   wiContext?: string;
   projectKey: string;
   projectKeys?: string[];
-  /** Discovery profile from the clarify LLM — used to floor triage estimates. */
+  /** Discovery profile from the clarify LLM — retained for context/questioning only. */
   clarifyDiscoveryProfile?: DiscoveryProfile;
+  /** Shared LLM sizing contract captured during discovery. */
+  clarifySizingContract?: EffectiveSizingContract;
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

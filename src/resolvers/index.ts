@@ -497,6 +497,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
+    clarifySizingContract: payload.clarifySizingContract ?? undefined,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker

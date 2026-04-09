@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { utils as XLSXUtils, write } from 'xlsx';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyProgressPayload, GenerationContextMeta } from './types';
+import type { ClarifyContextMeta, ClarifyProgressPayload, EffectiveSizingContract, GenerationContextMeta } from './types';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
 import {
@@ -54,11 +54,9 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 type GenerationProgressMeta = {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
+  triage?: EffectiveSizingContract;
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
-  draftFeaturesProvisional?: boolean;
-  consolidationPending?: boolean;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: {
     projectKey: string;
@@ -251,11 +249,12 @@ function DiscoveryScoreCard({
   const discoveryProfile = meta?.discoveryProfile ?? context?.discoveryProfile;
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
   const assessment = meta?.assessment ?? null;
-  const complexityKey = discoveryProfile?.complexity ?? assessment?.complexity ?? null;
+  const sizingContract = meta?.sizingContract ?? context?.sizingContract;
+  const complexityKey = sizingContract?.complexity ?? discoveryProfile?.complexity ?? assessment?.complexity ?? null;
   const complexityLabel = complexityKey ? (COMPLEXITY_LEVELS.find((level) => level.key === complexityKey)?.label ?? complexityKey) : null;
-  const plannedQuestions = ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
+  const plannedQuestions = sizingContract?.estimatedQuestions ?? ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
 
-  if (!discoveryProfile && !assessment && !ambiguityAssessment) {
+  if (!discoveryProfile && !assessment && !ambiguityAssessment && !sizingContract) {
     return (
       <div>
         <div className="flex items-center justify-between mb-2.5">
@@ -455,12 +454,10 @@ function GeneratingPipeline({
   const triage = meta?.triage;
   const arProgress = meta?.arProgress;
   const draftFeatures = meta?.draftFeatures ?? [];
-  const draftFeaturesProvisional = Boolean(meta?.draftFeaturesProvisional);
-  const consolidationPending = Boolean(meta?.consolidationPending);
   const featureProgress = meta?.featureProgress ?? [];
   const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
   const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
-  const draftFeatureNote = getDraftFeatureNote(consolidationPending);
+  const draftFeatureNote = getDraftFeatureNote();
 
   // Anchored progress: context=5%, triage=25%, features=50%, ARs=72→100%
   const STAGE_PCT = [5, 25, 50, 72];
@@ -569,7 +566,7 @@ function GeneratingPipeline({
           >
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                {getDraftFeatureHeading(draftFeaturesProvisional)}
+                {getDraftFeatureHeading()}
               </div>
               {draftFeatureNote && (
                 <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">

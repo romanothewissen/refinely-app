@@ -95,7 +95,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       },
     });
     const clarifyStartedAt = Date.now();
-    const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } = await generateClarifyingQuestions({
+    const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, sizingContract } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
@@ -112,6 +112,16 @@ export async function handler(event: { body: ClarifyEvent }) {
           {
             stage: 'question_generation',
             assessment,
+            sizingContract: assessment.shape && assessment.complexity && typeof assessment.featureTarget === 'number' && assessment.arDepth
+              ? ({
+                  shape: assessment.shape,
+                  complexity: assessment.complexity,
+                  featureTarget: assessment.featureTarget,
+                  arDepth: assessment.arDepth,
+                  arTarget: assessment.arTarget,
+                  estimatedQuestions: assessment.estimatedQuestions ?? assessment.questionPlan.target,
+                } as const)
+              : undefined,
             sources: {
               projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
               projectCount: selectedProjectKeys.length,
@@ -133,6 +143,7 @@ export async function handler(event: { body: ClarifyEvent }) {
 
     await sendClarifyProgress(sessionId, 'Finalizing discovery questions and coverage gaps…', inputSignature, {
       stage: 'finalize',
+      sizingContract,
       discoveryProfile,
       ambiguityAssessment: {
         ...ambiguityAssessment,
@@ -151,12 +162,13 @@ export async function handler(event: { body: ClarifyEvent }) {
       projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
       projectKeys: selectedProjectKeys,
       projectCount: selectedProjectKeys.length,
-      domainRolesUsed: [],
+      domainRolesUsed: config.domainRoles ?? [],
       discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
+      sizingContract,
       discoveryProfile,
       ambiguityAssessment: {
         ...ambiguityAssessment,

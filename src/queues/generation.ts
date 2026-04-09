@@ -7,13 +7,12 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { DiscoveryProfile, Feature, GenerationContextMeta, GenerationEvent, GenerationSizingAssessment, TokenUsageSummary } from '../types';
-import { TriageResult } from '../core/story-generator';
+import { EffectiveSizingContract, Feature, GenerationContextMeta, GenerationEvent, GenerationSizingAssessment, TokenUsageSummary } from '../types';
+import { TriageResult, triageToSizingContract } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
   assessRequirementWithLlm,
-  capDiscoveryProfileFloorForSmallAsk,
   GenerationCancelledError,
   generateFeatures,
   generateSessionTitle,
@@ -35,102 +34,14 @@ import {
   summarizeReferencedWiSections,
 } from '../services/project-selection';
 
-// ─── Discovery Profile Floor ─────────────────────────────────────────────────
-// The triage model (Haiku) runs before generation and can under-estimate scope.
-// The clarify model (Sonnet) already assessed scope/complexity during discovery.
-// This function upgrades the triage result to be at least as high as the clarify
-// profile suggests — taking the max across all dimensions.
-
-const SHAPE_ORDER = ['minimal', 'narrow', 'balanced', 'broad', 'epic'] as const;
-const COMPLEXITY_ORDER = ['trivial', 'low', 'medium', 'high', 'very_high'] as const;
-const AR_DEPTH_ORDER = ['minimal', 'lean', 'standard', 'thorough', 'comprehensive'] as const;
-type Shape = typeof SHAPE_ORDER[number];
-type Complexity = typeof COMPLEXITY_ORDER[number];
-type ArDepth = typeof AR_DEPTH_ORDER[number];
-
-function maxShape(a: Shape, b: Shape): Shape {
-  return SHAPE_ORDER.indexOf(a) >= SHAPE_ORDER.indexOf(b) ? a : b;
-}
-function maxComplexity(a: Complexity, b: Complexity): Complexity {
-  return COMPLEXITY_ORDER.indexOf(a) >= COMPLEXITY_ORDER.indexOf(b) ? a : b;
-}
-function maxArDepth(a: ArDepth, b: ArDepth): ArDepth {
-  return AR_DEPTH_ORDER.indexOf(a) >= AR_DEPTH_ORDER.indexOf(b) ? a : b;
-}
-
-function complexityToArDepth(c: Complexity): ArDepth {
-  if (c === 'very_high') return 'comprehensive';
-  if (c === 'high') return 'thorough';
-  if (c === 'medium') return 'standard';
-  if (c === 'low') return 'lean';
-  return 'minimal';
-}
-
-function applyDiscoveryProfileFloor(
-  triage: TriageResult | null,
-  profile: DiscoveryProfile,
-  requirement?: string,
-  clarifyAnswers?: Array<{ answer?: string }>,
-  skipSmallAskCap?: boolean,
-): TriageResult {
-  // Map clarify scope → minimum triage shape + feature count
-  const scopeToShape: Record<DiscoveryProfile['scope'], { shape: Shape; minFeatures: number }> = {
-    narrow:    { shape: 'narrow',   minFeatures: 2 },
-    moderate:  { shape: 'balanced', minFeatures: 4 },
-    broad:     { shape: 'broad',    minFeatures: 7 },
-    very_broad: { shape: 'epic',    minFeatures: 11 },
+function sizingContractToTriage(contract: EffectiveSizingContract): TriageResult {
+  return {
+    estimatedFeatures: Math.max(1, Math.round(contract.featureTarget)),
+    estimatedQuestions: Math.max(0, Math.round(contract.estimatedQuestions)),
+    shape: contract.shape,
+    complexity: contract.complexity,
+    arDepth: contract.arDepth,
   };
-
-  // Map clarify complexity → triage complexity (same scale except 'trivial' doesn't exist in clarify)
-  const complexityMap: Record<DiscoveryProfile['complexity'], Complexity> = {
-    low:       'low',
-    medium:    'medium',
-    high:      'high',
-    very_high: 'very_high',
-  };
-
-  const profileShape = scopeToShape[profile.scope];
-  const profileComplexity = complexityMap[profile.complexity];
-
-  const baseFeatures = Math.max(1, triage?.estimatedFeatures ?? 1);
-  const baseShape = (triage?.shape ?? 'minimal') as Shape;
-  const baseComplexity = (triage?.complexity ?? 'low') as Complexity;
-  const baseArDepth = (triage?.arDepth ?? 'lean') as ArDepth;
-  const baseQuestions = Math.max(0, triage?.estimatedQuestions ?? 0);
-
-  const finalShape = maxShape(baseShape, profileShape.shape);
-  const finalComplexity = maxComplexity(baseComplexity, profileComplexity);
-  const finalFeatures = Math.max(baseFeatures, profileShape.minFeatures);
-  const finalArDepth = maxArDepth(baseArDepth, complexityToArDepth(finalComplexity));
-
-  const floored = {
-    estimatedFeatures: finalFeatures,
-    estimatedQuestions: baseQuestions,
-    shape: finalShape,
-    complexity: finalComplexity,
-    arDepth: finalArDepth,
-  };
-
-  if (!requirement) {
-    return floored;
-  }
-
-  // When the user completed a discovery session (clarifyDiscoveryProfile present),
-  // the Sonnet model already calibrated scope/complexity. Trust that assessment —
-  // do not override it with the guard_rule heuristic cap.
-  if (skipSmallAskCap) {
-    return floored;
-  }
-
-  return capDiscoveryProfileFloorForSmallAsk({
-    requirement,
-    clarifyAnswers: clarifyAnswers?.map((answer) => ({
-      question: '',
-      answer: String(answer.answer ?? ''),
-      selectedSuggestions: [],
-    })),
-    triage: floored,
-  }) ?? floored;
 }
 
 interface RealtimeEvent {
@@ -143,11 +54,9 @@ interface RealtimeEvent {
 
 interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
+  triage?: EffectiveSizingContract;
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
-  draftFeaturesProvisional?: boolean;
-  consolidationPending?: boolean;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   failedFeatureIds?: string[];
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
@@ -215,13 +124,7 @@ function startProgressHeartbeat(
 
 function buildTriagePayload(triageResult: Awaited<ReturnType<typeof assessRequirementWithLlm>>) {
   if (!triageResult) return undefined;
-  return {
-    shape: triageResult.shape,
-    complexity: triageResult.complexity,
-    featureTarget: triageResult.estimatedFeatures,
-    arDepth: triageResult.arDepth,
-    estimatedQuestions: triageResult.estimatedQuestions,
-  };
+  return triageToSizingContract(triageResult);
 }
 
 function buildFeatureProgressState(
@@ -239,7 +142,7 @@ function buildFeatureProgressState(
 }
 
 export async function handler(event: { body: GenerationEvent }) {
-  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey, projectKeys, clarifyDiscoveryProfile } = event.body;
+  const { sessionId, accountId, requirement, clarifyAnswers, attachmentText, license, config: eventConfig, projectKey, projectKeys, clarifySizingContract } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
@@ -288,22 +191,13 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentIncluded: Boolean(attachmentText?.trim()),
     };
 
-    // When the user completed discovery, skip the triage LLM call — the clarify model
-    // already assessed scope and complexity with a richer prompt. Derive the effective
-    // triage directly from the discovery profile and fire the progress message immediately.
-    const triagePromise: Promise<Awaited<ReturnType<typeof assessRequirementWithLlm>>> = clarifyDiscoveryProfile
-      ? Promise.resolve(applyDiscoveryProfileFloor(
-          null,
-          clarifyDiscoveryProfile,
-          maskedRequirement.text,
-          maskedAnswers.answers,
-          true, // skipSmallAskCap: trust the Sonnet discovery assessment
-        )).then(async result => {
+    const triagePromise: Promise<Awaited<ReturnType<typeof assessRequirementWithLlm>>> = clarifySizingContract
+      ? Promise.resolve(sizingContractToTriage(clarifySizingContract)).then(async result => {
           const triage = buildTriagePayload(result);
           if (triage) {
             const arText = ` with ${triage.arDepth} acceptance depth`;
             await updateProgress(
-              `Initial read: ${triage.shape} scope, ${triage.complexity} complexity — drafting about ${triage.featureTarget} features${arText}`,
+              `Committed sizing: ${triage.shape} scope, ${triage.complexity} complexity — drafting about ${triage.featureTarget} features${arText}`,
               1,
               { stage: 'triage', triage, sources: baseSources },
             );
@@ -409,7 +303,10 @@ export async function handler(event: { body: GenerationEvent }) {
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
         if (!effectiveTriageResult) {
-          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — drafting about ${triage.featureTarget} features, about ${triage.arTarget} ARs each`, 1, {
+          const arText = typeof triage.arTarget === 'number'
+            ? `, about ${triage.arTarget} ARs each`
+            : ` with ${triage.arDepth} acceptance depth`;
+          await updateProgress(`Assessed as ${triage.shape} scope, ${triage.complexity} complexity — drafting about ${triage.featureTarget} features${arText}`, 1, {
             stage: 'triage',
             triage,
             sources: progressSources,
@@ -427,8 +324,6 @@ export async function handler(event: { body: GenerationEvent }) {
           stage: 'acceptance_requirements',
           triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
-          draftFeaturesProvisional: true,
-          consolidationPending: true,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, 0),
           arProgress: { completed: 0, total: draftFeatures.length },
           sources: progressSources,
@@ -439,8 +334,6 @@ export async function handler(event: { body: GenerationEvent }) {
           stage: 'acceptance_requirements',
           triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
-          draftFeaturesProvisional: true,
-          consolidationPending: true,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, completed),
           arProgress: { completed, total },
           sources: progressSources,
@@ -468,6 +361,7 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentIncluded: Boolean(attachmentText?.trim()),
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
+      sizingContract: buildTriagePayload(effectiveTriageResult),
       sizingAssessment: sizingAssessmentSnapshot,
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,

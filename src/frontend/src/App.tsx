@@ -144,6 +144,7 @@ function buildClarifyLoadingMeta(
   const basePayload: ClarifyProgressPayload | null = livePayload || clarifyContext
     ? {
         ...livePayload,
+        sizingContract: livePayload?.sizingContract ?? clarifyContext?.sizingContract,
         discoveryProfile: livePayload?.discoveryProfile ?? clarifyContext?.discoveryProfile,
         ambiguityAssessment: livePayload?.ambiguityAssessment ?? clarifyContext?.ambiguityAssessment,
         sources: livePayload?.sources ?? contextSources,
@@ -1198,6 +1199,7 @@ function LegacyApp({
         projectKey,
         projectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
+        clarifySizingContract: clarifyContext?.sizingContract ?? undefined,
       }) as any;
 
       if (res?.success) {

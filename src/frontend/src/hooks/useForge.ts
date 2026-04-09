@@ -26,6 +26,7 @@ export const api = {
     projectKey?: string;
     projectKeys?: string[];
     clarifyDiscoveryProfile?: unknown;
+    clarifySizingContract?: unknown;
   }) => invoke('startGeneration', payload),
 
   // Clarify (async queue)

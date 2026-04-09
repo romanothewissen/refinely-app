@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
+import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, EffectiveSizingContract } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -13,11 +13,9 @@ export interface GenerationProgress {
 
 export interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
-  triage?: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions?: number };
+  triage?: EffectiveSizingContract;
   arProgress?: { completed: number; total: number };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
-  draftFeaturesProvisional?: boolean;
-  consolidationPending?: boolean;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
   sources?: {
     projectKey: string;
@@ -77,8 +75,6 @@ function mergeGenerationPayload(
     triage: next.triage ?? previous.triage,
     arProgress: next.arProgress ?? previous.arProgress,
     draftFeatures: next.draftFeatures?.length ? next.draftFeatures : previous.draftFeatures,
-    draftFeaturesProvisional: next.draftFeaturesProvisional ?? previous.draftFeaturesProvisional,
-    consolidationPending: next.consolidationPending ?? previous.consolidationPending,
     featureProgress: next.featureProgress?.length ? next.featureProgress : previous.featureProgress,
     sources: mergeGenerationSources(previous.sources, next.sources),
   };
@@ -107,6 +103,7 @@ function mergeClarifyPayload(
   return {
     stage: next.stage ?? previous.stage,
     assessment: next.assessment ?? previous.assessment,
+    sizingContract: next.sizingContract ?? previous.sizingContract,
     discoveryProfile: next.discoveryProfile ?? previous.discoveryProfile,
     ambiguityAssessment: next.ambiguityAssessment ?? previous.ambiguityAssessment,
     sources: next.sources ?? previous.sources,

@@ -240,9 +240,9 @@ test('calibrateDiscoveryProfile preserves the llm question count while raising s
     repairedQuestionCount: 10,
   });
 
-  assert.equal(calibrated.scope, 'broad');
+  assert.equal(calibrated.scope, 'moderate');
   assert.equal(calibrated.complexity, 'medium');
-  assert.equal(calibrated.ambiguity, 'high');
+  assert.equal(calibrated.ambiguity, 'medium');
   assert.equal(calibrated.recommendedInitialCount, 10);
 });
 
@@ -274,9 +274,9 @@ test('calibrateDiscoveryProfile does not inflate implementation complexity solel
     repairedQuestionCount: 6,
   });
 
-  assert.equal(calibrated.scope, 'broad');
+  assert.equal(calibrated.scope, 'narrow');
   assert.equal(calibrated.complexity, 'medium');
-  assert.equal(calibrated.ambiguity, 'high');
+  assert.equal(calibrated.ambiguity, 'medium');
 });
 
 test('broad multi-input automation asks still infer unresolved discovery categories without synthesizing questions', () => {
@@ -295,8 +295,8 @@ test('broad multi-input automation asks still infer unresolved discovery categor
 
   assert.equal(repaired.failureReasonCode, 'invalid_empty_questions');
   assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
-  assert.ok(['moderate', 'broad', 'very_broad'].includes(repaired.discoveryProfile.scope));
-  assert.equal(repaired.discoveryProfile.ambiguity, 'high');
+  assert.equal(repaired.discoveryProfile.scope, 'moderate');
+  assert.equal(repaired.discoveryProfile.ambiguity, 'medium');
   assert.deepEqual(repaired.questions, []);
 });
 
@@ -665,7 +665,7 @@ test('sizing prompts calibrate consolidation around independently valuable scope
 
   assert.match(assessmentPrompt, /If the same guard rule applies to two closely related work item types, that does NOT automatically require separate features/i);
   assert.match(assessmentPrompt, /Supporting visibility, audit, notification, policy-definition, reason capture, and override behavior usually belong inside the parent feature/i);
-  assert.match(repairPrompt, /Prefer the smallest set of strong, independently valuable features/i);
+  assert.match(repairPrompt, /Prefer a well-scoped set of strong, independently valuable features/i);
   assert.match(repairPrompt, /Merge sibling features when they express the same core rule/i);
   assert.match(repairPrompt, /Preserve workflow splits only when they are explicitly supported by the requirement or clarifying answers/i);
   assert.match(repairPrompt, /Do not use domain expectations, generic best practices, or organizational heuristics as a reason to create or preserve separate features/i);
@@ -676,8 +676,8 @@ test('generation fallback is operational only when triage is unavailable', () =>
     min: 1,
     max: 1,
     target: 1,
-    shape: 'balanced',
-    complexity: 'medium',
+    shape: 'minimal',
+    complexity: 'low',
   });
   assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.arPlan, {
     min: 0,

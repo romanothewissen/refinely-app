@@ -18,6 +18,7 @@ import {
   TenantConfig,
   GenerationResult,
   GenerationSizingAssessment,
+  EffectiveSizingContract,
   SizingAssessmentArDepth,
   SizingAssessmentArchetype,
   SizingAssessmentConfidence,
@@ -133,6 +134,7 @@ interface ClarifyDiscoveryResult {
   tokenUsage: TokenUsageSummary;
   ambiguityAssessment: ClarifyAmbiguityAssessment;
   discoveryProfile: DiscoveryProfile;
+  sizingContract?: EffectiveSizingContract;
 }
 
 interface DiscoverySufficiencyEvaluation {
@@ -674,9 +676,9 @@ export interface TriageResult {
 
 export const DEFAULT_GENERATION_TRIAGE_FALLBACK: RequirementAssessment = {
   questionPlan: { min: 0, max: 0, target: 0, clarity: 'medium' },
-  featurePlan: { min: 1, max: 1, target: 1, shape: 'balanced', complexity: 'medium' },
+  featurePlan: { min: 1, max: 1, target: 1, shape: 'minimal', complexity: 'low' },
   arPlan: { min: 0, max: 0, target: 0, depth: 'standard' },
-  ambiguityScore: 3,
+  ambiguityScore: 2,
   ambiguityReasons: ['Triage could not be completed; using operational fallback metadata only.'],
 };
 
@@ -742,6 +744,16 @@ export function triageToAssessment(triage: TriageResult): { featurePlan: Feature
   return { featurePlan, arPlan, questionPlan };
 }
 
+export function triageToSizingContract(triage: TriageResult): EffectiveSizingContract {
+  return {
+    shape: triage.shape,
+    complexity: triage.complexity,
+    featureTarget: Math.max(1, triage.estimatedFeatures),
+    arDepth: triage.arDepth,
+    estimatedQuestions: Math.max(0, triage.estimatedQuestions),
+  };
+}
+
 export async function assessRequirementWithLlm(input: {
   requirement: string;
   clarifyAnswers?: ClarifyAnswer[];
@@ -795,11 +807,7 @@ export async function assessRequirementWithLlmWithUsage(input: {
       ...input.providerOpts,
     });
     return {
-      triage: applySmallAskTriageGuardrails({
-        requirement: input.requirement,
-        clarifyAnswers: input.clarifyAnswers,
-        triage: parseTriageResult(result.data),
-      }),
+      triage: parseTriageResult(result.data),
       usage: result.usage,
     };
   } catch {
@@ -1314,7 +1322,7 @@ export function capDiscoveryProfileFloorForSmallAsk(input: {
 function shouldAutoRepairOversizedAssessment(assessment: SizingAssessmentSnapshot): boolean {
   return assessment.verdict === 'oversized'
     && assessment.confidence === 'high'
-    && assessment.featureCount > 1;
+    && assessment.featureCount >= Math.max(assessment.preferredFeatureRange.max + 3, assessment.minimumPreservedFeatureCount + 2);
 }
 
 function buildGenerationSizingAssessment(input: {
@@ -1477,7 +1485,11 @@ async function repairOversizedFeatureSet(opts: {
 
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
-  const repairedFeatures = backfilled.features.map(normaliseFeature);
+  const repairedFeatures = backfilled.features.map((feature) => normaliseFeature(feature, {
+    requirement,
+    clarifyAnswers,
+    domainRoles: config.domainRoles,
+  }));
   const originalArCount = features.reduce((sum, feature) => sum + feature.acceptanceRequirements.length, 0);
   const repairedArCount = repairedFeatures.reduce((sum, feature) => sum + feature.acceptanceRequirements.length, 0);
   const improved = repairedFeatures.length < features.length || repairedArCount < originalArCount;
@@ -1836,7 +1848,7 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   config: TenantConfig;
   precomputedTriage?: TriageResult | null;
-  onTriageComplete?: (assessment: { shape: string; complexity: string; featureTarget: number; arDepth: string; arTarget?: number; estimatedQuestions: number }) => Promise<void>;
+  onTriageComplete?: (assessment: EffectiveSizingContract) => Promise<void>;
   onPass1Complete?: (draftFeatures: Feature[]) => Promise<void>;
   onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
   onSizingAssessment?: (assessment: GenerationSizingAssessment) => Promise<void>;
@@ -1884,16 +1896,25 @@ export async function generateFeatures(opts: {
   const assessment: RequirementAssessment = triageResult
     ? { ...DEFAULT_GENERATION_TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
     : DEFAULT_GENERATION_TRIAGE_FALLBACK;
+  const roleGrounding: RoleGroundingContext = {
+    requirement,
+    clarifyAnswers,
+    domainRoles: config.domainRoles,
+  };
 
   if (onTriageComplete) {
-    await onTriageComplete({
-      shape: assessment.featurePlan.shape,
-      complexity: assessment.featurePlan.complexity,
-      featureTarget: assessment.featurePlan.target,
-      arDepth: assessment.arPlan.depth,
-      arTarget: assessment.arPlan.target || undefined,
-      estimatedQuestions: assessment.questionPlan.target,
-    });
+    await onTriageComplete(
+      triageResult
+        ? triageToSizingContract(triageResult)
+        : {
+            shape: assessment.featurePlan.shape,
+            complexity: assessment.featurePlan.complexity,
+            featureTarget: assessment.featurePlan.target,
+            arDepth: assessment.arPlan.depth,
+            arTarget: assessment.arPlan.target || undefined,
+            estimatedQuestions: assessment.questionPlan.target,
+          },
+    );
   }
 
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
@@ -1929,7 +1950,7 @@ export async function generateFeatures(opts: {
   });
 
   const pass1Features = pass1Result.features;
-  const pass1DraftFeatures = pass1Features.map(normaliseFeature);
+  const pass1DraftFeatures = pass1Features.map((feature) => normaliseFeature(feature, roleGrounding));
   const decompositionSizingAssessment = assessSizingHeuristics({
     stage: 'decomposition',
     requirement,
@@ -2040,7 +2061,7 @@ export async function generateFeatures(opts: {
     if (onArProgress) await onArProgress(pass1Features.length, pass1Features.length, pass1Features.length - 1);
   }
 
-  let features = rawFeatures.map(normaliseFeature);
+  let features = rawFeatures.map((feature) => normaliseFeature(feature, roleGrounding));
   let finalSizingAssessment = assessSizingHeuristics({
     stage: 'final',
     requirement,
@@ -2137,8 +2158,12 @@ export async function generateClarifyingQuestions(opts: {
   similarStoriesText: string;
   config: TenantConfig;
   onTriageComplete?: (assessment: {
-    shape?: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
-    complexity?: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+    shape?: EffectiveSizingContract['shape'];
+    complexity?: EffectiveSizingContract['complexity'];
+    featureTarget?: number;
+    arDepth?: EffectiveSizingContract['arDepth'];
+    arTarget?: number;
+    estimatedQuestions?: number;
     clarity: 'clear' | 'medium' | 'vague';
     questionPlan: { min: number; max: number; target: number };
   }) => Promise<void>;
@@ -2154,10 +2179,10 @@ export async function generateClarifyingQuestions(opts: {
   const questionPlan = clarifyTriageResult
     ? triageToAssessment(clarifyTriageResult).questionPlan
     : undefined;
+  const sizingContract = clarifyTriageResult ? triageToSizingContract(clarifyTriageResult) : undefined;
   if (onTriageComplete) {
     await onTriageComplete({
-      shape: clarifyTriageResult?.shape,
-      complexity: clarifyTriageResult?.complexity,
+      ...(sizingContract ?? {}),
       clarity: questionPlan?.clarity ?? 'medium',
       questionPlan: {
         min: questionPlan?.min ?? 0,
@@ -2218,6 +2243,19 @@ export async function generateClarifyingQuestions(opts: {
   const normalizedProfileCandidate = normalizeDiscoveryProfile(
     parseDiscoveryProfileCandidate(raw.data),
     parsedQuestions.length || desiredQuestionCount,
+    sizingContract ? {
+      scope: sizingContract.shape === 'epic'
+        ? 'very_broad'
+        : sizingContract.shape === 'broad'
+          ? 'broad'
+          : sizingContract.shape === 'balanced'
+            ? 'moderate'
+            : 'narrow',
+      complexity: sizingContract.complexity === 'trivial' ? 'low' : sizingContract.complexity,
+      ambiguity: questionPlan?.clarity === 'vague' ? 'high' : questionPlan?.clarity === 'medium' ? 'medium' : 'low',
+      recommendedInitialCount: sizingContract.estimatedQuestions,
+      followupCap: 4,
+    } : undefined,
   );
   const normalizedProfile = {
     ...normalizedProfileCandidate,
@@ -2282,6 +2320,7 @@ export async function generateClarifyingQuestions(opts: {
 
   return {
     questions: filteredQuestions,
+    sizingContract,
     discoveryProfile,
     tokenUsage: {
       input: totalInputTokens,
@@ -2553,7 +2592,11 @@ export async function refineFeatures(opts: {
     ...buildLlmProviderOpts(config),
   });
 
-  const normalisedFeatures = (result.data.features ?? []).map(normaliseFeature);
+  const roleGrounding: RoleGroundingContext = {
+    requirement,
+    domainRoles: config.domainRoles,
+  };
+  const normalisedFeatures = (result.data.features ?? []).map((feature) => normaliseFeature(feature, roleGrounding));
   // Drop any feature the LLM returned with no acceptance requirements — these are
   // invalid shells left behind when the model incorrectly moves all ARs to split features.
   const validFeatures = normalisedFeatures.filter((f) => f.acceptanceRequirements.length > 0);
@@ -2615,6 +2658,10 @@ export async function refineSingleFeature(opts: {
 
   const rawFeatures = result.data.features ?? [];
   const effectiveRawFeatures = allowSplit ? rawFeatures : rawFeatures.slice(0, 1);
+  const roleGrounding: RoleGroundingContext = {
+    requirement,
+    domainRoles: config.domainRoles,
+  };
 
   if (!allowSplit && rawFeatures.length > 1) {
     console.warn(`refineSingleFeature: ignoring ${rawFeatures.length - 1} unexpected split feature(s)`);
@@ -2624,7 +2671,7 @@ export async function refineSingleFeature(opts: {
   // (preserving its id). Any additional features (e.g. when the user asks to split)
   // are returned as new features with fresh ids.
   const features: Feature[] = effectiveRawFeatures.map((raw, index) => {
-    const candidate = normaliseFeature(raw);
+    const candidate = normaliseFeature(raw, roleGrounding);
     if (index === 0) {
       // Preserve the original feature's id and fall back gracefully.
       const stableResult: Feature = {
@@ -2639,10 +2686,10 @@ export async function refineSingleFeature(opts: {
         storyPoints: candidate.storyPoints ?? feature.storyPoints,
         processCode: candidate.processCode ?? feature.processCode,
       };
-      return harmonizeFeatureRoleLanguage(stableResult);
+      return applyFeatureOutputGuardrails(stableResult, roleGrounding);
     }
     // Additional split features get fresh ids (already assigned by normaliseFeature).
-    return harmonizeFeatureRoleLanguage(candidate);
+    return applyFeatureOutputGuardrails(candidate, roleGrounding);
   });
 
   // If the LLM returned nothing, fall back to the original feature unchanged.
@@ -2783,15 +2830,242 @@ export async function askQuestion(opts: {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function normaliseFeature(raw: RawFeature): Feature {
+const NEUTRAL_FALLBACK_ROLE = 'authorized user';
+const ROLE_LABEL_HINTS = new Set([
+  ...GENERIC_ROLE_WORDS,
+  'admin',
+  'administrator',
+  'manager',
+  'owner',
+  'requester',
+  'reviewer',
+  'approver',
+  'dispatcher',
+  'planner',
+  'coordinator',
+  'lead',
+  'director',
+  'supervisor',
+  'customer',
+  'caller',
+  'sender',
+  'recipient',
+  'analyst',
+  'developer',
+]);
+
+interface RoleGroundingContext {
+  requirement?: string;
+  clarifyAnswers?: ClarifyAnswer[];
+  domainRoles?: string[];
+}
+
+function looksLikeRoleLabel(text: string): boolean {
+  const tokens = tokenizeRole(text);
+  if (!tokens.length) return false;
+  return tokens.some((token) => ROLE_LABEL_HINTS.has(token) || token.endsWith('users') || token.endsWith('user'));
+}
+
+function uniqueNonEmptyStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach((value) => {
+    const trimmed = String(value ?? '').trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(trimmed);
+  });
+  return result;
+}
+
+function collectExplicitActorLabels(input: RoleGroundingContext): string[] {
+  const values: string[] = [];
+  const sources = [
+    String(input.requirement ?? ''),
+    ...(input.clarifyAnswers ?? []).map((answer) => String(answer.answer ?? '')),
+  ];
+
+  for (const source of sources) {
+    if (!source.trim()) continue;
+
+    const storyMatch = source.match(/As an?\s+([^,.\n]{2,80}?)\s*,\s*I need to/i);
+    if (storyMatch?.[1] && looksLikeRoleLabel(storyMatch[1])) {
+      values.push(storyMatch[1].trim());
+    }
+
+    const rolePattern = /\b([A-Za-z][A-Za-z/& -]{1,60}?)\s+(?:must|can|cannot|can't|should|should not|need(?:s)? to|attempts? to|tries to)\b/gi;
+    let match: RegExpExecArray | null;
+    while ((match = rolePattern.exec(source)) !== null) {
+      const candidate = String(match[1] ?? '').trim();
+      if (!candidate || !looksLikeRoleLabel(candidate)) continue;
+      values.push(candidate);
+    }
+  }
+
+  return uniqueNonEmptyStrings(values);
+}
+
+function buildRoleEvidenceText(input: RoleGroundingContext): string {
+  return [
+    String(input.requirement ?? ''),
+    ...(input.clarifyAnswers ?? []).map((answer) => String(answer.answer ?? '')),
+  ].join('\n');
+}
+
+function scoreDomainRoleEvidence(role: string, evidenceText: string): number {
+  const normalizedEvidence = evidenceText.toLowerCase();
+  const normalizedRole = role.trim().toLowerCase();
+  if (!normalizedRole) return 0;
+  if (normalizedEvidence.includes(normalizedRole)) return 10 + tokenizeRole(role).length;
+
+  const roleTokens = tokenizeRole(role).filter((token) => token.length > 2);
+  const distinctiveTokens = roleTokens.filter((token) => !GENERIC_ROLE_WORDS.has(token));
+  if (!distinctiveTokens.length) return 0;
+
+  const evidenceTokens = new Set(tokenizeRole(evidenceText));
+  const matched = distinctiveTokens.filter((token) => evidenceTokens.has(token)).length;
+  if (matched !== distinctiveTokens.length) return 0;
+
+  return 6 + distinctiveTokens.length;
+}
+
+function resolveHighConfidenceDomainRole(input: RoleGroundingContext): string | null {
+  const roles = uniqueNonEmptyStrings(input.domainRoles ?? []);
+  if (!roles.length) return null;
+
+  const evidenceText = buildRoleEvidenceText(input);
+  if (!evidenceText.trim()) return null;
+
+  const scored = roles
+    .map((role) => ({ role, score: scoreDomainRoleEvidence(role, evidenceText) }))
+    .filter((item) => item.score >= 8)
+    .sort((left, right) => right.score - left.score);
+
+  if (!scored.length) return null;
+  if (scored.length > 1 && scored[0].score === scored[1].score) return null;
+  return scored[0].role;
+}
+
+function roleMatchesActorLabel(role: string, actorLabel: string): boolean {
+  const normalizedRole = role.trim().toLowerCase();
+  const normalizedActor = actorLabel.trim().toLowerCase();
+  if (!normalizedRole || !normalizedActor) return false;
+  if (normalizedRole === normalizedActor) return true;
+  return roleOverlapScore(normalizedRole, normalizedActor) >= 0.67;
+}
+
+function roleIsEvidenceBacked(role: string, input: RoleGroundingContext, explicitActors: string[]): boolean {
+  if (!role.trim()) return false;
+  if (role.trim().toLowerCase() === NEUTRAL_FALLBACK_ROLE) return true;
+  if (explicitActors.some((actor) => roleMatchesActorLabel(role, actor))) return true;
+
+  const evidenceText = buildRoleEvidenceText(input);
+  if (scoreDomainRoleEvidence(role, evidenceText) >= 8) return true;
+  return false;
+}
+
+function resolveEvidenceBackedRole(featureRole: string | null, input?: RoleGroundingContext): string {
+  if (!input) return featureRole?.trim() || NEUTRAL_FALLBACK_ROLE;
+
+  const explicitActors = collectExplicitActorLabels(input);
+  if (featureRole && roleIsEvidenceBacked(featureRole, input, explicitActors)) {
+    return featureRole.trim();
+  }
+
+  if (explicitActors.length) {
+    return explicitActors[0];
+  }
+
+  const domainRole = resolveHighConfidenceDomainRole(input);
+  if (domainRole) return domainRole;
+  return NEUTRAL_FALLBACK_ROLE;
+}
+
+function replaceFeatureRole(description: string, role: string): string {
+  const trimmedRole = role.trim();
+  if (!trimmedRole) return description;
+
+  if (/^As an?\s+.+?,\s*I need to\s+/i.test(description)) {
+    return description.replace(/^As an?\s+(.+?)(,\s*I need to\s+)/i, `As ${articleForRole(trimmedRole)} ${trimmedRole}$2`);
+  }
+
+  return `As ${articleForRole(trimmedRole)} ${trimmedRole}, I need to ${description.trim()} so that the requested outcome is achieved.`;
+}
+
+function trimVerboseSegment(value: string, maxWords: number): string {
+  let trimmed = sanitizeArClause(value)
+    .replace(/\bfor example\b[\s\S]*$/i, '')
+    .replace(/\bsuch as\b[\s\S]*$/i, '')
+    .replace(/\bincluding\b[\s\S]*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const sentenceBreak = trimmed.search(/[.;!?]\s/);
+  if (sentenceBreak >= 0) {
+    trimmed = trimmed.slice(0, sentenceBreak).trim();
+  }
+
+  const clauseMarkers = [', so that ', ' so that ', ' which ', ' allowing ', ' in order to ', ', with ', ' while '];
+  for (const marker of clauseMarkers) {
+    if (trimmed.split(/\s+/).length <= maxWords) break;
+    const markerIndex = trimmed.toLowerCase().indexOf(marker);
+    if (markerIndex > 0) {
+      trimmed = trimmed.slice(0, markerIndex).trim();
+    }
+  }
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length > maxWords) {
+    trimmed = words.slice(0, maxWords).join(' ');
+  }
+
+  return trimmed.replace(/[,:;.\s]+$/g, '').trim();
+}
+
+function normalizeFeatureDescriptionVerbosity(description: string): string {
+  const match = description.match(/^As an?\s+(.+?),\s*I need to\s+(.+?)\s+so that\s+(.+)$/i);
+  if (!match) return sanitizeArClause(description);
+
+  const role = sanitizeArClause(match[1]);
+  const action = trimVerboseSegment(match[2], 18);
+  const benefit = trimVerboseSegment(match[3], 16);
+  if (!role || !action || !benefit) return sanitizeArClause(description);
+
+  return `As ${articleForRole(role)} ${role}, I need to ${action} so that ${benefit}.`;
+}
+
+function normalizeAcceptanceRequirementVerbosity(ar: AcceptanceRequirement): AcceptanceRequirement {
+  return {
+    given: trimVerboseSegment(ar.given, 22),
+    when: trimVerboseSegment(ar.when, 22),
+    then: trimVerboseSegment(ar.then, 18),
+  };
+}
+
+export function applyFeatureOutputGuardrails(
+  feature: Feature,
+  roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
+): Feature {
+  const resolvedRole = resolveEvidenceBackedRole(extractRoleFromDescription(feature.description), roleGrounding);
+  const description = normalizeFeatureDescriptionVerbosity(replaceFeatureRole(feature.description, resolvedRole));
   return harmonizeFeatureRoleLanguage({
+    ...feature,
+    description,
+    acceptanceRequirements: (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity),
+  });
+}
+
+function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext): Feature {
+  return applyFeatureOutputGuardrails({
     id: uuidv4(),
     summary: raw.summary ?? 'Untitled feature',
     description: raw.description ?? '',
     acceptanceRequirements: normaliseArs(getRawAcceptanceArray(raw)),
     storyPoints: raw.suggested_story_points,
     processCode: raw.process_code,
-  });
+  }, roleGrounding);
 }
 
 function buildLlmProviderOpts(config: TenantConfig) {

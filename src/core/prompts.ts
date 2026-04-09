@@ -82,8 +82,8 @@ export function buildDecompositionSystemPrompt(opts: {
   };
 }): string {
   const roleList = opts.domainRoles.length
-    ? `Roles in this domain: ${opts.domainRoles.join(', ')}.`
-    : 'Infer appropriate business roles from the requirement context.';
+    ? `Configured roles in this domain: ${opts.domainRoles.join(', ')}. Reuse one only when it is directly supported by the requirement or answered Q&A.`
+    : 'If the requirement or answered Q&A does not name a clear human actor, use "authorized user" instead of inventing a domain persona.';
 
   const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? processTaxonomyBlock(opts.processTaxonomy)
@@ -184,9 +184,11 @@ Each dimension helps you test whether a distinct, deliverable capability exists.
 RULES:
 - A feature must represent independent business value, not just a supporting mechanism, side effect, analysis step, or operational convenience.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
-- Use business roles appropriate to the domain (from the list above if provided)
+- Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
+- Keep the description concise. It should stay as one short user-story sentence, not a policy paragraph or mini-specification.
+- Keep workflow rules, exceptions, timing, feedback, and enforcement details out of the description unless they are essential to state the core action or benefit. Put that detail into acceptance requirements instead.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
 - Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
@@ -269,6 +271,8 @@ RULES:
 - Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
 - If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
 - When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
+- Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
+- Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
@@ -344,6 +348,7 @@ CONSOLIDATION RULES:
 QUALITY RULES:
 - Return the COMPLETE final feature set
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Every feature MUST include complete acceptance_requirements with standalone GIVEN/WHEN/THEN triples
 - No solution language, no system names, no implementation detail
 ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy above\n' : ''}
@@ -733,6 +738,7 @@ FEATURE RULES:
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms
 - Let the feedback determine the scope of change. If the user asks for a tone or audience shift like "less technical" or "more business-friendly", rewrite the affected descriptions and ARs accordingly.
+- Resolve the role label from evidence in this order: original requirement actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Requirement-stated actors outrank domain context and reference stories. If the requirement uses labels like "standard users" and "admins", preserve those labels unless the feedback explicitly asks to rename them.
 ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
 ACCEPTANCE REQUIREMENT RULES:
@@ -800,6 +806,7 @@ CHANGE RULES:
 
 QUALITY RULES:
 - Feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Resolve the role label from evidence in this order: original requirement actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
 - Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.

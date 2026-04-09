@@ -292,7 +292,8 @@ export function ClarifyQuestionsView({
               {questions.length > 0 && (() => {
                 const profile = contextMeta?.discoveryProfile;
                 const qPlan = contextMeta?.ambiguityAssessment?.questionPlan;
-                const complexityKey = profile?.complexity;
+                const sizingContract = contextMeta?.sizingContract;
+                const complexityKey = sizingContract?.complexity ?? profile?.complexity;
                 const ci = complexityKey ? (DISCOVERY_COMPLEXITY_MAP[complexityKey] ?? 2) : 2;
 
                 return (
@@ -339,10 +340,10 @@ export function ClarifyQuestionsView({
                             <div className="text-[12px] font-bold text-[var(--rf-text)]">{AMBIGUITY_LABELS[profile.ambiguity] ?? profile.ambiguity}</div>
                           </div>
                         )}
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
-                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{typeof qPlan?.target === 'number' && qPlan.target !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> planned {qPlan.target}</span> : ''}</div>
-                        </div>
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
+                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{typeof (sizingContract?.estimatedQuestions ?? qPlan?.target) === 'number' && (sizingContract?.estimatedQuestions ?? qPlan?.target) !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> planned {sizingContract?.estimatedQuestions ?? qPlan?.target}</span> : ''}</div>
+                          </div>
                       </div>
                     )}
                   </motion.div>

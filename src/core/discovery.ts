@@ -1061,30 +1061,6 @@ function categoryCoverageKeys(profile: DiscoveryProfile, input?: {
   return uniqueCategoryKeys([...profile.missingCategoryKeys, ...inferred]);
 }
 
-function raiseScope(
-  current: DiscoveryProfile['scope'],
-  minimum: DiscoveryProfile['scope'],
-): DiscoveryProfile['scope'] {
-  const rank: DiscoveryProfile['scope'][] = ['narrow', 'moderate', 'broad', 'very_broad'];
-  return rank[Math.max(rank.indexOf(current), rank.indexOf(minimum))] ?? current;
-}
-
-function raiseComplexity(
-  current: DiscoveryProfile['complexity'],
-  minimum: DiscoveryProfile['complexity'],
-): DiscoveryProfile['complexity'] {
-  const rank: DiscoveryProfile['complexity'][] = ['low', 'medium', 'high', 'very_high'];
-  return rank[Math.max(rank.indexOf(current), rank.indexOf(minimum))] ?? current;
-}
-
-function raiseAmbiguity(
-  current: DiscoveryProfile['ambiguity'],
-  minimum: DiscoveryProfile['ambiguity'],
-): DiscoveryProfile['ambiguity'] {
-  const rank: DiscoveryProfile['ambiguity'][] = ['low', 'medium', 'high'];
-  return rank[Math.max(rank.indexOf(current), rank.indexOf(minimum))] ?? current;
-}
-
 export function calibrateDiscoveryProfile(
   profile: DiscoveryProfile,
   opts: {
@@ -1094,55 +1070,29 @@ export function calibrateDiscoveryProfile(
   } = {},
 ): DiscoveryProfile {
   const requiredCategoryKeys = uniqueCategoryKeys(opts.requiredCategoryKeys ?? profile.missingCategoryKeys);
-  const breadth = requiredCategoryKeys.length;
   const repairedQuestionCount = Math.max(0, opts.repairedQuestionCount ?? profile.recommendedInitialCount);
-  const repairApplied = Boolean(opts.repairApplied);
-
-  let scope = profile.scope;
-  let complexity = profile.complexity;
-  let ambiguity = profile.ambiguity;
-  let recommendedInitialCount = profile.recommendedInitialCount;
-
-  if (breadth >= 4) {
-    scope = raiseScope(scope, 'moderate');
-    ambiguity = raiseAmbiguity(ambiguity, 'high');
-  }
-
-  if (breadth >= 6) {
-    scope = raiseScope(scope, 'broad');
-    ambiguity = raiseAmbiguity(ambiguity, 'high');
-  }
-
-  if (repairApplied) {
-    scope = raiseScope(scope, breadth >= 5 ? 'broad' : 'moderate');
-    ambiguity = raiseAmbiguity(ambiguity, 'high');
-  }
-
-  if (repairedQuestionCount > 0) {
-    recommendedInitialCount = repairedQuestionCount;
-  }
 
   return {
     ...profile,
-    scope,
-    complexity,
-    ambiguity,
     missingCategoryKeys: requiredCategoryKeys,
-    recommendedInitialCount: Math.max(0, Math.round(recommendedInitialCount)),
+    recommendedInitialCount: Math.max(0, Math.round(repairedQuestionCount)),
   };
 }
 
 export function normalizeDiscoveryProfile(
   candidate?: Partial<DiscoveryProfile> | null,
   fallbackQuestionCount = 8,
+  fallbackProfile?: Partial<DiscoveryProfile>,
 ): DiscoveryProfile {
-  const scope = cleanText(candidate?.scope).toLowerCase();
-  const complexity = cleanText(candidate?.complexity).toLowerCase();
-  const ambiguity = cleanText(candidate?.ambiguity).toLowerCase();
+  const scope = cleanText(candidate?.scope ?? fallbackProfile?.scope).toLowerCase();
+  const complexity = cleanText(candidate?.complexity ?? fallbackProfile?.complexity).toLowerCase();
+  const ambiguity = cleanText(candidate?.ambiguity ?? fallbackProfile?.ambiguity).toLowerCase();
   const recommendedInitialCount = Math.max(
     0,
     Number.isFinite(candidate?.recommendedInitialCount)
       ? Number(candidate?.recommendedInitialCount)
+      : Number.isFinite(fallbackProfile?.recommendedInitialCount)
+        ? Number(fallbackProfile?.recommendedInitialCount)
       : fallbackQuestionCount,
   );
   const rawMissing = Array.isArray((candidate as { missingCategoryKeys?: unknown[] } | null | undefined)?.missingCategoryKeys)
@@ -1152,10 +1102,10 @@ export function normalizeDiscoveryProfile(
   return {
     scope: scope === 'narrow' || scope === 'moderate' || scope === 'broad' || scope === 'very_broad'
       ? scope
-      : 'moderate',
+      : 'narrow',
     complexity: complexity === 'low' || complexity === 'medium' || complexity === 'high' || complexity === 'very_high'
       ? complexity
-      : 'medium',
+      : 'low',
     ambiguity: ambiguity === 'low' || ambiguity === 'medium' || ambiguity === 'high'
       ? ambiguity
       : 'medium',
@@ -1165,7 +1115,16 @@ export function normalizeDiscoveryProfile(
         .filter((value): value is ClarifyCategoryKey => Boolean(value)),
     ),
     recommendedInitialCount: Math.round(recommendedInitialCount),
-    followupCap: Math.max(0, Math.round(Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4)),
+    followupCap: Math.max(
+      0,
+      Math.round(
+        Number.isFinite(candidate?.followupCap)
+          ? Number(candidate?.followupCap)
+          : Number.isFinite(fallbackProfile?.followupCap)
+            ? Number(fallbackProfile?.followupCap)
+            : 4,
+      ),
+    ),
   };
 }
 
