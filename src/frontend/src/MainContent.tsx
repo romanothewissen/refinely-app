@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2, Settings } from 'lucide-react';
+import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2, Settings, RefreshCcw, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { utils as XLSXUtils, write } from 'xlsx';
 import { api } from './hooks/useForge';
@@ -55,10 +55,11 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 type GenerationProgressMeta = {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
-  arProgress?: { completed: number; total: number };
+  arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   draftFeatureCount?: number;
-  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
+  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
+  failedFeatureIds?: string[];
   sizingAssessment?: unknown;
   stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; total?: number };
   reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
@@ -623,7 +624,11 @@ function GeneratingPipeline({
           </div>
           <div className="mt-2 flex items-center justify-between">
             <span className="text-[12px] text-[var(--rf-text-tertiary)]">
-              {arProgress?.total ? `${arProgress.completed} of ${arProgress.total} ARs written` : normalizeDisplayText(GENERATION_STEPS[stageIndex]?.label ?? 'Starting...')}
+              {arProgress?.total
+                ? arProgress.phase === 'backfill'
+                  ? `${arProgress.completed} of ${arProgress.total} features complete, retrying incomplete ARs`
+                  : `${arProgress.completed} of ${arProgress.total} features complete`
+                : normalizeDisplayText(GENERATION_STEPS[stageIndex]?.label ?? 'Starting...')}
             </span>
             <span className="text-[12px] font-bold text-[var(--rf-brand)]">{pct}%</span>
           </div>
@@ -669,14 +674,22 @@ function GeneratingPipeline({
                 <div key={f.id} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 flex items-center gap-2.5 backdrop-blur-sm">
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
                     status === 'active' ? 'bg-[var(--rf-brand)] animate-pulse'
+                    : status === 'retrying' ? 'bg-[var(--rf-warning)] animate-pulse'
+                    : status === 'failed' ? 'bg-[var(--rf-danger)]'
                     : status === 'complete' ? 'bg-[var(--rf-success)]'
                     : 'bg-[var(--rf-border-strong)]'
                   }`} />
                   <span className="text-[13px] font-medium text-[var(--rf-text)] truncate flex-1">{f.summary}</span>
                   {status === 'complete' && <CheckCircle2 className="w-3.5 h-3.5 text-[var(--rf-success)] shrink-0" />}
+                  {status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-danger)] shrink-0" />}
                   {status === 'active' && (
                     <div className="w-10 h-1 bg-[rgba(0,0,0,0.05)] rounded-full overflow-hidden shrink-0">
                       <div className="h-full w-3/5 bg-[var(--rf-brand)] animate-pulse rounded-full" />
+                    </div>
+                  )}
+                  {status === 'retrying' && (
+                    <div className="w-10 h-1 bg-[rgba(0,0,0,0.05)] rounded-full overflow-hidden shrink-0">
+                      <div className="h-full w-3/5 bg-[var(--rf-warning)] animate-pulse rounded-full" />
                     </div>
                   )}
                 </div>
@@ -810,6 +823,8 @@ interface Feature {
   acceptanceRequirements: AcceptanceRequirement[];
   storyPoints?: number;
   processCode?: string;
+  arGenerationStatus?: 'failed' | 'retrying';
+  arGenerationError?: string;
   isAccepted?: boolean;
   pendingRefinement?: Feature;
   pendingRemoval?: boolean;
@@ -980,6 +995,7 @@ interface MainContentProps {
   isAdmin?: boolean;
   onOpenSettings?: () => void;
   onDraftReviewDecision?: (decision: 'keep' | 'consolidate') => void;
+  onRetryFailedFeature?: (featureId: string) => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -987,7 +1003,7 @@ export function MainContent({
   features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  isAdmin, onOpenSettings, onDraftReviewDecision
+  isAdmin, onOpenSettings, onDraftReviewDecision, onRetryFailedFeature
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1583,6 +1599,8 @@ export function MainContent({
             {features.map((feature, idx) => {
               const isEditing = editingIdx === idx;
               const draft = editDraft;
+              const featureNeedsArRetry = feature.arGenerationStatus === 'failed';
+              const featureRetrying = feature.arGenerationStatus === 'retrying';
 
               return (
                 <motion.div
@@ -1590,6 +1608,8 @@ export function MainContent({
                   className={`group overflow-hidden rounded-[20px] border ${
                     feature.pendingRemoval
                       ? 'opacity-80 border-[var(--rf-danger-subtle)] bg-white'
+                      : featureNeedsArRetry
+                        ? 'border-[rgba(179,94,48,0.28)] bg-white'
                       : feature.pendingAddition
                         ? 'border-[rgba(46,125,86,0.30)] bg-white'
                         : feature.isAccepted
@@ -1602,6 +1622,8 @@ export function MainContent({
                   style={{
                     boxShadow: feature.pendingAddition || feature.isAccepted
                       ? '0 6px 28px -4px rgba(46,125,86,0.18), 0 2px 8px -2px rgba(46,125,86,0.10)'
+                      : featureNeedsArRetry
+                        ? '0 6px 24px -6px rgba(160,81,30,0.18)'
                       : feature.pendingRemoval
                         ? '0 4px 20px -4px rgba(155,53,69,0.14)'
                         : '0 4px 24px -4px rgba(43,89,74,0.13), 0 1px 6px -1px rgba(43,89,74,0.07)'
@@ -1613,6 +1635,8 @@ export function MainContent({
                     <div className={`h-1.5 sm:h-auto sm:w-1.5 shrink-0 ${
                       feature.pendingRemoval
                         ? 'bg-[var(--rf-danger)]'
+                        : featureNeedsArRetry
+                          ? 'bg-[var(--rf-warning)]'
                         : feature.pendingAddition || feature.isAccepted
                           ? 'bg-[var(--rf-success)]'
                           : 'bg-[var(--rf-brand)]'
@@ -1634,6 +1658,11 @@ export function MainContent({
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
                             <div className="shrink-0 flex items-center gap-2 pt-0.5">
+                              {featureNeedsArRetry && (
+                                <span className="inline-flex items-center gap-1 rounded-lg px-2 py-1 bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)] text-[11px] font-bold tracking-wide border border-[rgba(160,81,30,0.12)]">
+                                  <AlertTriangle className="w-3 h-3" /> AR Retry Needed
+                                </span>
+                              )}
                               <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-white/60 text-[var(--rf-text-secondary)] text-[12px] font-semibold tracking-widest border border-[var(--rf-border)]">
                                 {feature.acceptanceRequirements?.length || 0} ARs
                               </span>
@@ -1652,6 +1681,17 @@ export function MainContent({
                             <>
                               <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-text-tertiary)] hover:bg-white/70 hover:text-[var(--rf-text)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
                               <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
+                              {featureNeedsArRetry ? (
+                                <motion.button
+                                  onClick={() => onRetryFailedFeature?.(feature.id)}
+                                  disabled={featureRetrying}
+                                  className="px-3 py-1.5 text-[13px] font-semibold rounded-xl transition border flex items-center gap-1.5 text-[var(--rf-warning)] bg-[var(--rf-warning-subtle)] border-[rgba(160,81,30,0.12)] disabled:opacity-60"
+                                  whileTap={{ scale: 0.97 }}
+                                >
+                                  <RefreshCcw className={`w-3.5 h-3.5 ${featureRetrying ? 'animate-spin' : ''}`} />
+                                  {featureRetrying ? 'Retrying…' : 'Retry ARs'}
+                                </motion.button>
+                              ) : (
                               <motion.button onClick={() => toggleAccepted(idx)} className={`px-3 py-1.5 text-[13px] font-semibold rounded-xl transition border flex items-center gap-1.5 ${
                                 feature.isAccepted
                                   ? 'text-[var(--rf-success)] bg-[var(--rf-success-subtle)] border-[var(--rf-success-subtle)]'
@@ -1659,6 +1699,7 @@ export function MainContent({
                               }`} whileTap={{ scale: 0.97 }}>
                                 <Check className="w-3.5 h-3.5" /> {feature.isAccepted ? 'Accepted' : 'Accept'}
                               </motion.button>
+                              )}
                               <motion.button onClick={() => requestFeatureRemoval(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-danger)] hover:bg-[var(--rf-danger-subtle)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Trash2 className="w-3.5 h-3.5" /> Delete</motion.button>
                               {feature.jiraIssueKey ? (
                                 <div className="flex items-center gap-1">
@@ -1685,8 +1726,8 @@ export function MainContent({
                               ) : (
                                 <motion.button
                                   onClick={() => onPushFeature(idx)}
-                                  disabled={!feature.isAccepted}
-                                  title={!feature.isAccepted ? "Accept feature first to push to Jira" : ""}
+                                  disabled={!feature.isAccepted || featureNeedsArRetry}
+                                  title={featureNeedsArRetry ? 'Retry AR generation before pushing to Jira' : !feature.isAccepted ? "Accept feature first to push to Jira" : ""}
                                   className="px-3 py-1.5 text-[13px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:bg-[var(--rf-border-strong)] disabled:text-[var(--rf-text-tertiary)] rounded-lg transition flex items-center gap-1.5 shadow-sm shadow-[var(--rf-brand)]/20"
                                   whileTap={{ scale: 0.97 }}
                                 >
@@ -1719,6 +1760,27 @@ export function MainContent({
                              <motion.button onClick={() => rejectRefinement(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
                              <motion.button onClick={() => acceptRefinement(idx)} className="px-4 py-2 text-xs font-bold text-white bg-[var(--rf-success)] hover:bg-[var(--rf-success)] rounded-lg shadow-sm shadow-[var(--rf-success)]/20" whileTap={{ scale: 0.97 }}>Accept Addition</motion.button>
                            </div>
+                        </div>
+                      )}
+
+                      {featureNeedsArRetry && (
+                        <div className="mb-4 p-4 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(160,81,30,0.12)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="flex items-start gap-2 text-[var(--rf-warning)] font-bold text-sm">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                            <div>
+                              <div>Acceptance requirements need retry</div>
+                              <div className="mt-1 text-[12px] font-medium text-[var(--rf-text-secondary)]">{feature.arGenerationError || 'This feature stayed incomplete after automatic retries.'}</div>
+                            </div>
+                          </div>
+                          <motion.button
+                            onClick={() => onRetryFailedFeature?.(feature.id)}
+                            disabled={featureRetrying}
+                            className="px-4 py-2 text-xs font-bold text-white bg-[var(--rf-warning)] hover:brightness-[0.98] rounded-lg shadow-sm disabled:opacity-60 flex items-center gap-2"
+                            whileTap={{ scale: 0.97 }}
+                          >
+                            <RefreshCcw className={`w-3.5 h-3.5 ${featureRetrying ? 'animate-spin' : ''}`} />
+                            {featureRetrying ? 'Retrying…' : 'Retry This Feature'}
+                          </motion.button>
                         </div>
                       )}
 

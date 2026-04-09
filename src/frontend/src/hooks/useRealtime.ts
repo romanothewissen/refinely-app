@@ -14,10 +14,11 @@ export interface GenerationProgress {
 export interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
-  arProgress?: { completed: number; total: number };
+  arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   draftFeatureCount?: number;
-  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
+  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
+  failedFeatureIds?: string[];
   sizingAssessment?: unknown;
   stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; total?: number };
   reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
@@ -83,6 +84,7 @@ function mergeGenerationPayload(
     draftFeatures: next.draftFeatures?.length ? next.draftFeatures : previous.draftFeatures,
     draftFeatureCount: next.draftFeatureCount ?? previous.draftFeatureCount,
     featureProgress: next.featureProgress?.length ? next.featureProgress : previous.featureProgress,
+    failedFeatureIds: next.failedFeatureIds ?? previous.failedFeatureIds,
     sizingAssessment: next.sizingAssessment ?? previous.sizingAssessment,
     stageDurationsMs: next.stageDurationsMs ?? previous.stageDurationsMs,
     reviewDecision: next.reviewDecision ?? previous.reviewDecision,

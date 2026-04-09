@@ -5,6 +5,7 @@ import { isCompleteAcceptanceRequirement } from '../ar-validation';
 import { buildSingleFeatureRefineSystemPrompt } from '../prompts';
 import {
   AcceptanceRequirementsGenerationError,
+  annotateFailedAcceptanceRequirementFeatures,
   applyFeatureOutputGuardrails,
   applySmallAskTriageGuardrails,
   assessSizingHeuristics,
@@ -123,6 +124,40 @@ test('AcceptanceRequirementsGenerationError preserves failing draft metadata', (
   assert.equal(error.name, 'AcceptanceRequirementsGenerationError');
   assert.deepEqual(error.failedFeatureIndexes, [0]);
   assert.equal(error.draftFeatures[0]?.id, 'feature-1');
+});
+
+test('annotateFailedAcceptanceRequirementFeatures marks only failed features for retry', () => {
+  const features = [
+    makeFeature('Keep complete feature', 2),
+    makeFeature('Retry incomplete feature', 0),
+  ] as Array<{
+    id: string;
+    summary: string;
+    description: string;
+    acceptanceRequirements: Array<{ given: string; when: string; then: string }>;
+    arGenerationStatus?: 'failed' | 'retrying';
+    arGenerationError?: string;
+  }>;
+
+  const annotated = annotateFailedAcceptanceRequirementFeatures(features, new Set([features[1].id])) as typeof features;
+
+  assert.equal(annotated[0].arGenerationStatus, undefined);
+  assert.equal(annotated[0].arGenerationError, undefined);
+  assert.equal(annotated[1].arGenerationStatus, 'failed');
+  assert.match(annotated[1].arGenerationError ?? '', /retry this feature/i);
+});
+
+test('annotateFailedAcceptanceRequirementFeatures clears stale retry flags from recovered features', () => {
+  const feature = {
+    ...makeFeature('Recovered feature', 2),
+    arGenerationStatus: 'retrying' as const,
+    arGenerationError: 'Old retry error',
+  };
+
+  const annotated = annotateFailedAcceptanceRequirementFeatures(feature, new Set()) as typeof feature;
+
+  assert.equal(annotated.arGenerationStatus, undefined);
+  assert.equal(annotated.arGenerationError, undefined);
 });
 
 test('feedbackRequestsStructuralRefinement keeps stylistic bulk feedback in per-feature mode', () => {

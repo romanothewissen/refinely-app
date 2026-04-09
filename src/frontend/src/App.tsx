@@ -28,6 +28,8 @@ export interface Feature {
   acceptanceRequirements: Array<{ given: string; when: string; then: string }>;
   storyPoints?: number;
   processCode?: string;
+  arGenerationStatus?: 'failed' | 'retrying';
+  arGenerationError?: string;
   markdown?: string;
   title?: string;
   isAccepted?: boolean;
@@ -706,7 +708,9 @@ function LegacyApp({
         setFeatures(payload.features);
       }
       setGenerationContext(payload.generationContext ?? null);
+      setGenerationError(null);
       setGenerationProgressMeta(null);
+      setGenerationWarning(payload.generationContext?.partialSuccessMessage ?? null);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
       setIsWorking(false);
@@ -1264,6 +1268,45 @@ function LegacyApp({
     }
   };
 
+  const retryFailedFeatureGeneration = async (featureId: string) => {
+    const sid = sessionIdRef.current;
+    setIsWorking(true);
+    setWorkflowRunId(prev => prev + 1);
+    setGenerationError(null);
+    setGenerationWarning(null);
+    setPendingClarifySessionId(null);
+    setWorkflowStage('generation');
+
+    setFeatures((prev) => prev.map((feature) => (
+      feature.id === featureId
+        ? {
+            ...feature,
+            arGenerationStatus: 'retrying',
+            arGenerationError: undefined,
+          }
+        : feature
+    )));
+
+    try {
+      setPendingSessionId(sid);
+      const res = await api.retryFailedFeatureGeneration({
+        sessionId: sid,
+        featureId,
+      }) as any;
+      if (!res?.success) {
+        setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
+        setPendingSessionId(null);
+        setIsWorking(false);
+        setWorkflowStage('blocked');
+      }
+    } catch (err: any) {
+      setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
+      setPendingSessionId(null);
+      setIsWorking(false);
+      setWorkflowStage('blocked');
+    }
+  };
+
   const handleCreateJiraFeature = async (formData: any) => {
     if (formData && formData.key && activePushFeatureIdx !== null) {
       const updatedFeatures = [...features];
@@ -1586,6 +1629,7 @@ function LegacyApp({
                   isAdmin={isAdmin}
                   onOpenSettings={openSettings}
                   onDraftReviewDecision={resumeGenerationFromDraftReview}
+                  onRetryFailedFeature={retryFailedFeatureGeneration}
                   onWorkflowTokenUsage={(usageDelta) => {
                     setWorkflowTokenUsage(prev => {
                       const base = prev || { input: 0, output: 0, total: 0 };

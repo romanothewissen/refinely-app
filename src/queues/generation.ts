@@ -12,6 +12,7 @@ import { TriageResult, triageToSizingContract } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
+  ArGenerationProgressSnapshot,
   assessRequirementWithLlm,
   GenerationCancelledError,
   generateFeatures,
@@ -57,10 +58,10 @@ interface RealtimeEvent {
 interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
-  arProgress?: { completed: number; total: number };
+  arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
   draftFeatureCount?: number;
-  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'complete' }>;
+  featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
   sizingAssessment?: GenerationSizingAssessment | GenerationSizingAssessment['decomposition'];
   stageDurationsMs?: GenerationStageDurationsMs;
@@ -145,15 +146,23 @@ function buildTriagePayload(triageResult: Awaited<ReturnType<typeof assessRequir
 
 function buildFeatureProgressState(
   draftFeatures: Array<Pick<Feature, 'id'>>,
-  completed: number,
-): Array<{ id: string; status: 'pending' | 'active' | 'complete' }> {
-  return draftFeatures.map((feature, index) => ({
+  snapshot: Pick<ArGenerationProgressSnapshot, 'completedFeatureIds' | 'activeFeatureIds' | 'backfillFeatureIds' | 'failedFeatureIds'>,
+): Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }> {
+  const completedIds = new Set(snapshot.completedFeatureIds);
+  const activeIds = new Set(snapshot.activeFeatureIds);
+  const retryingIds = new Set(snapshot.backfillFeatureIds);
+  const failedIds = new Set(snapshot.failedFeatureIds);
+  return draftFeatures.map((feature) => ({
     id: feature.id,
-    status: index < completed
+    status: completedIds.has(feature.id)
       ? 'complete'
-      : index === completed
-        ? 'active'
-        : 'pending',
+      : retryingIds.has(feature.id)
+        ? 'retrying'
+        : activeIds.has(feature.id)
+          ? 'active'
+          : failedIds.has(feature.id)
+            ? 'failed'
+            : 'pending',
   }));
 }
 
@@ -173,6 +182,9 @@ export async function handler(event: { body: GenerationEvent }) {
     reviewedDraftDecision,
     reviewedTriageSizingContract,
     priorStageDurationsMs,
+    retryFeatureId,
+    retryFeature,
+    retryBaseFeatures,
   } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
@@ -316,11 +328,21 @@ export async function handler(event: { body: GenerationEvent }) {
     progressSourcesSnapshot = progressSources;
 
     // Progress: pass 1
-    await updateProgress(reviewedDraftFeatures?.length ? 'Resuming generation from reviewed draft features…' : 'Planning feature structure from gathered context…', 1, {
-      stage: reviewedDraftFeatures?.length ? 'draft_review' : 'decomposition',
-      triage: buildTriagePayload(effectiveTriageResult),
-      sources: progressSources,
-    });
+    await updateProgress(
+      retryFeatureId
+        ? 'Retrying acceptance requirements for the selected feature…'
+        : reviewedDraftFeatures?.length
+          ? 'Resuming generation from reviewed draft features…'
+          : 'Planning feature structure from gathered context…',
+      1,
+      {
+        stage: retryFeatureId
+          ? 'acceptance_requirements'
+          : reviewedDraftFeatures?.length ? 'draft_review' : 'decomposition',
+        triage: buildTriagePayload(effectiveTriageResult),
+        sources: progressSources,
+      },
+    );
 
     let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> = [];
 
@@ -332,8 +354,9 @@ export async function handler(event: { body: GenerationEvent }) {
       wiContextText: wiContext.text,
       config,
       precomputedTriage: effectiveTriageResult,
-      precomputedDraftFeatures: reviewedDraftFeatures,
-      draftReviewDecision: reviewedDraftDecision,
+      precomputedDraftFeatures: retryFeature ? [retryFeature] : reviewedDraftFeatures,
+      draftReviewDecision: retryFeatureId ? 'keep' : reviewedDraftDecision,
+      allowPartialArFailure: Boolean(retryFeatureId && retryBaseFeatures?.length),
       priorStageDurationsMs,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onTriageComplete: async (triage) => {
@@ -391,20 +414,33 @@ export async function handler(event: { body: GenerationEvent }) {
           triage: triageContract,
           draftFeatures: liveDraftFeatures,
           draftFeatureCount: draftFeatures.length,
-          featureProgress: buildFeatureProgressState(liveDraftFeatures, 0),
-          arProgress: { completed: 0, total: draftFeatures.length },
+          featureProgress: buildFeatureProgressState(liveDraftFeatures, {
+            completedFeatureIds: [],
+            activeFeatureIds: draftFeatures.map((feature) => feature.id),
+            backfillFeatureIds: [],
+            failedFeatureIds: [],
+          }),
+          arProgress: { completed: 0, total: draftFeatures.length, phase: 'initial' },
           stageDurationsMs,
           sources: progressSources,
         });
       },
-      onArProgress: async (completed, total) => {
-        await updateProgress(`Writing acceptance requirements: ${completed}/${total} features…`, 2, {
+      onArProgress: async (snapshot) => {
+        const completed = snapshot.completedFeatureIds.length;
+        const retrying = snapshot.backfillFeatureIds.length;
+        const failed = snapshot.failedFeatureIds.length;
+        const total = snapshot.total;
+        const message = snapshot.phase === 'backfill'
+          ? `Retrying incomplete acceptance requirements: ${completed}/${total} features complete${retrying ? `, ${retrying} retrying` : ''}${failed ? `, ${failed} still incomplete` : ''}…`
+          : `Writing acceptance requirements: ${completed}/${total} features complete${snapshot.activeFeatureIds.length ? `, ${snapshot.activeFeatureIds.length} in progress` : ''}…`;
+        await updateProgress(message, 2, {
           stage: 'acceptance_requirements',
           triage: buildTriagePayload(effectiveTriageResult),
           draftFeatures: liveDraftFeatures,
           draftFeatureCount: liveDraftFeatures.length,
-          featureProgress: buildFeatureProgressState(liveDraftFeatures, completed),
-          arProgress: { completed, total },
+          featureProgress: buildFeatureProgressState(liveDraftFeatures, snapshot),
+          arProgress: { completed, total, phase: snapshot.phase },
+          failedFeatureIds: snapshot.failedFeatureIds,
           sources: progressSources,
         });
       },
@@ -415,6 +451,26 @@ export async function handler(event: { body: GenerationEvent }) {
 
     result.similarStories = similarStories;
     result.sessionId = sessionId;
+    if (retryFeatureId && retryBaseFeatures?.length) {
+      const replacementFeature = result.features[0] ?? retryFeature;
+      const mergedFeatures = retryBaseFeatures.map((feature) => (
+        feature.id === retryFeatureId
+          ? replacementFeature
+          : feature
+      ));
+      result.features = mergedFeatures;
+      const failedFeatureIds = mergedFeatures
+        .filter((feature) => feature.arGenerationStatus === 'failed')
+        .map((feature) => feature.id);
+      result.generationContext = {
+        ...(result.generationContext ?? { projectKey: resolvePrimaryProjectKey(projectKey, projectKeys), domainRolesUsed: config.domainRoles ?? [] }),
+        failedFeatureIds,
+        partialSuccess: failedFeatureIds.length > 0,
+        partialSuccessMessage: failedFeatureIds.length > 0
+          ? `Acceptance requirements could not be completed for ${failedFeatureIds.length} feature${failedFeatureIds.length === 1 ? '' : 's'}. Retry the highlighted feature${failedFeatureIds.length === 1 ? '' : 's'} from the canvas.`
+          : undefined,
+      };
+    }
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
@@ -435,6 +491,9 @@ export async function handler(event: { body: GenerationEvent }) {
       pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
       draftReviewTriggered: Boolean(reviewedDraftDecision || false),
       draftReviewDecision: reviewedDraftDecision,
+      failedFeatureIds: result.generationContext?.failedFeatureIds ?? [],
+      partialSuccess: result.generationContext?.partialSuccess,
+      partialSuccessMessage: result.generationContext?.partialSuccessMessage,
       stageDurationsMs: result.generationContext?.stageDurationsMs ?? priorStageDurationsMs,
       tokenUsage: result.tokenUsage,
       wiDocsCount: wiContext.docs.length,
@@ -460,6 +519,13 @@ export async function handler(event: { body: GenerationEvent }) {
       config.generatorConfig.arModel,
       generationContext,
       result.tokenUsage,
+      {
+        clarifyAnswers: maskedAnswers.answers,
+        attachmentText: maskedAttachment.text,
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        projectKeys: selectedProjectKeys,
+        sizingContract: generationContext.sizingContract,
+      },
     );
 
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
@@ -640,6 +706,13 @@ async function saveConversationTurn(
   model: string,
   generationContext?: GenerationContextMeta,
   tokenUsage?: TokenUsageSummary,
+  retryContext?: {
+    clarifyAnswers: ClarifyAnswer[];
+    attachmentText: string;
+    projectKey: string;
+    projectKeys: string[];
+    sizingContract?: EffectiveSizingContract;
+  },
 ) {
   try {
     const key = KEYS.userConversations(accountId, sessionId);
@@ -651,6 +724,7 @@ async function saveConversationTurn(
       similarStories,
       generationContext,
       tokenUsage,
+      retryContext,
       model,
       timestamp: new Date().toISOString(),
     });

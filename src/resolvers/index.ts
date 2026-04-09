@@ -573,6 +573,57 @@ resolver.define('resumeGeneration', async ({ payload, context }) => {
   return { success: true, sessionId: payload.sessionId, warning: check.reason };
 });
 
+resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const convKey = KEYS.userConversations(accountId, payload.sessionId);
+  const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(convKey);
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const latestGenerateTurn = [...turns].reverse().find((turn) => Array.isArray(turn?.features) && turn.features.length > 0);
+  const retryContext = latestGenerateTurn?.retryContext;
+  const retryBaseFeatures = Array.isArray(latestGenerateTurn?.features) ? latestGenerateTurn.features as Feature[] : [];
+  const retryFeature = retryBaseFeatures.find((feature) => feature?.id === payload?.featureId);
+
+  if (!latestGenerateTurn || !retryFeature) {
+    return { success: false, error: 'No retryable generated feature was found for this session.' };
+  }
+
+  const config = await getConfig();
+  const check = await checkGenerationAllowed(config, context);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
+    projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
+    projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
+  });
+
+  const event: GenerationEvent = {
+    sessionId: payload.sessionId,
+    accountId,
+    requirement: latestGenerateTurn.requirement ?? '',
+    clarifyAnswers: retryContext?.clarifyAnswers ?? [],
+    attachmentText: retryContext?.attachmentText ?? '',
+    config,
+    license: context?.license,
+    goldExamples: '',
+    wiContext: '',
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: authorizedProjects.projectKeys,
+    clarifySizingContract: retryContext?.sizingContract,
+    retryFeatureId: retryFeature.id,
+    retryFeature,
+    retryBaseFeatures,
+  };
+
+  await entitySet(KEYS.generationProgress(payload.sessionId), {
+    type: 'progress',
+    sessionId: payload.sessionId,
+    message: 'Retrying acceptance requirements for the selected feature…',
+    updatedAt: Date.now(),
+  });
+
+  const generationQueue = new Queue({ key: 'generation-queue' });
+  await generationQueue.push({ body: event });
+  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+});
+
 async function cancelWorkflowProgress(
   sessionId: string,
   type: 'generation' | 'clarify' | 'refine',

@@ -274,6 +274,8 @@ export interface Feature {
   acceptanceRequirements: AcceptanceRequirement[];
   storyPoints?: number;
   processCode?: string;          // only if taxonomy enabled
+  arGenerationStatus?: 'failed' | 'retrying';
+  arGenerationError?: string;
   jiraIssueKey?: string;
   jiraIssueUrl?: string;
 }
@@ -477,6 +479,9 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   pass1DraftFeatureCount?: number;
   draftReviewTriggered?: boolean;
   draftReviewDecision?: 'keep' | 'consolidate';
+  failedFeatureIds?: string[];
+  partialSuccess?: boolean;
+  partialSuccessMessage?: string;
   stageDurationsMs?: GenerationStageDurationsMs;
   tokenUsage?: TokenUsageSummary;
 }
@@ -760,6 +765,9 @@ export interface GenerationEvent {
   reviewedDraftDecision?: 'keep' | 'consolidate';
   reviewedTriageSizingContract?: EffectiveSizingContract;
   priorStageDurationsMs?: GenerationStageDurationsMs;
+  retryFeatureId?: string;
+  retryFeature?: Feature;
+  retryBaseFeatures?: Feature[];
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

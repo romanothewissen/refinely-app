@@ -60,6 +60,7 @@ import {
 // ─── Types from LLM response ──────────────────────────────────────────────────
 
 interface RawFeature {
+  id?: string;
   summary?: string;
   description?: string;
   /** Snake_case (preferred in prompts) */
@@ -182,6 +183,17 @@ export class Pass1DraftReviewRequiredError extends Error {
     this.stageDurationsMs = stageDurationsMs;
   }
 }
+
+export interface ArGenerationProgressSnapshot {
+  total: number;
+  completedFeatureIds: string[];
+  activeFeatureIds: string[];
+  backfillFeatureIds: string[];
+  failedFeatureIds: string[];
+  phase: 'initial' | 'backfill';
+}
+
+const INCOMPLETE_AR_RETRY_MESSAGE = 'Acceptance requirements could not be completed automatically. Retry this feature to finish its ARs.';
 
 function trimForPrompt(text: string, maxChars: number): string {
   const trimmed = String(text ?? '').trim();
@@ -554,6 +566,33 @@ async function generateAcceptanceRequirementsForFeature(input: {
   return { feature: input.feature, usage };
 }
 
+function listCompleteFeatureIds(features: RawFeature[]): string[] {
+  return features
+    .filter((feature) => rawFeatureHasCompleteAcceptanceRequirements(feature))
+    .map((feature) => feature.id)
+    .filter((featureId): featureId is string => Boolean(featureId));
+}
+
+export function annotateFailedAcceptanceRequirementFeatures(features: Feature, failedIds: Set<string>): Feature;
+export function annotateFailedAcceptanceRequirementFeatures(features: Feature[], failedIds: Set<string>): Feature[];
+export function annotateFailedAcceptanceRequirementFeatures(features: Feature | Feature[], failedIds: Set<string>): Feature | Feature[] {
+  const applyToFeature = (feature: Feature): Feature => {
+    if (failedIds.has(feature.id)) {
+      return {
+        ...feature,
+        arGenerationStatus: 'failed',
+        arGenerationError: INCOMPLETE_AR_RETRY_MESSAGE,
+      };
+    }
+    const { arGenerationStatus: _status, arGenerationError: _error, ...rest } = feature;
+    return rest;
+  };
+
+  return Array.isArray(features)
+    ? features.map((feature) => applyToFeature(feature))
+    : applyToFeature(features);
+}
+
 async function runParallelArPass(input: {
   features: RawFeature[];
   requirement: string;
@@ -577,7 +616,7 @@ async function runParallelArPass(input: {
     modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
     piiMaskingEnabled?: boolean;
   };
-  onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
+  onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
 }): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
   const systemPrompt = buildArSystemPrompt({
     domainContext: input.domainContext,
@@ -608,9 +647,25 @@ async function runParallelArPass(input: {
     }),
   }));
 
+  const total = tasks.length;
+  const completedFeatureIds = new Set<string>();
+  const activeFeatureIds = new Set(tasks.map((task) => task.feature.id).filter((featureId): featureId is string => Boolean(featureId)));
+  const failedFeatureIds = new Set<string>();
+
+  if (input.onArProgress) {
+    await input.onArProgress({
+      total,
+      completedFeatureIds: [],
+      activeFeatureIds: [...activeFeatureIds],
+      backfillFeatureIds: [],
+      failedFeatureIds: [],
+      phase: 'initial',
+    });
+  }
+
   // Run all features in parallel — no artificial concurrency cap
   const allResults = await Promise.allSettled(
-    tasks.map(async (task, i) => {
+    tasks.map(async (task) => {
       const result = await generateAcceptanceRequirementsForFeature({
         feature: task.feature,
         systemPrompt,
@@ -619,7 +674,28 @@ async function runParallelArPass(input: {
         maxTokens,
         providerOpts: input.providerOpts,
       });
-      if (input.onArProgress) await input.onArProgress(i + 1, tasks.length, i);
+      const featureId = task.feature.id;
+      if (featureId) {
+        activeFeatureIds.delete(featureId);
+      }
+      if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
+        if (featureId) {
+          completedFeatureIds.add(featureId);
+          failedFeatureIds.delete(featureId);
+        }
+      } else if (featureId) {
+        failedFeatureIds.add(featureId);
+      }
+      if (input.onArProgress) {
+        await input.onArProgress({
+          total,
+          completedFeatureIds: [...completedFeatureIds],
+          activeFeatureIds: [...activeFeatureIds],
+          backfillFeatureIds: [],
+          failedFeatureIds: [...failedFeatureIds],
+          phase: 'initial',
+        });
+      }
       return result;
     }),
   );
@@ -661,6 +737,7 @@ async function backfillMissingAcceptanceRequirements(input: {
     modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
     piiMaskingEnabled?: boolean;
   };
+  onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
 }): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
   const missingIndexes = input.features
     .map((feature, index) => ({ feature, index }))
@@ -679,6 +756,22 @@ async function backfillMissingAcceptanceRequirements(input: {
   });
   const model = getTierModel(input.generatorConfig.arModel, input.tier);
   const nextFeatures = [...input.features];
+  const total = input.features.length;
+  const completedFeatureIds = new Set(listCompleteFeatureIds(input.features));
+  const retryingFeatureIds = new Set(missingIndexes.map(({ feature }) => feature.id).filter((featureId): featureId is string => Boolean(featureId)));
+  const failedFeatureIds = new Set<string>();
+
+  if (input.onArProgress) {
+    retryingFeatureIds.forEach((featureId) => completedFeatureIds.delete(featureId));
+    await input.onArProgress({
+      total,
+      completedFeatureIds: [...completedFeatureIds],
+      activeFeatureIds: [],
+      backfillFeatureIds: [...retryingFeatureIds],
+      failedFeatureIds: [],
+      phase: 'backfill',
+    });
+  }
 
   const backfillResults = await Promise.allSettled(
     missingIndexes.map(({ feature, index }) =>
@@ -704,7 +797,31 @@ async function backfillMissingAcceptanceRequirements(input: {
         model,
         maxTokens: 3072,
         providerOpts: input.providerOpts,
-      }).then(result => ({ result, index })),
+      }).then(async (result) => {
+        const featureId = feature.id;
+        if (featureId) {
+          retryingFeatureIds.delete(featureId);
+        }
+        if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
+          if (featureId) {
+            completedFeatureIds.add(featureId);
+            failedFeatureIds.delete(featureId);
+          }
+        } else if (featureId) {
+          failedFeatureIds.add(featureId);
+        }
+        if (input.onArProgress) {
+          await input.onArProgress({
+            total,
+            completedFeatureIds: [...completedFeatureIds],
+            activeFeatureIds: [],
+            backfillFeatureIds: [...retryingFeatureIds],
+            failedFeatureIds: [...failedFeatureIds],
+            phase: 'backfill',
+          });
+        }
+        return { result, index };
+      }),
     ),
   );
 
@@ -1427,6 +1544,7 @@ export function shouldPauseForDraftReview(input: {
 
 function toRawFeature(feature: Feature): RawFeature {
   return {
+    id: feature.id,
     summary: feature.summary,
     description: feature.description,
     acceptance_requirements: feature.acceptanceRequirements.map((ar) => `GIVEN ${ar.given} WHEN ${ar.when} THEN ${ar.then}`),
@@ -2052,10 +2170,11 @@ export async function generateFeatures(opts: {
   precomputedTriage?: TriageResult | null;
   precomputedDraftFeatures?: Feature[];
   draftReviewDecision?: 'keep' | 'consolidate';
+  allowPartialArFailure?: boolean;
   priorStageDurationsMs?: GenerationStageDurationsMs;
   onTriageComplete?: (assessment: EffectiveSizingContract) => Promise<void>;
   onPass1Complete?: (draftFeatures: Feature[], sizingAssessment: SizingAssessmentSnapshot, triage: EffectiveSizingContract, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
-  onArProgress?: (completed: number, total: number, completedFeatureIndex?: number) => Promise<void>;
+  onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
   onSizingAssessment?: (assessment: GenerationSizingAssessment) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
@@ -2069,6 +2188,7 @@ export async function generateFeatures(opts: {
     precomputedTriage,
     precomputedDraftFeatures,
     draftReviewDecision,
+    allowPartialArFailure,
     priorStageDurationsMs,
     onTriageComplete,
     onPass1Complete,
@@ -2171,8 +2291,8 @@ export async function generateFeatures(opts: {
     });
     pass1ResultUsage = pass1Result.usage;
     stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
-    pass1Features = pass1Result.features;
-    pass1DraftFeatures = pass1Features.map((feature) => normaliseFeature(feature, roleGrounding));
+    pass1DraftFeatures = pass1Result.features.map((feature) => normaliseFeature(feature, roleGrounding));
+    pass1Features = pass1DraftFeatures.map(toRawFeature);
   }
   const decompositionSizingAssessment = assessSizingHeuristics({
     stage: 'decomposition',
@@ -2261,17 +2381,46 @@ export async function generateFeatures(opts: {
       generatorConfig,
       tier: config.tier,
       providerOpts,
+      onArProgress,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
     stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
     rawFeatures = backfillResult.features;
+    const targetedRetryStartedAt = Date.now();
+    const targetedRetryResult = await backfillMissingAcceptanceRequirements({
+      features: rawFeatures,
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      domainContext: config.domainContext,
+      arPlan: assessment.arPlan,
+      generatorConfig,
+      tier: config.tier,
+      providerOpts,
+      onArProgress,
+    });
+    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
+    rawFeatures = targetedRetryResult.features;
     pass2Usage = {
-      input: parallelResult.usage.input + backfillResult.usage.input,
-      output: parallelResult.usage.output + backfillResult.usage.output,
+      input: parallelResult.usage.input + backfillResult.usage.input + targetedRetryResult.usage.input,
+      output: parallelResult.usage.output + backfillResult.usage.output + targetedRetryResult.usage.output,
     };
   } else {
     // Monolithic path: single LLM call for all features (used for 1-feature results)
-    if (onArProgress) await onArProgress(0, pass1Features.length, 0);
+    const singleFeatureId = pass1Features[0]?.id;
+    if (onArProgress && singleFeatureId) {
+      await onArProgress({
+        total: pass1Features.length,
+        completedFeatureIds: [],
+        activeFeatureIds: [singleFeatureId],
+        backfillFeatureIds: [],
+        failedFeatureIds: [],
+        phase: 'initial',
+      });
+    }
     const pass2System = buildArSystemPrompt({
       domainContext: config.domainContext,
       arPlan: assessment.arPlan,
@@ -2318,14 +2467,47 @@ export async function generateFeatures(opts: {
       generatorConfig,
       tier: config.tier,
       providerOpts,
+      onArProgress,
     });
     stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
     rawFeatures = backfillResult.features;
+    const targetedRetryStartedAt = Date.now();
+    const targetedRetryResult = await backfillMissingAcceptanceRequirements({
+      features: rawFeatures,
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      wiContextText,
+      similarStoriesText,
+      domainContext: config.domainContext,
+      arPlan: assessment.arPlan,
+      generatorConfig,
+      tier: config.tier,
+      providerOpts,
+      onArProgress,
+    });
+    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
+    rawFeatures = targetedRetryResult.features;
     pass2Usage = {
-      input: pass2Result.usage.input + backfillResult.usage.input,
-      output: pass2Result.usage.output + backfillResult.usage.output,
+      input: pass2Result.usage.input + backfillResult.usage.input + targetedRetryResult.usage.input,
+      output: pass2Result.usage.output + backfillResult.usage.output + targetedRetryResult.usage.output,
     };
-    if (onArProgress) await onArProgress(pass1Features.length, pass1Features.length, pass1Features.length - 1);
+    const completedSingleFeatureIds = listCompleteFeatureIds(rawFeatures);
+    if (onArProgress) {
+      await onArProgress({
+        total: pass1Features.length,
+        completedFeatureIds: completedSingleFeatureIds,
+        activeFeatureIds: [],
+        backfillFeatureIds: [],
+        failedFeatureIds: pass1Features
+          .map((feature) => feature.id)
+          .filter((featureId): featureId is string => {
+            if (!featureId) return false;
+            return !completedSingleFeatureIds.includes(featureId);
+          }),
+        phase: 'initial',
+      });
+    }
   }
 
   let features = rawFeatures.map((feature) => normaliseFeature(feature, roleGrounding));
@@ -2341,9 +2523,15 @@ export async function generateFeatures(opts: {
   let repairUsage = { input: 0, output: 0 };
   let preRepairFeatureCount: number | undefined;
   let preRepairAcceptanceRequirementCount: number | undefined;
+  const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
+  const failedFeatureIds = new Set(
+    failedFeatureIndexes
+      .map((index) => features[index]?.id)
+      .filter((id): id is string => Boolean(id)),
+  );
 
   const allowAutoRepair = draftReviewDecision !== 'keep';
-  if (allowAutoRepair && shouldAutoRepairOversizedAssessment(finalSizingAssessment)) {
+  if (failedFeatureIndexes.length === 0 && allowAutoRepair && shouldAutoRepairOversizedAssessment(finalSizingAssessment)) {
     const repairStartedAt = Date.now();
     preRepairFeatureCount = finalSizingAssessment.featureCount;
     preRepairAcceptanceRequirementCount = finalSizingAssessment.acceptanceRequirementCount;
@@ -2373,14 +2561,17 @@ export async function generateFeatures(opts: {
     });
   }
 
-  const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   if (failedFeatureIndexes.length > 0) {
     const failedCount = failedFeatureIndexes.length;
-    throw new AcceptanceRequirementsGenerationError(
-      `Acceptance requirements could not be completed for ${failedCount} feature${failedCount === 1 ? '' : 's'}. Retry generation to finish the missing acceptance requirements.`,
-      features,
-      failedFeatureIndexes,
-    );
+    const successfulCount = features.length - failedCount;
+    if (successfulCount === 0 && !allowPartialArFailure) {
+      throw new AcceptanceRequirementsGenerationError(
+        `Acceptance requirements could not be completed for ${failedCount} feature${failedCount === 1 ? '' : 's'}. Retry generation to finish the missing acceptance requirements.`,
+        features,
+        failedFeatureIndexes,
+      );
+    }
+    features = annotateFailedAcceptanceRequirementFeatures(features, failedFeatureIds) as Feature[];
   }
   const violations = validateFeatures(features, config);
 
@@ -2419,6 +2610,11 @@ export async function generateFeatures(opts: {
     generationContext: {
       projectKey: '',
       domainRolesUsed: [],
+      failedFeatureIds: [...failedFeatureIds],
+      partialSuccess: failedFeatureIds.size > 0,
+      partialSuccessMessage: failedFeatureIds.size > 0
+        ? `Acceptance requirements could not be completed for ${failedFeatureIds.size} feature${failedFeatureIds.size === 1 ? '' : 's'}. Retry the highlighted feature${failedFeatureIds.size === 1 ? '' : 's'} from the canvas.`
+        : undefined,
       stageDurationsMs,
     },
     tokenUsage,

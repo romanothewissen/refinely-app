@@ -32,6 +32,10 @@ export const api = {
     sessionId: string;
     decision: 'keep' | 'consolidate';
   }) => invoke('resumeGeneration', payload),
+  retryFailedFeatureGeneration: (payload: {
+    sessionId: string;
+    featureId: string;
+  }) => invoke('retryFailedFeatureGeneration', payload),
 
   // Clarify (async queue)
   startClarify: (
