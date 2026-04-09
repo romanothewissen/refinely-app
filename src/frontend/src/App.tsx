@@ -738,8 +738,15 @@ function LegacyApp({
   );
 
   useEffect(() => {
-    setGenerationProgressMeta(liveGenerationPayload ?? null);
-  }, [liveGenerationPayload]);
+    if (liveGenerationPayload) {
+      setGenerationProgressMeta(liveGenerationPayload);
+      return;
+    }
+
+    if (workflowStage !== 'generation_review') {
+      setGenerationProgressMeta(null);
+    }
+  }, [liveGenerationPayload, workflowStage]);
 
   useEffect(() => {
     let cancelled = false;
