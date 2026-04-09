@@ -4,7 +4,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { utils as XLSXUtils, write } from 'xlsx';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyProgressPayload, EffectiveSizingContract, GenerationContextMeta } from './types';
+import type {
+  AiChangeActionType,
+  ClarifyContextMeta,
+  ClarifyProgressPayload,
+  EffectiveSizingContract,
+  GenerationContextMeta,
+  RestructureScope,
+  StructuralFeatureProposal,
+  StructuralRestructureProposal,
+  UndoableAiChange,
+} from './types';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
 import {
@@ -829,6 +839,8 @@ interface Feature {
   pendingRefinement?: Feature;
   pendingRemoval?: boolean;
   pendingAddition?: boolean;
+  pendingChangeSource?: 'refine' | 'restructure';
+  pendingChangeScope?: 'single' | 'all' | 'selected';
   jiraIssueKey?: string;
   jiraIssueUrl?: string;
 }
@@ -935,6 +947,8 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingRefinement: undefined,
         pendingAddition: false,
         pendingRemoval: true,
+        pendingChangeSource: 'refine',
+        pendingChangeScope: 'all',
       };
     }
 
@@ -944,6 +958,8 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingRefinement: undefined,
         pendingRemoval: false,
         pendingAddition: true,
+        pendingChangeSource: 'refine',
+        pendingChangeScope: 'all',
       };
     }
 
@@ -953,6 +969,8 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingRefinement: undefined,
         pendingAddition: false,
         pendingRemoval: false,
+        pendingChangeSource: undefined,
+        pendingChangeScope: undefined,
       };
     }
 
@@ -960,20 +978,158 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
       ...row.original,
       pendingAddition: false,
       pendingRemoval: false,
+      pendingChangeSource: 'refine',
+      pendingChangeScope: 'all',
       pendingRefinement: {
         ...row.proposed,
         id: row.original.id,
         pendingAddition: false,
         pendingRemoval: false,
         pendingRefinement: undefined,
+        pendingChangeSource: undefined,
+        pendingChangeScope: undefined,
       },
     };
   });
 }
 
+function cloneFeatureArray(features: Feature[]): Feature[] {
+  return JSON.parse(JSON.stringify(features));
+}
+
+function buildUndoableAiChange(
+  previousFeatures: Feature[],
+  actionType: AiChangeActionType,
+  scope: 'single' | 'all' | 'selected',
+  affectedFeatureIds: string[],
+): UndoableAiChange {
+  const label = actionType === 'restructure'
+    ? scope === 'selected'
+      ? 'Undo restructure of selected features'
+      : 'Undo restructure'
+    : actionType === 'refine_all'
+      ? 'Undo refine all'
+      : 'Undo refine';
+
+  return {
+    actionType,
+    scope,
+    label,
+    timestamp: new Date().toISOString(),
+    affectedFeatureIds,
+    previousFeatures: cloneFeatureArray(previousFeatures),
+  };
+}
+
+function annotateStructuralProposalResults(
+  original: Feature[],
+  proposal: StructuralRestructureProposal,
+): Feature[] {
+  const proposalsByPrimary = new Map<string, StructuralFeatureProposal[]>();
+  const removedFeatureIds = new Set(proposal.removedFeatureIds);
+  const coveredFeatureIds = new Set<string>();
+  const detachedAdditions: Feature[] = [];
+
+  proposal.proposedFeatures.forEach((feature) => {
+    feature.sourceFeatureIds.forEach((id) => coveredFeatureIds.add(id));
+    const primarySourceId = feature.primarySourceFeatureId || feature.sourceFeatureIds[0];
+    if (primarySourceId) {
+      const bucket = proposalsByPrimary.get(primarySourceId) ?? [];
+      bucket.push(feature);
+      proposalsByPrimary.set(primarySourceId, bucket);
+    } else {
+      detachedAdditions.push({
+        ...feature,
+        pendingAddition: true,
+        pendingChangeSource: 'restructure',
+        pendingChangeScope: proposal.scope,
+      });
+    }
+  });
+
+  const next: Feature[] = [];
+
+  original.forEach((feature) => {
+    const anchored = proposalsByPrimary.get(feature.id) ?? [];
+    if (anchored.length > 0) {
+      const [first, ...rest] = anchored;
+      proposalsByPrimary.delete(feature.id);
+      if (featuresEquivalent(feature, first) && first.sourceFeatureIds.length === 1 && first.sourceFeatureIds[0] === feature.id) {
+        next.push({
+          ...feature,
+          pendingRefinement: undefined,
+          pendingAddition: false,
+          pendingRemoval: false,
+          pendingChangeSource: undefined,
+          pendingChangeScope: undefined,
+        });
+      } else {
+        next.push({
+          ...feature,
+          pendingAddition: false,
+          pendingRemoval: false,
+          pendingChangeSource: 'restructure',
+          pendingChangeScope: proposal.scope,
+          pendingRefinement: {
+            ...first,
+            id: feature.id,
+            pendingAddition: false,
+            pendingRemoval: false,
+            pendingRefinement: undefined,
+            pendingChangeSource: undefined,
+            pendingChangeScope: undefined,
+          },
+        });
+      }
+      rest.forEach((addition) => {
+        next.push({
+          ...addition,
+          pendingAddition: true,
+          pendingRemoval: false,
+          pendingRefinement: undefined,
+          pendingChangeSource: 'restructure',
+          pendingChangeScope: proposal.scope,
+        });
+      });
+      return;
+    }
+
+    if (removedFeatureIds.has(feature.id) || coveredFeatureIds.has(feature.id)) {
+      next.push({
+        ...feature,
+        pendingRefinement: undefined,
+        pendingAddition: false,
+        pendingRemoval: true,
+        pendingChangeSource: 'restructure',
+        pendingChangeScope: proposal.scope,
+      });
+      return;
+    }
+
+    next.push(feature);
+  });
+
+  proposalsByPrimary.forEach((bucket) => {
+    bucket.forEach((addition) => {
+      next.push({
+        ...addition,
+        pendingAddition: true,
+        pendingRemoval: false,
+        pendingRefinement: undefined,
+        pendingChangeSource: 'restructure',
+        pendingChangeScope: proposal.scope,
+      });
+    });
+  });
+
+  next.push(...detachedAdditions);
+  return next;
+}
+
 interface MainContentProps {
   features: Feature[];
   setFeatures: React.Dispatch<React.SetStateAction<Feature[]>>;
+  onSetLastAiChange?: (change: UndoableAiChange | null) => void;
   onPushFeature: (index: number) => void;
   isGenerating: boolean;
   progress?: string;
@@ -996,14 +1152,16 @@ interface MainContentProps {
   onOpenSettings?: () => void;
   onDraftReviewDecision?: (decision: 'keep' | 'consolidate') => void;
   onRetryFailedFeature?: (featureId: string) => void;
+  onUndoLastAiChange?: () => void;
+  undoActionLabel?: string | null;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function MainContent({
-  features, setFeatures, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
+  features, setFeatures, onSetLastAiChange, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  isAdmin, onOpenSettings, onDraftReviewDecision, onRetryFailedFeature
+  isAdmin, onOpenSettings, onDraftReviewDecision, onRetryFailedFeature, onUndoLastAiChange, undoActionLabel
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1035,6 +1193,40 @@ export function MainContent({
   const [bulkRefineProgress, setBulkRefineProgress] = useState('');
   const bulkRefinePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bulkRefineStartedAtRef = useRef<number>(0);
+  const [showRestructure, setShowRestructure] = useState(false);
+  const [restructureInput, setRestructureInput] = useState('');
+  const [restructureScope, setRestructureScope] = useState<RestructureScope>('all');
+  const [isRestructuring, setIsRestructuring] = useState(false);
+  const [restructureProgress, setRestructureProgress] = useState('');
+  const restructurePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const restructureStartedAtRef = useRef<number>(0);
+  const [selectedFeatureIds, setSelectedFeatureIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelectedFeatureIds((previous) => {
+      const next = new Set<string>();
+      const currentIds = new Set(features.map((feature) => feature.id));
+      previous.forEach((id) => {
+        if (currentIds.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [features]);
+
+  const persistConversationFeatures = React.useCallback((
+    nextFeatures: Feature[],
+    options?: { lastAiChange?: UndoableAiChange | null; clearLastAiChange?: boolean },
+  ) => {
+    const payload: { lastAiChange?: UndoableAiChange; clearLastAiChange?: boolean } = {};
+    if (options?.lastAiChange) {
+      payload.lastAiChange = options.lastAiChange;
+      onSetLastAiChange?.(options.lastAiChange);
+    } else if (options?.clearLastAiChange) {
+      payload.clearLastAiChange = true;
+      onSetLastAiChange?.(null);
+    }
+    api.updateConversationFeatures(sessionId, nextFeatures, payload);
+  }, [onSetLastAiChange, sessionId]);
 
   const exportFeaturesToExcel = () => {
     if (!features.length) return;
@@ -1164,7 +1356,7 @@ export function MainContent({
       setFeatures(prev => {
         const n = [...prev];
         n[editingIdx] = editDraft;
-        api.updateConversationFeatures(sessionId, n);
+        persistConversationFeatures(n, { clearLastAiChange: true });
         return n;
       });
     }
@@ -1188,13 +1380,27 @@ export function MainContent({
   // ── Refinement helpers ───────────────────────────────────────────────────
   const acceptRefinement = (idx: number) => {
     if (features[idx]?.pendingRemoval) {
-      removeFeatureAt(idx);
+      shiftIndexedUiStateAfterRemoval(idx);
+      setFeatures(prev => {
+        const next = prev.filter((_, featureIndex) => featureIndex !== idx);
+        persistConversationFeatures(next, {
+          lastAiChange: buildUndoableAiChange(
+            prev,
+            features[idx]?.pendingChangeSource === 'restructure' ? 'restructure' : 'refine_single',
+            features[idx]?.pendingChangeScope ?? 'single',
+            [features[idx]?.id].filter(Boolean) as string[],
+          ),
+        });
+        return next;
+      });
       return;
     }
     setFeatures(prev => {
       const n = [...prev];
+      const source = n[idx].pendingChangeSource;
+      const scope = n[idx].pendingChangeScope ?? 'single';
       if (n[idx].pendingAddition) {
-        n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined };
+        n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined };
       } else if (n[idx].pendingRefinement) {
         n[idx] = {
           ...n[idx].pendingRefinement!,
@@ -1202,9 +1408,18 @@ export function MainContent({
           pendingAddition: undefined,
           pendingRefinement: undefined,
           pendingRemoval: undefined,
+          pendingChangeSource: undefined,
+          pendingChangeScope: undefined,
         };
       }
-      api.updateConversationFeatures(sessionId, n);
+      persistConversationFeatures(n, {
+        lastAiChange: buildUndoableAiChange(
+          prev,
+          source === 'restructure' ? 'restructure' : 'refine_single',
+          scope,
+          [prev[idx]?.id].filter(Boolean) as string[],
+        ),
+      });
       return n;
     });
   };
@@ -1215,8 +1430,8 @@ export function MainContent({
     }
     setFeatures(prev => {
       const n = [...prev];
-      n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined };
-      api.updateConversationFeatures(sessionId, n);
+      n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined };
+      persistConversationFeatures(n, { clearLastAiChange: true });
       return n;
     });
   };
@@ -1224,7 +1439,7 @@ export function MainContent({
     setFeatures(prev => {
       const n = [...prev];
       n[idx] = { ...n[idx], isAccepted: !n[idx].isAccepted };
-      api.updateConversationFeatures(sessionId, n);
+      persistConversationFeatures(n, { clearLastAiChange: true });
       return n;
     });
   };
@@ -1242,8 +1457,8 @@ export function MainContent({
   };
   const clearPendingRemoval = (idx: number) => {
     setFeatures(prev => {
-      const next = prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false } : f);
-      api.updateConversationFeatures(sessionId, next);
+      const next = prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false, pendingChangeSource: undefined, pendingChangeScope: undefined } : f);
+      persistConversationFeatures(next, { clearLastAiChange: true });
       return next;
     });
   };
@@ -1251,7 +1466,7 @@ export function MainContent({
     shiftIndexedUiStateAfterRemoval(idx);
     setFeatures(prev => {
       const next = prev.filter((_, i) => i !== idx);
-      api.updateConversationFeatures(sessionId, next);
+      persistConversationFeatures(next, { clearLastAiChange: true });
       return next;
     });
   };
@@ -1316,7 +1531,11 @@ export function MainContent({
           if (event.tokenUsage?.total) {
             onWorkflowTokenUsage?.(event.tokenUsage as { input: number; output: number; total: number });
           }
-          setFeatures(prev => annotateBulkRefinementResults(prev, event.features as Feature[]));
+          setFeatures(prev => {
+            const annotated = annotateBulkRefinementResults(prev, event.features as Feature[]);
+            persistConversationFeatures(annotated);
+            return annotated;
+          });
           setShowBulkRefine(false);
           setBulkInput('');
           setBulkRefineProgress('');
@@ -1351,7 +1570,7 @@ export function MainContent({
         bulkRefinePollRef.current = null;
       }
     };
-  }, [isBulkRefining, onWorkflowTokenUsage, sessionId, setFeatures, showBulkRefine]);
+  }, [isBulkRefining, onWorkflowTokenUsage, persistConversationFeatures, sessionId, setFeatures, showBulkRefine]);
 
   const handleBulkRefine = async () => {
     if (!bulkInput.trim() || isBulkRefining) return;
@@ -1359,6 +1578,10 @@ export function MainContent({
     try {
       const feedback = bulkInput.trim();
       const res = await api.refineFeatures(sessionId, requirement, features, feedback) as any;
+      if (res?.blocked && res?.code === 'structural_refine_unsupported') {
+        alert(res.message || 'Structural bulk refine is not supported here. Use Restructure instead.');
+        return;
+      }
       if (!res.success) {
         throw new Error(res.error || 'Bulk refinement failed');
       }
@@ -1371,13 +1594,130 @@ export function MainContent({
     }
   };
 
+  useEffect(() => {
+    if (!isRestructuring) {
+      if (restructurePollRef.current) {
+        clearInterval(restructurePollRef.current);
+        restructurePollRef.current = null;
+      }
+      if (!showRestructure) setRestructureProgress('');
+      return;
+    }
+
+    let active = true;
+    restructureStartedAtRef.current = Date.now();
+    setRestructureProgress((previous) => previous || 'Starting restructure…');
+
+    restructurePollRef.current = setInterval(async () => {
+      if (!active) return;
+      try {
+        const res = await api.getBulkRefineResult(sessionId) as any;
+        if (!active || !res?.success) return;
+        const event = res.progress;
+
+        if (!event) {
+          if (Date.now() - restructureStartedAtRef.current > 90_000) {
+            throw new Error('Restructure did not start. Please try again.');
+          }
+          return;
+        }
+
+        if (event.type === 'progress') {
+          if (event.message) setRestructureProgress(event.message);
+          const updatedAt = event.updatedAt ?? 0;
+          if (updatedAt > 0 && Date.now() - updatedAt > 180_000) {
+            throw new Error('Restructure is taking unusually long. Please try again, or switch to a faster model in Settings.');
+          }
+          return;
+        }
+
+        if (restructurePollRef.current) {
+          clearInterval(restructurePollRef.current);
+          restructurePollRef.current = null;
+        }
+
+        if (event.type === 'complete') {
+          if (!event.proposal) {
+            throw new Error('Restructure finished without returning a proposal.');
+          }
+          if (event.tokenUsage?.total) {
+            onWorkflowTokenUsage?.(event.tokenUsage as { input: number; output: number; total: number });
+          }
+          setFeatures((prev) => {
+            const annotated = annotateStructuralProposalResults(prev, event.proposal as StructuralRestructureProposal);
+            persistConversationFeatures(annotated);
+            return annotated;
+          });
+          setShowRestructure(false);
+          setRestructureInput('');
+          setRestructureProgress('');
+          setIsRestructuring(false);
+          setSelectedFeatureIds(new Set());
+          return;
+        }
+
+        if (event.type === 'cancelled') {
+          setRestructureProgress('');
+          setIsRestructuring(false);
+          return;
+        }
+
+        throw new Error(event.message || 'Restructure failed');
+      } catch (err: any) {
+        if (restructurePollRef.current) {
+          clearInterval(restructurePollRef.current);
+          restructurePollRef.current = null;
+        }
+        if (!active) return;
+        console.error('Restructure failed:', err);
+        setRestructureProgress('');
+        setIsRestructuring(false);
+        alert(`AI restructure failed: ${err.message || 'Unknown error'}. Please try again.`);
+      }
+    }, 1500);
+
+    return () => {
+      active = false;
+      if (restructurePollRef.current) {
+        clearInterval(restructurePollRef.current);
+        restructurePollRef.current = null;
+      }
+    };
+  }, [isRestructuring, onWorkflowTokenUsage, persistConversationFeatures, sessionId, setFeatures, showRestructure]);
+
+  const handleRestructure = async () => {
+    if (!restructureInput.trim() || isRestructuring) return;
+    const selectedIds = [...selectedFeatureIds];
+    const scope: RestructureScope = restructureScope === 'selected' && selectedIds.length > 0 ? 'selected' : 'all';
+
+    try {
+      const res = await api.restructureFeatures({
+        sessionId,
+        requirement,
+        features,
+        feedback: restructureInput.trim(),
+        scope,
+        selectedFeatureIds: scope === 'selected' ? selectedIds : [],
+      }) as any;
+      if (!res?.success) {
+        throw new Error(res?.error || 'Restructure failed');
+      }
+      setRestructureProgress('Queuing restructure review…');
+      setIsRestructuring(true);
+    } catch (err: any) {
+      console.error('Restructure failed:', err);
+      setRestructureProgress('');
+      alert(`AI restructure failed: ${err.message || 'Unknown error'}. Please try again.`);
+    }
+  };
+
   const discardAllProposed = () => {
     if (window.confirm('Discard all pending AI improvements?')) {
       setFeatures(prev => {
         const next = prev
           .filter(f => !f.pendingAddition)
-          .map(f => ({ ...f, pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined }));
-        api.updateConversationFeatures(sessionId, next);
+          .map(f => ({ ...f, pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined }));
+        persistConversationFeatures(next, { clearLastAiChange: true });
         return next;
       });
     }
@@ -1385,6 +1725,9 @@ export function MainContent({
 
   const acceptAllProposed = () => {
     setFeatures(prev => {
+      const pendingFeatures = prev.filter((feature) => feature.pendingRefinement || feature.pendingAddition || feature.pendingRemoval);
+      const restructurePending = pendingFeatures.some((feature) => feature.pendingChangeSource === 'restructure');
+      const scope = pendingFeatures.some((feature) => feature.pendingChangeScope === 'selected') ? 'selected' : 'all';
       const next = prev
         .filter(f => !f.pendingRemoval)
         .map(f => {
@@ -1394,6 +1737,8 @@ export function MainContent({
               pendingAddition: undefined,
               pendingRefinement: undefined,
               pendingRemoval: undefined,
+              pendingChangeSource: undefined,
+              pendingChangeScope: undefined,
             };
           }
           if (!f.pendingRefinement) return f;
@@ -1404,10 +1749,19 @@ export function MainContent({
             pendingAddition: undefined,
             pendingRefinement: undefined,
             pendingRemoval: undefined,
+            pendingChangeSource: undefined,
+            pendingChangeScope: undefined,
             isAccepted: true
           };
         });
-      api.updateConversationFeatures(sessionId, next);
+      persistConversationFeatures(next, {
+        lastAiChange: buildUndoableAiChange(
+          prev,
+          restructurePending ? 'restructure' : 'refine_all',
+          scope,
+          pendingFeatures.map((feature) => feature.id),
+        ),
+      });
       return next;
     });
   };
@@ -1472,6 +1826,17 @@ export function MainContent({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {undoActionLabel && onUndoLastAiChange && (
+                <motion.button
+                  onClick={onUndoLastAiChange}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
+                  whileTap={{ scale: 0.97 }}
+                  title={undoActionLabel}
+                >
+                  <RefreshCcw className="w-3.5 h-3.5" />
+                  Undo
+                </motion.button>
+              )}
               {features.some(f => f.pendingRefinement || f.pendingRemoval || f.pendingAddition) && (
                 <>
                   <motion.button onClick={discardAllProposed} className="rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]" whileTap={{ scale: 0.97 }}>Discard All</motion.button>
@@ -1486,6 +1851,18 @@ export function MainContent({
               >
                 <Download className="w-3.5 h-3.5" />
                 Export
+              </motion.button>
+              <motion.button
+                onClick={() => {
+                  setRestructureScope(selectedFeatureIds.size > 0 ? 'selected' : 'all');
+                  setShowRestructure(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
+                whileTap={{ scale: 0.97 }}
+                title={selectedFeatureIds.size > 0 ? `Restructure selected features (${selectedFeatureIds.size}) or the whole canvas` : 'Restructure the feature set'}
+              >
+                <RefreshCcw className="w-3.5 h-3.5" />
+                {selectedFeatureIds.size > 0 ? `Restructure Selected (${selectedFeatureIds.size})` : 'Restructure'}
               </motion.button>
               <motion.button
                 onClick={() => setShowBulkRefine(true)}
@@ -1654,6 +2031,26 @@ export function MainContent({
                           />
                         ) : (
                           <div className="flex flex-1 min-w-0 items-start gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSelectedFeatureIds((previous) => {
+                                  const next = new Set(previous);
+                                  if (next.has(feature.id)) next.delete(feature.id);
+                                  else next.add(feature.id);
+                                  return next;
+                                });
+                              }}
+                              className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border transition ${
+                                selectedFeatureIds.has(feature.id)
+                                  ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                                  : 'border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)]'
+                              }`}
+                              title={selectedFeatureIds.has(feature.id) ? 'Deselect for restructure' : 'Select for restructure'}
+                            >
+                              {selectedFeatureIds.has(feature.id) ? <Check className="h-3.5 w-3.5" /> : <span className="h-2.5 w-2.5 rounded-sm border border-current/40" />}
+                            </button>
                             <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
@@ -2040,6 +2437,118 @@ export function MainContent({
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showRestructure && (
+          <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
+            <motion.div
+              className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
+              onClick={!isRestructuring ? () => setShowRestructure(false) : undefined}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="relative rf-glass-card w-full max-w-2xl overflow-hidden"
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <div className="border-b border-[var(--rf-border-subtle)] bg-white/40 px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <RefreshCcw className="h-4 w-4 text-[var(--rf-brand)]" />
+                    <span className="text-sm font-bold text-[var(--rf-text)]">Restructure features</span>
+                  </div>
+                  {!isRestructuring && (
+                    <button onClick={() => setShowRestructure(false)} className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]">
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
+                  Use restructure for safe merges, splits, or consolidation after features already exist. The result comes back as a preview so you can review every proposed change before accepting it.
+                </p>
+              </div>
+
+              <div className="space-y-4 px-5 py-5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRestructureScope('all')}
+                    className={`rounded-full px-3 py-1.5 text-[12px] font-bold transition ${
+                      restructureScope === 'all'
+                        ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-subtle)]'
+                        : 'bg-white/70 text-[var(--rf-text-secondary)] border border-[var(--rf-border)]'
+                    }`}
+                  >
+                    Whole canvas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectedFeatureIds.size > 0 && setRestructureScope('selected')}
+                    disabled={selectedFeatureIds.size === 0}
+                    className={`rounded-full px-3 py-1.5 text-[12px] font-bold transition disabled:opacity-45 ${
+                      restructureScope === 'selected'
+                        ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-subtle)]'
+                        : 'bg-white/70 text-[var(--rf-text-secondary)] border border-[var(--rf-border)]'
+                    }`}
+                  >
+                    Selected features ({selectedFeatureIds.size})
+                  </button>
+                </div>
+
+                {restructureScope === 'selected' && selectedFeatureIds.size > 0 && (
+                  <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-[12px] text-[var(--rf-text-secondary)]">
+                    {features
+                      .filter((feature) => selectedFeatureIds.has(feature.id))
+                      .map((feature) => feature.title || feature.summary)
+                      .join(' • ')}
+                  </div>
+                )}
+
+                <textarea
+                  autoFocus
+                  placeholder="For example: consolidate the intake-view and response features into clearer boundaries, or split case initiation away from contact linking."
+                  value={restructureInput}
+                  onChange={(e) => setRestructureInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      handleRestructure();
+                    }
+                  }}
+                  className="min-h-[148px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                />
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                    {isRestructuring ? (restructureProgress || 'Preparing restructure preview…') : 'Cmd/Ctrl + Enter to prepare a restructure preview'}
+                  </span>
+                  <motion.button
+                    onClick={handleRestructure}
+                    disabled={!restructureInput.trim() || isRestructuring || (restructureScope === 'selected' && selectedFeatureIds.size === 0)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {isRestructuring ? (
+                      <>
+                        <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Restructuring...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-3.5 w-3.5" />
+                        Prepare Preview
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* AI Refine Popup */}
       {refinePopupIdx !== null && (
         <RefinePopup
@@ -2051,7 +2560,16 @@ export function MainContent({
             setFeatures(prev => {
               const n = [...prev];
               // First feature replaces the original (shown as a diff/redline).
-              n[refinePopupIdx] = { ...n[refinePopupIdx], pendingRefinement: refinedFeatures[0] };
+              n[refinePopupIdx] = {
+                ...n[refinePopupIdx],
+                pendingRefinement: {
+                  ...refinedFeatures[0],
+                  pendingChangeSource: undefined,
+                  pendingChangeScope: undefined,
+                },
+                pendingChangeSource: 'refine',
+                pendingChangeScope: 'single',
+              };
               // Additional features from a split are inserted after the original as pending additions.
               if (refinedFeatures.length > 1) {
                 const additions = refinedFeatures.slice(1).map(f => ({
@@ -2059,9 +2577,12 @@ export function MainContent({
                   pendingAddition: true,
                   pendingRefinement: undefined,
                   pendingRemoval: false,
+                  pendingChangeSource: 'refine' as const,
+                  pendingChangeScope: 'single' as const,
                 }));
                 n.splice(refinePopupIdx + 1, 0, ...additions);
               }
+              persistConversationFeatures(n);
               return n;
             });
             if (tokenUsage) {

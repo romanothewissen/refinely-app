@@ -19,6 +19,7 @@ import type {
   ClarifyQuestion,
   GenerationContextMeta,
   TokenUsageSummary,
+  UndoableAiChange,
 } from './types';
 
 export interface Feature {
@@ -38,6 +39,8 @@ export interface Feature {
   pendingRefinement?: Feature;
   pendingRemoval?: boolean;
   pendingAddition?: boolean;
+  pendingChangeSource?: 'refine' | 'restructure';
+  pendingChangeScope?: 'single' | 'all' | 'selected';
 }
 
 
@@ -392,6 +395,7 @@ function LegacyApp({
   const [isWorking, setIsWorking] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generationWarning, setGenerationWarning] = useState<string | null>(null);
+  const [lastAiChange, setLastAiChange] = useState<UndoableAiChange | null>(null);
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
   const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
@@ -604,6 +608,7 @@ function LegacyApp({
     setPendingClarifySessionId(null);
     setIsWorking(false);
     setSidebarOpen(!((latestFeatureTurn?.features?.length ?? 0) > 0));
+    setLastAiChange((conversation?.lastAiChange as UndoableAiChange | null) ?? null);
   };
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
@@ -633,6 +638,7 @@ function LegacyApp({
         setFeatures([]);
         setGenerationContext(null);
         setClarifyContext(null);
+        setLastAiChange(null);
         setSidebarOpen(true);
       }
     }).catch(() => {
@@ -641,6 +647,7 @@ function LegacyApp({
       setFeatures([]);
       setGenerationContext(null);
       setClarifyContext(null);
+      setLastAiChange(null);
       setSidebarOpen(true);
     });
     loadHistory();
@@ -1317,9 +1324,10 @@ function LegacyApp({
       };
       
       setFeatures(updatedFeatures);
+      setLastAiChange(null);
       
       // Persist the linked issue key back to Forge Storage
-      api.updateConversationFeatures(sessionId, updatedFeatures).catch(err => {
+      api.updateConversationFeatures(sessionId, updatedFeatures, { clearLastAiChange: true }).catch(err => {
         console.error('Failed to persist created issue key:', err);
       });
     }
@@ -1345,6 +1353,7 @@ function LegacyApp({
         setRunAttachmentParseState(null);
         setRunAttachmentError(null);
         setWorkflowStage('idle');
+        setLastAiChange(null);
         const restoredSignature = buildConversationInputSignature(res.conversation, {
           projectKey,
           contextMode,
@@ -1363,6 +1372,22 @@ function LegacyApp({
       }
     } catch (err) {
       console.error('Failed to restore session:', err);
+    }
+  };
+
+  const handleUndoLastAiChange = async () => {
+    try {
+      const res = await api.undoLastAiChange(sessionId) as any;
+      if (!res?.success || !Array.isArray(res.features)) {
+        throw new Error(res?.error || 'Undo failed');
+      }
+      setFeatures(res.features);
+      setLastAiChange(null);
+      setGenerationError(null);
+      setGenerationWarning(null);
+      loadHistory();
+    } catch (err: any) {
+      setGenerationError(`Undo failed: ${err?.message ?? String(err)}`);
     }
   };
 
@@ -1609,6 +1634,7 @@ function LegacyApp({
                 <MainContent
                   features={features}
                   setFeatures={setFeatures}
+                  onSetLastAiChange={setLastAiChange}
                   onPushFeature={(idx: number) => setActivePushFeatureIdx(idx)}
                   isGenerating={isCanvasLoading}
                   progress={loadingProgress}
@@ -1630,6 +1656,8 @@ function LegacyApp({
                   onOpenSettings={openSettings}
                   onDraftReviewDecision={resumeGenerationFromDraftReview}
                   onRetryFailedFeature={retryFailedFeatureGeneration}
+                  onUndoLastAiChange={handleUndoLastAiChange}
+                  undoActionLabel={lastAiChange?.label || null}
                   onWorkflowTokenUsage={(usageDelta) => {
                     setWorkflowTokenUsage(prev => {
                       const base = prev || { input: 0, output: 0, total: 0 };

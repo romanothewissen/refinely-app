@@ -28,6 +28,9 @@ import {
   TokenUsageSummary,
   DiscoveryProfile,
   GenerationStageDurationsMs,
+  StructuralFeatureProposal,
+  StructuralRestructureProposal,
+  RestructureScope,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
@@ -38,7 +41,7 @@ import {
   buildTriageSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
-  buildRefineSystemPrompt,
+  buildRestructureSystemPrompt,
   buildSizingRepairSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
@@ -69,6 +72,24 @@ interface RawFeature {
   acceptanceRequirements?: unknown[];
   suggested_story_points?: number;
   process_code?: string;
+}
+
+interface RawStructuralFeatureProposal extends RawFeature {
+  source_feature_ids?: unknown[];
+  sourceAcceptanceRequirementRefs?: unknown[];
+  source_acceptance_requirement_refs?: unknown[];
+  primary_source_feature_id?: string;
+  primarySourceFeatureId?: string;
+  rationale?: string;
+}
+
+interface RawStructuralRestructureResponse {
+  proposed_features?: RawStructuralFeatureProposal[];
+  proposedFeatures?: RawStructuralFeatureProposal[];
+  removed_feature_ids?: unknown[];
+  removedFeatureIds?: unknown[];
+  removed_acceptance_requirement_refs?: unknown[];
+  removedAcceptanceRequirementRefs?: unknown[];
 }
 
 interface ClarifyQuestionPlan {
@@ -3017,6 +3038,238 @@ const STRUCTURAL_REFINEMENT_PATTERNS = [
   /\bfeature set\b/i,
 ];
 
+function toAcceptanceRequirementRef(featureId: string, arIndex: number): string {
+  return `${featureId}#${arIndex}`;
+}
+
+function sanitizeStringArray(values: unknown[]): string[] {
+  return values
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value.length > 0);
+}
+
+function normaliseStructuralProposalFeature(
+  raw: RawStructuralFeatureProposal,
+  roleGrounding?: RoleGroundingContext,
+): StructuralFeatureProposal {
+  const feature = normaliseFeature(raw, roleGrounding);
+  const sourceFeatureIds = sanitizeStringArray(Array.isArray(raw.source_feature_ids) ? raw.source_feature_ids : []);
+  const sourceAcceptanceRequirementRefs = sanitizeStringArray(
+    Array.isArray(raw.source_acceptance_requirement_refs)
+      ? raw.source_acceptance_requirement_refs
+      : Array.isArray(raw.sourceAcceptanceRequirementRefs)
+        ? raw.sourceAcceptanceRequirementRefs
+        : [],
+  );
+  const primarySourceFeatureId = String(raw.primary_source_feature_id ?? raw.primarySourceFeatureId ?? '').trim() || undefined;
+  const rationale = String(raw.rationale ?? '').trim() || undefined;
+
+  return {
+    ...feature,
+    sourceFeatureIds,
+    sourceAcceptanceRequirementRefs,
+    primarySourceFeatureId,
+    rationale,
+  };
+}
+
+function normaliseStructuralRestructureResponse(
+  raw: RawStructuralRestructureResponse,
+  roleGrounding?: RoleGroundingContext,
+): StructuralRestructureProposal {
+  const proposedRaw = Array.isArray(raw.proposed_features)
+    ? raw.proposed_features
+    : Array.isArray(raw.proposedFeatures)
+      ? raw.proposedFeatures
+      : [];
+  const removedFeatureIds = sanitizeStringArray(
+    Array.isArray(raw.removed_feature_ids)
+      ? raw.removed_feature_ids
+      : Array.isArray(raw.removedFeatureIds)
+        ? raw.removedFeatureIds
+        : [],
+  );
+  const removedAcceptanceRequirementRefs = sanitizeStringArray(
+    Array.isArray(raw.removed_acceptance_requirement_refs)
+      ? raw.removed_acceptance_requirement_refs
+      : Array.isArray(raw.removedAcceptanceRequirementRefs)
+        ? raw.removedAcceptanceRequirementRefs
+        : [],
+  );
+
+  return {
+    scope: 'all',
+    selectedFeatureIds: [],
+    proposedFeatures: proposedRaw.map((feature) => normaliseStructuralProposalFeature(feature, roleGrounding)),
+    removedFeatureIds,
+    removedAcceptanceRequirementRefs,
+  };
+}
+
+export function validateStructuralRestructureProposal(input: {
+  scope: RestructureScope;
+  selectedFeatures: Feature[];
+  proposal: StructuralRestructureProposal;
+}): { valid: true } | { valid: false; reason: string } {
+  const selectedFeatureIds = new Set(input.selectedFeatures.map((feature) => feature.id));
+  const selectedRefs = new Set(
+    input.selectedFeatures.flatMap((feature) =>
+      (feature.acceptanceRequirements || []).map((_, index) => toAcceptanceRequirementRef(feature.id, index))),
+  );
+
+  const proposalSelectedIds = new Set(input.proposal.selectedFeatureIds);
+  if (proposalSelectedIds.size !== selectedFeatureIds.size || [...selectedFeatureIds].some((id) => !proposalSelectedIds.has(id))) {
+    return { valid: false, reason: 'Proposal selected feature ids do not match the requested restructure scope.' };
+  }
+
+  const coveredFeatureIds = new Set<string>();
+  const coveredRefs = new Set<string>();
+
+  for (const proposedFeature of input.proposal.proposedFeatures) {
+    if (!proposedFeature.acceptanceRequirements?.length) {
+      return { valid: false, reason: `Proposed feature "${proposedFeature.summary}" is missing acceptance requirements.` };
+    }
+
+    if (proposedFeature.sourceFeatureIds.length === 0 && proposedFeature.primarySourceFeatureId) {
+      return { valid: false, reason: `Proposed feature "${proposedFeature.summary}" declares a primary source without source_feature_ids.` };
+    }
+
+    for (const sourceFeatureId of proposedFeature.sourceFeatureIds) {
+      if (!selectedFeatureIds.has(sourceFeatureId)) {
+        return { valid: false, reason: `Proposed feature "${proposedFeature.summary}" references out-of-scope source feature "${sourceFeatureId}".` };
+      }
+      coveredFeatureIds.add(sourceFeatureId);
+    }
+
+    if (
+      proposedFeature.primarySourceFeatureId
+      && !proposedFeature.sourceFeatureIds.includes(proposedFeature.primarySourceFeatureId)
+    ) {
+      return { valid: false, reason: `Proposed feature "${proposedFeature.summary}" has a primary source that is not in source_feature_ids.` };
+    }
+
+    for (const ref of proposedFeature.sourceAcceptanceRequirementRefs) {
+      if (!selectedRefs.has(ref)) {
+        return { valid: false, reason: `Proposed feature "${proposedFeature.summary}" references unknown or out-of-scope AR ref "${ref}".` };
+      }
+      const sourceFeatureId = ref.split('#')[0] ?? '';
+      if (!proposedFeature.sourceFeatureIds.includes(sourceFeatureId)) {
+        return { valid: false, reason: `Proposed feature "${proposedFeature.summary}" owns AR ref "${ref}" without owning its source feature.` };
+      }
+      if (coveredRefs.has(ref)) {
+        return { valid: false, reason: `Acceptance requirement ref "${ref}" is assigned more than once.` };
+      }
+      coveredRefs.add(ref);
+    }
+  }
+
+  for (const featureId of input.proposal.removedFeatureIds) {
+    if (!selectedFeatureIds.has(featureId)) {
+      return { valid: false, reason: `Removed feature id "${featureId}" is outside the restructure scope.` };
+    }
+    coveredFeatureIds.add(featureId);
+  }
+
+  for (const ref of input.proposal.removedAcceptanceRequirementRefs) {
+    if (!selectedRefs.has(ref)) {
+      return { valid: false, reason: `Removed acceptance requirement ref "${ref}" is outside the restructure scope.` };
+    }
+    if (coveredRefs.has(ref)) {
+      return { valid: false, reason: `Acceptance requirement ref "${ref}" is both preserved and removed.` };
+    }
+    coveredRefs.add(ref);
+  }
+
+  for (const featureId of selectedFeatureIds) {
+    if (!coveredFeatureIds.has(featureId)) {
+      return { valid: false, reason: `Source feature "${featureId}" is not accounted for by the restructure proposal.` };
+    }
+  }
+
+  for (const ref of selectedRefs) {
+    if (!coveredRefs.has(ref)) {
+      return { valid: false, reason: `Acceptance requirement ref "${ref}" is not accounted for by the restructure proposal.` };
+    }
+  }
+
+  return { valid: true };
+}
+
+export async function restructureFeatures(opts: {
+  requirement: string;
+  features: Feature[];
+  feedback: string;
+  selectedFeatureIds?: string[];
+  scope: RestructureScope;
+  config: TenantConfig;
+}): Promise<{ proposal: StructuralRestructureProposal; tokenUsage: TokenUsageSummary }> {
+  const { requirement, features, feedback, selectedFeatureIds = [], scope, config } = opts;
+  const targetedFeatures = scope === 'selected'
+    ? features.filter((feature) => selectedFeatureIds.includes(feature.id))
+    : features;
+
+  if (!targetedFeatures.length) {
+    throw new Error('Select at least one feature to restructure.');
+  }
+
+  const system = buildRestructureSystemPrompt({
+    domainContext: config.domainContext,
+    domainRoles: config.domainRoles,
+    processTaxonomy: config.processTaxonomy,
+    processTaxonomyEnabled: config.processTaxonomyEnabled,
+    scope,
+  });
+
+  const userMessage = [
+    `REQUIREMENT: ${requirement}`,
+    `FEEDBACK: ${feedback}`,
+    `SCOPE: ${scope === 'selected' ? `selected features only (${targetedFeatures.length})` : `entire canvas (${targetedFeatures.length} features)`}`,
+    `TARGET FEATURES:\n${JSON.stringify(targetedFeatures.map((feature) => ({
+      ...feature,
+      acceptanceRequirementRefs: (feature.acceptanceRequirements || []).map((ar, index) => ({
+        ref: toAcceptanceRequirementRef(feature.id, index),
+        ...ar,
+      })),
+    })), null, 2)}`,
+  ].join('\n\n');
+
+  const result = await callLlmJsonWithUsage<RawStructuralRestructureResponse>({
+    model: getTierModel(config.generatorConfig.refineModel, config.tier),
+    systemPrompt: system,
+    userMessage,
+    maxTokens: config.generatorConfig.maxTokens,
+    reasoningEffort: 'high',
+    ...buildLlmProviderOpts(config),
+  });
+
+  const roleGrounding: RoleGroundingContext = {
+    requirement,
+    domainRoles: config.domainRoles,
+  };
+  const proposal = normaliseStructuralRestructureResponse(result.data, roleGrounding);
+  proposal.scope = scope;
+  proposal.selectedFeatureIds = targetedFeatures.map((feature) => feature.id);
+
+  const validation = validateStructuralRestructureProposal({
+    scope,
+    selectedFeatures: targetedFeatures,
+    proposal,
+  });
+  if (!validation.valid) {
+    throw new Error(validation.reason);
+  }
+
+  return {
+    proposal,
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: { restructure: toStageUsage(result.usage) },
+    },
+  };
+}
+
 export function feedbackRequestsStructuralRefinement(feedback: string): boolean {
   const normalized = String(feedback ?? '').trim();
   if (!normalized) return false;
@@ -3032,61 +3285,17 @@ export async function refineFeatures(opts: {
 }): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
   const { requirement, features, feedback, config, onProgress } = opts;
 
-  if (!feedbackRequestsStructuralRefinement(feedback)) {
-    return refineFeaturesIndividually({
-      requirement,
-      features,
-      feedback,
-      config,
-      onProgress,
-    });
+  if (feedbackRequestsStructuralRefinement(feedback)) {
+    throw new Error('structural_refine_unsupported');
   }
 
-  const system = buildRefineSystemPrompt({
-    domainContext: config.domainContext,
-    domainRoles: config.domainRoles,
-    processTaxonomy: config.processTaxonomy,
-    processTaxonomyEnabled: config.processTaxonomyEnabled,
-  });
-
-  const userMessage = [
-    `REQUIREMENT: ${requirement}`,
-    `FEEDBACK: ${feedback}`,
-    `CURRENT FEATURES:\n${JSON.stringify(features, null, 2)}`,
-  ].join('\n\n');
-
-  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(config.generatorConfig.refineModel, config.tier),
-    systemPrompt: system,
-    userMessage,
-    maxTokens: config.generatorConfig.maxTokens,
-    reasoningEffort: 'high',
-    ...buildLlmProviderOpts(config),
-  });
-
-  const roleGrounding: RoleGroundingContext = {
+  return refineFeaturesIndividually({
     requirement,
-    domainRoles: config.domainRoles,
-  };
-  const normalisedFeatures = (result.data.features ?? []).map((feature) => normaliseFeature(feature, roleGrounding));
-  // Drop any feature the LLM returned with no acceptance requirements — these are
-  // invalid shells left behind when the model incorrectly moves all ARs to split features.
-  const validFeatures = normalisedFeatures.filter((f) => f.acceptanceRequirements.length > 0);
-  if (validFeatures.length < normalisedFeatures.length) {
-    console.warn(
-      `refineFeatures: dropped ${normalisedFeatures.length - validFeatures.length} feature(s) with empty acceptance requirements`,
-    );
-  }
-
-  return {
-    features: validFeatures.length > 0 ? validFeatures : normalisedFeatures,
-    tokenUsage: {
-      input: result.usage.input,
-      output: result.usage.output,
-      total: result.usage.input + result.usage.output,
-      byStage: { refine: toStageUsage(result.usage) },
-    },
-  };
+    features,
+    feedback,
+    config,
+    onProgress,
+  });
 }
 
 // ─── Single Feature Refinement ────────────────────────────────────────────────

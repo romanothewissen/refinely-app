@@ -38,6 +38,7 @@ import {
 const resolver: any = new Resolver();
 import {
   evaluateSufficiency,
+  feedbackRequestsStructuralRefinement,
   refineSingleFeature,
   checkRefineFeedbackSufficiency,
   askQuestion,
@@ -803,6 +804,15 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
 
 resolver.define('refineFeatures', async ({ payload, context }) => {
   try {
+    if (feedbackRequestsStructuralRefinement(String(payload.feedback ?? ''))) {
+      return {
+        success: true,
+        blocked: true,
+        code: 'structural_refine_unsupported',
+        message: 'Bulk Refine can only make non-structural wording and quality changes. Use Restructure for merges, splits, or consolidation.',
+      };
+    }
+
     const config = await getConfig();
     const refineQueue = new Queue({ key: 'refine-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
@@ -831,6 +841,44 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
     return { success: true, queued: true };
   } catch (err: any) {
     console.error('refineFeatures failed:', err);
+    return { success: false, error: err?.message || 'Unknown error' };
+  }
+});
+
+resolver.define('restructureFeatures', async ({ payload, context }) => {
+  try {
+    const config = await getConfig();
+    const refineQueue = new Queue({ key: 'refine-queue' });
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+    const selectedProjectKeys = authorizedProjects.projectKeys;
+    const event: RefineEvent = {
+      sessionId: payload.sessionId,
+      accountId,
+      requirement: payload.requirement ?? '',
+      feedback: payload.feedback ?? '',
+      features: payload.features as Feature[],
+      config,
+      license: context?.license,
+      projectKey: authorizedProjects.projectKey,
+      projectKeys: selectedProjectKeys,
+      mode: 'restructure',
+      restructureScope: payload.scope === 'selected' ? 'selected' : 'all',
+      selectedFeatureIds: Array.isArray(payload.selectedFeatureIds) ? payload.selectedFeatureIds : [],
+    };
+
+    await entitySet(KEYS.refineProgress(payload.sessionId), {
+      type: 'progress',
+      sessionId: payload.sessionId,
+      operationType: 'restructure',
+      message: 'Queuing restructure review…',
+      updatedAt: Date.now(),
+    });
+    await refineQueue.push({ body: event });
+
+    return { success: true, queued: true };
+  } catch (err: any) {
+    console.error('restructureFeatures failed:', err);
     return { success: false, error: err?.message || 'Unknown error' };
   }
 });
@@ -1849,15 +1897,52 @@ resolver.define('updateConversationFeatures', async ({ payload, context }) => {
   try {
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     const key = KEYS.userConversations(accountId, payload.sessionId);
-    const existing = await entityGet<{ turns: Array<Record<string, any>> }>(key);
+    const existing = await entityGet<{ turns: Array<Record<string, any>>; lastAiChange?: Record<string, any>; updatedAt?: string }>(key);
     if (existing?.turns) {
       const lastTurn = existing.turns[existing.turns.length - 1];
       if (lastTurn) {
         lastTurn.features = payload.features;
+        if (payload.lastAiChange) {
+          existing.lastAiChange = payload.lastAiChange;
+        } else if (payload.clearLastAiChange) {
+          delete existing.lastAiChange;
+        }
+        existing.updatedAt = new Date().toISOString();
         await entitySet(key, existing);
       }
     }
     return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+});
+
+resolver.define('undoLastAiChange', async ({ payload, context }) => {
+  try {
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const key = KEYS.userConversations(accountId, payload.sessionId);
+    const existing = await entityGet<{ turns: Array<Record<string, any>>; lastAiChange?: Record<string, any>; updatedAt?: string }>(key);
+    const lastAiChange = existing?.lastAiChange;
+    if (!existing?.turns?.length || !lastAiChange?.previousFeatures) {
+      return { success: false, error: 'There is no AI change available to undo.' };
+    }
+
+    existing.turns.push({
+      turnType: 'undo',
+      features: lastAiChange.previousFeatures,
+      undoneAction: lastAiChange,
+      timestamp: new Date().toISOString(),
+    });
+    delete existing.lastAiChange;
+    existing.updatedAt = new Date().toISOString();
+    await entitySet(key, existing);
+    await syncConversationIndexEntry(accountId, payload.sessionId, {
+      updatedAt: existing.updatedAt,
+      turnCount: existing.turns.length,
+    });
+
+    return { success: true, features: lastAiChange.previousFeatures };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, error: message };

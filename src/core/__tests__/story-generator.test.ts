@@ -19,6 +19,7 @@ import {
   repairAcceptanceRequirements,
   shouldPauseForDraftReview,
   triageToSizingContract,
+  validateStructuralRestructureProposal,
 } from '../story-generator';
 import {
   formatGenerationFeatureTarget,
@@ -168,6 +169,133 @@ test('feedbackRequestsStructuralRefinement keeps stylistic bulk feedback in per-
 test('feedbackRequestsStructuralRefinement detects explicit backlog restructuring requests', () => {
   assert.equal(feedbackRequestsStructuralRefinement('merge overlapping features and remove duplicate features'), true);
   assert.equal(feedbackRequestsStructuralRefinement('split this into separate service case and work order features'), true);
+});
+
+test('validateStructuralRestructureProposal accepts complete merge coverage', () => {
+  const selected = [
+    makeFeature('View incoming communications', 2),
+    makeFeature('Respond to incoming communications', 1),
+  ];
+
+  const validation = validateStructuralRestructureProposal({
+    scope: 'selected',
+    selectedFeatures: selected,
+    proposal: {
+      scope: 'selected',
+      selectedFeatureIds: selected.map((feature) => feature.id),
+      proposedFeatures: [
+        {
+          id: 'merged-intake',
+          summary: 'Manage incoming communications',
+          description: 'As a Service Manager, I need to manage incoming communications so that intake handling stays coordinated.',
+          acceptanceRequirements: [
+            {
+              given: 'incoming communications are waiting to be processed',
+              when: 'the service manager reviews the intake workspace',
+              then: 'the communications can be reviewed and actioned from one coordinated feature scope.',
+            },
+          ],
+          sourceFeatureIds: selected.map((feature) => feature.id),
+          sourceAcceptanceRequirementRefs: [`${selected[0].id}#0`, `${selected[0].id}#1`, `${selected[1].id}#0`],
+          primarySourceFeatureId: selected[0].id,
+          rationale: 'Merge overlapping intake and response coverage into one coherent slice.',
+        },
+      ],
+      removedFeatureIds: [],
+      removedAcceptanceRequirementRefs: [],
+    },
+  });
+
+  assert.deepEqual(validation, { valid: true });
+});
+
+test('validateStructuralRestructureProposal rejects duplicated AR ownership', () => {
+  const selected = [makeFeature('Initiate a case', 2)];
+  const duplicatedRef = `${selected[0].id}#0`;
+
+  const validation = validateStructuralRestructureProposal({
+    scope: 'selected',
+    selectedFeatures: selected,
+    proposal: {
+      scope: 'selected',
+      selectedFeatureIds: selected.map((feature) => feature.id),
+      proposedFeatures: [
+        {
+          id: 'proposal-a',
+          summary: 'Create a case',
+          description: 'As a Service Manager, I need to create a case so that intake work can proceed.',
+          acceptanceRequirements: [
+            {
+              given: 'a valid intake exists',
+              when: 'the service manager creates a case',
+              then: 'the case is opened.',
+            },
+          ],
+          sourceFeatureIds: [selected[0].id],
+          sourceAcceptanceRequirementRefs: [duplicatedRef],
+          primarySourceFeatureId: selected[0].id,
+        },
+        {
+          id: 'proposal-b',
+          summary: 'Validate case preconditions',
+          description: 'As a Service Manager, I need to validate case preconditions so that invalid cases are blocked.',
+          acceptanceRequirements: [
+            {
+              given: 'a case is about to be created',
+              when: 'a blocking condition exists',
+              then: 'the case creation is stopped.',
+            },
+          ],
+          sourceFeatureIds: [selected[0].id],
+          sourceAcceptanceRequirementRefs: [duplicatedRef, `${selected[0].id}#1`],
+          primarySourceFeatureId: selected[0].id,
+        },
+      ],
+      removedFeatureIds: [],
+      removedAcceptanceRequirementRefs: [],
+    },
+  });
+
+  assert.equal(validation.valid, false);
+  assert.match(validation.reason, /assigned more than once/i);
+});
+
+test('validateStructuralRestructureProposal rejects missing source coverage', () => {
+  const selected = [
+    makeFeature('Link contact records', 1),
+    makeFeature('Initiate cases', 1),
+  ];
+
+  const validation = validateStructuralRestructureProposal({
+    scope: 'selected',
+    selectedFeatures: selected,
+    proposal: {
+      scope: 'selected',
+      selectedFeatureIds: selected.map((feature) => feature.id),
+      proposedFeatures: [
+        {
+          id: 'contact-linking-only',
+          summary: 'Link incoming communications to contacts',
+          description: 'As a Service Manager, I need to link incoming communications to contacts so that existing context is reused.',
+          acceptanceRequirements: [
+            {
+              given: 'an incoming communication matches a known contact',
+              when: 'the service manager reviews the communication',
+              then: 'the communication is linked to that contact.',
+            },
+          ],
+          sourceFeatureIds: [selected[0].id],
+          sourceAcceptanceRequirementRefs: [`${selected[0].id}#0`],
+          primarySourceFeatureId: selected[0].id,
+        },
+      ],
+      removedFeatureIds: [],
+      removedAcceptanceRequirementRefs: [],
+    },
+  });
+
+  assert.equal(validation.valid, false);
+  assert.match(validation.reason, /not accounted for/i);
 });
 
 test('buildSingleFeatureRefineSystemPrompt can forbid splitting during bulk refinement', () => {

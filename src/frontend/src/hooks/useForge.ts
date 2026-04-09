@@ -68,6 +68,14 @@ export const api = {
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>
     invoke('refineFeatures', { sessionId, requirement, features, feedback }),
+  restructureFeatures: (payload: {
+    sessionId: string;
+    requirement: string;
+    features: unknown[];
+    feedback: string;
+    scope: 'all' | 'selected';
+    selectedFeatureIds?: string[];
+  }) => invoke('restructureFeatures', payload),
   getBulkRefineResult: (sessionId: string) => invoke('getBulkRefineResult', { sessionId }),
   cancelBulkRefine: (sessionId: string) => invoke('cancelBulkRefine', { sessionId }),
   refineSingleFeature: (feature: unknown, feedback: string, requirement?: string, sessionId?: string) =>
@@ -155,8 +163,12 @@ export const api = {
     invoke('renameConversation', { sessionId, title }),
   toggleBookmark: (sessionId: string, isPinned: boolean) =>
     invoke('toggleBookmark', { sessionId, isPinned }),
-  updateConversationFeatures: (sessionId: string, features: any[]) =>
-    invoke('updateConversationFeatures', { sessionId, features }),
+  updateConversationFeatures: (
+    sessionId: string,
+    features: any[],
+    options?: { lastAiChange?: unknown; clearLastAiChange?: boolean },
+  ) => invoke('updateConversationFeatures', { sessionId, features, ...(options || {}) }),
+  undoLastAiChange: (sessionId: string) => invoke('undoLastAiChange', { sessionId }),
 
   // Session persistence
   getLastSession: () => invoke('getLastSession'),

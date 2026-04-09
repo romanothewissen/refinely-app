@@ -280,6 +280,34 @@ export interface Feature {
   jiraIssueUrl?: string;
 }
 
+export type RestructureScope = 'all' | 'selected';
+
+export interface StructuralFeatureProposal extends Feature {
+  sourceFeatureIds: string[];
+  sourceAcceptanceRequirementRefs: string[];
+  primarySourceFeatureId?: string;
+  rationale?: string;
+}
+
+export interface StructuralRestructureProposal {
+  scope: RestructureScope;
+  selectedFeatureIds: string[];
+  proposedFeatures: StructuralFeatureProposal[];
+  removedFeatureIds: string[];
+  removedAcceptanceRequirementRefs: string[];
+}
+
+export type AiChangeActionType = 'refine_single' | 'refine_all' | 'restructure';
+
+export interface UndoableAiChange {
+  actionType: AiChangeActionType;
+  scope: 'single' | 'all' | 'selected';
+  label: string;
+  timestamp: string;
+  affectedFeatureIds: string[];
+  previousFeatures: Feature[];
+}
+
 export interface ValidationViolation {
   featureId: string;
   field: string;

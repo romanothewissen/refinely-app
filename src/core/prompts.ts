@@ -771,6 +771,71 @@ ${taxonomySection}
 Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ...", ...], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
 }
 
+export function buildRestructureSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles: string[];
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+  scope: 'all' | 'selected';
+}): string {
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? processTaxonomyBlock(opts.processTaxonomy)
+    : '';
+
+  return `You are a principal business analyst restructuring an existing Jira feature set.
+${platformContextBlock(opts.domainContext)}
+YOUR JOB: Reorganize the targeted features into a cleaner final structure while preserving business coverage and keeping acceptance requirements attached to the correct resulting feature.
+
+RESTRUCTURE RULES:
+- Return ONLY the proposed replacement structure for the targeted feature set
+- Each proposed feature must own one coherent capability slice
+- Do not create overlapping sibling features that test the same primary action or outcome
+- Preserve still-relevant business rules, edge cases, and acceptance coverage unless the feedback explicitly removes them
+- If coverage is removed, declare that removal explicitly using removed_feature_ids and/or removed_acceptance_requirement_refs
+- Every selected source feature and every selected acceptance requirement must be accounted for exactly once, either by a proposed feature or explicit removal
+- Never duplicate a source acceptance requirement across multiple proposed features
+- In ${opts.scope === 'selected' ? 'selected-scope mode, do not reference or mutate any non-selected feature ids or AR refs' : 'whole-canvas mode, use only the provided feature ids and AR refs'}
+
+FEATURE RULES:
+- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- No solution language: no buttons, screens, fields, forms, APIs, or databases
+- Resolve the role label from evidence in this order: original requirement actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
+- Requirement-stated actors outrank domain context and reference stories
+${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
+
+ACCEPTANCE REQUIREMENT RULES:
+- Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Never write ARs in first person
+- Every returned feature MUST include at least one complete acceptance requirement
+- Keep ARs with the feature whose primary capability they verify
+- Do not leave a feature shell with zero ARs
+
+PROVENANCE RULES:
+- Every proposed feature MUST include:
+  - source_feature_ids: the ids of the source features whose scope it owns
+  - source_acceptance_requirement_refs: refs in the form "featureId#index" covering the original ARs it owns
+  - primary_source_feature_id: one id from source_feature_ids that should anchor this proposal in the UI
+  - rationale: a short explanation of why this feature exists after restructuring
+- Every removed acceptance requirement ref must also use the form "featureId#index"
+
+${taxonomySection}
+
+Output JSON: {
+  "proposed_features": [{
+    "summary": "...",
+    "description": "As a ...",
+    "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."],
+    "source_feature_ids": ["feature-id-1"],
+    "source_acceptance_requirement_refs": ["feature-id-1#0"],
+    "primary_source_feature_id": "feature-id-1",
+    "rationale": "..."
+    ${opts.processTaxonomyEnabled ? ', "suggested_story_points": 3, "process_code": "..."' : ', "suggested_story_points": 3'}
+  }],
+  "removed_feature_ids": [],
+  "removed_acceptance_requirement_refs": []
+}`;
+}
+
 // ─── Single Feature Refinement ────────────────────────────────────────────────
 
 export function buildSingleFeatureRefineSystemPrompt(opts: {

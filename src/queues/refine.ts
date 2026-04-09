@@ -1,5 +1,5 @@
-import { Feature, RefineEvent } from '../types';
-import { refineFeatures } from '../core/story-generator';
+import { Feature, RefineEvent, StructuralRestructureProposal } from '../types';
+import { refineFeatures, restructureFeatures } from '../core/story-generator';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
@@ -10,8 +10,10 @@ import { normalizeProjectKeys, resolvePrimaryProjectKey } from '../services/proj
 interface RefineProgressEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
   sessionId: string;
+  operationType?: 'refine' | 'restructure';
   message?: string;
   features?: Feature[];
+  proposal?: StructuralRestructureProposal;
   tokenUsage?: unknown;
   updatedAt: number;
 }
@@ -19,6 +21,7 @@ interface RefineProgressEvent {
 export async function handler(event: { body: RefineEvent }) {
   const { sessionId, accountId, requirement, feedback, features, license, config: eventConfig, projectKey, projectKeys } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
+  const operationType = event.body.mode === 'restructure' ? 'restructure' : 'refine';
   const config = {
     ...eventConfig,
     generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
@@ -26,7 +29,11 @@ export async function handler(event: { body: RefineEvent }) {
   };
 
   try {
-    await sendRefineProgress(sessionId, 'Preparing bulk refinement context…');
+    await sendRefineProgress(
+      sessionId,
+      operationType === 'restructure' ? 'Preparing restructure context…' : 'Preparing bulk refinement context…',
+      operationType,
+    );
 
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement ?? '', piiEnabled);
@@ -37,22 +44,48 @@ export async function handler(event: { body: RefineEvent }) {
       return;
     }
 
-    await sendRefineProgress(sessionId, `Refining ${Array.isArray(features) ? features.length : 0} features in the background…`);
+    await sendRefineProgress(
+      sessionId,
+      operationType === 'restructure'
+        ? `Restructuring ${event.body.restructureScope === 'selected' ? event.body.selectedFeatureIds?.length ?? 0 : Array.isArray(features) ? features.length : 0} features in the background…`
+        : `Refining ${Array.isArray(features) ? features.length : 0} features in the background…`,
+      operationType,
+    );
 
-    const result = await refineFeatures({
-      requirement: maskedRequirement.text,
-      features,
-      feedback: maskedFeedback.text,
-      config,
-      onProgress: (message) => sendRefineProgress(sessionId, message),
-    });
+    let tokenUsage;
+    let resultFeatures: Feature[];
+    let proposal: StructuralRestructureProposal | undefined;
+
+    if (operationType === 'restructure') {
+      const result = await restructureFeatures({
+        requirement: maskedRequirement.text,
+        features,
+        feedback: maskedFeedback.text,
+        selectedFeatureIds: event.body.selectedFeatureIds ?? [],
+        scope: event.body.restructureScope ?? 'all',
+        config,
+      });
+      tokenUsage = result.tokenUsage;
+      proposal = result.proposal;
+      resultFeatures = result.proposal.proposedFeatures;
+    } else {
+      const result = await refineFeatures({
+        requirement: maskedRequirement.text,
+        features,
+        feedback: maskedFeedback.text,
+        config,
+        onProgress: (message) => sendRefineProgress(sessionId, message, operationType),
+      });
+      tokenUsage = result.tokenUsage;
+      resultFeatures = result.features;
+    }
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
       return;
     }
 
-    await updateLatestTurnFeatures(sessionId, accountId, result.features, feedback, result.tokenUsage);
+    await updateLatestTurnFeatures(sessionId, accountId, resultFeatures, feedback, tokenUsage);
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
         sessionId,
@@ -63,14 +96,19 @@ export async function handler(event: { body: RefineEvent }) {
         projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
-          'Bulk refinement applied from explicit user feedback.',
-          'Existing features were preserved where the feedback did not require structural changes.',
+          operationType === 'restructure'
+            ? 'Feature structure proposal generated from explicit user restructure feedback.'
+            : 'Bulk refinement applied from explicit user feedback.',
+          operationType === 'restructure'
+            ? 'Existing feature coverage was preserved through explicit source-feature and AR provenance.'
+            : 'Existing features were preserved where the feedback did not require structural changes.',
         ],
         contextUsage: {
           featureCount: Array.isArray(features) ? features.length : 0,
           feedbackLength: String(feedback ?? '').length,
+          operationType,
         },
-        tokenUsage: result.tokenUsage,
+        tokenUsage,
         piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedFeedback.stats),
       });
     }
@@ -80,15 +118,18 @@ export async function handler(event: { body: RefineEvent }) {
       projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
       sessionId,
       model: config.generatorConfig.refineModel,
-      tokenUsage: result.tokenUsage ?? null,
+      tokenUsage: tokenUsage ?? null,
+      metadata: { operationType, restructureScope: event.body.restructureScope ?? null },
     });
 
     await entitySet(KEYS.refineProgress(sessionId), {
       type: 'complete',
       sessionId,
-      message: 'Bulk refinement complete.',
-      features: result.features,
-      tokenUsage: result.tokenUsage,
+      operationType,
+      message: operationType === 'restructure' ? 'Restructure proposal ready.' : 'Bulk refinement complete.',
+      features: resultFeatures,
+      proposal,
+      tokenUsage,
       updatedAt: Date.now(),
     } as RefineProgressEvent);
   } catch (err) {
@@ -100,16 +141,18 @@ export async function handler(event: { body: RefineEvent }) {
     await entitySet(KEYS.refineProgress(sessionId), {
       type: 'error',
       sessionId,
+      operationType,
       message: err instanceof Error ? err.message : 'Bulk refinement failed',
       updatedAt: Date.now(),
     } as RefineProgressEvent);
   }
 }
 
-async function sendRefineProgress(sessionId: string, message: string) {
+async function sendRefineProgress(sessionId: string, message: string, operationType: 'refine' | 'restructure') {
   await entitySet(KEYS.refineProgress(sessionId), {
     type: 'progress',
     sessionId,
+    operationType,
     message,
     updatedAt: Date.now(),
   } as RefineProgressEvent);
@@ -124,6 +167,7 @@ async function markCancelled(sessionId: string) {
   await entitySet(KEYS.refineProgress(sessionId), {
     type: 'cancelled',
     sessionId,
+    operationType: 'refine',
     message: 'Bulk refinement cancelled.',
     updatedAt: Date.now(),
   } as RefineProgressEvent);
