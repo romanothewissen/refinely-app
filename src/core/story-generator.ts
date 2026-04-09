@@ -665,6 +665,9 @@ async function runParallelArPass(input: {
         suggested_story_points: feature.suggested_story_points,
         process_code: feature.process_code,
       },
+      siblingFeatures: input.features
+        .filter(f => f.id !== feature.id)
+        .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
     }),
   }));
 
@@ -814,6 +817,9 @@ async function backfillMissingAcceptanceRequirements(input: {
             suggested_story_points: feature.suggested_story_points,
             process_code: feature.process_code,
           },
+          siblingFeatures: input.features
+            .filter(f => f.id !== feature.id)
+            .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
         }),
         model,
         maxTokens: 3072,
@@ -2650,6 +2656,7 @@ export async function generateClarifyingQuestions(opts: {
   wiContextText: string;
   similarStoriesText: string;
   config: TenantConfig;
+  precomputedTriage?: TriageResult | null;
   onTriageComplete?: (assessment: {
     shape?: EffectiveSizingContract['shape'];
     complexity?: EffectiveSizingContract['complexity'];
@@ -2663,12 +2670,14 @@ export async function generateClarifyingQuestions(opts: {
 }): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config, onTriageComplete } = opts;
 
-  const clarifyTriageResult = await assessRequirementWithLlm({
-    requirement,
-    generatorConfig: config.generatorConfig,
-    tier: config.tier,
-    providerOpts: buildLlmProviderOpts(config),
-  });
+  const clarifyTriageResult = opts.precomputedTriage !== undefined
+    ? opts.precomputedTriage
+    : await assessRequirementWithLlm({
+        requirement,
+        generatorConfig: config.generatorConfig,
+        tier: config.tier,
+        providerOpts: buildLlmProviderOpts(config),
+      });
   const questionPlan = clarifyTriageResult
     ? triageToAssessment(clarifyTriageResult).questionPlan
     : undefined;

@@ -229,8 +229,13 @@ export async function findSimilarStories(
       ranked = await rerankWithLlm(requirement, candidates, config.generatorConfig.themeModel);
     }
 
+    const threshold = config.similarityConfig?.threshold ?? 0;
+    const filtered = threshold > 0
+      ? ranked.filter(item => (item.relevanceScore ?? 0) >= threshold)
+      : ranked;
+
     const baseUrl = await getJiraBaseUrl();
-    return ranked.slice(0, maxResults).map(item => ({
+    return filtered.slice(0, maxResults).map(item => ({
       key: item.key,
       summary: item.summary,
       description: item.description,

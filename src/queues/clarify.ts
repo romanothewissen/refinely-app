@@ -9,7 +9,7 @@
  */
 
 import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
-import { ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
+import { assessRequirementWithLlm, ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
@@ -63,7 +63,24 @@ export async function handler(event: { body: ClarifyEvent }) {
         domainContextApplied: Boolean(config.domainContext?.trim()),
       },
     });
-    const [wiContext, similarStories] = await Promise.all([
+    const triagePromise = assessRequirementWithLlm({
+      requirement: maskedRequirement.text,
+      generatorConfig: config.generatorConfig,
+      tier: config.tier,
+      providerOpts: {
+        provider: config.generatorConfig.provider,
+        geminiApiKey: config.generatorConfig.geminiApiKey,
+        geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
+        openaiApiKey: config.generatorConfig.openaiApiKey,
+        openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+        azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
+        azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
+        azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+        modelCatalogs: config.generatorConfig.modelCatalogs,
+      },
+    });
+
+    const [wiContext, similarStories, precomputedTriage] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), 4, 20000, selectedProjectKeys)
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
@@ -76,6 +93,7 @@ export async function handler(event: { body: ClarifyEvent }) {
             maxResults: 8,
           })
         : Promise.resolve([]),
+      triagePromise,
     ]);
 
     if (await isWorkflowCancelled(sessionId)) {
@@ -101,6 +119,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       wiContextText: wiContext.text,
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
+      precomputedTriage,
       onTriageComplete: async (assessment) => {
         const questionText = assessment.questionPlan.target > 0
           ? `targeting about ${assessment.questionPlan.target} questions`

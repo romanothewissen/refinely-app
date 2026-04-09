@@ -279,6 +279,7 @@ RULES:
 - When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
 - Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
 - Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
+- When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
@@ -444,6 +445,7 @@ export function buildArPerFeatureUserMessage(opts: {
   wiContextText?: string;
   similarStoriesText?: string;
   feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string };
+  siblingFeatures?: { summary: string; description: string }[];
 }): string {
   const reqText = (opts.requirement || '').trim().slice(0, 2000);
   const parts = [`REQUIREMENT:\n${reqText}`];
@@ -469,7 +471,14 @@ export function buildArPerFeatureUserMessage(opts: {
 
   const similarStoriesText = (opts.similarStoriesText || '').trim();
   if (similarStoriesText) {
-    parts.push(`RELATED BACKLOG CONTEXT (secondary to the requirement and work instructions):\n${similarStoriesText.slice(0, 1800)}`);
+    parts.push(`RELATED BACKLOG CONTEXT (secondary to the requirement and work instructions):\n${similarStoriesText.slice(0, 3000)}`);
+  }
+
+  if (opts.siblingFeatures && opts.siblingFeatures.length > 0) {
+    const siblingList = opts.siblingFeatures
+      .map((f, i) => `${i + 1}. ${f.summary}: ${f.description}`)
+      .join('\n');
+    parts.push(`OTHER FEATURES IN THIS BACKLOG (do not duplicate their acceptance requirements):\n${siblingList}`);
   }
 
   parts.push(

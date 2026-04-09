@@ -103,7 +103,9 @@ export async function retrieveWiContext(
   if (!scopedChunks.length) return { text: '', docs: [], chunks: [] };
 
   const scored = bm25Score(query, scopedChunks);
-  const top = scored.slice(0, topK);
+  const topScore = scored[0]?.score ?? 0;
+  const minScore = topScore * 0.2;
+  const top = scored.filter(s => s.score >= minScore).slice(0, topK).map(s => s.chunk);
   const parts = top.map(c => c.text);
   const referencedDocIds = new Set(top.map(c => c.docId));
   const docs = cache.docs.filter(doc => referencedDocIds.has(doc.docId) && docMatchesProject(doc, projectKey));
@@ -150,7 +152,7 @@ function chunkText(text: string, maxChars = 800, minChars = 200): string[] {
 
 // ─── BM25 scoring ─────────────────────────────────────────────────────────────
 
-function bm25Score(query: string, chunks: StoredWiChunk[]): StoredWiChunk[] {
+function bm25Score(query: string, chunks: StoredWiChunk[]): { chunk: StoredWiChunk; score: number }[] {
   const k1 = 1.5, b = 0.75;
   const queryTerms = tokenize(query);
   const avgLen = chunks.reduce((s, c) => s + c.tokenCount, 0) / (chunks.length || 1);
@@ -173,8 +175,7 @@ function bm25Score(query: string, chunks: StoredWiChunk[]): StoredWiChunk[] {
 
   return scored
     .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map(s => s.chunk);
+    .sort((a, b) => b.score - a.score);
 }
 
 function tokenize(text: string): string[] {
