@@ -331,10 +331,10 @@ ${platformContextBlock(opts.domainContext)}
 YOUR JOB: Rewrite the feature set into a smaller, better-scoped backlog that preserves the original business intent and all still-relevant business rules.
 
 CONSOLIDATION RULES:
-- Prefer the smallest set of strong, independently valuable features that fully covers the ask
+- Prefer a well-scoped set of strong, independently valuable features that fully covers the ask
 - Preserve workflow splits only when they are explicitly supported by the requirement or clarifying answers
 - Do not use domain expectations, generic best practices, or organizational heuristics as a reason to create or preserve separate features
-- Merge sibling features when they express the same core rule with only minor wording, target-object, support, or exception differences
+- Merge sibling features when they express the same core rule with only minor wording, target-object, support, or exception differences — only merge when you are confident they represent the same atomic business rule, not merely related concerns
 - Keep override, exemption, reason-capture, visibility, audit, notification, and policy-definition behavior inside the parent feature unless it is clearly an independently deliverable workflow
 - If the same guard rule applies to multiple closely related work item types, you may keep them in one feature when the business rule is the same
 - If the user message gives a minimum preserved feature count or explicit split evidence, do not consolidate below that floor and do not merge away those explicitly evidenced splits
@@ -377,8 +377,8 @@ CALIBRATION EXAMPLES — use these as reasoning models:
 
 EXAMPLE 1 — Narrow guard / constraint rule:
 Requirement: "Prevent a record from moving to Completed when dependent work items are still open."
-Reasoning: One guard rule on one lifecycle event. Preventing completion while dependent work remains open is the core deliverable. Releasing the block after the condition clears is usually acceptance behaviour for the same feature, not automatically a second feature. Complexity is medium because evaluation timing, visible blocked state, and exception handling are not fully stated — but the core rule itself is explicit. For this to be "high" complexity, there would need to be multiple conflicting policies, several actor groups with different decision paths, or a broader workflow beyond this guard.
-Output: {"reasoning": "...", "estimatedFeatures": 1, "estimatedQuestions": 5, "shape": "minimal", "complexity": "medium", "arDepth": "standard"}
+Reasoning: One guard rule on one lifecycle event. Preventing completion while dependent work remains open is the core deliverable. Releasing the block after the condition clears is acceptance behaviour for the same feature, not a second feature. Complexity is low because the trigger, actor, and core rule are all stated. Evaluation timing and blocked-state visibility are acceptance-requirement depth details, not independent decision paths. For this to be "medium" complexity, there would need to be at least two actor groups, conflicting policies, or several implied decision paths — none of which are present here.
+Output: {"reasoning": "...", "estimatedFeatures": 1, "estimatedQuestions": 4, "shape": "minimal", "complexity": "low", "arDepth": "lean"}
 
 EXAMPLE 2 — Focused single-actor feature:
 Requirement: "Add the ability to export the current report view as a PDF."
@@ -588,7 +588,7 @@ OUTPUT RULES:
 - "details" is optional and should only be included when extra business context is needed to avoid losing domain fidelity.
 - Each question should read like one clear business decision, not a request for an exhaustive list.
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".
-- Anti-bias: most requirements score narrow/moderate scope with low/medium complexity. Do not default to high — justify it explicitly in profileReasoning. However, when the requirement names a broad capability area with mostly unstated business rules, actors, or decision logic, do not under-score complexity or question count just because the requirement text is short. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;
+- Anti-bias: guard rules and single-actor focused asks often score low complexity; short asks naming a workflow domain with mostly unstated rules often score high complexity. Do not default to medium just because you are uncertain — reason through what is stated versus genuinely unknown and choose the level that fits. Justify any high rating explicitly in profileReasoning, but do not suppress a high rating when the requirement names a workflow domain with mostly unstated actors, rules, or decision logic. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────

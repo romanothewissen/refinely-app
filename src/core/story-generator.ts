@@ -1133,7 +1133,7 @@ function computeSizingHeuristics(input: {
   }
 
   if (featureCount >= preferredFeatureRange.max + 2) {
-    oversizeScore += 2;
+    oversizeScore += 1;
     reasonItems.push(buildSizingReason(
       'feature_count_far_above_preferred_range',
       'The feature count is materially above the preferred range for this kind of ask.',
@@ -1202,7 +1202,7 @@ function computeSizingHeuristics(input: {
   let verdict: SizingAssessmentVerdict;
   let confidence: SizingAssessmentConfidence;
 
-  if (oversizeScore >= 4) {
+  if (oversizeScore >= 5) {
     verdict = 'oversized';
     confidence = 'high';
   } else if (oversizeScore >= 2) {
@@ -1432,7 +1432,7 @@ async function repairOversizedFeatureSet(opts: {
   ].join('\n\n---\n\n');
 
   const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(config.generatorConfig.refineModel, config.tier),
+    model: getTierModel(config.generatorConfig.evaluateModel, config.tier),
     systemPrompt: buildSizingRepairSystemPrompt({
       domainContext: config.domainContext,
       processTaxonomy: config.processTaxonomy,

@@ -251,7 +251,7 @@ function DiscoveryScoreCard({
   const discoveryProfile = meta?.discoveryProfile ?? context?.discoveryProfile;
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
   const assessment = meta?.assessment ?? null;
-  const complexityKey = discoveryProfile?.complexity ?? null;
+  const complexityKey = discoveryProfile?.complexity ?? assessment?.complexity ?? null;
   const complexityLabel = complexityKey ? (COMPLEXITY_LEVELS.find((level) => level.key === complexityKey)?.label ?? complexityKey) : null;
   const plannedQuestions = ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
 

@@ -71,6 +71,7 @@ function applyDiscoveryProfileFloor(
   profile: DiscoveryProfile,
   requirement?: string,
   clarifyAnswers?: Array<{ answer?: string }>,
+  skipSmallAskCap?: boolean,
 ): TriageResult {
   // Map clarify scope → minimum triage shape + feature count
   const scopeToShape: Record<DiscoveryProfile['scope'], { shape: Shape; minFeatures: number }> = {
@@ -111,6 +112,13 @@ function applyDiscoveryProfileFloor(
   };
 
   if (!requirement) {
+    return floored;
+  }
+
+  // When the user completed a discovery session (clarifyDiscoveryProfile present),
+  // the Sonnet model already calibrated scope/complexity. Trust that assessment —
+  // do not override it with the guard_rule heuristic cap.
+  if (skipSmallAskCap) {
     return floored;
   }
 
@@ -289,6 +297,7 @@ export async function handler(event: { body: GenerationEvent }) {
           clarifyDiscoveryProfile,
           maskedRequirement.text,
           maskedAnswers.answers,
+          true, // skipSmallAskCap: trust the Sonnet discovery assessment
         )).then(async result => {
           const triage = buildTriagePayload(result);
           if (triage) {
