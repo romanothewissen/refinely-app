@@ -564,7 +564,7 @@ export async function handler(event: { body: GenerationEvent }) {
             priorStageDurationsMs: err.stageDurationsMs,
           },
           sources: progressSourcesSnapshot,
-        } satisfies GenerationProgressPayload,
+        } as GenerationProgressPayload,
         updatedAt: Date.now(),
       } as RealtimeEvent);
       return;
