@@ -2987,11 +2987,14 @@ function replaceFeatureRole(description: string, role: string): string {
   const trimmedRole = role.trim();
   if (!trimmedRole) return description;
 
-  if (/^As an?\s+.+?,\s*I need to\s+/i.test(description)) {
-    return description.replace(/^As an?\s+(.+?)(,\s*I need to\s+)/i, `As ${articleForRole(trimmedRole)} ${trimmedRole}$2`);
+  // Deduplicate before attempting role replacement to avoid wrapping an already-malformed string.
+  const cleaned = deduplicateDescription(description);
+
+  if (/^As an?\s+.+?,\s*I need to\s+/i.test(cleaned)) {
+    return cleaned.replace(/^As an?\s+(.+?)(,\s*I need to\s+)/i, `As ${articleForRole(trimmedRole)} ${trimmedRole}$2`);
   }
 
-  return `As ${articleForRole(trimmedRole)} ${trimmedRole}, I need to ${description.trim()} so that the requested outcome is achieved.`;
+  return `As ${articleForRole(trimmedRole)} ${trimmedRole}, I need to ${cleaned.trim()} so that the requested outcome is achieved.`;
 }
 
 function trimVerboseSegment(value: string, maxWords: number): string {
@@ -3024,9 +3027,33 @@ function trimVerboseSegment(value: string, maxWords: number): string {
   return trimmed.replace(/[,:;.\s]+$/g, '').trim();
 }
 
+function deduplicateDescription(description: string): string {
+  // Detect descriptions where the LLM concatenated two user-story sentences.
+  // Strategy: find the last "As a[n] ..." occurrence and use that as the canonical sentence.
+  const asAPattern = /As an?\s+/gi;
+  const matches: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = asAPattern.exec(description)) !== null) {
+    matches.push(m.index);
+  }
+  if (matches.length <= 1) return description;
+  // Take the substring starting at the last "As a[n]" occurrence.
+  const lastStart = matches[matches.length - 1];
+  const candidate = description.slice(lastStart).trim();
+  // Only use it if it forms a recognisable user story sentence.
+  if (/^As an?\s+.+,\s*I need/i.test(candidate)) return candidate;
+  // Fallback: try the second-to-last occurrence.
+  if (matches.length >= 2) {
+    const secondLast = description.slice(matches[matches.length - 2]).trim();
+    if (/^As an?\s+.+,\s*I need/i.test(secondLast)) return secondLast;
+  }
+  return description;
+}
+
 function normalizeFeatureDescriptionVerbosity(description: string): string {
-  const match = description.match(/^As an?\s+(.+?),\s*I need to\s+(.+?)\s+so that\s+(.+)$/i);
-  if (!match) return sanitizeArClause(description);
+  const cleaned = deduplicateDescription(description);
+  const match = cleaned.match(/^As an?\s+(.+?),\s*I need to\s+(.+?)\s+so that\s+(.+)$/i);
+  if (!match) return sanitizeArClause(cleaned);
 
   const role = sanitizeArClause(match[1]);
   const action = trimVerboseSegment(match[2], 18);

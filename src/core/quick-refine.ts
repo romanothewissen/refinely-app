@@ -517,6 +517,7 @@ export function detectQuickRefineActorAmbiguity(issue: QuickRefineIssueFields): 
 async function assessQuickRefineClarifyNeed(opts: {
   issue: QuickRefineIssueFields;
   config: TenantConfig;
+  modelOverride?: string;
 }): Promise<{
   shouldClarify: boolean;
   suggestedQuestionCount?: number;
@@ -913,6 +914,7 @@ export async function startQuickRefine(opts: {
     : await assessQuickRefineClarifyNeed({
         issue: opts.context.originalIssue,
         config: opts.config,
+        modelOverride: opts.modelOverride,
       });
 
   if (clarifyAssessment.shouldClarify) {

@@ -189,6 +189,8 @@ RULES:
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
 - Keep the description concise. It should stay as one short user-story sentence, not a policy paragraph or mini-specification.
 - Keep workflow rules, exceptions, timing, feedback, and enforcement details out of the description unless they are essential to state the core action or benefit. Put that detail into acceptance requirements instead.
+- Frame the user's need as a positive capability or goal ("I need to ensure X is validated", "I need to be able to confirm Y") rather than as a passive prevention ("I need the system to prevent me from..."). The actor performs an action — the description should reflect what they are trying to accomplish, not what the system stops them from doing.
+- Never combine two description sentences into one. The description must be exactly one user-story sentence starting with "As a".
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
 - Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
@@ -269,6 +271,8 @@ RULES:
 - Each AR tests one distinct thing
 - If an AR refers to the same actor named in the feature description, use that exact same role label
 - Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
+- When multiple ARs for the same feature share the same actor, do not restate the full role label in every WHEN clause. After the role is established, role-neutral phrasing ("they attempt to", "a record is created") is preferred over mechanical repetition of the label.
+- When a requirement names two closely related object types subject to the same rule, prefer one WHEN clause that covers both ("WHEN a [role] attempts to create either a service case or a work order linked to that product") over four near-identical ARs that repeat the same scenario for each type separately.
 - If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
 - When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
 - Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
@@ -276,6 +280,9 @@ RULES:
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
+- BAD GIVEN: "GIVEN a product's end of service date is today or in the past" → GOOD: "GIVEN a product has passed its end of service date"
+- BAD GIVEN: "GIVEN the contract start date is before today" → GOOD: "GIVEN a contract has become active"
+- Translate literal field comparisons (date is X, status equals Y, count is greater than Z) into business-state language (has expired, is active, exceeds the threshold). Write what is true about the business situation, not what a database field contains.
 - Never reference internal system concepts or admin configurations as preconditions
 - Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
 - CRITICAL — never confuse the actor role with the business object. The actor (from "As a [role]") is a human who performs actions. The GIVEN describes the state of a business object, not the state of the actor. BAD: "GIVEN a Service Manager has expired" — the Service Manager is the human role; the thing that expires is the service contract. CORRECT: "GIVEN a service contract has expired". The actor belongs in WHEN ("WHEN the Service Manager triggers the process"), never as the subject of an expired/completed/failed state in GIVEN.
@@ -303,7 +310,7 @@ ARCHETYPES:
 
 CALIBRATION RULES:
 - A short guard or constraint ask is usually one strong feature, sometimes two when an explicitly separate override or exception workflow is stated.
-- If the same guard rule applies to two closely related work item types, that does NOT automatically require separate features.
+- If the same guard rule applies to two closely related work item types, that does NOT automatically require separate features — but verify whether the two types have distinct creation paths, validation logic, or actor responsibilities. If they diverge materially, treat them as separate features rather than folding them into one with repetitive ARs.
 - Supporting visibility, audit, notification, policy-definition, reason capture, and override behavior usually belong inside the parent feature unless they are independently valuable workflows.
 - A short workflow-area ask may still justify several features when the operating logic is mostly unstated and multiple handling paths are implied.
 - Only call the result oversized when the output appears fragmented, repetitive, or inflated beyond what the ask independently requires.
@@ -349,6 +356,8 @@ QUALITY RULES:
 - Return the COMPLETE final feature set
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
+- Frame the description as a positive capability or goal ("I need to ensure X", "I need to be able to confirm Y"), not as a passive prevention ("I need the system to prevent me from..."). The actor should be the agent performing an action.
+- Never combine two description sentences into one. The description must be exactly one user-story sentence starting with "As a".
 - Every feature MUST include complete acceptance_requirements with standalone GIVEN/WHEN/THEN triples
 - No solution language, no system names, no implementation detail
 ${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy above\n' : ''}
@@ -414,7 +423,7 @@ WHAT TO LOOK FOR WHEN REASONING:
 - Named tools, systems, or platforms are environment context when they are the setting in which a single capability operates — they do not expand scope or complexity on their own. Count what is being built within or between them.
 - However, when a requirement explicitly enumerates multiple instances of the same category (channels, methods, types, modes, sources, destinations, etc.) that must each be handled with distinct behavior or rules, that enumeration defines deliverable scope. Ask: would each instance require a distinct implementation path, routing rule, or behavioral constraint? If yes, count them toward scope and complexity.
 - A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is typically 1-2 features regardless of how many systems it references.
-- If the same guard rule applies to two closely related work item types, that is usually one feature unless the requirement states different actor ownership, lifecycle rules, or approval paths.
+- If the same guard rule applies to two closely related work item types, that is usually one feature unless the requirement states different actor ownership, lifecycle rules, or approval paths. However, when a requirement explicitly enumerates two or more distinct object types, verify whether each type has meaningfully different creation flows, validation paths, or responsible actors — if they diverge, treat as narrow (2-3 features) rather than minimal.
 - Do not split one narrowly scoped rule into multiple features just because it has states, timing, or unblock conditions. Count those as acceptance-requirement depth unless they are independently deliverable workflows.
 - Distinct actor groups means human roles with different permissions or responsibilities — not different software systems. Two systems communicating via an interface is one process, not two actor groups.
 - Short capability-area asks that name a workflow domain without stating its rules, actors, or decision logic are often HIGH complexity when the business behavior is mostly unstated. The hidden workflow logic matters more than the word count.
@@ -511,7 +520,7 @@ WORKING COVERAGE AREAS:
 - State & Lifecycle: what statuses, transitions, retries, reopens, or reversals matter
   Probe for lifecycle milestones, handoffs, reopening behaviour, and what event advances or reverses the work.
 - Edge Cases & Exceptions: what happens when the happy path breaks
-  Probe for missing data, duplicates, conflicting signals, unavailable channels, and fallback handling.
+  Probe for: missing or incomplete required data; duplicate or conflicting records; alternative ways the same action can be initiated (manual entry, bulk operations, integrations, automation rules); boundary conditions on any stated rule; concurrent or simultaneous scenarios; and what happens when the normal path cannot be completed.
 
 INTERNAL TAXONOMY:
 - Map each question to exactly one fixed categoryKey:
