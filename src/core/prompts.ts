@@ -269,7 +269,9 @@ RULES:
 - Write as if describing business outcomes to someone who has never seen the system
 - Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
 - Each AR tests one distinct thing
-- If an AR refers to the same actor named in the feature description, use that exact same role label
+- Treat the feature description role as the default actor anchor for that feature.
+- If an AR refers to the same actor named in the feature description, use that exact same role label.
+- Only upgrade to a more specific role when that role is directly supported by the requirement, clarified answers, or other provided evidence. If you do upgrade, use that same specific role consistently across the feature instead of mixing generic and specific labels.
 - Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
 - When multiple ARs for the same feature share the same actor, do not restate the full role label in every WHEN clause. After the role is established, role-neutral phrasing ("they attempt to", "a record is created") is preferred over mechanical repetition of the label.
 - When a requirement names two closely related object types subject to the same rule, prefer one WHEN clause that covers both ("WHEN a [role] attempts to create either a service case or a work order linked to that product") over four near-identical ARs that repeat the same scenario for each type separately.

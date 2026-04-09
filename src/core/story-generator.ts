@@ -262,7 +262,7 @@ function trimPromptText(text: string, maxChars: number): string {
   return `${normalized.slice(0, maxChars).trimEnd()}\n...[truncated for speed]`;
 }
 
-function collectDiscoveryGroundingTerms(parts: string[]): Set<string> {
+export function collectDiscoveryGroundingTerms(parts: string[]): Set<string> {
   const terms = new Set<string>();
   const rawSignals = extractDiscoverySignals(parts);
 
@@ -293,29 +293,65 @@ function countGroundingHits(text: string, groundingTerms: Set<string>): number {
   return hits;
 }
 
-function followupQuestionsLookWeak(
+type DiscoveryQuestionStrength = {
+  hits: number;
+  isBroadGenericPattern: boolean;
+  questionLooksGeneric: boolean;
+  weakForFollowup: boolean;
+  strongForInitial: boolean;
+};
+
+function assessDiscoveryQuestionStrength(
+  question: ClarifyQuestion,
+  groundingTerms: Set<string>,
+): DiscoveryQuestionStrength {
+  const normalizedQuestion = question.question.trim();
+  if (!normalizedQuestion) {
+    return {
+      hits: 0,
+      isBroadGenericPattern: false,
+      questionLooksGeneric: true,
+      weakForFollowup: true,
+      strongForInitial: false,
+    };
+  }
+
+  const isBroadGenericPattern = GENERIC_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(normalizedQuestion));
+  const hits = countGroundingHits(normalizedQuestion, groundingTerms);
+  const questionLooksGeneric = /\b(capability|process|system|workflow|handling|business outcome)\b/i.test(normalizedQuestion);
+
+  return {
+    hits,
+    isBroadGenericPattern,
+    questionLooksGeneric,
+    weakForFollowup: isBroadGenericPattern || hits === 0 || (questionLooksGeneric && hits < 2),
+    strongForInitial: hits >= 2 || (hits >= 1 && !questionLooksGeneric && !isBroadGenericPattern),
+  };
+}
+
+export function followupQuestionsLookWeak(
   questions: ClarifyQuestion[],
   groundingTerms: Set<string>,
 ): boolean {
   if (!questions.length) return true;
 
-  return questions.some((question) => {
-    const normalizedQuestion = question.question.trim();
-    if (!normalizedQuestion) return true;
-    if (GENERIC_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(normalizedQuestion))) return true;
-
-    const hits = countGroundingHits(normalizedQuestion, groundingTerms);
-    const questionLooksGeneric = /\b(capability|process|system|workflow|handling|business outcome)\b/i.test(normalizedQuestion);
-    return hits === 0 || (questionLooksGeneric && hits < 2);
-  });
+  return questions.some((question) => assessDiscoveryQuestionStrength(question, groundingTerms).weakForFollowup);
 }
 
-function initialQuestionsLookWeak(
+export function initialQuestionsLookWeak(
   questions: ClarifyQuestion[],
   groundingTerms: Set<string>,
 ): boolean {
   if (!questions.length) return false;
-  return followupQuestionsLookWeak(questions, groundingTerms);
+
+  const assessments = questions.map((question) => assessDiscoveryQuestionStrength(question, groundingTerms));
+  const groundedQuestionCount = assessments.filter((assessment) => assessment.hits > 0).length;
+  const strongQuestionCount = assessments.filter((assessment) => assessment.strongForInitial).length;
+  const allQuestionsWeak = assessments.every((assessment) => assessment.weakForFollowup);
+
+  return allQuestionsWeak
+    || groundedQuestionCount < Math.min(2, questions.length)
+    || strongQuestionCount === 0;
 }
 
 function pushPromptSection(parts: string[], heading: string, text: string, maxChars: number) {
@@ -2831,6 +2867,8 @@ export async function askQuestion(opts: {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const NEUTRAL_FALLBACK_ROLE = 'authorized user';
+const ROLE_BEHAVIOR_VERB_PATTERN = '(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|tries|works|manages|uses|belongs)';
+const CLAUSE_ROLE_PATTERN = new RegExp(`\\b(a|an|the)\\s+([A-Za-z][A-Za-z\\s/-]{1,60}?)(?=\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b)`, 'gi');
 const ROLE_LABEL_HINTS = new Set([
   ...GENERIC_ROLE_WORDS,
   'admin',
@@ -2966,16 +3004,84 @@ function roleIsEvidenceBacked(role: string, input: RoleGroundingContext, explici
   return false;
 }
 
-function resolveEvidenceBackedRole(featureRole: string | null, input?: RoleGroundingContext): string {
+function isGenericRoleLabel(role: string): boolean {
+  const tokens = tokenizeRole(role);
+  if (!tokens.length) return false;
+  if (role.trim().toLowerCase() === NEUTRAL_FALLBACK_ROLE) return true;
+  return tokens.every((token) => GENERIC_ROLE_WORDS.has(token) || token === 'authorized' || token.endsWith('user') || token.endsWith('users'));
+}
+
+function extractRoleCandidatesFromClause(clause: string): string[] {
+  const matches: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = CLAUSE_ROLE_PATTERN.exec(clause)) !== null) {
+    const candidate = String(match[2] ?? '').trim();
+    if (!candidate || !looksLikeRoleLabel(candidate)) continue;
+    matches.push(candidate);
+  }
+  CLAUSE_ROLE_PATTERN.lastIndex = 0;
+  return uniqueNonEmptyStrings(matches);
+}
+
+function canonicalizeRoleCandidate(
+  role: string,
+  input: RoleGroundingContext,
+  explicitActors: string[],
+): string | null {
+  const trimmed = role.trim();
+  if (!trimmed || !roleIsEvidenceBacked(trimmed, input, explicitActors)) return null;
+
+  const matchedExplicitActor = explicitActors.find((actor) => roleMatchesActorLabel(trimmed, actor));
+  if (matchedExplicitActor) return matchedExplicitActor;
+
+  const matchedDomainRole = uniqueNonEmptyStrings(input.domainRoles ?? []).find((domainRole) => roleMatchesActorLabel(trimmed, domainRole));
+  if (matchedDomainRole) return matchedDomainRole;
+
+  if (isGenericRoleLabel(trimmed)) return null;
+  return trimmed;
+}
+
+function resolveDominantAcceptanceRole(
+  acceptanceRequirements: AcceptanceRequirement[],
+  input?: RoleGroundingContext,
+): string | null {
+  if (!input || !acceptanceRequirements.length) return null;
+
+  const explicitActors = collectExplicitActorLabels(input);
+  const counts = new Map<string, number>();
+
+  acceptanceRequirements.forEach((ar) => {
+    extractRoleCandidatesFromClause(`${ar.given} ${ar.when} ${ar.then}`).forEach((candidate) => {
+      const canonical = canonicalizeRoleCandidate(candidate, input, explicitActors);
+      if (!canonical) return;
+      counts.set(canonical, (counts.get(canonical) ?? 0) + 1);
+    });
+  });
+
+  const candidates = [...counts.entries()].sort((left, right) => right[1] - left[1]);
+  if (candidates.length !== 1) return null;
+  return candidates[0][0];
+}
+
+function resolveEvidenceBackedRole(
+  featureRole: string | null,
+  input?: RoleGroundingContext,
+  acceptanceRequirements: AcceptanceRequirement[] = [],
+): string {
   if (!input) return featureRole?.trim() || NEUTRAL_FALLBACK_ROLE;
 
   const explicitActors = collectExplicitActorLabels(input);
-  if (featureRole && roleIsEvidenceBacked(featureRole, input, explicitActors)) {
+  if (featureRole && !isGenericRoleLabel(featureRole) && roleIsEvidenceBacked(featureRole, input, explicitActors)) {
     return featureRole.trim();
   }
 
   if (explicitActors.length) {
     return explicitActors[0];
+  }
+
+  const dominantAcceptanceRole = resolveDominantAcceptanceRole(acceptanceRequirements, input);
+  if (dominantAcceptanceRole && (!featureRole || isGenericRoleLabel(featureRole))) {
+    return dominantAcceptanceRole;
   }
 
   const domainRole = resolveHighConfidenceDomainRole(input);
@@ -3075,12 +3181,17 @@ export function applyFeatureOutputGuardrails(
   feature: Feature,
   roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
 ): Feature {
-  const resolvedRole = resolveEvidenceBackedRole(extractRoleFromDescription(feature.description), roleGrounding);
+  const normalizedAcceptanceRequirements = (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity);
+  const resolvedRole = resolveEvidenceBackedRole(
+    extractRoleFromDescription(feature.description),
+    roleGrounding,
+    normalizedAcceptanceRequirements,
+  );
   const description = normalizeFeatureDescriptionVerbosity(replaceFeatureRole(feature.description, resolvedRole));
   return harmonizeFeatureRoleLanguage({
     ...feature,
     description,
-    acceptanceRequirements: (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity),
+    acceptanceRequirements: normalizedAcceptanceRequirements,
   });
 }
 
@@ -3284,25 +3395,60 @@ function articleForRole(role: string): 'a' | 'an' {
 function alignRoleInClause(clause: string, featureRole: string): string {
   if (!clause || !featureRole) return clause;
 
-  return clause.replace(/\b(a|an|the)\s+([A-Za-z][A-Za-z\s/-]{1,60}?)(?=\s+(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|works|manages|uses|belongs)\b)/i, (match, article, rolePhrase) => {
+  return clause.replace(CLAUSE_ROLE_PATTERN, (match, article, rolePhrase) => {
     if (!shouldAlignRolePhrase(rolePhrase, featureRole)) return match;
     const nextArticle = String(article).toLowerCase() === 'the' ? 'the' : articleForRole(featureRole);
     return `${nextArticle} ${featureRole}`;
   });
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countDistinctClauseRoleCandidates(clause: string): number {
+  return extractRoleCandidatesFromClause(clause).length;
+}
+
+function canNeutralizeWhenClause(clause: string, featureRole: string): boolean {
+  const leadingRolePattern = new RegExp(`^(?:(?:a|an|the)\\s+)?${escapeRegex(featureRole)}\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b`, 'i');
+  if (!leadingRolePattern.test(clause)) return false;
+  return countDistinctClauseRoleCandidates(clause) <= 1;
+}
+
+function neutralizeWhenClauseRole(clause: string, featureRole: string): string {
+  if (!canNeutralizeWhenClause(clause, featureRole)) return clause;
+  const leadingRolePattern = new RegExp(`^(?:(?:a|an|the)\\s+)?${escapeRegex(featureRole)}\\s+`, 'i');
+  return clause
+    .replace(leadingRolePattern, 'they ')
+    .replace(/^they attempts\b/i, 'they attempt')
+    .replace(/^they tries\b/i, 'they try')
+    .replace(/^they has\b/i, 'they have')
+    .replace(/^they is\b/i, 'they are')
+    .replace(/^they does\b/i, 'they do');
+}
+
 function harmonizeFeatureRoleLanguage(feature: Feature): Feature {
   const featureRole = extractRoleFromDescription(feature.description);
   if (!featureRole) return feature;
 
+  let explicitWhenRoleSeen = false;
   return {
     ...feature,
-    acceptanceRequirements: (feature.acceptanceRequirements || []).map(ar => ({
-      ...ar,
-      given: alignRoleInClause(ar.given, featureRole),
-      when: alignRoleInClause(ar.when, featureRole),
-      then: alignRoleInClause(ar.then, featureRole),
-    })),
+    acceptanceRequirements: (feature.acceptanceRequirements || []).map((ar) => {
+      const given = alignRoleInClause(ar.given, featureRole);
+      const whenAligned = alignRoleInClause(ar.when, featureRole);
+      const when = explicitWhenRoleSeen ? neutralizeWhenClauseRole(whenAligned, featureRole) : whenAligned;
+      if (new RegExp(`^(?:(?:a|an|the)\\s+)?${escapeRegex(featureRole)}\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b`, 'i').test(whenAligned)) {
+        explicitWhenRoleSeen = true;
+      }
+      return {
+        ...ar,
+        given,
+        when,
+        then: alignRoleInClause(ar.then, featureRole),
+      };
+    }),
   };
 }
 

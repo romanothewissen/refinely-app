@@ -9,9 +9,12 @@ import {
   applySmallAskTriageGuardrails,
   assessSizingHeuristics,
   capDiscoveryProfileFloorForSmallAsk,
+  collectDiscoveryGroundingTerms,
   deriveSizingGuidance,
   feedbackRequestsStructuralRefinement,
   findFeaturesMissingCompleteAcceptanceRequirements,
+  followupQuestionsLookWeak,
+  initialQuestionsLookWeak,
   repairAcceptanceRequirements,
   triageToSizingContract,
 } from '../story-generator';
@@ -209,6 +212,59 @@ test('applySmallAskTriageGuardrails narrows precise guard-rule triage estimates'
   assert.equal(guarded?.arDepth, 'standard');
 });
 
+test('initialQuestionsLookWeak accepts a mixed but grounded initial discovery set', () => {
+  const requirement = 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.';
+  const groundingTerms = collectDiscoveryGroundingTerms([requirement]);
+  const questions = [
+    {
+      categoryKey: 'context_trigger' as const,
+      category: 'Context & Trigger',
+      intent: 'business_outcome',
+      question: 'What should automatic case handling across Phone, WhatsApp, Text, and Email improve first?',
+      suggestions: [],
+    },
+    {
+      categoryKey: 'context_trigger' as const,
+      category: 'Context & Trigger',
+      intent: 'trigger_event',
+      question: 'Which trigger policy should start case creation across Phone, WhatsApp, Text, and Email?',
+      suggestions: [],
+    },
+    {
+      categoryKey: 'business_rules' as const,
+      category: 'Business Rules',
+      intent: 'decision_logic',
+      question: 'How should the flow choose between a new case and an existing one?',
+      suggestions: [],
+    },
+    {
+      categoryKey: 'edge_cases_exceptions' as const,
+      category: 'Edge Cases & Exceptions',
+      intent: 'conflicts_duplicates',
+      question: 'What should happen when the incoming interaction appears to match an existing case and could create a duplicate?',
+      suggestions: [],
+    },
+  ];
+
+  assert.equal(initialQuestionsLookWeak(questions, groundingTerms), false);
+});
+
+test('followupQuestionsLookWeak still rejects a broad initial-style follow-up question', () => {
+  const requirement = 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.';
+  const groundingTerms = collectDiscoveryGroundingTerms([requirement]);
+  const questions = [
+    {
+      categoryKey: 'business_rules' as const,
+      category: 'Business Rules',
+      intent: 'decision_logic',
+      question: 'How should the flow choose between a new case and an existing one?',
+      suggestions: [],
+    },
+  ];
+
+  assert.equal(followupQuestionsLookWeak(questions, groundingTerms), true);
+});
+
 test('deriveSizingGuidance preserves explicit manual vs automated workflow splits', () => {
   const guidance = deriveSizingGuidance({
     requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
@@ -363,4 +419,82 @@ test('applyFeatureOutputGuardrails falls back to authorized user when the role i
     'As a Field Service Engineer, I need to be prevented from creating service cases or work orders when the primary installed product has reached its designated end of service date so that unsupported requests are blocked and users receive clear feedback about the policy.',
   );
   assert.equal(guarded.acceptanceRequirements[0].when.includes('for example'), false);
+});
+
+test('applyFeatureOutputGuardrails promotes a generic feature role to a dominant evidence-backed AR role', () => {
+  const guarded = applyFeatureOutputGuardrails({
+    id: 'feature-1',
+    summary: 'Block unsupported record creation',
+    description: 'As an authorized user, I need to create supported records so that unsupported products are not processed.',
+    acceptanceRequirements: [
+      {
+        given: 'a product has passed its end of service date',
+        when: 'a Technical Support Specialist attempts to create the record',
+        then: 'the record is not created',
+      },
+      {
+        given: 'a product has passed its end of service date',
+        when: 'a Technical Support Specialist attempts to create the record with a linked work order',
+        then: 'the linked work order is not created',
+      },
+    ],
+  }, {
+    requirement: 'As a Technical Support Specialist, I need to prevent creation of service records for unsupported products.',
+    domainRoles: ['Technical Support Specialist', 'Supervisor'],
+  });
+
+  assert.match(guarded.description, /^As a Technical Support Specialist, I need to /);
+  assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
+});
+
+test('applyFeatureOutputGuardrails reduces repeated WHEN role labels after the first explicit mention', () => {
+  const guarded = applyFeatureOutputGuardrails({
+    id: 'feature-1',
+    summary: 'Block unsupported record creation',
+    description: 'As an authorized user, I need to create supported records so that unsupported products are not processed.',
+    acceptanceRequirements: [
+      {
+        given: 'a product has passed its end of service date',
+        when: 'a Technical Support Specialist attempts to create the record',
+        then: 'the record is not created',
+      },
+      {
+        given: 'a product has passed its end of service date',
+        when: 'the Technical Support Specialist attempts to create the linked work order',
+        then: 'the linked work order is not created',
+      },
+    ],
+  }, {
+    requirement: 'As a Technical Support Specialist, I need to prevent creation of service records for unsupported products.',
+    domainRoles: ['Technical Support Specialist'],
+  });
+
+  assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
+  assert.match(guarded.acceptanceRequirements[1].when, /^they attempts? to create the linked work order$/i);
+  assert.doesNotMatch(guarded.acceptanceRequirements[1].when, /Technical Support Specialist/i);
+});
+
+test('applyFeatureOutputGuardrails does not promote a generic feature role when multiple AR roles are present', () => {
+  const guarded = applyFeatureOutputGuardrails({
+    id: 'feature-1',
+    summary: 'Coordinate unsupported record handling',
+    description: 'As an authorized user, I need to handle unsupported records so that the right follow-up occurs.',
+    acceptanceRequirements: [
+      {
+        given: 'a product has passed its end of service date',
+        when: 'a Technical Support Specialist attempts to create the record',
+        then: 'the record is blocked',
+      },
+      {
+        given: 'the block requires approval',
+        when: 'a Supervisor reviews the request',
+        then: 'the request is routed for a decision',
+      },
+    ],
+  }, {
+    requirement: 'Unsupported record handling must block creation and route exceptions for review when needed.',
+    domainRoles: ['Technical Support Specialist', 'Supervisor'],
+  });
+
+  assert.match(guarded.description, /^As an authorized user, I need to /);
 });
