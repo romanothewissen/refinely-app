@@ -21,10 +21,14 @@ import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
 import {
   formatGenerationFeatureTarget,
+  getApprovedDraftStructureNote,
+  getCoverageReviewSummary,
+  getDiscoveryProfileHeadline,
   getDraftFeatureHeading,
   getDraftFeatureNote,
   getGenerationFeatureTargetLabel,
   getSizingRunContextNote,
+  getSourceContextChips,
 } from './generation-progress-copy';
 
 function normalizeDisplayText(value: string): string {
@@ -77,6 +81,7 @@ type GenerationProgressMeta = {
   resumeContext?: unknown;
   sources?: {
     projectKey: string;
+    projectCount?: number;
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
     wiDocsCount?: number;
@@ -112,7 +117,7 @@ function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?:
     if (idx >= 0) return idx;
   }
   const text = (progress || '').toLowerCase();
-  if (text.includes('acceptance requirement')) return 3;
+  if (text.includes('acceptance requirement')) return 4;
   if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
   if (text.includes('planning feature') || text.includes('feature structure')) return 2;
   return 0;
@@ -185,6 +190,23 @@ function ComplexityBar({ current }: { current?: string | null }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ContextChipList({ chips }: { chips: string[] }) {
+  if (!chips.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {chips.map((chip) => (
+        <span
+          key={chip}
+          className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]"
+        >
+          {chip}
+        </span>
+      ))}
     </div>
   );
 }
@@ -378,7 +400,10 @@ function DraftReviewCard({
                         </span>
                       )}
                     </div>
-                    <div className="text-[13px] text-[var(--rf-text-secondary)]">{feature.description}</div>
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Use case</div>
+                      <div className="text-[13px] text-[var(--rf-text-secondary)]">{feature.description}</div>
+                    </div>
                     {mergeLine && (
                       <div className="text-[12px] font-semibold text-[var(--rf-brand)]">{normalizeDisplayText(mergeLine)}</div>
                     )}
@@ -452,16 +477,18 @@ function DiscoveryScoreCard({
   const assessment = meta?.assessment ?? null;
   const sizingContract = meta?.sizingContract ?? context?.sizingContract;
   const complexityKey = sizingContract?.complexity ?? discoveryProfile?.complexity ?? assessment?.complexity ?? null;
-  const complexityLabel = complexityKey ? (COMPLEXITY_LEVELS.find((level) => level.key === complexityKey)?.label ?? complexityKey) : null;
   const plannedQuestions = sizingContract?.estimatedQuestions ?? ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
+  const discoveryHeadline = getDiscoveryProfileHeadline(discoveryProfile);
+  const sourceChips = getSourceContextChips(meta?.sources ?? context ?? null);
 
   if (!discoveryProfile && !assessment && !ambiguityAssessment && !sizingContract) {
     return (
       <div>
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
-          <span className="text-[12px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing…</span>
+          <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{discoveryHeadline}</span>
         </div>
+        <ContextChipList chips={sourceChips} />
         <div className="flex gap-1 mb-1">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="flex-1 h-2 rounded-sm shimmer" style={{ animationDelay: `${i * 0.12}s` }} />
@@ -484,8 +511,9 @@ function DiscoveryScoreCard({
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="flex items-center justify-between mb-2.5">
         <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
-        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{complexityLabel ?? 'Assessing'}</span>
+        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{discoveryHeadline}</span>
       </div>
+      <ContextChipList chips={sourceChips} />
       <ComplexityBar current={complexityKey} />
 
       <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
@@ -659,6 +687,7 @@ function GeneratingPipeline({
   const featureProgressById = new Map(featureProgress.map(item => [item.id, item.status]));
   const liveArRatio = arProgress?.total ? Math.min(1, arProgress.completed / arProgress.total) : 0;
   const draftFeatureNote = getDraftFeatureNote();
+  const sourceChips = getSourceContextChips(meta?.sources ?? null);
 
   // Anchored progress: context=5%, triage=25%, features=50%, ARs=72→100%
   const STAGE_PCT = [5, 25, 50, 72];
@@ -690,6 +719,9 @@ function GeneratingPipeline({
               <span className="dot-bounce flex gap-0.5"><span /><span /><span /></span>
               {normalizeDisplayText(progress || 'Processing...')}
             </p>
+            <div className="mt-3">
+              <ContextChipList chips={sourceChips} />
+            </div>
           </div>
           {canCancel && onCancel && (
             <button
@@ -1296,8 +1328,9 @@ export function MainContent({
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
   const sizingRunContextNote =
     generationContext?.draftReviewDecision === 'continue'
-      ? 'Draft structure was explicitly approved before acceptance requirements were written.'
+      ? getApprovedDraftStructureNote()
       : getSizingRunContextNote(generationContext?.sizingAssessment);
+  const coverageReviewSummary = getCoverageReviewSummary(generationContext?.coverageReview);
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
@@ -2048,15 +2081,16 @@ export function MainContent({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--rf-border)] bg-white/65 px-4 py-2.5 backdrop-blur-sm">
-                  <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Run context</span>
-                  <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+                <div className="rounded-xl border border-[var(--rf-border)] bg-white/65 px-4 py-3 backdrop-blur-sm">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Run context</span>
+                    <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
                     <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
                       {generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}
                     </span>
                     {(generationContext.wiDocsCount ?? 0) > 0 && (
                       <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.wiDocsCount} docs
+                        {generationContext.wiDocsCount} work instruction{generationContext.wiDocsCount === 1 ? '' : 's'}
                       </span>
                     )}
                     {generationContext.domainContextApplied && (
@@ -2079,18 +2113,26 @@ export function MainContent({
                         {sizingRunContextNote}
                       </span>
                     )}
-                    {generationContext.coverageReview && (
+                    {coverageReviewSummary && (
                       <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[13px] font-semibold ${
-                        generationContext.coverageReview.sufficient
+                        coverageReviewSummary.tone === 'success'
                           ? 'border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
                           : 'border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] text-[var(--rf-warning)]'
                       }`}>
-                        {generationContext.coverageReview.sufficient
-                          ? 'Coverage review: looks complete'
-                          : `Coverage review: ${generationContext.coverageReview.missingCoverage.length || 1} possible gap${generationContext.coverageReview.missingCoverage.length === 1 ? '' : 's'}`}
+                        {coverageReviewSummary.label}
                       </span>
                     )}
                   </div>
+                </div>
+                  {coverageReviewSummary?.details.length ? (
+                    <div className="mt-3 rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                      {coverageReviewSummary.details.map((detail, index) => (
+                        <div key={`${detail}-${index}`} className={index > 0 ? 'mt-1.5' : ''}>
+                          {normalizeDisplayText(detail)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </motion.div>
             )}

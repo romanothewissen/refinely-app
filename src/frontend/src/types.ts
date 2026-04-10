@@ -270,7 +270,7 @@ export interface AcceptanceRequirement {
 export interface Feature {
   id: string;
   summary: string;
-  description: string;          // "As a [role], I need to [action] so that [benefit]"
+  description: string;          // "As a [role], I need [action] so that [benefit]"
   acceptanceRequirements: AcceptanceRequirement[];
   storyPoints?: number;
   processCode?: string;          // only if taxonomy enabled

@@ -157,6 +157,64 @@ function mapDraftFeatures(features: Feature[]): Array<Pick<Feature, 'id' | 'summ
   }));
 }
 
+export function buildGenerationStartProgressUpdate(opts: {
+  retryFeatureId?: string;
+  retryFeature?: Feature;
+  reviewedDraftFeatures?: Feature[];
+  reviewedDraftReview?: DraftReviewMetadata;
+  reviewedDraftDecision?: GenerationEvent['reviewedDraftDecision'];
+  advisorySizingContract?: EffectiveSizingContract;
+  sources?: GenerationProgressPayload['sources'];
+}): { message: string; payload: GenerationProgressPayload } {
+  const {
+    retryFeatureId,
+    retryFeature,
+    reviewedDraftFeatures,
+    reviewedDraftReview,
+    reviewedDraftDecision,
+    advisorySizingContract,
+    sources,
+  } = opts;
+
+  const seededDraftFeatures = retryFeature
+    ? mapDraftFeatures([retryFeature])
+    : reviewedDraftFeatures?.length
+      ? mapDraftFeatures(reviewedDraftFeatures)
+      : [];
+
+  const stage: GenerationProgressPayload['stage'] = retryFeatureId
+    ? 'acceptance_requirements'
+    : reviewedDraftFeatures?.length && reviewedDraftDecision === 'continue'
+      ? 'acceptance_requirements'
+      : reviewedDraftFeatures?.length
+        ? 'draft_review'
+        : 'decomposition';
+
+  const message = retryFeatureId
+    ? 'Retrying acceptance requirements for the selected feature…'
+    : reviewedDraftFeatures?.length && reviewedDraftDecision && reviewedDraftDecision !== 'continue'
+      ? 'Revising the draft structure from your review…'
+      : reviewedDraftFeatures?.length
+        ? 'Continuing with the reviewed draft structure…'
+        : 'Planning feature structure from gathered context…';
+
+  return {
+    message,
+    payload: {
+      stage,
+      triage: advisorySizingContract,
+      ...(seededDraftFeatures.length
+        ? {
+            draftFeatures: seededDraftFeatures,
+            draftFeatureCount: seededDraftFeatures.length,
+            draftReview: reviewedDraftReview,
+          }
+        : {}),
+      sources,
+    },
+  };
+}
+
 export async function handler(event: { body: GenerationEvent }) {
   const {
     sessionId,
@@ -272,26 +330,20 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     progressSourcesSnapshot = progressSources;
 
-    // Progress: pass 1
-    await updateProgress(
-      retryFeatureId
-        ? 'Retrying acceptance requirements for the selected feature…'
-        : reviewedDraftFeatures?.length && reviewedDraftDecision && reviewedDraftDecision !== 'continue'
-          ? 'Revising the draft structure from your review…'
-          : reviewedDraftFeatures?.length
-            ? 'Continuing with the reviewed draft structure…'
-          : 'Planning feature structure from gathered context…',
-      1,
-      {
-        stage: retryFeatureId
-          ? 'acceptance_requirements'
-          : reviewedDraftFeatures?.length ? 'draft_review' : 'decomposition',
-        triage: advisorySizingContract,
-        sources: progressSources,
-      },
-    );
+    const startProgress = buildGenerationStartProgressUpdate({
+      retryFeatureId,
+      retryFeature,
+      reviewedDraftFeatures,
+      reviewedDraftReview,
+      reviewedDraftDecision,
+      advisorySizingContract,
+      sources: progressSources,
+    });
 
-    let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> = [];
+    await updateProgress(startProgress.message, 1, startProgress.payload);
+
+    let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> =
+      startProgress.payload.draftFeatures ?? [];
     let liveDraftReview: DraftReviewMetadata | undefined = reviewedDraftReview;
     let liveDraftReviewIterations = reviewedDraftReviewIterations ?? 0;
 

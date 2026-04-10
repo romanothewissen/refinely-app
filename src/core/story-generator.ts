@@ -17,7 +17,6 @@ import {
   ClarifyFailureReasonCode,
   TenantConfig,
   GenerationResult,
-  GenerationSizingAssessment,
   EffectiveSizingContract,
   SizingAssessmentArDepth,
   SizingAssessmentArchetype,
@@ -48,7 +47,6 @@ import {
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
   buildRestructureSystemPrompt,
-  buildSizingRepairSystemPrompt,
   buildCoverageCheckSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
@@ -618,7 +616,6 @@ function normalizeDraftDescriptionText(description: string): string {
     .replace(/\s+([,.;:!?])/g, '$1')
     .trim();
 
-  cleaned = cleaned.replace(/^As an?\s+([^,]+),\s*I need\s+(?!to\b)/i, 'As a $1, I need to ');
   cleaned = cleaned.replace(/\bso that\b\s+(.*?)\s+\bso that\b\s+\1\b/i, 'so that $1');
   return cleaned.trim();
 }
@@ -639,10 +636,9 @@ function collectFeatureDescriptionIssues(description: string): string[] {
   const issues = new Set<string>();
 
   if (!/^As an?\s+/i.test(cleaned)) issues.add('Missing "As a [role]" opening');
-  if (!/\bI need(?:\s+to)?\b/i.test(cleaned)) issues.add('Missing "I need to" action clause');
+  if (!/\bI need(?:\s+to)?\b/i.test(cleaned)) issues.add('Missing "I need" action clause');
   if (!/\bso that\b/i.test(cleaned)) issues.add('Missing explicit business benefit');
   if ((cleaned.match(/\bso that\b/gi) ?? []).length > 1) issues.add('Contains repeated "so that" benefit clauses');
-  if (/^As an?\s+.+?,\s*I need\s+(?!to\b)/i.test(cleaned)) issues.add('Uses malformed "I need" phrasing');
   if (/[.?!]\s+\S/.test(cleaned)) issues.add('Contains more than one sentence');
 
   const parts = parseFeatureDescriptionParts(cleaned);
@@ -884,7 +880,9 @@ export function annotateFailedAcceptanceRequirementFeatures(features: Feature | 
         arGenerationError: INCOMPLETE_AR_RETRY_MESSAGE,
       };
     }
-    const { arGenerationStatus: _status, arGenerationError: _error, ...rest } = feature;
+    const rest = { ...feature };
+    delete rest.arGenerationStatus;
+    delete rest.arGenerationError;
     return rest;
   };
 
@@ -1800,39 +1798,6 @@ export function capDiscoveryProfileFloorForSmallAsk(input: {
   };
 }
 
-function shouldAutoRepairOversizedAssessment(assessment: SizingAssessmentSnapshot): boolean {
-  return assessment.verdict === 'oversized'
-    && assessment.confidence === 'high'
-    && assessment.featureCount >= Math.max(assessment.preferredFeatureRange.max + 3, assessment.minimumPreservedFeatureCount + 2);
-}
-
-function buildGenerationSizingAssessment(input: {
-  decomposition: SizingAssessmentSnapshot;
-  final: SizingAssessmentSnapshot;
-  repairApplied: boolean;
-  repairRejectedReason?: string;
-  preRepairFeatureCount?: number;
-  preRepairAcceptanceRequirementCount?: number;
-}): GenerationSizingAssessment {
-  return {
-    archetype: input.final.archetype,
-    verdict: input.final.verdict,
-    confidence: input.final.confidence,
-    preferredFeatureRange: input.final.preferredFeatureRange,
-    preferredArDepth: input.final.preferredArDepth,
-    minimumPreservedFeatureCount: input.final.minimumPreservedFeatureCount,
-    explicitSplitSignals: input.final.explicitSplitSignals,
-    reasonCodes: input.final.reasonCodes,
-    reasons: input.final.reasons,
-    repairApplied: input.repairApplied,
-    repairRejectedReason: input.repairRejectedReason,
-    preRepairFeatureCount: input.preRepairFeatureCount,
-    preRepairAcceptanceRequirementCount: input.preRepairAcceptanceRequirementCount,
-    decomposition: input.decomposition,
-    final: input.final,
-  };
-}
-
 export function shouldPauseForDraftReview(input: {
   draftFeatureCount: number;
   triageFeatureTarget?: number;
@@ -1860,279 +1825,6 @@ function toRawFeature(feature: Feature): RawFeature {
     acceptance_requirements: feature.acceptanceRequirements.map((ar) => `GIVEN ${ar.given} WHEN ${ar.when} THEN ${ar.then}`),
     suggested_story_points: feature.storyPoints,
     process_code: feature.processCode,
-  };
-}
-
-function repairedOutputViolatesExplicitSplitEvidence(features: Feature[], evidence: ExplicitSplitEvidence[]): string | null {
-  for (const item of evidence) {
-    if (features.length < item.minimumFeatureCount) {
-      return 'below_explicit_workflow_floor';
-    }
-
-    if (item.code === 'manual_vs_automated_workflows') {
-      const featureTexts = features.map((feature) => featureNarrative(feature));
-      const manualIndexes = featureTexts
-        .map((text, index) => (textMentionsAny(text, MANUAL_PATH_TERMS) ? index : -1))
-        .filter((index) => index >= 0);
-      const automatedIndexes = featureTexts
-        .map((text, index) => (textMentionsAny(text, AUTOMATED_PATH_TERMS) ? index : -1))
-        .filter((index) => index >= 0);
-
-      const preservesSplit = manualIndexes.some((manualIndex) => automatedIndexes.some((autoIndex) => autoIndex !== manualIndex));
-      if (!preservesSplit) {
-        return 'merged_explicit_manual_and_automated_paths';
-      }
-    }
-
-    if (item.code === 'separate_exception_or_approval_workflow') {
-      const hasSeparateExceptionFeature = features.some((feature) =>
-        /\b(override|exception|exempt|approval|manual review)\b/i.test(featureNarrative(feature)),
-      );
-      if (!hasSeparateExceptionFeature) {
-        return 'merged_explicit_exception_or_approval_path';
-      }
-    }
-  }
-
-  return null;
-}
-
-async function repairOversizedFeatureSet(opts: {
-  requirement: string;
-  clarifyAnswers: ClarifyAnswer[];
-  attachmentText: string;
-  similarStoriesText: string;
-  wiContextText: string;
-  features: Feature[];
-  sizingAssessment: SizingAssessmentSnapshot;
-  config: TenantConfig;
-  providerOpts: {
-    provider: TenantConfig['generatorConfig']['provider'];
-    geminiApiKey?: string;
-    geminiBaseUrl?: string;
-    openaiApiKey?: string;
-    openaiBaseUrl?: string;
-    azureOpenAIApiKey?: string;
-    azureOpenAIBaseUrl?: string;
-    azureOpenAIApiVersion?: string;
-    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
-    piiMaskingEnabled?: boolean;
-  };
-  shouldCancel?: () => Promise<boolean> | boolean;
-}): Promise<{ features: Feature[]; usage: { input: number; output: number }; applied: boolean; rejectedReason?: string }> {
-  const {
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    similarStoriesText,
-    wiContextText,
-    features,
-    sizingAssessment,
-    config,
-    providerOpts,
-    shouldCancel,
-  } = opts;
-  const guidance = deriveSizingGuidance({
-    requirement,
-    clarifyAnswers,
-  });
-
-  const userMessage = [
-    buildGenerationUserMessage({
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText,
-      similarStoriesText,
-      limits: PASS2_CONTEXT_LIMITS,
-    }),
-    `SIZING SIGNAL:\nArchetype: ${sizingAssessment.archetype}\nPreferred feature range: ${sizingAssessment.preferredFeatureRange.min}-${sizingAssessment.preferredFeatureRange.max}\nMinimum preserved feature count: ${sizingAssessment.minimumPreservedFeatureCount}\nPreferred AR depth: ${sizingAssessment.preferredArDepth}\nExplicit split evidence:\n${guidance.explicitSplitEvidence.length ? guidance.explicitSplitEvidence.map((item) => `- ${item.detail}`).join('\n') : '- None'}\nReasons:\n${sizingAssessment.reasons.map((reason) => `- ${reason.detail}`).join('\n')}`,
-    `CURRENT FEATURES:\n${JSON.stringify(features, null, 2)}`,
-  ].join('\n\n---\n\n');
-
-  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(config.generatorConfig.evaluateModel, config.tier),
-    systemPrompt: buildSizingRepairSystemPrompt({
-      domainContext: config.domainContext,
-      processTaxonomy: config.processTaxonomy,
-      processTaxonomyEnabled: config.processTaxonomyEnabled,
-    }),
-    userMessage,
-    maxTokens: Math.max(config.generatorConfig.maxTokens ?? 8192, 4096),
-    reasoningEffort: 'medium',
-    ...providerOpts,
-  });
-
-  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-
-  const rawFeatures = result.data.features ?? [];
-  if (rawFeatures.length === 0) {
-    return {
-      features,
-      usage: { input: result.usage.input, output: result.usage.output },
-      applied: false,
-      rejectedReason: undefined,
-    };
-  }
-
-  const backfilled = await backfillMissingAcceptanceRequirements({
-    features: rawFeatures,
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    wiContextText,
-    similarStoriesText,
-    domainContext: config.domainContext,
-    arPlan: {
-      min: 0,
-      max: 0,
-      target: 0,
-      depth: sizingAssessment.preferredArDepth as ArPlan['depth'],
-    },
-    generatorConfig: config.generatorConfig,
-    tier: config.tier,
-    providerOpts,
-  });
-
-  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-
-  const repairedFeatures = backfilled.features.map((feature) => normaliseFeature(feature, {
-    requirement,
-    clarifyAnswers,
-    domainRoles: config.domainRoles,
-  }));
-  const originalArCount = features.reduce((sum, feature) => sum + feature.acceptanceRequirements.length, 0);
-  const repairedArCount = repairedFeatures.reduce((sum, feature) => sum + feature.acceptanceRequirements.length, 0);
-  const improved = repairedFeatures.length < features.length || repairedArCount < originalArCount;
-  const rejectedReason = repairedOutputViolatesExplicitSplitEvidence(repairedFeatures, guidance.explicitSplitEvidence);
-
-  return {
-    features: improved && !rejectedReason ? repairedFeatures : features,
-    usage: {
-      input: result.usage.input + backfilled.usage.input,
-      output: result.usage.output + backfilled.usage.output,
-    },
-    applied: improved && !rejectedReason,
-    rejectedReason: rejectedReason ?? undefined,
-  };
-}
-
-async function consolidateDraftFeatureSet(opts: {
-  requirement: string;
-  clarifyAnswers: ClarifyAnswer[];
-  attachmentText: string;
-  similarStoriesText: string;
-  wiContextText: string;
-  features: Feature[];
-  sizingAssessment: SizingAssessmentSnapshot;
-  config: TenantConfig;
-  providerOpts: {
-    provider: TenantConfig['generatorConfig']['provider'];
-    geminiApiKey?: string;
-    geminiBaseUrl?: string;
-    openaiApiKey?: string;
-    openaiBaseUrl?: string;
-    azureOpenAIApiKey?: string;
-    azureOpenAIBaseUrl?: string;
-    azureOpenAIApiVersion?: string;
-    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
-    piiMaskingEnabled?: boolean;
-  };
-  shouldCancel?: () => Promise<boolean> | boolean;
-}): Promise<{ features: Feature[]; usage: { input: number; output: number }; applied: boolean; rejectedReason?: string }> {
-  const {
-    requirement,
-    clarifyAnswers,
-    attachmentText,
-    similarStoriesText,
-    wiContextText,
-    features,
-    sizingAssessment,
-    config,
-    providerOpts,
-    shouldCancel,
-  } = opts;
-  const guidance = deriveSizingGuidance({
-    requirement,
-    clarifyAnswers,
-  });
-
-  const userMessage = [
-    buildGenerationUserMessage({
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText,
-      similarStoriesText,
-      limits: PASS1_CONTEXT_LIMITS,
-    }),
-    `SIZING SIGNAL:\nArchetype: ${sizingAssessment.archetype}\nPreferred feature range: ${sizingAssessment.preferredFeatureRange.min}-${sizingAssessment.preferredFeatureRange.max}\nMinimum preserved feature count: ${sizingAssessment.minimumPreservedFeatureCount}\nReasons:\n${sizingAssessment.reasons.map((reason) => `- ${reason.detail}`).join('\n')}`,
-    `CURRENT DRAFT FEATURES:\n${JSON.stringify(features.map((feature) => ({
-      summary: feature.summary,
-      description: feature.description,
-      suggested_story_points: feature.storyPoints,
-      process_code: feature.processCode,
-    })), null, 2)}`,
-  ].join('\n\n---\n\n');
-
-  const systemPrompt = [
-    buildDecompositionSystemPrompt({
-      domainContext: config.domainContext,
-      domainRoles: config.domainRoles,
-      processTaxonomy: config.processTaxonomy,
-      processTaxonomyEnabled: config.processTaxonomyEnabled,
-      clarifyAnswerCount: clarifyAnswers.length,
-      featurePlan: {
-        min: sizingAssessment.preferredFeatureRange.min,
-        max: sizingAssessment.preferredFeatureRange.max,
-        target: Math.min(sizingAssessment.preferredFeatureRange.max, Math.max(sizingAssessment.preferredFeatureRange.min, features.length)),
-        shape: sizingAssessment.featureCount >= 9 ? 'epic' : sizingAssessment.featureCount >= 6 ? 'broad' : sizingAssessment.featureCount >= 4 ? 'balanced' : sizingAssessment.featureCount >= 2 ? 'narrow' : 'minimal',
-        complexity: sizingAssessment.stage === 'decomposition' ? 'high' : 'medium',
-      },
-    }),
-    'DRAFT REVIEW INSTRUCTION:',
-    '- You are consolidating pass-1 draft features before acceptance requirements are written.',
-    '- Return ONLY the revised draft feature set.',
-    '- Keep acceptance_requirements empty arrays for every feature.',
-    '- Prefer the smallest strong set of features that preserves the intended workflow boundaries.',
-    '- Do not silently drop explicit exception, approval, or manual-vs-automated path evidence.',
-  ].join('\n\n');
-
-  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(config.generatorConfig.decompositionModel, config.tier),
-    systemPrompt,
-    userMessage,
-    maxTokens: Math.max(config.generatorConfig.maxTokens ?? 8192, 4096),
-    reasoningEffort: 'medium',
-    ...providerOpts,
-  });
-
-  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-
-  const repairedFeatures = (result.data.features ?? []).map((feature) => normaliseFeature({
-    ...feature,
-    acceptance_requirements: [],
-  }, {
-    requirement,
-    clarifyAnswers,
-    domainRoles: config.domainRoles,
-  })).map((feature) => ({
-    ...feature,
-    acceptanceRequirements: [],
-  }));
-
-  if (!repairedFeatures.length) {
-    return { features, usage: result.usage, applied: false };
-  }
-
-  const rejectedReason = repairedOutputViolatesExplicitSplitEvidence(repairedFeatures, guidance.explicitSplitEvidence);
-  const improved = repairedFeatures.length < features.length;
-
-  return {
-    features: improved && !rejectedReason ? repairedFeatures : features,
-    usage: result.usage,
-    applied: improved && !rejectedReason,
-    rejectedReason: rejectedReason ?? undefined,
   };
 }
 
@@ -3690,6 +3382,14 @@ export async function refineSingleFeature(opts: {
     allowSplit = true,
   } = opts;
 
+  const featurePayload = {
+    summary: feature.summary,
+    description: feature.description,
+    acceptance_requirements: feature.acceptanceRequirements,
+    suggested_story_points: feature.storyPoints,
+    process_code: feature.processCode,
+  };
+
   const system = buildSingleFeatureRefineSystemPrompt({
     domainContext: config.domainContext,
     processTaxonomy: config.processTaxonomy,
@@ -3699,7 +3399,7 @@ export async function refineSingleFeature(opts: {
 
   const userMessage = [
     requirement ? `ORIGINAL REQUIREMENT:\n${requirement}` : '',
-    `FEATURE:\n${JSON.stringify(feature, null, 2)}`,
+    `FEATURE:\n${JSON.stringify(featurePayload, null, 2)}`,
     `FEEDBACK: ${feedback}`,
   ].filter(Boolean).join('\n\n');
 
@@ -3707,8 +3407,8 @@ export async function refineSingleFeature(opts: {
     model: getTierModel(config.generatorConfig.refineModel, config.tier),
     systemPrompt: system,
     userMessage,
-    maxTokens: 4096,
-    reasoningEffort: 'medium',
+    maxTokens: allowSplit ? 4096 : 3072,
+    reasoningEffort: allowSplit ? 'medium' : 'low',
     ...buildLlmProviderOpts(config),
   });
 
@@ -3764,6 +3464,35 @@ export async function refineSingleFeature(opts: {
   };
 }
 
+export async function runOrderedConcurrentTasks<T>(opts: {
+  tasks: Array<() => Promise<T>>;
+  concurrency: number;
+  onProgress?: (completed: number, total: number) => Promise<void> | void;
+}): Promise<T[]> {
+  const { tasks, concurrency, onProgress } = opts;
+  if (!tasks.length) return [];
+
+  const limit = Math.max(1, Math.min(concurrency, tasks.length));
+  const results = new Array<T>(tasks.length);
+  let nextIndex = 0;
+  let completed = 0;
+
+  const worker = async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= tasks.length) return;
+
+      results[currentIndex] = await tasks[currentIndex]();
+      completed += 1;
+      await onProgress?.(completed, tasks.length);
+    }
+  };
+
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+  return results;
+}
+
 async function refineFeaturesIndividually(opts: {
   requirement: string;
   features: Feature[];
@@ -3789,19 +3518,20 @@ async function refineFeaturesIndividually(opts: {
   let totalInput = 0;
   let totalOutput = 0;
   const byStage: Record<string, { input: number; output: number; total: number }> = {};
-
-  for (const [index, feature] of features.entries()) {
-    await onProgress?.(`Refining feature ${index + 1} of ${features.length}…`);
-
-    const result = await refineSingleFeature({
+  const results = await runOrderedConcurrentTasks({
+    tasks: features.map((feature) => () => refineSingleFeature({
       requirement,
       feature,
       feedback,
       config,
       allowSplit: false,
-    });
+    })),
+    concurrency: 3,
+    onProgress: (completed, total) => onProgress?.(`Refined ${completed} of ${total} features…`),
+  });
 
-    refinedFeatures.push(result.features[0] ?? feature);
+  results.forEach((result, index) => {
+    refinedFeatures.push(result.features[0] ?? features[index]);
     totalInput += result.tokenUsage.input;
     totalOutput += result.tokenUsage.output;
     byStage[`refine_${index + 1}`] = {
@@ -3809,7 +3539,7 @@ async function refineFeaturesIndividually(opts: {
       output: result.tokenUsage.output,
       total: result.tokenUsage.total,
     };
-  }
+  });
 
   return {
     features: refinedFeatures,
@@ -3926,7 +3656,6 @@ export async function askQuestion(opts: {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const NEUTRAL_FALLBACK_ROLE = 'authorized user';
 const ROLE_BEHAVIOR_VERB_PATTERN = '(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|tries|works|manages|uses|belongs)';
 const CLAUSE_ROLE_PATTERN = new RegExp(`\\b(a|an|the)\\s+([A-Za-z][A-Za-z\\s/-]{1,60}?)(?=\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b)`, 'gi');
 const ROLE_LABEL_HINTS = new Set([
@@ -3978,99 +3707,6 @@ function uniqueNonEmptyStrings(values: string[]): string[] {
   return result;
 }
 
-function collectExplicitActorLabels(input: RoleGroundingContext): string[] {
-  const values: string[] = [];
-  const sources = [
-    String(input.requirement ?? ''),
-    ...(input.clarifyAnswers ?? []).map((answer) => String(answer.answer ?? '')),
-  ];
-
-  for (const source of sources) {
-    if (!source.trim()) continue;
-
-    const storyMatch = source.match(/As an?\s+([^,.\n]{2,80}?)\s*,\s*I need to/i);
-    if (storyMatch?.[1] && looksLikeRoleLabel(storyMatch[1])) {
-      values.push(storyMatch[1].trim());
-    }
-
-    const rolePattern = /\b([A-Za-z][A-Za-z/& -]{1,60}?)\s+(?:must|can|cannot|can't|should|should not|need(?:s)? to|attempts? to|tries to)\b/gi;
-    let match: RegExpExecArray | null;
-    while ((match = rolePattern.exec(source)) !== null) {
-      const candidate = String(match[1] ?? '').trim();
-      if (!candidate || !looksLikeRoleLabel(candidate)) continue;
-      values.push(candidate);
-    }
-  }
-
-  return uniqueNonEmptyStrings(values);
-}
-
-function buildRoleEvidenceText(input: RoleGroundingContext): string {
-  return [
-    String(input.requirement ?? ''),
-    ...(input.clarifyAnswers ?? []).map((answer) => String(answer.answer ?? '')),
-  ].join('\n');
-}
-
-function scoreDomainRoleEvidence(role: string, evidenceText: string): number {
-  const normalizedEvidence = evidenceText.toLowerCase();
-  const normalizedRole = role.trim().toLowerCase();
-  if (!normalizedRole) return 0;
-  if (normalizedEvidence.includes(normalizedRole)) return 10 + tokenizeRole(role).length;
-
-  const roleTokens = tokenizeRole(role).filter((token) => token.length > 2);
-  const distinctiveTokens = roleTokens.filter((token) => !GENERIC_ROLE_WORDS.has(token));
-  if (!distinctiveTokens.length) return 0;
-
-  const evidenceTokens = new Set(tokenizeRole(evidenceText));
-  const matched = distinctiveTokens.filter((token) => evidenceTokens.has(token)).length;
-  if (matched !== distinctiveTokens.length) return 0;
-
-  return 6 + distinctiveTokens.length;
-}
-
-function resolveHighConfidenceDomainRole(input: RoleGroundingContext): string | null {
-  const roles = uniqueNonEmptyStrings(input.domainRoles ?? []);
-  if (!roles.length) return null;
-
-  const evidenceText = buildRoleEvidenceText(input);
-  if (!evidenceText.trim()) return null;
-
-  const scored = roles
-    .map((role) => ({ role, score: scoreDomainRoleEvidence(role, evidenceText) }))
-    .filter((item) => item.score >= 8)
-    .sort((left, right) => right.score - left.score);
-
-  if (!scored.length) return null;
-  if (scored.length > 1 && scored[0].score === scored[1].score) return null;
-  return scored[0].role;
-}
-
-function roleMatchesActorLabel(role: string, actorLabel: string): boolean {
-  const normalizedRole = role.trim().toLowerCase();
-  const normalizedActor = actorLabel.trim().toLowerCase();
-  if (!normalizedRole || !normalizedActor) return false;
-  if (normalizedRole === normalizedActor) return true;
-  return roleOverlapScore(normalizedRole, normalizedActor) >= 0.67;
-}
-
-function roleIsEvidenceBacked(role: string, input: RoleGroundingContext, explicitActors: string[]): boolean {
-  if (!role.trim()) return false;
-  if (role.trim().toLowerCase() === NEUTRAL_FALLBACK_ROLE) return true;
-  if (explicitActors.some((actor) => roleMatchesActorLabel(role, actor))) return true;
-
-  const evidenceText = buildRoleEvidenceText(input);
-  if (scoreDomainRoleEvidence(role, evidenceText) >= 8) return true;
-  return false;
-}
-
-function isGenericRoleLabel(role: string): boolean {
-  const tokens = tokenizeRole(role);
-  if (!tokens.length) return false;
-  if (role.trim().toLowerCase() === NEUTRAL_FALLBACK_ROLE) return true;
-  return tokens.every((token) => GENERIC_ROLE_WORDS.has(token) || token === 'authorized' || token.endsWith('user') || token.endsWith('users'));
-}
-
 function extractRoleCandidatesFromClause(clause: string): string[] {
   const matches: string[] = [];
   let match: RegExpExecArray | null;
@@ -4081,91 +3717,6 @@ function extractRoleCandidatesFromClause(clause: string): string[] {
   }
   CLAUSE_ROLE_PATTERN.lastIndex = 0;
   return uniqueNonEmptyStrings(matches);
-}
-
-function canonicalizeRoleCandidate(
-  role: string,
-  input: RoleGroundingContext,
-  explicitActors: string[],
-): string | null {
-  const trimmed = role.trim();
-  if (!trimmed || !roleIsEvidenceBacked(trimmed, input, explicitActors)) return null;
-
-  const matchedExplicitActor = explicitActors.find((actor) => roleMatchesActorLabel(trimmed, actor));
-  if (matchedExplicitActor) return matchedExplicitActor;
-
-  const matchedDomainRole = uniqueNonEmptyStrings(input.domainRoles ?? []).find((domainRole) => roleMatchesActorLabel(trimmed, domainRole));
-  if (matchedDomainRole) return matchedDomainRole;
-
-  if (isGenericRoleLabel(trimmed)) return null;
-  return trimmed;
-}
-
-function resolveDominantAcceptanceRole(
-  acceptanceRequirements: AcceptanceRequirement[],
-  input?: RoleGroundingContext,
-): string | null {
-  if (!input || !acceptanceRequirements.length) return null;
-
-  const explicitActors = collectExplicitActorLabels(input);
-  const counts = new Map<string, number>();
-
-  acceptanceRequirements.forEach((ar) => {
-    extractRoleCandidatesFromClause(`${ar.given} ${ar.when} ${ar.then}`).forEach((candidate) => {
-      const canonical = canonicalizeRoleCandidate(candidate, input, explicitActors);
-      if (!canonical) return;
-      counts.set(canonical, (counts.get(canonical) ?? 0) + 1);
-    });
-  });
-
-  const candidates = [...counts.entries()].sort((left, right) => right[1] - left[1]);
-  if (candidates.length !== 1) return null;
-  return candidates[0][0];
-}
-
-function resolveEvidenceBackedRole(
-  featureRole: string | null,
-  input?: RoleGroundingContext,
-  acceptanceRequirements: AcceptanceRequirement[] = [],
-): string {
-  if (!input) return featureRole?.trim() || NEUTRAL_FALLBACK_ROLE;
-
-  const explicitActors = collectExplicitActorLabels(input);
-  if (featureRole && !isGenericRoleLabel(featureRole) && roleIsEvidenceBacked(featureRole, input, explicitActors)) {
-    return featureRole.trim();
-  }
-
-  if (explicitActors.length) {
-    return explicitActors[0];
-  }
-
-  const dominantAcceptanceRole = resolveDominantAcceptanceRole(acceptanceRequirements, input);
-  if (dominantAcceptanceRole && (!featureRole || isGenericRoleLabel(featureRole))) {
-    return dominantAcceptanceRole;
-  }
-
-  const domainRole = resolveHighConfidenceDomainRole(input);
-  if (domainRole) return domainRole;
-  return NEUTRAL_FALLBACK_ROLE;
-}
-
-function replaceFeatureRole(description: string, role: string): string {
-  const trimmedRole = role.trim();
-  if (!trimmedRole) return description;
-
-  // Deduplicate before attempting role replacement to avoid wrapping an already-malformed string.
-  let cleaned = deduplicateDescription(description).trim();
-
-  // Strip any existing "As a[n] X, I need (to)? " wrapper so we never double-wrap on repeated normalization.
-  cleaned = cleaned.replace(/^As an?\s+[^,]+,\s*I need(?:\s+to)?\s+/i, '').trim();
-
-  const article = articleForRole(trimmedRole);
-  // If the cleaned body already contains a "so that ..." clause, do NOT append another fallback benefit.
-  if (/\bso that\b/i.test(cleaned)) {
-    return `As ${article} ${trimmedRole}, I need to ${cleaned}`.replace(/\s+/g, ' ').trim();
-  }
-
-  return `As ${article} ${trimmedRole}, I need to ${cleaned} so that the requested outcome is achieved.`;
 }
 
 function trimVerboseSegment(value: string, maxWords: number): string {
@@ -4219,19 +3770,6 @@ function deduplicateDescription(description: string): string {
   return description;
 }
 
-function normalizeFeatureDescriptionVerbosity(description: string): string {
-  const cleaned = deduplicateDescription(description);
-  const match = cleaned.match(/^As an?\s+(.+?),\s*I need to\s+(.+?)\s+so that\s+(.+)$/i);
-  if (!match) return sanitizeArClause(cleaned);
-
-  const role = sanitizeArClause(match[1]);
-  const action = trimVerboseSegment(match[2], 18);
-  const benefit = trimVerboseSegment(match[3], 16);
-  if (!role || !action || !benefit) return sanitizeArClause(description);
-
-  return `As ${articleForRole(role)} ${role}, I need to ${action} so that ${benefit}.`;
-}
-
 function normalizeAcceptanceRequirementVerbosity(ar: AcceptanceRequirement): AcceptanceRequirement {
   return {
     given: trimVerboseSegment(ar.given, 22),
@@ -4242,8 +3780,9 @@ function normalizeAcceptanceRequirementVerbosity(ar: AcceptanceRequirement): Acc
 
 export function applyFeatureOutputGuardrails(
   feature: Feature,
-  roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
+  _roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
 ): Feature {
+  void _roleGrounding;
   const normalizedAcceptanceRequirements = (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity);
   const description = normalizeDraftDescriptionText(feature.description);
   return harmonizeFeatureRoleLanguage({
@@ -4405,7 +3944,7 @@ export function repairAcceptanceRequirements(
 }
 
 function extractRoleFromDescription(description: string): string | null {
-  const match = description.match(/^As an?\s+(.+?),\s*I need to\s+/i);
+  const match = description.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+/i);
   return match?.[1]?.trim() || null;
 }
 

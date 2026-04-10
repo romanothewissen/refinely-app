@@ -7,6 +7,15 @@ const SOLUTION_TERMS = [
   'javascript', 'css', 'html', 'react', 'angular', 'node', 'python',
 ];
 
+const IMPLEMENTATION_FLAVORED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bdesignated inbox\b/i, label: 'designated inbox' },
+  { pattern: /\bsubject(?: line)?\b/i, label: 'subject line' },
+  { pattern: /\b(?:case|reference)\s+(?:id|identifier)\b/i, label: 'reference ID' },
+  { pattern: /\bemail content\b/i, label: 'email content' },
+  { pattern: /\bappend(?:ed|s)?\b/i, label: 'append operation' },
+  { pattern: /\bthe system\s+(?:identifies|matches|parses|reads|extracts|detects|appends)\b/i, label: 'system action wording' },
+];
+
 // Stop-words / incomplete-sentence terminators. An AR clause that ends on one of these reads as truncated.
 const TRUNCATED_TRAILING_WORDS = new Set([
   'a', 'an', 'the',
@@ -76,7 +85,7 @@ const ROLE_HINT_WORDS = new Set([
 ]);
 
 function extractRoleFromDescription(description: string): string | null {
-  const match = description.match(/^As an?\s+(.+?),\s*I need to\s+/i);
+  const match = description.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+/i);
   return match?.[1]?.trim() || null;
 }
 
@@ -255,11 +264,11 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
 
   for (const feature of features) {
     // Check description format
-    if (!feature.description.match(/^As a .+, I need to .+ so that .+/i)) {
+    if (!feature.description.match(/^As an? .+, I need(?: to)? .+ so that .+/i)) {
       violations.push({
         featureId: feature.id,
         field: 'description',
-        message: 'Description must follow "As a [role], I need to [action] so that [benefit]" format',
+        message: 'Description must follow "As a [role], I need [action] so that [benefit]" format',
       });
     }
 
@@ -341,6 +350,17 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
             featureId: feature.id,
             field: 'acceptanceRequirements',
             message: `AR contains solution language: "${term}"`,
+          });
+          break;
+        }
+      }
+
+      for (const entry of IMPLEMENTATION_FLAVORED_PATTERNS) {
+        if (entry.pattern.test(arText)) {
+          violations.push({
+            featureId: feature.id,
+            field: 'acceptanceRequirements',
+            message: `AR contains implementation-flavored wording: "${entry.label}"`,
           });
           break;
         }

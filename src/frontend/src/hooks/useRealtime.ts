@@ -24,6 +24,7 @@ export interface GenerationProgressPayload {
   resumeContext?: unknown;
   sources?: {
     projectKey: string;
+    projectCount?: number;
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
     wiDocsCount?: number;

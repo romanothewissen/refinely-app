@@ -232,10 +232,6 @@ const CATEGORY_ALIASES: Record<string, ClarifyCategoryKey> = {
   'exceptions and failure modes': 'edge_cases_exceptions',
 };
 
-function clampCount(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.round(value)));
-}
-
 function cleanText(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }

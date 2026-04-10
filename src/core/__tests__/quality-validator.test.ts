@@ -93,6 +93,25 @@ test('validateFeatures flags near-duplicate acceptance requirements within the s
   assert.ok(hit, `expected near-duplicate AR violation, got: ${JSON.stringify(violations)}`);
 });
 
+test('validateFeatures flags implementation-flavored AR wording that should stay business-facing', () => {
+  const features: Feature[] = [
+    makeFeature({
+      id: 'feat-1',
+      acceptanceRequirements: [
+        {
+          given: 'an email is received in a designated inbox with a unique case reference ID in its subject',
+          when: 'the system identifies a matching active case',
+          then: 'the email content is appended to that existing case',
+        },
+      ],
+    }),
+  ];
+
+  const violations = validateFeatures(features, baseConfig);
+  const hit = violations.find(v => /implementation-flavored wording/.test(v.message));
+  assert.ok(hit, `expected implementation-flavored wording violation, got: ${JSON.stringify(violations)}`);
+});
+
 test('detectFeatureOverlaps flags pairs that share most content tokens', () => {
   const features: Feature[] = [
     makeFeature({

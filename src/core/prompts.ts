@@ -127,7 +127,8 @@ ${isHighComplexity
 - A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context unless each requires distinct handling rules — in that case, the distinct handling IS the deliverable scope.
 - Do NOT split into trivial or UI-level features. Combine supporting concerns into a single feature.
 - If a list, notification, status definition, audit trail, exception diagnosis, or visibility aid only supports the core behavior, keep it inside the main feature unless explicitly requested as a separate deliverable.
-`;};
+`;
+  }
 
     if (shape === 'epic')
       return `${base}
@@ -197,13 +198,13 @@ Each dimension helps you test whether a distinct, deliverable capability exists.
 
 RULES:
 - A feature must represent independent business value, not just a supporting mechanism, side effect, analysis step, or operational convenience.
-- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
 - Keep the description concise, grammatical, and specific. It must stay as one user-story sentence, but it does not need to be artificially compressed.
 - Keep workflow rules, exceptions, timing, feedback, and enforcement details out of the description unless they are essential to state the core action or benefit. Put that detail into acceptance requirements instead.
-- Frame the user's need as a positive capability or goal ("I need to ensure X is validated", "I need to be able to confirm Y") rather than as a passive prevention ("I need the system to prevent me from..."). The actor performs an action — the description should reflect what they are trying to accomplish, not what the system stops them from doing.
+- Frame the user's need as a positive capability or goal ("I need validation of X", "I need confirmation of Y") rather than as a passive prevention ("I need the system to prevent me from..."). The actor performs an action — the description should reflect what they are trying to accomplish, not what the system stops them from doing.
 - Never combine two description sentences into one. The description must be exactly one user-story sentence starting with "As a".
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
@@ -257,7 +258,7 @@ RULES:
 - Preserve business coverage and meaning. Do not silently drop relevant workflow branches, rules, or exceptions.
 - Keep acceptance_requirements as empty arrays in this draft stage.
 - Keep summaries and descriptions business-facing and implementation-free.
-- Keep descriptions as one grammatical user-story sentence: "As a [role], I need to [action] so that [benefit]"
+- Keep descriptions as one grammatical user-story sentence: "As a [role], I need [action] so that [benefit]"
 - Only merge features when they truly describe the same primary capability and outcome.
 - Only split features when the current draft is hiding independently buildable or testable slices.
 - If the action targets selected features, keep non-selected features stable unless a tiny wording adjustment is required for coherence.
@@ -281,7 +282,7 @@ YOUR JOB:
 
 DESCRIPTION RULES:
 - Each description must be exactly one sentence
-- Use the format: "As a [role], I need to [action] so that [benefit]"
+- Use the format: "As a [role], I need [action] so that [benefit]"
 - Keep the sentence grammatical, action-led, and specific about business value
 - Slightly long but clear is better than short and awkward
 - Do not use filler benefits like "so that the requested outcome is achieved"
@@ -348,6 +349,9 @@ RULES:
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - No system-specific terms: no product names, module names, system object names
 - Write as if describing business outcomes to someone who has never seen the system
+- Translate technical event wording into plain business language. Prefer customer communications, open cases, approvals, routing, and outcomes over inbox names, subject lines, reference IDs, matching logic, append operations, parsing steps, or generic system actions.
+- BAD: "GIVEN an email is received in a designated inbox with a unique Case Reference ID in its subject WHEN the system identifies a matching active Case THEN the email content is appended to that existing Case"
+- GOOD: "GIVEN a customer reply clearly relates to an open case WHEN the communication is reviewed THEN the case history includes that reply"
 - Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
 - Each AR tests one distinct thing
 - Treat the feature description role as the default actor anchor for that feature.
@@ -439,9 +443,9 @@ CONSOLIDATION RULES:
 
 QUALITY RULES:
 - Return the COMPLETE final feature set
-- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
-- Frame the description as a positive capability or goal ("I need to ensure X", "I need to be able to confirm Y"), not as a passive prevention ("I need the system to prevent me from..."). The actor should be the agent performing an action.
+- Frame the description as a positive capability or goal ("I need validation of X", "I need confirmation of Y"), not as a passive prevention ("I need the system to prevent me from..."). The actor should be the agent performing an action.
 - Never combine two description sentences into one. The description must be exactly one user-story sentence starting with "As a".
 - Every feature MUST include complete acceptance_requirements with standalone GIVEN/WHEN/THEN triples
 - No solution language, no system names, no implementation detail
@@ -836,7 +840,7 @@ PRESERVATION AND STRUCTURE RULES:
 - Never output partial AR text, truncated THEN statements, or placeholder rewrites
 
 FEATURE RULES:
-- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms
 - Let the feedback determine the scope of change. If the user asks for a tone or audience shift like "less technical" or "more business-friendly", rewrite the affected descriptions and ARs accordingly.
@@ -851,6 +855,7 @@ ACCEPTANCE REQUIREMENT RULES:
 - If you consolidate multiple features into fewer features, merge the coverage cleanly and rewrite the final ARs as complete standalone triples.
 - No solution language or system-specific terms
 - Business outcomes only — not implementation steps
+- When technical wording appears in the current draft, translate it into user-facing business language without losing the rule. Prefer customer communications, case history, approvals, routing, and outcomes over inboxes, subject lines, reference IDs, matching logic, append operations, or parsing steps.
 - Be CONCEPTUAL — describe behavior patterns, never example values
 - The GIVEN must describe a real-world business situation, not a system configuration state
 - Each AR tests one distinct thing; include happy path, key business rules, relevant edge cases
@@ -888,7 +893,7 @@ RESTRUCTURE RULES:
 - In ${opts.scope === 'selected' ? 'selected-scope mode, do not reference or mutate any non-selected feature ids or AR refs' : 'whole-canvas mode, use only the provided feature ids and AR refs'}
 
 FEATURE RULES:
-- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - No solution language: no buttons, screens, fields, forms, APIs, or databases
 - Resolve the role label from evidence in this order: original requirement actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Requirement-stated actors outrank domain context and reference stories
@@ -972,13 +977,14 @@ CHANGE RULES:
 - Requirement-stated actors outrank domain context and reference stories. If the requirement uses labels like "standard users" and "admins", preserve those labels unless the feedback explicitly asks to rename them.
 
 QUALITY RULES:
-- Feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - Resolve the role label from evidence in this order: original requirement actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
 - Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
 - Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split a single AR across multiple entries.
 - Be CONCEPTUAL — describe behavior patterns, not specific instances
+- Translate technical event wording into plain business language. Prefer customer communications, open cases, approvals, routing, and outcomes over inbox names, subject lines, reference IDs, matching logic, append operations, or system internals.
 - Preserve role wording exactly: if the feature description says "As a [role]", do not rename that actor inside related ARs unless the feedback explicitly changes the role
 - Never use the actor role as the subject of a GIVEN state condition. The actor (e.g. "Service Manager") is a human who acts — the GIVEN describes the state of a business object (e.g. "a service contract has expired"), not the actor. The actor belongs in WHEN, not GIVEN.
 

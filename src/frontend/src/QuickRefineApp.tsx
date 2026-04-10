@@ -903,97 +903,168 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
 
       <div className="mx-auto max-w-6xl space-y-1.5">
         <div className="overflow-hidden border-b border-[var(--jira-border)] bg-white">
-          <div className="flex flex-wrap items-center gap-2 border-b border-[var(--jira-border)] px-3 py-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
-                <Sparkles className="w-3 h-3" />
-              </div>
-              <span className="text-[13px] font-semibold text-[var(--jira-text)]">Quick Refine</span>
-              {issueKey ? (
-                <span className="rounded bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
-                  {issueKey}
-                </span>
-              ) : null}
-              {context?.issueType ? (
-                <span className="rounded border border-[var(--jira-border)] px-2 py-0.5 text-[11px] text-[var(--jira-text-subtle)]">
-                  {context.issueType}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {stage === 'draft' ? (
-                <div className="inline-flex rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-0.5">
-                  {(['diff', 'result'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setDraftViewMode(mode)}
-                      className={`rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wide transition ${
-                        draftViewMode === mode
-                          ? 'bg-white text-[var(--jira-text)] shadow-[var(--jira-shadow-xs)]'
-                          : 'text-[var(--jira-text-subtle)] hover:text-[var(--jira-text)]'
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
+          {surface === 'issue-panel' ? (
+            <>
+              {/* Row 1 — title + model selector */}
+              <div className="flex items-center gap-2 border-b border-[var(--rf-border)] px-3 py-2">
+                <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
+                  <Sparkles className="w-3 h-3" />
                 </div>
-              ) : null}
-              {modelOptions.length ? (
-                <label className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-2 py-1">
-                  <span className="text-[11px] text-[var(--jira-text-subtle)]">Model</span>
+                <span style={{ fontFamily: "'Fraunces', serif" }} className="text-[14px] font-medium text-[var(--jira-text)]">Quick Refine</span>
+                {issueKey ? (
+                  <span className="rounded bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
+                    {issueKey}
+                  </span>
+                ) : null}
+                {modelOptions.length ? (
                   <select
                     value={modelOverride}
                     onChange={(event) => handleModelChange(event.target.value)}
-                    className="bg-transparent text-[12px] font-medium text-[var(--jira-text)] outline-none"
+                    className="ml-auto bg-transparent text-[11px] text-[var(--jira-text-subtle)] outline-none cursor-pointer"
                   >
                     {modelOptions.map((option) => (
                       <option key={option.id} value={option.id}>{option.label}</option>
                     ))}
                   </select>
-                </label>
-              ) : null}
-              {!busy && !isSessionProcessing && stage === 'draft' ? (
-                <button
-                  type="button"
-                  onClick={() => setAiDialogOpen(true)}
-                  className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]"
-                >
-                  <WandSparkles className="w-3.5 h-3.5" />
-                  AI Refine
-                </button>
-              ) : null}
-              {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
-                <button
-                  type="button"
-                  onClick={() => void handleStart({ restart: true })}
-                  disabled={busy}
-                  className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)] disabled:opacity-50"
-                >
-                  <RefreshCcw className="w-3 h-3" />
-                  Restart
-                </button>
-              ) : null}
-              {onOpenSettings ? (
-                <button
-                  type="button"
-                  onClick={onOpenSettings}
-                  className="rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
-                >
-                  Settings
-                </button>
-              ) : null}
-              {surface === 'issue-panel' ? (
-                <button
-                  type="button"
-                  onClick={() => setActive(false)}
-                  className="rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
-                >
-                  Collapse
-                </button>
-              ) : null}
+                ) : null}
+              </div>
+              {/* Row 2 — view tabs + action buttons */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5">
+                {stage === 'draft' ? (
+                  <div className="inline-flex rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-0.5">
+                    {(['diff', 'result'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setDraftViewMode(mode)}
+                        className={`rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition ${
+                          draftViewMode === mode
+                            ? 'bg-white text-[var(--jira-text)] shadow-[var(--jira-shadow-xs)]'
+                            : 'text-[var(--jira-text-subtle)] hover:text-[var(--jira-text)]'
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="ml-auto flex items-center gap-1.5">
+                  {!busy && !isSessionProcessing && stage === 'draft' ? (
+                    <button
+                      type="button"
+                      onClick={() => setAiDialogOpen(true)}
+                      className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]"
+                    >
+                      <WandSparkles className="w-3.5 h-3.5" />
+                      AI Refine
+                    </button>
+                  ) : null}
+                  {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleStart({ restart: true })}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)] disabled:opacity-50"
+                    >
+                      <RefreshCcw className="w-3 h-3" />
+                      Restart
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setActive(false)}
+                    className="rounded border border-[var(--jira-border)] bg-white px-2 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
+                  >
+                    Collapse
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* issue-action: single row layout */
+            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--jira-border)] px-3 py-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]">
+                  <Sparkles className="w-3 h-3" />
+                </div>
+                <span style={{ fontFamily: "'Fraunces', serif" }} className="text-[14px] font-medium text-[var(--jira-text)]">Quick Refine</span>
+                {issueKey ? (
+                  <span className="rounded bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
+                    {issueKey}
+                  </span>
+                ) : null}
+                {context?.issueType ? (
+                  <span className="rounded border border-[var(--jira-border)] px-2 py-0.5 text-[11px] text-[var(--jira-text-subtle)]">
+                    {context.issueType}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {stage === 'draft' ? (
+                  <div className="inline-flex rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-0.5">
+                    {(['diff', 'result'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setDraftViewMode(mode)}
+                        className={`rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wide transition ${
+                          draftViewMode === mode
+                            ? 'bg-white text-[var(--jira-text)] shadow-[var(--jira-shadow-xs)]'
+                            : 'text-[var(--jira-text-subtle)] hover:text-[var(--jira-text)]'
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {modelOptions.length ? (
+                  <label className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-2 py-1">
+                    <span className="text-[11px] text-[var(--jira-text-subtle)]">Model</span>
+                    <select
+                      value={modelOverride}
+                      onChange={(event) => handleModelChange(event.target.value)}
+                      className="bg-transparent text-[12px] font-medium text-[var(--jira-text)] outline-none"
+                    >
+                      {modelOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {!busy && !isSessionProcessing && stage === 'draft' ? (
+                  <button
+                    type="button"
+                    onClick={() => setAiDialogOpen(true)}
+                    className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]"
+                  >
+                    <WandSparkles className="w-3.5 h-3.5" />
+                    AI Refine
+                  </button>
+                ) : null}
+                {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleStart({ restart: true })}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)] disabled:opacity-50"
+                  >
+                    <RefreshCcw className="w-3 h-3" />
+                    Restart
+                  </button>
+                ) : null}
+                {onOpenSettings ? (
+                  <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className="rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
+                  >
+                    Settings
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
           <div className="space-y-1.5 bg-[var(--jira-bg)] p-2">
             {error ? (
               <div className="rounded border border-[var(--rf-danger)]/25 bg-[var(--rf-danger-subtle)] px-3 py-2 text-[12px] text-[var(--rf-danger)]">
@@ -1053,17 +1124,17 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--rf-brand)] flex-shrink-0" />
                   <span className="text-[13px] font-semibold text-[var(--jira-text)]">
-                    {session?.status === 'queued' ? 'Queued — loading context' : 'Building rewrite'}
+                    Building rewrite
                   </span>
                   <span className="ml-auto rounded-full bg-[var(--rf-brand-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
-                    {session?.status === 'queued' ? 'Queued' : 'Running'}
+                    Running
                   </span>
                 </div>
                 <div className="h-1 overflow-hidden rounded-full bg-[var(--rf-brand-subtle)]">
                   <div className="h-full w-2/5 animate-pulse rounded-full bg-[var(--rf-brand)]" />
                 </div>
                 <p className="text-[12px] leading-5 text-[var(--jira-text-subtle)]">
-                  {busyLabel || 'Keep this panel open or come back later — your session auto-resumes.'}
+                  {busyLabel || 'Analysing context and rewriting the issue…'}
                 </p>
               </div>
             ) : null}
@@ -1167,13 +1238,13 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                     <div className="space-y-2">
                       <div className="rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-2.5">
                         <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Summary</p>
-                        <div className="text-[13px] text-[var(--jira-text)]">
+                        <div className="text-[13px] text-[var(--jira-text)] break-words overflow-hidden">
                           <DiffText oldText={(draft.diffBaseIssue ?? diffBaseIssue ?? originalIssue).summary} newText={draft.currentIssue.summary} mode="redline" />
                         </div>
                       </div>
                       <div className="rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] p-2.5">
                         <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Description</p>
-                        <div className="text-[13px] leading-6 text-[var(--jira-text)] whitespace-pre-wrap">
+                        <div className="text-[13px] leading-6 text-[var(--jira-text)] whitespace-pre-wrap break-words overflow-hidden">
                           <DiffText oldText={(draft.diffBaseIssue ?? diffBaseIssue ?? originalIssue).description} newText={draft.currentIssue.description} mode="redline" />
                         </div>
                       </div>

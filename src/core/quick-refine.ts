@@ -30,9 +30,7 @@ import type {
 import { callLlmJsonWithUsage } from './llm';
 import { buildAdfContentOnly, buildAdfDocument, createFeatureIssue, createIssueLink } from './jira-creator';
 import {
-  assessRequirementWithLlmWithUsage,
   repairAcceptanceRequirements,
-  triageToAssessment,
 } from './story-generator';
 
 interface QuickRefineRawIssueFields {
@@ -191,26 +189,28 @@ function toSentenceCase(value: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function parseStoryLikeDescription(value: string): { role: string; action: string; benefit: string } | null {
+function parseStoryLikeDescription(value: string): { role: string; action: string; benefit: string; prefersNeedTo: boolean } | null {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
 
-  const strictMatch = text.match(/^As an?\s+(.+?),\s*I need to\s+(.+?)\s+so that\s+(.+)$/i);
+  const strictMatch = text.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+(.+?)\s+so that\s+(.+)$/i);
   if (strictMatch) {
     return {
       role: normalizeSentence(strictMatch[1]),
       action: normalizeSentence(strictMatch[2]),
       benefit: normalizeSentence(strictMatch[3]),
+      prefersNeedTo: /\bI need to\b/i.test(text),
     };
   }
 
-  const looseMatch = text.match(/^As an?\s+(.+?),\s*I (?:need|want) to\s+(.+)$/i);
+  const looseMatch = text.match(/^As an?\s+(.+?),\s*I (need(?:\s+to)?|want to)\s+(.+)$/i);
   if (looseMatch) {
     const role = normalizeSentence(looseMatch[1]);
-    const remainder = looseMatch[2].trim();
+    const remainder = looseMatch[3].trim();
     const [firstSentence = '', ...rest] = remainder.split(/(?<=[.!?])\s+/);
     const sentence = normalizeSentence(firstSentence);
     const benefit = normalizeSentence(rest.join(' '));
+    const prefersNeedTo = /\bto\b/i.test(looseMatch[2]);
 
     if (!sentence) return null;
     if (/so that/i.test(sentence)) {
@@ -219,6 +219,7 @@ function parseStoryLikeDescription(value: string): { role: string; action: strin
         role,
         action: normalizeSentence(actionPart),
         benefit: normalizeSentence([benefitPart, benefit].filter(Boolean).join(' ')),
+        prefersNeedTo,
       };
     }
 
@@ -226,6 +227,7 @@ function parseStoryLikeDescription(value: string): { role: string; action: strin
       role,
       action: sentence,
       benefit,
+      prefersNeedTo,
     };
   }
 
@@ -238,7 +240,7 @@ export function ensureUserStoryDescription(value: unknown, fallback?: string): s
   const source = attempt ?? fallbackAttempt;
 
   if (!source) {
-    throw new Error('Quick refine description must follow "As a [role], I need to [action] so that [benefit]".');
+    throw new Error('Quick refine description must follow "As a [role], I need [action] so that [benefit]".');
   }
 
   const role = normalizeSentence(source.role);
@@ -248,7 +250,7 @@ export function ensureUserStoryDescription(value: unknown, fallback?: string): s
     throw new Error('Quick refine description is missing a role, action, or benefit.');
   }
 
-  return `As a ${toSentenceCase(role)}, I need to ${action} so that ${ensureTrailingPeriod(benefit)}`;
+  return `As a ${toSentenceCase(role)}, I need${source.prefersNeedTo ? ' to' : ''} ${action} so that ${ensureTrailingPeriod(benefit)}`;
 }
 
 function parseArString(text: string): AcceptanceRequirement {
@@ -436,9 +438,10 @@ RULES:
 - Keep the current issue as one rewritten item in "currentIssue".
 - You may propose up to 3 "splitCandidates" only when the issue currently bundles multiple independently deliverable capabilities.
 - Use business-friendly language. Avoid implementation detail unless the issue explicitly requires it.
-- Every description MUST strictly follow: "As a [role], I need to [action] so that [benefit]".
+- Every description MUST strictly follow: "As a [role], I need [action] so that [benefit]".
 - Do not add any extra explanation before or after the user story sentence.
 - acceptance_requirements must be complete GIVEN / WHEN / THEN triples.
+- Translate technical event wording into plain business language. Prefer customer communications, open cases, approvals, routing, and outcomes over inbox names, subject lines, reference IDs, matching logic, append operations, or system internals.
 - If the issue still needs the full Refinely workflow, set handoffRecommended to true and explain why in handoffReason, but still return the best possible draft.
 
 Return JSON only:
@@ -514,54 +517,6 @@ export function detectQuickRefineActorAmbiguity(issue: QuickRefineIssueFields): 
   return hasGenericActor || !hasNamedActor;
 }
 
-async function assessQuickRefineClarifyNeed(opts: {
-  issue: QuickRefineIssueFields;
-  config: TenantConfig;
-  modelOverride?: string;
-}): Promise<{
-  shouldClarify: boolean;
-  suggestedQuestionCount?: number;
-  reason?: string;
-  usage?: TokenUsageSummary;
-}> {
-  const requirement = buildRequirementText(opts.issue);
-  const triage = await assessRequirementWithLlmWithUsage({
-    requirement,
-    generatorConfig: opts.config.generatorConfig,
-    tier: opts.config.tier,
-    providerOpts: buildProviderOpts(opts.config),
-  });
-  const suggestedQuestionCount = triage.triage
-    ? triageToAssessment(triage.triage).questionPlan.target
-    : 0;
-  const usage = triage.usage ? buildTokenUsage('quick_refine_triage', triage.usage) : undefined;
-  const actorAmbiguity = detectQuickRefineActorAmbiguity(opts.issue);
-
-  if (actorAmbiguity && suggestedQuestionCount > 0) {
-    return {
-      shouldClarify: true,
-      suggestedQuestionCount,
-      reason: 'A couple of focused questions will help avoid guessing the actor and permission model.',
-      usage,
-    };
-  }
-
-  if (suggestedQuestionCount >= 2) {
-    return {
-      shouldClarify: true,
-      suggestedQuestionCount,
-      reason: 'A couple of focused questions will improve the quick rewrite.',
-      usage,
-    };
-  }
-
-  return {
-    shouldClarify: false,
-    suggestedQuestionCount,
-    usage,
-  };
-}
-
 function shouldHandoffQuickRefine(issue: QuickRefineIssueFields): boolean {
   const text = quickRefineText(issue).toLowerCase();
   const broadSignals = [
@@ -604,7 +559,7 @@ function normalizeSplitCandidates(raw: QuickRefineGenerationResponse['splitCandi
       const summary = String(candidate?.summary ?? '').trim();
       const rawDescription = String(candidate?.description ?? '').trim();
       if (!summary && !rawDescription) return null;
-      const description = ensureUserStoryDescription(rawDescription, summary ? `As a user, I need to handle ${summary.toLowerCase()} so that the requested outcome is achieved.` : '');
+      const description = ensureUserStoryDescription(rawDescription, summary ? `As a user, I need handling of ${summary.toLowerCase()} so that the requested outcome is achieved.` : '');
       const rawArs = Array.isArray(candidate?.acceptance_requirements) && candidate.acceptance_requirements.length
         ? candidate.acceptance_requirements
         : Array.isArray(candidate?.acceptanceRequirements)
@@ -907,15 +862,8 @@ export async function startQuickRefine(opts: {
   const domainRoles = getCombinedPersonaRoles(opts.config, projectKeys).map((role) => role.role).filter(Boolean);
   const heuristicClarifyReason = getQuickRefineHeuristicClarifyReason(opts.context.originalIssue);
   const clarifyAssessment = heuristicClarifyReason
-    ? {
-        shouldClarify: true,
-        reason: heuristicClarifyReason,
-      }
-    : await assessQuickRefineClarifyNeed({
-        issue: opts.context.originalIssue,
-        config: opts.config,
-        modelOverride: opts.modelOverride,
-      });
+    ? { shouldClarify: true as const, reason: heuristicClarifyReason, suggestedQuestionCount: undefined }
+    : { shouldClarify: false as const };
 
   if (clarifyAssessment.shouldClarify) {
     const questionsResult = await callLlmJsonWithUsage<QuickRefineQuestionResponse>({
@@ -943,7 +891,7 @@ export async function startQuickRefine(opts: {
       reason: clarifyAssessment.reason || 'A little more specificity will improve the quick rewrite.',
       questions,
       tokenUsage: mergeTokenUsage(
-        clarifyAssessment.usage,
+        undefined,
         buildTokenUsage('quick_refine_questions', questionsResult.usage),
       ),
     };
@@ -966,8 +914,8 @@ export async function startQuickRefine(opts: {
       similarStories,
       wiContextText: wiContext.text,
     }),
-    maxTokens: Math.min(opts.config.generatorConfig.maxTokens, 5000),
-    reasoningEffort: 'medium',
+    maxTokens: Math.min(opts.config.generatorConfig.maxTokens, 2000),
+    reasoningEffort: 'low',
     ...buildProviderOpts(opts.config),
   });
 
@@ -979,10 +927,7 @@ export async function startQuickRefine(opts: {
       enrichQuickRefineContextMeta(opts.context.contextMeta, wiContext, similarStories),
       [],
       rewrite.data,
-      mergeTokenUsage(
-        clarifyAssessment.usage,
-        buildTokenUsage('quick_refine_rewrite', rewrite.usage),
-      ),
+      buildTokenUsage('quick_refine_rewrite', rewrite.usage),
     ),
   };
 }

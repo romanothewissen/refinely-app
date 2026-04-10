@@ -81,12 +81,23 @@ GIVEN required context is missing WHEN quick refine runs THEN the app asks focus
 
 test('ensureUserStoryDescription normalizes loose story phrasing into strict user-story format', () => {
   const description = ensureUserStoryDescription(
-    'As a System Administrator, I want to restrict create and update access to IM&T records. This ensures data integrity.',
+    'As a System Administrator, I need secure control over create and update access to IM&T records. This ensures data integrity.',
   );
 
   assert.equal(
     description,
-    'As a System Administrator, I need to restrict create and update access to IM&T records so that data integrity.',
+    'As a System Administrator, I need secure control over create and update access to IM&T records so that data integrity.',
+  );
+});
+
+test('ensureUserStoryDescription accepts legacy "I need to" input without rejecting it', () => {
+  const description = ensureUserStoryDescription(
+    'As a System Administrator, I need to manage IM&T tool permissions so that only authorised users can edit records.',
+  );
+
+  assert.equal(
+    description,
+    'As a System Administrator, I need to manage IM&T tool permissions so that only authorised users can edit records.',
   );
 });
 

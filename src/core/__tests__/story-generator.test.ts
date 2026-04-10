@@ -23,10 +23,14 @@ import {
 } from '../story-generator';
 import {
   formatGenerationFeatureTarget,
+  getApprovedDraftStructureNote,
+  getCoverageReviewSummary,
+  getDiscoveryProfileHeadline,
   getDraftFeatureHeading,
   getDraftFeatureNote,
   getGenerationFeatureTargetLabel,
   getSizingRunContextNote,
+  getSourceContextChips,
 } from '../../frontend/src/generation-progress-copy';
 
 function makeFeature(summary: string, arCount: number, description?: string) {
@@ -309,6 +313,7 @@ test('buildSingleFeatureRefineSystemPrompt can forbid splitting during bulk refi
   assert.match(prompt, /Return EXACTLY ONE feature in the features array/);
   assert.match(prompt, /Do not split this feature into multiple features/);
   assert.match(prompt, /Do not invent new sibling features or move acceptance requirements into other features/);
+  assert.match(prompt, /As a \[role\], I need \[action\] so that \[benefit\]/);
 });
 
 test('assessSizingHeuristics flags oversized split guard-rule backlogs', () => {
@@ -491,8 +496,35 @@ test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors fro
 test('generation progress copy labels draft output as provisional', () => {
   assert.equal(getGenerationFeatureTargetLabel(), 'Triage estimate');
   assert.equal(formatGenerationFeatureTarget(7), 'Forecast 7');
-  assert.equal(getDraftFeatureHeading(), 'Features');
+  assert.equal(getDraftFeatureHeading(), 'Draft features');
   assert.equal(getDraftFeatureNote(), null);
+});
+
+test('generation progress copy summarizes coverage and discovery context in plain language', () => {
+  assert.equal(getApprovedDraftStructureNote(), 'Using approved feature structure');
+  assert.deepEqual(getCoverageReviewSummary({
+    sufficient: false,
+    missingCoverage: ['Clarify how existing replies attach to open cases.'],
+  }), {
+    label: 'Coverage check found 1 area to review',
+    tone: 'warning',
+    details: ['Clarify how existing replies attach to open cases.'],
+  });
+  assert.equal(getDiscoveryProfileHeadline({
+    scope: 'moderate',
+    complexity: 'medium',
+    ambiguity: 'high',
+    recommendedInitialCount: 6,
+    followupCap: 2,
+    missingCategoryKeys: [],
+  }), 'Moderate scope / High ambiguity');
+  assert.deepEqual(getSourceContextChips({
+    projectCount: 2,
+    domainContextApplied: true,
+    attachmentIncluded: true,
+    wiDocsCount: 3,
+    similarStoriesCount: 1,
+  }), ['2 projects', 'Guidance on', 'Attachment included', '3 work instructions', '1 similar story']);
 });
 
 test('shouldPauseForDraftReview pauses when pass-1 draft materially exceeds the triage forecast', () => {
