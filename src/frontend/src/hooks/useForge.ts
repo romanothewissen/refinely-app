@@ -30,7 +30,8 @@ export const api = {
   }) => invoke('startGeneration', payload),
   resumeGeneration: (payload: {
     sessionId: string;
-    decision: 'keep' | 'consolidate';
+    decision: 'continue' | 'broaden' | 'tighten' | 'merge_selected' | 'split_selected';
+    selectedFeatureIds?: string[];
   }) => invoke('resumeGeneration', payload),
   retryFailedFeatureGeneration: (payload: {
     sessionId: string;

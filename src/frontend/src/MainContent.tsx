@@ -8,6 +8,8 @@ import type {
   AiChangeActionType,
   ClarifyContextMeta,
   ClarifyProgressPayload,
+  DraftReviewDecision,
+  DraftReviewMetadata,
   EffectiveSizingContract,
   GenerationContextMeta,
   RestructureScope,
@@ -70,9 +72,8 @@ type GenerationProgressMeta = {
   draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
-  sizingAssessment?: unknown;
-  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; total?: number };
-  reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
+  draftReview?: DraftReviewMetadata;
+  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; coverageCheck?: number; total?: number };
   resumeContext?: unknown;
   sources?: {
     projectKey: string;
@@ -255,12 +256,31 @@ function DraftReviewCard({
   onDecision,
 }: {
   meta: GenerationProgressMeta | null;
-  onDecision: (decision: 'keep' | 'consolidate') => void;
+  onDecision: (decision: DraftReviewDecision, selectedFeatureIds?: string[]) => void;
 }) {
-  const draftFeatures = meta?.draftFeatures ?? [];
-  const draftFeatureCount = meta?.draftFeatureCount ?? draftFeatures.length;
-  const forecast = meta?.triage?.featureTarget;
-  const reason = meta?.reviewDecision?.reason ?? 'The draft is larger than expected for this ask.';
+  const draftFeatures = meta?.draftFeatures;
+  const draftFeatureList = draftFeatures ?? [];
+  const draftFeatureCount = meta?.draftFeatureCount ?? draftFeatureList.length;
+  const draftReview = meta?.draftReview;
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedIds((previous) => previous.filter((id) => (draftFeatures ?? []).some((feature) => feature.id === id)));
+  }, [draftFeatures]);
+
+  const toggleSelected = (featureId: string) => {
+    setSelectedIds((previous) => (
+      previous.includes(featureId)
+        ? previous.filter((id) => id !== featureId)
+        : [...previous, featureId]
+    ));
+  };
+
+  const featureNoteById = new Map((draftReview?.featureNotes ?? []).map((note) => [note.featureId, note]));
+  const adjustedFeatureIds = new Set(draftReview?.descriptionQuality?.adjustedFeatureIds ?? []);
+  const reviewSummary = draftReview?.reviewMessage || draftReview?.reasoningSummary || 'Review the drafted feature structure before acceptance requirements are written.';
+  const unresolvedAmbiguities = draftReview?.unresolvedAmbiguities ?? [];
+  const qualityWarnings = draftReview?.descriptionQuality?.warnings ?? [];
 
   return (
     <motion.div
@@ -280,15 +300,19 @@ function DraftReviewCard({
             Review drafted features before AR generation
           </h2>
           <p className="mt-1.5 text-[14px] font-medium text-[var(--rf-text-secondary)] leading-relaxed">
-            {normalizeDisplayText(reason)}
+            {normalizeDisplayText(reviewSummary)}
           </p>
         </div>
 
         <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Triage estimate</div>
-              <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof forecast === 'number' ? `Forecast ${forecast}` : 'Assessing'}</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Review action</div>
+              <div className="text-[14px] font-black text-[var(--rf-text)]">
+                {draftReview?.lastAction
+                  ? draftReview.lastAction.replace(/_/g, ' ')
+                  : 'Initial review'}
+              </div>
             </div>
             <div>
               <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>
@@ -297,29 +321,118 @@ function DraftReviewCard({
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Draft titles</div>
-          {draftFeatures.map((feature) => (
-            <div key={feature.id} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 text-[13px] font-medium text-[var(--rf-text)]">
-              {feature.summary}
+        {unresolvedAmbiguities.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Unresolved ambiguities</div>
+            <div className="rounded-xl border border-[var(--rf-border)] bg-white/55 px-4 py-3 text-[13px] text-[var(--rf-text-secondary)] space-y-2">
+              {unresolvedAmbiguities.map((item, index) => (
+                <div key={`${item}-${index}`}>{normalizeDisplayText(item)}</div>
+              ))}
             </div>
-          ))}
+          </div>
+        )}
+
+        {qualityWarnings.length > 0 && (
+          <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)] space-y-1.5">
+            {qualityWarnings.map((warning, index) => (
+              <div key={`${warning}-${index}`}>{normalizeDisplayText(warning)}</div>
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Draft features</div>
+          {draftFeatureList.map((feature) => {
+            const note = featureNoteById.get(feature.id);
+            const isSelected = selectedIds.includes(feature.id);
+            const detailLines = [
+              note?.whySeparate,
+              note?.possibleSplitNote,
+              ...(note?.descriptionIssues ?? []),
+            ].filter(Boolean);
+            const mergeLine = note?.possibleMergeWith?.length
+              ? `Possible merge with: ${note.possibleMergeWith.join(', ')}`
+              : null;
+
+            return (
+              <button
+                key={feature.id}
+                type="button"
+                onClick={() => toggleSelected(feature.id)}
+                className={`w-full text-left rounded-xl border px-4 py-3 transition ${
+                  isSelected
+                    ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]'
+                    : 'border-[var(--rf-border)] bg-white/55 hover:border-[var(--rf-border-strong)] hover:bg-white/70'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 h-4 w-4 rounded border ${isSelected ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)]' : 'border-[var(--rf-border-strong)] bg-white'}`}>
+                    {isSelected && <Check className="h-3 w-3 text-white" />}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[14px] font-bold text-[var(--rf-text)]">{feature.summary}</div>
+                      {adjustedFeatureIds.has(feature.id) && (
+                        <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
+                          Description adjusted
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[13px] text-[var(--rf-text-secondary)]">{feature.description}</div>
+                    {mergeLine && (
+                      <div className="text-[12px] font-semibold text-[var(--rf-brand)]">{normalizeDisplayText(mergeLine)}</div>
+                    )}
+                    {detailLines.length > 0 && (
+                      <div className="space-y-1 text-[12px] text-[var(--rf-text-secondary)]">
+                        {detailLines.map((line, index) => (
+                          <div key={`${feature.id}-${index}`}>{normalizeDisplayText(line ?? '')}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap gap-3 pt-1">
           <button
             type="button"
-            onClick={() => onDecision('consolidate')}
+            onClick={() => onDecision('continue')}
             className="brainstorm-shimmer px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
           >
-            Consolidate Before ARs
+            Continue With This Structure
           </button>
           <button
             type="button"
-            onClick={() => onDecision('keep')}
+            onClick={() => onDecision('broaden')}
             className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
           >
-            Keep Draft And Continue
+            Broaden Breakdown
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecision('tighten')}
+            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
+          >
+            Tighten Grouping
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecision('merge_selected', selectedIds)}
+            disabled={selectedIds.length < 2}
+            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Merge Selected
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecision('split_selected', selectedIds)}
+            disabled={selectedIds.length < 1}
+            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Split Selected
           </button>
         </div>
       </div>
@@ -1150,7 +1263,7 @@ interface MainContentProps {
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
   isAdmin?: boolean;
   onOpenSettings?: () => void;
-  onDraftReviewDecision?: (decision: 'keep' | 'consolidate') => void;
+  onDraftReviewDecision?: (decision: DraftReviewDecision, selectedFeatureIds?: string[]) => void;
   onRetryFailedFeature?: (featureId: string) => void;
   onUndoLastAiChange?: () => void;
   undoActionLabel?: string | null;
@@ -1182,11 +1295,9 @@ export function MainContent({
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
   const sizingRunContextNote =
-    generationContext?.draftReviewDecision === 'keep'
-      ? 'Draft kept as sketched before acceptance requirements were written.'
-      : generationContext?.draftReviewDecision === 'consolidate'
-        ? 'Draft consolidated before acceptance requirements were written.'
-        : getSizingRunContextNote(generationContext?.sizingAssessment);
+    generationContext?.draftReviewDecision === 'continue'
+      ? 'Draft structure was explicitly approved before acceptance requirements were written.'
+      : getSizingRunContextNote(generationContext?.sizingAssessment);
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
@@ -1905,7 +2016,7 @@ export function MainContent({
           ) : workflowStage === 'generation_review' && generationProgressMeta ? (
             <DraftReviewCard
               meta={generationProgressMeta || null}
-              onDecision={(decision) => onDraftReviewDecision?.(decision)}
+              onDecision={(decision, selectedFeatureIds) => onDraftReviewDecision?.(decision, selectedFeatureIds)}
             />
           ) : !hasFeatures ? (
             <motion.div
@@ -1966,6 +2077,17 @@ export function MainContent({
                     {sizingRunContextNote && (
                       <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
                         {sizingRunContextNote}
+                      </span>
+                    )}
+                    {generationContext.coverageReview && (
+                      <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[13px] font-semibold ${
+                        generationContext.coverageReview.sufficient
+                          ? 'border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                          : 'border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] text-[var(--rf-warning)]'
+                      }`}>
+                        {generationContext.coverageReview.sufficient
+                          ? 'Coverage review: looks complete'
+                          : `Coverage review: ${generationContext.coverageReview.missingCoverage.length || 1} possible gap${generationContext.coverageReview.missingCoverage.length === 1 ? '' : 's'}`}
                       </span>
                     )}
                   </div>

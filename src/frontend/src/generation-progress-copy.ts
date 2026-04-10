@@ -19,15 +19,6 @@ export function getDraftFeatureNote(): string | null {
 export function getSizingRunContextNote(
   sizingAssessment?: GenerationSizingAssessment | null,
 ): string | null {
-  if (!sizingAssessment) return null;
-
-  if (sizingAssessment.repairApplied && typeof sizingAssessment.preRepairFeatureCount === 'number') {
-    return `Draft consolidated from ${sizingAssessment.preRepairFeatureCount} to ${sizingAssessment.final.featureCount} features before final output.`;
-  }
-
-  if (sizingAssessment.repairRejectedReason && typeof sizingAssessment.preRepairFeatureCount === 'number') {
-    return `Draft kept at ${sizingAssessment.final.featureCount} features because consolidation would have dropped below the explicit workflow floor.`;
-  }
-
+  void sizingAssessment;
   return null;
 }

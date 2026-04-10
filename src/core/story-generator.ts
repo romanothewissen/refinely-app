@@ -31,11 +31,17 @@ import {
   StructuralFeatureProposal,
   StructuralRestructureProposal,
   RestructureScope,
+  CoverageReviewAdvice,
+  DraftReviewDecision,
+  DraftReviewMetadata,
+  DraftFeatureReviewNote,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
 import { getTierModel } from '../services/billing';
 import {
   buildDecompositionSystemPrompt,
+  buildDraftDescriptionRepairSystemPrompt,
+  buildDraftReviewSystemPrompt,
   buildArSystemPrompt,
   buildArPerFeatureUserMessage,
   buildTriageSystemPrompt,
@@ -43,10 +49,11 @@ import {
   buildEvaluateSystemPrompt,
   buildRestructureSystemPrompt,
   buildSizingRepairSystemPrompt,
+  buildCoverageCheckSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
 } from './prompts';
-import { detectFeatureOverlaps, validateFeatures } from './quality-validator';
+import { validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import {
   allowsZeroQuestionDiscovery,
@@ -74,6 +81,38 @@ interface RawFeature {
   process_code?: string;
 }
 
+interface RawDraftFeature extends RawFeature {
+  why_separate?: string;
+  whySeparate?: string;
+  possible_merge_with?: unknown[];
+  possibleMergeWith?: unknown[];
+  possible_split_note?: string;
+  possibleSplitNote?: string;
+}
+
+interface RawDecompositionResponse {
+  reasoning_summary?: string;
+  reasoningSummary?: string;
+  unresolved_ambiguities?: unknown[];
+  unresolvedAmbiguities?: unknown[];
+  features?: RawDraftFeature[];
+}
+
+interface RawDescriptionRewrite {
+  id?: string;
+  description?: string;
+}
+
+interface RawDescriptionRepairResponse {
+  rewrites?: RawDescriptionRewrite[];
+}
+
+interface RawCoverageReviewResponse {
+  sufficient?: boolean;
+  missingCoverage?: unknown[];
+  reasoning?: string;
+}
+
 interface RawStructuralFeatureProposal extends RawFeature {
   source_feature_ids?: unknown[];
   sourceAcceptanceRequirementRefs?: unknown[];
@@ -90,6 +129,22 @@ interface RawStructuralRestructureResponse {
   removedFeatureIds?: unknown[];
   removed_acceptance_requirement_refs?: unknown[];
   removedAcceptanceRequirementRefs?: unknown[];
+}
+
+interface DraftFeatureReviewDetails {
+  whySeparate?: string;
+  possibleMergeWith: string[];
+  possibleSplitNote?: string;
+}
+
+interface DecompositionDraftResult {
+  features: RawDraftFeature[];
+  reviewMeta: {
+    reasoningSummary?: string;
+    unresolvedAmbiguities: string[];
+    featureNotes: DraftFeatureReviewDetails[];
+  };
+  usage: { input: number; output: number };
 }
 
 interface ClarifyQuestionPlan {
@@ -186,21 +241,18 @@ export class AcceptanceRequirementsGenerationError extends Error {
 
 export class Pass1DraftReviewRequiredError extends Error {
   draftFeatures: Feature[];
-  sizingAssessment: SizingAssessmentSnapshot;
-  triage: EffectiveSizingContract;
+  draftReview: DraftReviewMetadata;
   stageDurationsMs: GenerationStageDurationsMs;
 
   constructor(
     draftFeatures: Feature[],
-    sizingAssessment: SizingAssessmentSnapshot,
-    triage: EffectiveSizingContract,
+    draftReview: DraftReviewMetadata,
     stageDurationsMs: GenerationStageDurationsMs,
   ) {
     super('Generation paused for draft review.');
     this.name = 'Pass1DraftReviewRequiredError';
     this.draftFeatures = draftFeatures;
-    this.sizingAssessment = sizingAssessment;
-    this.triage = triage;
+    this.draftReview = draftReview;
     this.stageDurationsMs = stageDurationsMs;
   }
 }
@@ -442,7 +494,6 @@ function buildGenerationUserMessage(input: {
 async function runDecompositionPass(input: {
   userMessage: string;
   systemPrompt: string;
-  shape: FeaturePlan['shape'];
   generatorConfig: TenantConfig['generatorConfig'];
   tier: TenantConfig['tier'];
   providerOpts: {
@@ -457,11 +508,9 @@ async function runDecompositionPass(input: {
     modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
     piiMaskingEnabled?: boolean;
   };
-}): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
-  // Use high reasoning only for broad/epic shapes where multi-workflow decomposition
-  // benefits from extended thinking. Simpler shapes use medium to reduce latency.
-  const reasoningEffort = (input.shape === 'broad' || input.shape === 'epic') ? 'high' : 'medium';
-  const firstAttempt = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+}): Promise<DecompositionDraftResult> {
+  const reasoningEffort = 'medium';
+  const firstAttempt = await callLlmJsonWithUsage<RawDecompositionResponse>({
     model: getTierModel(input.generatorConfig.decompositionModel, input.tier),
     systemPrompt: input.systemPrompt,
     userMessage: input.userMessage,
@@ -472,10 +521,14 @@ async function runDecompositionPass(input: {
 
   const initialFeatures = firstAttempt.data.features ?? [];
   if (initialFeatures.length > 0) {
-    return { features: initialFeatures, usage: firstAttempt.usage };
+    return {
+      features: initialFeatures,
+      reviewMeta: extractDraftReviewMetadata(firstAttempt.data, initialFeatures),
+      usage: firstAttempt.usage,
+    };
   }
 
-  const retryAttempt = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+  const retryAttempt = await callLlmJsonWithUsage<RawDecompositionResponse>({
     model: getTierModel(input.generatorConfig.decompositionModel, input.tier),
     systemPrompt: `${input.systemPrompt}\n\nFINAL REMINDER: Return at least 1 feature. Never return an empty features array.`,
     userMessage: `${input.userMessage}\n\nIMPORTANT: The previous result contained zero features. Return at least one well-scoped feature in valid JSON.`,
@@ -491,10 +544,42 @@ async function runDecompositionPass(input: {
 
   return {
     features: retryFeatures,
+    reviewMeta: extractDraftReviewMetadata(retryAttempt.data, retryFeatures),
     usage: {
       input: firstAttempt.usage.input + retryAttempt.usage.input,
       output: firstAttempt.usage.output + retryAttempt.usage.output,
     },
+  };
+}
+
+function normalizeDraftFeatureReviewDetails(feature: RawDraftFeature): DraftFeatureReviewDetails {
+  return {
+    whySeparate: sanitizeArClause(feature.why_separate ?? feature.whySeparate ?? ''),
+    possibleMergeWith: sanitizeStringArray(
+      Array.isArray(feature.possible_merge_with)
+        ? feature.possible_merge_with
+        : Array.isArray(feature.possibleMergeWith)
+          ? feature.possibleMergeWith
+          : [],
+    ),
+    possibleSplitNote: sanitizeArClause(feature.possible_split_note ?? feature.possibleSplitNote ?? ''),
+  };
+}
+
+function extractDraftReviewMetadata(
+  raw: RawDecompositionResponse,
+  features: RawDraftFeature[],
+): DecompositionDraftResult['reviewMeta'] {
+  return {
+    reasoningSummary: sanitizeArClause(raw.reasoning_summary ?? raw.reasoningSummary ?? ''),
+    unresolvedAmbiguities: sanitizeStringArray(
+      Array.isArray(raw.unresolved_ambiguities)
+        ? raw.unresolved_ambiguities
+        : Array.isArray(raw.unresolvedAmbiguities)
+          ? raw.unresolvedAmbiguities
+          : [],
+    ),
+    featureNotes: features.map((feature) => normalizeDraftFeatureReviewDetails(feature)),
   };
 }
 
@@ -517,6 +602,200 @@ export function findFeaturesMissingCompleteAcceptanceRequirements(
     if (!featureHasCompleteAcceptanceRequirements(feature)) indexes.push(index);
     return indexes;
   }, []);
+}
+
+const GENERIC_DESCRIPTION_BENEFIT_PATTERNS = [
+  /\brequested outcome is achieved\b/i,
+  /\bbusiness value is delivered\b/i,
+  /\bprocess (?:stays|remains) (?:aligned|supported|compliant)\b/i,
+  /\btask can be completed\b/i,
+  /\bworkflow can proceed\b/i,
+];
+
+function normalizeDraftDescriptionText(description: string): string {
+  let cleaned = deduplicateDescription(description)
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .trim();
+
+  cleaned = cleaned.replace(/^As an?\s+([^,]+),\s*I need\s+(?!to\b)/i, 'As a $1, I need to ');
+  cleaned = cleaned.replace(/\bso that\b\s+(.*?)\s+\bso that\b\s+\1\b/i, 'so that $1');
+  return cleaned.trim();
+}
+
+function parseFeatureDescriptionParts(description: string): { role: string; action: string; benefit: string } | null {
+  const cleaned = normalizeDraftDescriptionText(description);
+  const match = cleaned.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+(.+?)\s+so that\s+(.+?)[.?!]?$/i);
+  if (!match) return null;
+  return {
+    role: sanitizeArClause(match[1]),
+    action: sanitizeArClause(match[2]),
+    benefit: sanitizeArClause(match[3]),
+  };
+}
+
+function collectFeatureDescriptionIssues(description: string): string[] {
+  const cleaned = normalizeDraftDescriptionText(description);
+  const issues = new Set<string>();
+
+  if (!/^As an?\s+/i.test(cleaned)) issues.add('Missing "As a [role]" opening');
+  if (!/\bI need(?:\s+to)?\b/i.test(cleaned)) issues.add('Missing "I need to" action clause');
+  if (!/\bso that\b/i.test(cleaned)) issues.add('Missing explicit business benefit');
+  if ((cleaned.match(/\bso that\b/gi) ?? []).length > 1) issues.add('Contains repeated "so that" benefit clauses');
+  if (/^As an?\s+.+?,\s*I need\s+(?!to\b)/i.test(cleaned)) issues.add('Uses malformed "I need" phrasing');
+  if (/[.?!]\s+\S/.test(cleaned)) issues.add('Contains more than one sentence');
+
+  const parts = parseFeatureDescriptionParts(cleaned);
+  if (!parts) {
+    issues.add('Does not follow the expected user-story structure');
+    return [...issues];
+  }
+
+  if (parts.action.split(/\s+/).length < 2) issues.add('Action clause is too weak or incomplete');
+  if (parts.benefit.split(/\s+/).length < 2) issues.add('Benefit clause is too weak or incomplete');
+  if (GENERIC_DESCRIPTION_BENEFIT_PATTERNS.some((pattern) => pattern.test(parts.benefit))) {
+    issues.add('Benefit clause is too generic');
+  }
+
+  return [...issues];
+}
+
+function buildDraftDescriptionIssueMap(features: Feature[]): Map<string, string[]> {
+  const issuesById = new Map<string, string[]>();
+  features.forEach((feature) => {
+    const issues = collectFeatureDescriptionIssues(feature.description);
+    if (issues.length > 0) {
+      issuesById.set(feature.id, issues);
+    }
+  });
+  return issuesById;
+}
+
+async function repairDraftFeatureDescriptions(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  similarStoriesText: string;
+  wiContextText: string;
+  features: Feature[];
+  config: TenantConfig;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+}): Promise<{ features: Feature[]; descriptionQuality: DraftReviewMetadata['descriptionQuality']; usage: { input: number; output: number } }> {
+  const issueMap = buildDraftDescriptionIssueMap(opts.features);
+  if (issueMap.size === 0) {
+    return {
+      features: opts.features,
+      descriptionQuality: {
+        adjustedFeatureIds: [],
+        flaggedFeatureIds: [],
+        warnings: [],
+      },
+      usage: { input: 0, output: 0 },
+    };
+  }
+
+  const flagged = opts.features.filter((feature) => issueMap.has(feature.id));
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement: opts.requirement,
+      clarifyAnswers: opts.clarifyAnswers,
+      attachmentText: opts.attachmentText,
+      wiContextText: opts.wiContextText,
+      similarStoriesText: opts.similarStoriesText,
+      limits: PASS1_CONTEXT_LIMITS,
+    }),
+    `FEATURES WITH DESCRIPTION ISSUES:\n${JSON.stringify(flagged.map((feature) => ({
+      id: feature.id,
+      summary: feature.summary,
+      description: feature.description,
+      description_issues: issueMap.get(feature.id) ?? [],
+    })), null, 2)}`,
+  ].join('\n\n---\n\n');
+
+  const result = await callLlmJsonWithUsage<RawDescriptionRepairResponse>({
+    model: getTierModel(opts.config.generatorConfig.refineModel, opts.config.tier),
+    systemPrompt: buildDraftDescriptionRepairSystemPrompt(),
+    userMessage,
+    maxTokens: 2048,
+    reasoningEffort: 'medium',
+    ...opts.providerOpts,
+  });
+
+  const rewriteMap = new Map(
+    (result.data.rewrites ?? [])
+      .map((rewrite) => [String(rewrite.id ?? '').trim(), normalizeDraftDescriptionText(String(rewrite.description ?? '').trim())] as const)
+      .filter(([id, description]) => id && description),
+  );
+
+  const adjustedFeatureIds: string[] = [];
+  const revisedFeatures = opts.features.map((feature) => {
+    const rewrite = rewriteMap.get(feature.id);
+    if (!rewrite) return feature;
+    if (normalizeDraftDescriptionText(feature.description) !== rewrite) {
+      adjustedFeatureIds.push(feature.id);
+      return { ...feature, description: rewrite };
+    }
+    return feature;
+  });
+
+  const remainingIssues = buildDraftDescriptionIssueMap(revisedFeatures);
+  const flaggedFeatureIds = [...remainingIssues.keys()];
+  const warnings = revisedFeatures
+    .filter((feature) => remainingIssues.has(feature.id))
+    .map((feature) => `${feature.summary}: ${(remainingIssues.get(feature.id) ?? []).join('; ')}`);
+
+  return {
+    features: revisedFeatures,
+    descriptionQuality: {
+      adjustedFeatureIds,
+      flaggedFeatureIds,
+      warnings,
+    },
+    usage: result.usage,
+  };
+}
+
+function buildDraftReviewMetadata(input: {
+  features: Feature[];
+  base: DecompositionDraftResult['reviewMeta'];
+  descriptionQuality?: DraftReviewMetadata['descriptionQuality'];
+  lastAction?: DraftReviewDecision;
+  reviewMessage?: string;
+}): DraftReviewMetadata {
+  const issueMap = buildDraftDescriptionIssueMap(input.features);
+
+  const featureNotes: DraftFeatureReviewNote[] = input.features.map((feature, index) => {
+    const baseNote = input.base.featureNotes[index] ?? { possibleMergeWith: [] };
+    return {
+      featureId: feature.id,
+      summary: feature.summary,
+      whySeparate: baseNote.whySeparate,
+      possibleMergeWith: baseNote.possibleMergeWith,
+      possibleSplitNote: baseNote.possibleSplitNote,
+      descriptionIssues: issueMap.get(feature.id),
+      descriptionAdjusted: Boolean(input.descriptionQuality?.adjustedFeatureIds.includes(feature.id)),
+    };
+  });
+
+  return {
+    reasoningSummary: input.base.reasoningSummary,
+    unresolvedAmbiguities: input.base.unresolvedAmbiguities,
+    featureNotes,
+    descriptionQuality: input.descriptionQuality,
+    lastAction: input.lastAction,
+    reviewMessage: input.reviewMessage,
+  };
 }
 
 function rawFeatureHasCompleteAcceptanceRequirements(feature: RawFeature): boolean {
@@ -1857,6 +2136,160 @@ async function consolidateDraftFeatureSet(opts: {
   };
 }
 
+async function reviewDraftFeatureSet(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  similarStoriesText: string;
+  wiContextText: string;
+  features: Feature[];
+  action: Exclude<DraftReviewDecision, 'continue'>;
+  selectedFeatureIds?: string[];
+  currentReviewMeta?: DraftReviewMetadata;
+  config: TenantConfig;
+  providerOpts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    geminiApiKey?: string;
+    geminiBaseUrl?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    azureOpenAIApiKey?: string;
+    azureOpenAIBaseUrl?: string;
+    azureOpenAIApiVersion?: string;
+    modelCatalogs?: TenantConfig['generatorConfig']['modelCatalogs'];
+    piiMaskingEnabled?: boolean;
+  };
+  shouldCancel?: () => Promise<boolean> | boolean;
+}): Promise<{ features: Feature[]; reviewMeta: DraftReviewMetadata; usage: { input: number; output: number } }> {
+  const selectedFeatureIds = uniqueNonEmptyStrings(opts.selectedFeatureIds ?? []).filter((featureId) =>
+    opts.features.some((feature) => feature.id === featureId),
+  );
+  const selectionTooSmall =
+    (opts.action === 'merge_selected' && selectedFeatureIds.length < 2)
+    || (opts.action === 'split_selected' && selectedFeatureIds.length < 1);
+
+  if (selectionTooSmall) {
+    const reviewMeta = opts.currentReviewMeta
+      ? {
+          ...opts.currentReviewMeta,
+          lastAction: opts.action,
+          reviewMessage: opts.action === 'merge_selected'
+            ? 'Select at least two draft features before merging.'
+            : 'Select at least one draft feature before splitting.',
+        }
+      : buildDraftReviewMetadata({
+          features: opts.features,
+          base: {
+            reasoningSummary: '',
+            unresolvedAmbiguities: [],
+            featureNotes: opts.features.map(() => ({ possibleMergeWith: [] })),
+          },
+          lastAction: opts.action,
+          reviewMessage: opts.action === 'merge_selected'
+            ? 'Select at least two draft features before merging.'
+            : 'Select at least one draft feature before splitting.',
+        });
+    return { features: opts.features, reviewMeta, usage: { input: 0, output: 0 } };
+  }
+
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement: opts.requirement,
+      clarifyAnswers: opts.clarifyAnswers,
+      attachmentText: opts.attachmentText,
+      wiContextText: opts.wiContextText,
+      similarStoriesText: opts.similarStoriesText,
+      limits: PASS1_CONTEXT_LIMITS,
+    }),
+    `CURRENT DRAFT FEATURES:\n${JSON.stringify(opts.features.map((feature) => ({
+      id: feature.id,
+      summary: feature.summary,
+      description: feature.description,
+      suggested_story_points: feature.storyPoints,
+      process_code: feature.processCode,
+    })), null, 2)}`,
+    selectedFeatureIds.length
+      ? `SELECTED FEATURE IDS FOR THIS ACTION:\n${JSON.stringify(selectedFeatureIds, null, 2)}`
+      : 'SELECTED FEATURE IDS FOR THIS ACTION:\n[]',
+  ].join('\n\n---\n\n');
+
+  const result = await callLlmJsonWithUsage<RawDecompositionResponse>({
+    model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
+    systemPrompt: buildDraftReviewSystemPrompt({
+      domainContext: opts.config.domainContext,
+      processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
+      action: opts.action,
+    }),
+    userMessage,
+    maxTokens: Math.max(opts.config.generatorConfig.maxTokens ?? 8192, 4096),
+    reasoningEffort: 'medium',
+    ...opts.providerOpts,
+  });
+
+  if (await maybeCancelled(opts.shouldCancel)) throw new GenerationCancelledError();
+
+  const rawFeatures = result.data.features ?? [];
+  if (!rawFeatures.length) {
+    return {
+      features: opts.features,
+      reviewMeta: {
+        ...(opts.currentReviewMeta ?? buildDraftReviewMetadata({
+          features: opts.features,
+          base: {
+            reasoningSummary: '',
+            unresolvedAmbiguities: [],
+            featureNotes: opts.features.map(() => ({ possibleMergeWith: [] })),
+          },
+        })),
+        lastAction: opts.action,
+        reviewMessage: 'The draft revision kept the current structure unchanged.',
+      },
+      usage: result.usage,
+    };
+  }
+
+  const roleGrounding: RoleGroundingContext = {
+    requirement: opts.requirement,
+    clarifyAnswers: opts.clarifyAnswers,
+    domainRoles: opts.config.domainRoles,
+  };
+  const revisedFeatures = rawFeatures
+    .map((feature) => normaliseFeature({ ...feature, acceptance_requirements: [] }, roleGrounding))
+    .map((feature) => ({ ...feature, acceptanceRequirements: [] }));
+  const descriptionRepair = await repairDraftFeatureDescriptions({
+    requirement: opts.requirement,
+    clarifyAnswers: opts.clarifyAnswers,
+    attachmentText: opts.attachmentText,
+    similarStoriesText: opts.similarStoriesText,
+    wiContextText: opts.wiContextText,
+    features: revisedFeatures,
+    config: opts.config,
+    providerOpts: opts.providerOpts,
+  });
+
+  return {
+    features: descriptionRepair.features,
+    reviewMeta: buildDraftReviewMetadata({
+      features: descriptionRepair.features,
+      base: extractDraftReviewMetadata(result.data, rawFeatures),
+      descriptionQuality: descriptionRepair.descriptionQuality,
+      lastAction: opts.action,
+      reviewMessage:
+        opts.action === 'broaden'
+          ? 'Draft broadened for another review.'
+          : opts.action === 'tighten'
+            ? 'Draft tightened for another review.'
+            : opts.action === 'merge_selected'
+              ? 'Selected features merged for another review.'
+              : 'Selected features split for another review.',
+    }),
+    usage: {
+      input: result.usage.input + descriptionRepair.usage.input,
+      output: result.usage.output + descriptionRepair.usage.output,
+    },
+  };
+}
+
 // ─── Heuristic Fallback Assessment ───────────────────────────────────────────
 
 export function assessRequirement(input: {
@@ -2198,15 +2631,14 @@ export async function generateFeatures(opts: {
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
-  precomputedTriage?: TriageResult | null;
   precomputedDraftFeatures?: Feature[];
-  draftReviewDecision?: 'keep' | 'consolidate';
+  precomputedDraftReview?: DraftReviewMetadata;
+  draftReviewDecision?: DraftReviewDecision;
+  draftReviewSelectedFeatureIds?: string[];
   allowPartialArFailure?: boolean;
   priorStageDurationsMs?: GenerationStageDurationsMs;
-  onTriageComplete?: (assessment: EffectiveSizingContract) => Promise<void>;
-  onPass1Complete?: (draftFeatures: Feature[], sizingAssessment: SizingAssessmentSnapshot, triage: EffectiveSizingContract, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
+  onPass1Complete?: (draftFeatures: Feature[], draftReview: DraftReviewMetadata, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
   onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
-  onSizingAssessment?: (assessment: GenerationSizingAssessment) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
   const {
@@ -2216,15 +2648,14 @@ export async function generateFeatures(opts: {
     similarStoriesText,
     wiContextText,
     config,
-    precomputedTriage,
     precomputedDraftFeatures,
+    precomputedDraftReview,
     draftReviewDecision,
+    draftReviewSelectedFeatureIds,
     allowPartialArFailure,
     priorStageDurationsMs,
-    onTriageComplete,
     onPass1Complete,
     onArProgress,
-    onSizingAssessment,
     shouldCancel,
   } = opts;
   const { generatorConfig } = config;
@@ -2243,53 +2674,25 @@ export async function generateFeatures(opts: {
 
   const stageDurationsMs: GenerationStageDurationsMs = { ...(priorStageDurationsMs ?? {}) };
   const totalStartedAt = Date.now();
-
-  // ── Triage: LLM assessment of scope, complexity, feature count, AR depth ──
-  const triageStartedAt = Date.now();
-  const triageResult = precomputedTriage !== undefined
-    ? precomputedTriage
-    : await assessRequirementWithLlm({
-        requirement,
-        clarifyAnswers,
-        generatorConfig,
-        tier: config.tier,
-        providerOpts,
-      });
-  stageDurationsMs.triage = (stageDurationsMs.triage ?? 0) + (Date.now() - triageStartedAt);
-
-  const assessment: RequirementAssessment = triageResult
-    ? { ...DEFAULT_GENERATION_TRIAGE_FALLBACK, ...triageToAssessment(triageResult) }
-    : DEFAULT_GENERATION_TRIAGE_FALLBACK;
   const roleGrounding: RoleGroundingContext = {
     requirement,
     clarifyAnswers,
     domainRoles: config.domainRoles,
   };
 
-  if (onTriageComplete) {
-    await onTriageComplete(
-      triageResult
-        ? triageToSizingContract(triageResult)
-        : {
-            shape: assessment.featurePlan.shape,
-            complexity: assessment.featurePlan.complexity,
-            featureTarget: assessment.featurePlan.target,
-            arDepth: assessment.arPlan.depth,
-            arTarget: assessment.arPlan.target || undefined,
-            estimatedQuestions: assessment.questionPlan.target,
-          },
-    );
-  }
-
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+
+  const defaultArPlan: ArPlan = {
+    min: 0,
+    max: 0,
+    target: 0,
+    depth: 'standard',
+  };
 
   let pass1ResultUsage = { input: 0, output: 0 };
   let pass1Features: RawFeature[];
   let pass1DraftFeatures: Feature[];
-  if (precomputedDraftFeatures?.length) {
-    pass1DraftFeatures = precomputedDraftFeatures;
-    pass1Features = precomputedDraftFeatures.map(toRawFeature);
-  } else {
+  if (!precomputedDraftFeatures?.length) {
     const pass1StartedAt = Date.now();
     const pass1UserMessage = buildGenerationUserMessage({
       requirement,
@@ -2297,93 +2700,83 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText,
       similarStoriesText,
-      limits: (assessment.featurePlan.shape === 'minimal' || assessment.featurePlan.shape === 'narrow')
-        ? PASS1_CONTEXT_LIMITS_COMPACT
-        : PASS1_CONTEXT_LIMITS,
+      limits: PASS1_CONTEXT_LIMITS,
     });
 
-    // ── Pass 1: Decomposition ──
     const pass1System = buildDecompositionSystemPrompt({
       domainContext: config.domainContext,
       domainRoles: config.domainRoles,
       processTaxonomy: config.processTaxonomy,
       processTaxonomyEnabled: config.processTaxonomyEnabled,
       clarifyAnswerCount: clarifyAnswers.length,
-      featurePlan: assessment.featurePlan,
+      reviewMode: true,
     });
 
     const pass1Result = await runDecompositionPass({
       userMessage: pass1UserMessage,
       systemPrompt: pass1System,
-      shape: assessment.featurePlan.shape,
       generatorConfig,
       tier: config.tier,
       providerOpts,
     });
-    pass1ResultUsage = pass1Result.usage;
-    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
-    pass1DraftFeatures = pass1Result.features.map((feature) => normaliseFeature(feature, roleGrounding));
-    pass1Features = pass1DraftFeatures.map(toRawFeature);
-  }
-  const decompositionSizingAssessment = assessSizingHeuristics({
-    stage: 'decomposition',
-    requirement,
-    features: pass1DraftFeatures,
-    clarifyAnswers,
-    triage: triageResult,
-  });
-
-  // Notify caller so it can emit a progress event before the slow pass 2 LLM call
-  const triageSizingContract = triageResult
-    ? triageToSizingContract(triageResult)
-    : {
-        shape: assessment.featurePlan.shape,
-        complexity: assessment.featurePlan.complexity,
-        featureTarget: assessment.featurePlan.target,
-        arDepth: assessment.arPlan.depth,
-        arTarget: assessment.arPlan.target || undefined,
-        estimatedQuestions: assessment.questionPlan.target,
-      };
-  if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, decompositionSizingAssessment, triageSizingContract, stageDurationsMs);
-  if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-  const pass1Overlaps = detectFeatureOverlaps(pass1DraftFeatures);
-  if (pass1Overlaps.length > 0) {
-    console.warn(
-      `[generation] Pass 1 feature overlap detected (${pass1Overlaps.length} pair${pass1Overlaps.length === 1 ? '' : 's'}):`,
-      pass1Overlaps.map((overlap) => ({
-        left: overlap.leftSummary,
-        right: overlap.rightSummary,
-        similarity: Number(overlap.similarity.toFixed(2)),
-        reason: overlap.reason,
-      })),
-    );
-  }
-  if (!precomputedDraftFeatures?.length && shouldPauseForDraftReview({
-    draftFeatureCount: pass1DraftFeatures.length,
-    triageFeatureTarget: triageSizingContract.featureTarget,
-    sizingAssessment: decompositionSizingAssessment,
-    overlapCount: pass1Overlaps.length,
-  })) {
-    throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, decompositionSizingAssessment, triageSizingContract, stageDurationsMs);
-  }
-
-  if (precomputedDraftFeatures?.length && draftReviewDecision === 'consolidate') {
-    const repairStartedAt = Date.now();
-    const draftRepairResult = await consolidateDraftFeatureSet({
+    const normalizedDraftFeatures = pass1Result.features
+      .map((feature) => normaliseFeature({ ...feature, acceptance_requirements: [] }, roleGrounding))
+      .map((feature) => ({ ...feature, acceptanceRequirements: [] }));
+    const descriptionRepair = await repairDraftFeatureDescriptions({
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
       similarStoriesText,
+      wiContextText,
+      features: normalizedDraftFeatures,
+      config,
+      providerOpts,
+    });
+
+    pass1DraftFeatures = descriptionRepair.features;
+    pass1Features = pass1DraftFeatures.map(toRawFeature);
+    pass1ResultUsage = {
+      input: pass1Result.usage.input + descriptionRepair.usage.input,
+      output: pass1Result.usage.output + descriptionRepair.usage.output,
+    };
+    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
+
+    const draftReview = buildDraftReviewMetadata({
       features: pass1DraftFeatures,
-      sizingAssessment: decompositionSizingAssessment,
+      base: pass1Result.reviewMeta,
+      descriptionQuality: descriptionRepair.descriptionQuality,
+      reviewMessage: 'Review the drafted feature structure before acceptance requirements are written.',
+    });
+    if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, draftReview, stageDurationsMs);
+    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, draftReview, stageDurationsMs);
+  } else if (draftReviewDecision && draftReviewDecision !== 'continue') {
+    const reviewStartedAt = Date.now();
+    const reviewResult = await reviewDraftFeatureSet({
+      requirement,
+      clarifyAnswers,
+      attachmentText,
+      similarStoriesText,
+      wiContextText,
+      features: precomputedDraftFeatures,
+      action: draftReviewDecision,
+      selectedFeatureIds: draftReviewSelectedFeatureIds,
+      currentReviewMeta: precomputedDraftReview,
       config,
       providerOpts,
       shouldCancel,
     });
-    stageDurationsMs.repair = (stageDurationsMs.repair ?? 0) + (Date.now() - repairStartedAt);
-    pass1DraftFeatures = draftRepairResult.features;
-    pass1Features = draftRepairResult.features.map(toRawFeature);
+    pass1DraftFeatures = reviewResult.features;
+    pass1Features = pass1DraftFeatures.map(toRawFeature);
+    pass1ResultUsage = reviewResult.usage;
+    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - reviewStartedAt);
+
+    if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, reviewResult.reviewMeta, stageDurationsMs);
+    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+    throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, reviewResult.reviewMeta, stageDurationsMs);
+  } else {
+    pass1DraftFeatures = precomputedDraftFeatures;
+    pass1Features = precomputedDraftFeatures.map(toRawFeature);
   }
 
   // ── Pass 2: Acceptance Requirements ──
@@ -2404,7 +2797,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: assessment.arPlan,
+      arPlan: defaultArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -2421,7 +2814,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: assessment.arPlan,
+      arPlan: defaultArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -2439,7 +2832,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: assessment.arPlan,
+      arPlan: defaultArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -2467,7 +2860,7 @@ export async function generateFeatures(opts: {
     }
     const pass2System = buildArSystemPrompt({
       domainContext: config.domainContext,
-      arPlan: assessment.arPlan,
+      arPlan: defaultArPlan,
     });
 
     const pass2ContextMessage = buildGenerationUserMessage({
@@ -2507,7 +2900,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: assessment.arPlan,
+      arPlan: defaultArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -2524,7 +2917,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: assessment.arPlan,
+      arPlan: defaultArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -2555,55 +2948,12 @@ export async function generateFeatures(opts: {
   }
 
   let features = rawFeatures.map((feature) => normaliseFeature(feature, roleGrounding));
-  let finalSizingAssessment = assessSizingHeuristics({
-    stage: 'final',
-    requirement,
-    features,
-    clarifyAnswers,
-    triage: triageResult,
-  });
-  let repairApplied = false;
-  let repairRejectedReason: string | undefined;
-  let repairUsage = { input: 0, output: 0 };
-  let preRepairFeatureCount: number | undefined;
-  let preRepairAcceptanceRequirementCount: number | undefined;
   const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   const failedFeatureIds = new Set(
     failedFeatureIndexes
       .map((index) => features[index]?.id)
       .filter((id): id is string => Boolean(id)),
   );
-
-  const allowAutoRepair = draftReviewDecision !== 'keep';
-  if (failedFeatureIndexes.length === 0 && allowAutoRepair && shouldAutoRepairOversizedAssessment(finalSizingAssessment)) {
-    const repairStartedAt = Date.now();
-    preRepairFeatureCount = finalSizingAssessment.featureCount;
-    preRepairAcceptanceRequirementCount = finalSizingAssessment.acceptanceRequirementCount;
-    const repairResult = await repairOversizedFeatureSet({
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText,
-      similarStoriesText,
-      features,
-      sizingAssessment: finalSizingAssessment,
-      config,
-      providerOpts,
-      shouldCancel,
-    });
-    repairUsage = repairResult.usage;
-    repairApplied = repairResult.applied;
-    repairRejectedReason = repairResult.rejectedReason;
-    features = repairResult.features;
-    stageDurationsMs.repair = (stageDurationsMs.repair ?? 0) + (Date.now() - repairStartedAt);
-    finalSizingAssessment = assessSizingHeuristics({
-      stage: 'final',
-      requirement,
-      features,
-      clarifyAnswers,
-      triage: triageResult,
-    });
-  }
 
   if (failedFeatureIndexes.length > 0) {
     const failedCount = failedFeatureIndexes.length;
@@ -2618,33 +2968,31 @@ export async function generateFeatures(opts: {
     features = annotateFailedAcceptanceRequirementFeatures(features, failedFeatureIds) as Feature[];
   }
   const violations = validateFeatures(features, config);
+  const coverageStartedAt = Date.now();
+  const coverageReview = await checkCoverageAdvice({
+    requirement,
+    clarifyAnswers,
+    attachmentText,
+    similarStoriesText,
+    wiContextText,
+    features,
+    config,
+  });
+  stageDurationsMs.coverageCheck = (stageDurationsMs.coverageCheck ?? 0) + (Date.now() - coverageStartedAt);
 
   const tokenUsage: TokenUsageSummary = {
-    input: pass1ResultUsage.input + pass2Usage.input + repairUsage.input,
-    output: pass1ResultUsage.output + pass2Usage.output + repairUsage.output,
-    total: pass1ResultUsage.input + pass1ResultUsage.output + pass2Usage.input + pass2Usage.output + repairUsage.input + repairUsage.output,
+    input: pass1ResultUsage.input + pass2Usage.input + coverageReview.usage.input,
+    output: pass1ResultUsage.output + pass2Usage.output + coverageReview.usage.output,
+    total: pass1ResultUsage.input + pass1ResultUsage.output + pass2Usage.input + pass2Usage.output + coverageReview.usage.input + coverageReview.usage.output,
     byStage: {
       decomposition: toStageUsage(pass1ResultUsage),
       acceptanceRequirements: toStageUsage(pass2Usage),
-      ...(repairUsage.input || repairUsage.output
-        ? { sizingRepair: toStageUsage(repairUsage) }
+      ...(coverageReview.usage.input || coverageReview.usage.output
+        ? { coverageCheck: toStageUsage(coverageReview.usage) }
         : {}),
     },
   };
   stageDurationsMs.total = (priorStageDurationsMs?.total ?? 0) + (Date.now() - totalStartedAt);
-
-  const sizingAssessment = buildGenerationSizingAssessment({
-    decomposition: decompositionSizingAssessment,
-    final: finalSizingAssessment,
-    repairApplied,
-    repairRejectedReason,
-    preRepairFeatureCount,
-    preRepairAcceptanceRequirementCount,
-  });
-
-  if (onSizingAssessment) {
-    await onSizingAssessment(sizingAssessment);
-  }
 
   return {
     features,
@@ -2654,6 +3002,7 @@ export async function generateFeatures(opts: {
     generationContext: {
       projectKey: '',
       domainRolesUsed: [],
+      coverageReview: coverageReview.advice,
       failedFeatureIds: [...failedFeatureIds],
       partialSuccess: failedFeatureIds.size > 0,
       partialSuccessMessage: failedFeatureIds.size > 0
@@ -3492,6 +3841,46 @@ export async function checkRefineFeedbackSufficiency(opts: {
   return result;
 }
 
+async function checkCoverageAdvice(opts: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  similarStoriesText: string;
+  wiContextText: string;
+  features: Feature[];
+  config: TenantConfig;
+}): Promise<{ advice: CoverageReviewAdvice; usage: { input: number; output: number } }> {
+  const userMessage = [
+    buildGenerationUserMessage({
+      requirement: opts.requirement,
+      clarifyAnswers: opts.clarifyAnswers,
+      attachmentText: opts.attachmentText,
+      wiContextText: opts.wiContextText,
+      similarStoriesText: opts.similarStoriesText,
+      limits: PASS2_CONTEXT_LIMITS,
+    }),
+    `CURRENT FEATURES:\n${JSON.stringify(opts.features, null, 2)}`,
+  ].join('\n\n---\n\n');
+
+  const result = await callLlmJsonWithUsage<RawCoverageReviewResponse>({
+    model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
+    systemPrompt: buildCoverageCheckSystemPrompt({ domainContext: opts.config.domainContext }),
+    userMessage,
+    maxTokens: 2048,
+    reasoningEffort: 'medium',
+    ...buildLlmProviderOpts(opts.config),
+  });
+
+  return {
+    advice: {
+      sufficient: Boolean(result.data.sufficient),
+      missingCoverage: sanitizeStringArray(Array.isArray(result.data.missingCoverage) ? result.data.missingCoverage : []),
+      reasoning: sanitizeArClause(result.data.reasoning ?? ''),
+    },
+    usage: result.usage,
+  };
+}
+
 // ─── Session Title ────────────────────────────────────────────────────────────
 
 export async function generateSessionTitle(requirement: string, config: TenantConfig): Promise<string> {
@@ -3856,12 +4245,7 @@ export function applyFeatureOutputGuardrails(
   roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
 ): Feature {
   const normalizedAcceptanceRequirements = (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity);
-  const resolvedRole = resolveEvidenceBackedRole(
-    extractRoleFromDescription(feature.description),
-    roleGrounding,
-    normalizedAcceptanceRequirements,
-  );
-  const description = normalizeFeatureDescriptionVerbosity(replaceFeatureRole(feature.description, resolvedRole));
+  const description = normalizeDraftDescriptionText(feature.description);
   return harmonizeFeatureRoleLanguage({
     ...feature,
     description,
@@ -3871,7 +4255,7 @@ export function applyFeatureOutputGuardrails(
 
 function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext): Feature {
   return applyFeatureOutputGuardrails({
-    id: uuidv4(),
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : uuidv4(),
     summary: raw.summary ?? 'Untitled feature',
     description: raw.description ?? '',
     acceptanceRequirements: normaliseArs(getRawAcceptanceArray(raw)),

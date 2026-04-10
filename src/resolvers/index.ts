@@ -62,9 +62,9 @@ import {
   ClarifyAnswer,
   Feature,
   GenerationEvent,
+  GenerationStageDurationsMs,
   ClarifyEvent,
   QuickRefineDraft,
-  QuickRefineEvent,
   QuickRefineSession,
   QuickRefineSurface,
   RefineEvent,
@@ -525,16 +525,23 @@ resolver.define('resumeGeneration', async ({ payload, context }) => {
         projectKey: string;
         projectKeys: string[];
         draftFeatures: Feature[];
-        triage: EffectiveSizingContract;
+        draftReview?: import('../types').DraftReviewMetadata;
+        draftReviewIterations?: number;
         priorStageDurationsMs?: GenerationStageDurationsMs;
       };
     };
   } | null;
 
   const resumeContext = progress?.payload?.resumeContext;
-  const reviewDecision = payload?.decision === 'consolidate' ? 'consolidate' : 'keep';
+  const reviewDecision = payload?.decision;
+  const selectedFeatureIds = Array.isArray(payload?.selectedFeatureIds)
+    ? payload.selectedFeatureIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
+    : undefined;
   if (progress?.type !== 'review' || !resumeContext) {
     return { success: false, error: 'No paused draft review is available for this session.' };
+  }
+  if (!['continue', 'broaden', 'tighten', 'merge_selected', 'split_selected'].includes(reviewDecision)) {
+    return { success: false, error: 'A valid draft review decision is required to resume generation.' };
   }
 
   const config = await getConfig();
@@ -557,15 +564,19 @@ resolver.define('resumeGeneration', async ({ payload, context }) => {
     projectKey: authorizedProjects.projectKey,
     projectKeys: authorizedProjects.projectKeys,
     reviewedDraftFeatures: resumeContext.draftFeatures,
+    reviewedDraftReview: resumeContext.draftReview,
     reviewedDraftDecision: reviewDecision,
-    reviewedTriageSizingContract: resumeContext.triage,
+    reviewedDraftSelectedFeatureIds: selectedFeatureIds,
+    reviewedDraftReviewIterations: resumeContext.draftReviewIterations,
     priorStageDurationsMs: resumeContext.priorStageDurationsMs,
   };
 
   await entitySet(KEYS.generationProgress(payload.sessionId), {
     type: 'progress',
     sessionId: payload.sessionId,
-    message: reviewDecision === 'consolidate' ? 'Consolidating drafted features before AR generation…' : 'Continuing with drafted features…',
+    message: reviewDecision === 'continue'
+      ? 'Continuing with the reviewed draft structure…'
+      : 'Revising the draft structure from your review…',
     updatedAt: Date.now(),
   });
 
@@ -1205,7 +1216,6 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
       generatorConfig: resolveEffectiveGeneratorConfig(rawConfig.generatorConfig),
       tier: getEffectiveTier(rawConfig, context),
     };
-    const quickRefineQueue = new Queue({ key: 'quick-refine-queue' });
     const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
     const surface = (payload?.surface === 'issue-panel' ? 'issue-panel' : 'issue-action') as QuickRefineSurface;
     const issueKey = String(payload?.issueKey ?? '').trim();
@@ -1228,7 +1238,7 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
     });
 
     const now = new Date().toISOString();
-    const session: QuickRefineSession = {
+    const runningSession: QuickRefineSession = {
       sessionId,
       surface,
       issueKey,
@@ -1238,7 +1248,7 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
       modelOverride,
       originalIssue: issueContext.originalIssue,
       context: issueContext,
-      status: 'queued',
+      status: 'running',
       questions: undefined,
       draft: undefined,
       handoffReason: undefined,
@@ -1246,22 +1256,64 @@ resolver.define('startQuickRefine', async ({ payload, context }) => {
       createdAt: now,
       updatedAt: now,
     };
-    await persistQuickRefineSession(accountId, session);
+    await persistQuickRefineSession(accountId, runningSession);
 
-    const event: QuickRefineEvent = {
-      sessionId,
-      accountId,
+    const result = await startQuickRefine({
       context: issueContext,
       config,
       modelOverride,
+    });
+
+    const nextSession: QuickRefineSession = {
+      ...runningSession,
+      status: result.route === 'clarify' ? 'needs_clarification' : result.route === 'handoff' ? 'handoff' : 'draft',
+      questions: result.route === 'clarify' ? result.questions : undefined,
+      draft: result.route === 'rewrite' ? result.draft : undefined,
+      handoffReason: result.route === 'handoff' ? result.reason : undefined,
+      error: undefined,
+      updatedAt: new Date().toISOString(),
     };
-    await quickRefineQueue.push({ body: event });
+    await persistQuickRefineSession(accountId, nextSession);
+
+    if (result.route === 'rewrite' && config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+      await saveTransparencyReport({
+        sessionId,
+        turnType: 'refine',
+        actorAccountId: accountId,
+        provider: config.generatorConfig.provider,
+        model: modelOverride || config.generatorConfig.refineModel,
+        projectKey: issueContext.projectKey,
+        requirementExcerpt: issueContext.originalIssue.summary.slice(0, 240),
+        decisionSummary: ['Quick refine generated a preview rewrite for the current Jira issue.'],
+        contextUsage: {
+          issueKey: issueContext.issueKey,
+          similarStoriesCount: result.draft?.contextMeta?.similarStoriesCount ?? 0,
+          wiDocsCount: result.draft?.contextMeta?.wiDocsCount ?? 0,
+        },
+        tokenUsage: result.draft?.tokenUsage,
+        piiMasking: { enabled: false, totalRedactions: 0, byType: {} },
+      });
+    }
+
+    await recordProjectActivity({
+      action: 'refine',
+      projectKeys: [issueContext.projectKey],
+      projectKey: issueContext.projectKey,
+      sessionId,
+      model: modelOverride || config.generatorConfig.refineModel,
+      tokenUsage: result.route === 'rewrite' ? (result.draft?.tokenUsage ?? null) : (result.tokenUsage ?? null),
+      metadata: {
+        issueKey: issueContext.issueKey,
+        quickRefine: true,
+        route: result.route,
+        async: false,
+      },
+    });
 
     return {
       success: true,
-      queued: true,
       sessionId,
-      session,
+      session: nextSession,
     };
   } catch (err) {
     return {

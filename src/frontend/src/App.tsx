@@ -17,6 +17,7 @@ import type {
   ClarifyFailureReasonCode,
   ClarifyProgressPayload,
   ClarifyQuestion,
+  DraftReviewDecision,
   GenerationContextMeta,
   TokenUsageSummary,
   UndoableAiChange,
@@ -1245,7 +1246,7 @@ function LegacyApp({
     }
   };
 
-  const resumeGenerationFromDraftReview = async (decision: 'keep' | 'consolidate') => {
+  const resumeGenerationFromDraftReview = async (decision: DraftReviewDecision, selectedFeatureIds?: string[]) => {
     const sid = sessionIdRef.current;
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
@@ -1258,6 +1259,7 @@ function LegacyApp({
       const res = await api.resumeGeneration({
         sessionId: sid,
         decision,
+        selectedFeatureIds,
       }) as any;
       if (!res?.success) {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);

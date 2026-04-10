@@ -280,6 +280,44 @@ export interface Feature {
   jiraIssueUrl?: string;
 }
 
+export type DraftReviewDecision =
+  | 'continue'
+  | 'broaden'
+  | 'tighten'
+  | 'merge_selected'
+  | 'split_selected';
+
+export interface DraftFeatureReviewNote {
+  featureId?: string;
+  summary?: string;
+  whySeparate?: string;
+  possibleMergeWith?: string[];
+  possibleSplitNote?: string;
+  descriptionIssues?: string[];
+  descriptionAdjusted?: boolean;
+}
+
+export interface DraftDescriptionQualityReview {
+  adjustedFeatureIds: string[];
+  flaggedFeatureIds: string[];
+  warnings: string[];
+}
+
+export interface DraftReviewMetadata {
+  reasoningSummary?: string;
+  unresolvedAmbiguities: string[];
+  featureNotes: DraftFeatureReviewNote[];
+  descriptionQuality?: DraftDescriptionQualityReview;
+  lastAction?: DraftReviewDecision;
+  reviewMessage?: string;
+}
+
+export interface CoverageReviewAdvice {
+  sufficient: boolean;
+  missingCoverage: string[];
+  reasoning?: string;
+}
+
 export type RestructureScope = 'all' | 'selected';
 
 export interface StructuralFeatureProposal extends Feature {
@@ -494,6 +532,7 @@ export interface GenerationStageDurationsMs {
   acceptanceRequirements?: number;
   backfill?: number;
   repair?: number;
+  coverageCheck?: number;
   total?: number;
 }
 
@@ -506,7 +545,9 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   sizingAssessment?: GenerationSizingAssessment;
   pass1DraftFeatureCount?: number;
   draftReviewTriggered?: boolean;
-  draftReviewDecision?: 'keep' | 'consolidate';
+  draftReviewDecision?: DraftReviewDecision;
+  draftReviewIterations?: number;
+  coverageReview?: CoverageReviewAdvice;
   failedFeatureIds?: string[];
   partialSuccess?: boolean;
   partialSuccessMessage?: string;
@@ -773,7 +814,10 @@ export interface GenerationEvent {
   goldExamples: string;
   wiContext: string;
   reviewedDraftFeatures?: Feature[];
-  reviewedDraftDecision?: 'keep' | 'consolidate';
+  reviewedDraftReview?: DraftReviewMetadata;
+  reviewedDraftDecision?: DraftReviewDecision;
+  reviewedDraftSelectedFeatureIds?: string[];
+  reviewedDraftReviewIterations?: number;
   reviewedTriageSizingContract?: EffectiveSizingContract;
   priorStageDurationsMs?: GenerationStageDurationsMs;
   retryFeatureId?: string;

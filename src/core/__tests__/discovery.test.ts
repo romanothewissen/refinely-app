@@ -631,7 +631,8 @@ test('decomposition prompt treats feature counts as hints and keeps support beha
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
   assert.match(prompt, /work instructions or operational guidance/i);
   assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, or visibility aid/i);
-  assert.match(prompt, /Prefer the smallest set of strong, independently valuable features/i);
+  assert.match(prompt, /Surface independently valuable feature slices without inventing micro-features/i);
+  assert.match(prompt, /do not hide meaningful workflow branches inside one oversized feature/i);
   assert.doesNotMatch(prompt, /Output exactly/i);
 });
 

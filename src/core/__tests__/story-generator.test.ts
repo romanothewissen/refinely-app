@@ -561,7 +561,8 @@ test('shouldPauseForDraftReview pauses when sizing assessment confidently marks 
   }), true);
 });
 
-test('generation progress copy surfaces consolidation notes after generation', () => {
+test('generation progress copy no longer surfaces automatic consolidation notes', () => {
+  assert.equal(getSizingRunContextNote(null), null);
   assert.equal(
     getSizingRunContextNote({
       archetype: 'guard_rule',
@@ -606,7 +607,7 @@ test('generation progress copy surfaces consolidation notes after generation', (
         reasons: [],
       },
     }),
-    'Draft consolidated from 7 to 2 features before final output.',
+    null,
   );
 });
 
@@ -626,7 +627,7 @@ test('triageToSizingContract preserves the committed LLM sizing contract', () =>
   });
 });
 
-test('applyFeatureOutputGuardrails falls back to authorized user when the role is not evidence-backed', () => {
+test('applyFeatureOutputGuardrails preserves a valid but detailed feature description', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
     summary: 'Prevent creation after end of service',
@@ -643,15 +644,14 @@ test('applyFeatureOutputGuardrails falls back to authorized user when the role i
     domainRoles: ['Field Service Engineer', 'Technical Support Specialist'],
   });
 
-  assert.match(guarded.description, /^As an authorized user, I need to /);
-  assert.notEqual(
+  assert.equal(
     guarded.description,
     'As a Field Service Engineer, I need to be prevented from creating service cases or work orders when the primary installed product has reached its designated end of service date so that unsupported requests are blocked and users receive clear feedback about the policy.',
   );
   assert.equal(guarded.acceptanceRequirements[0].when.includes('for example'), false);
 });
 
-test('applyFeatureOutputGuardrails promotes a generic feature role to a dominant evidence-backed AR role', () => {
+test('applyFeatureOutputGuardrails does not promote a generic feature role from AR evidence alone', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
     summary: 'Block unsupported record creation',
@@ -673,11 +673,11 @@ test('applyFeatureOutputGuardrails promotes a generic feature role to a dominant
     domainRoles: ['Technical Support Specialist', 'Supervisor'],
   });
 
-  assert.match(guarded.description, /^As a Technical Support Specialist, I need to /);
+  assert.match(guarded.description, /^As an authorized user, I need to /);
   assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
 });
 
-test('applyFeatureOutputGuardrails reduces repeated WHEN role labels after the first explicit mention', () => {
+test('applyFeatureOutputGuardrails keeps repeated WHEN role labels when the feature role stays generic', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
     summary: 'Block unsupported record creation',
@@ -700,8 +700,7 @@ test('applyFeatureOutputGuardrails reduces repeated WHEN role labels after the f
   });
 
   assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
-  assert.match(guarded.acceptanceRequirements[1].when, /^they attempts? to create the linked work order$/i);
-  assert.doesNotMatch(guarded.acceptanceRequirements[1].when, /Technical Support Specialist/i);
+  assert.match(guarded.acceptanceRequirements[1].when, /^the Technical Support Specialist attempts to create the linked work order$/i);
 });
 
 test('applyFeatureOutputGuardrails does not promote a generic feature role when multiple AR roles are present', () => {

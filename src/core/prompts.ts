@@ -73,6 +73,7 @@ export function buildDecompositionSystemPrompt(opts: {
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
   clarifyAnswerCount?: number;
+  reviewMode?: boolean;
   featurePlan?: {
     min: number;
     max: number;
@@ -165,11 +166,24 @@ ${isHighComplexity
 - Clarifying context includes answered discovery questions. Use those answers to consolidate responsibly, but do not drop workflow-defining rules or exception behavior.`
     : '';
 
+  const outputFormat = opts.reviewMode
+    ? `OUTPUT FORMAT (strict):
+- Return a single JSON object with this shape:
+{"reasoning_summary":"...","unresolved_ambiguities":["..."],"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":N${opts.processTaxonomyEnabled ? ', "process_code":"..."' : ''},"why_separate":"...","possible_merge_with":["optional summary"],"possible_split_note":"optional note"}]}
+- reasoning_summary: 1 short paragraph explaining why this draft is broken down this way
+- unresolved_ambiguities: only the open scope questions that could still change feature boundaries; return [] when none are material
+- why_separate: 1 short sentence explaining the independent value of that feature
+- possible_merge_with: optional list of sibling feature summaries only when consolidation is plausibly reasonable
+- possible_split_note: optional short note only when the feature may still hide multiple deliverable slices
+- Keep acceptance_requirements empty arrays in this draft stage`
+    : `Think step by step about the full scope of this requirement. Return JSON:
+{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
 
-YOUR JOB: Given a short requirement, think deeply about what actually has to be delivered. Some requirements imply multiple features, but many focused rules, workflows, and business behaviors should stay as one or two strong backlog items rather than being expanded into micro-features.
+YOUR JOB: Given a requirement, reason deeply about what actually has to be delivered. Surface independently valuable feature slices without inventing micro-features, but do not hide meaningful workflow branches inside one oversized feature.
 
 DECOMPOSITION FRAMEWORK — reason through each dimension:
 1. CORE CAPABILITY: What is the primary thing being requested?
@@ -187,7 +201,7 @@ RULES:
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
-- Keep the description concise. It should stay as one short user-story sentence, not a policy paragraph or mini-specification.
+- Keep the description concise, grammatical, and specific. It must stay as one user-story sentence, but it does not need to be artificially compressed.
 - Keep workflow rules, exceptions, timing, feedback, and enforcement details out of the description unless they are essential to state the core action or benefit. Put that detail into acceptance requirements instead.
 - Frame the user's need as a positive capability or goal ("I need to ensure X is validated", "I need to be able to confirm Y") rather than as a passive prevention ("I need the system to prevent me from..."). The actor performs an action — the description should reflect what they are trying to accomplish, not what the system stops them from doing.
 - Never combine two description sentences into one. The description must be exactly one user-story sentence starting with "As a".
@@ -196,11 +210,10 @@ RULES:
 - Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
 - If work instructions or operational guidance in the user message define relevant business rules, decision logic, handling paths, state transitions, actor responsibilities, or exception behavior, preserve that scope explicitly rather than generalizing it away.
 - Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
-- If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
-- DO NOT split a trigger from its immediate behavior. If one event causes creation AND classification AND routing of the same object, that is ONE feature — not three. Classification, routing, and initial state assignment are properties of the creation flow, not separate features.
+- Preserve meaningful workflow boundaries when actor responsibilities, decision paths, lifecycle branches, or exception handling would materially change what gets built or tested.
+- Do NOT split a trigger from its immediate behavior when the behaviors are inseparable parts of the same deliverable. If one event causes creation and first-pass classification of the same object, keep them together unless the requirement clearly indicates independent ownership or release value.
 - DO NOT promote configuration or settings screens ("define designated inboxes", "manage classification keywords", "configure X") into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable. Admin configuration is a property of the parent capability — fold it into the feature whose behavior it controls.
-- Self-check for overlap before emitting: no two features in your output should share the same trigger AND target object AND actor. If any pair shares two of those three, merge them or clearly re-scope one of them.
-- If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
+- Before finalizing, check whether any pair of features is truly duplicative. Merge only when they represent the same primary capability and outcome, not merely adjacent parts of the same workflow area.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
@@ -210,8 +223,72 @@ ${discoveryContextGuidance ? `\n${discoveryContextGuidance}` : ''}
 
 ${taxonomySection}
 
-Think step by step about the full scope of this requirement. Prefer the smallest set of strong, independently valuable features that fully covers the ask, then output JSON:
-{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+${outputFormat}`;
+}
+
+export function buildDraftReviewSystemPrompt(opts: {
+  domainContext: string;
+  processTaxonomyEnabled: boolean;
+  action: 'broaden' | 'tighten' | 'merge_selected' | 'split_selected';
+}): string {
+  const actionInstruction = (() => {
+    switch (opts.action) {
+      case 'broaden':
+        return 'Expand the draft where it is hiding independently valuable workflow slices, actor-specific handling, or exception paths inside overly broad features.';
+      case 'tighten':
+        return 'Tighten the draft where sibling features are too thin or meaningfully overlap, but do not erase real workflow boundaries.';
+      case 'merge_selected':
+        return 'Merge only the selected draft features into a cleaner structure while leaving non-selected features materially unchanged.';
+      case 'split_selected':
+        return 'Split only the selected draft features into clearer independently valuable slices while leaving non-selected features materially unchanged.';
+      default:
+        return 'Revise the draft thoughtfully without changing the overall business meaning.';
+    }
+  })();
+
+  return `You are a principal business analyst revising a draft Jira feature breakdown before acceptance requirements are written.
+${platformContextBlock(opts.domainContext)}
+Your job is to revise the draft feature structure in response to a user review action.
+
+REVIEW ACTION:
+- ${actionInstruction}
+
+RULES:
+- Preserve business coverage and meaning. Do not silently drop relevant workflow branches, rules, or exceptions.
+- Keep acceptance_requirements as empty arrays in this draft stage.
+- Keep summaries and descriptions business-facing and implementation-free.
+- Keep descriptions as one grammatical user-story sentence: "As a [role], I need to [action] so that [benefit]"
+- Only merge features when they truly describe the same primary capability and outcome.
+- Only split features when the current draft is hiding independently buildable or testable slices.
+- If the action targets selected features, keep non-selected features stable unless a tiny wording adjustment is required for coherence.
+
+OUTPUT FORMAT (strict):
+{"reasoning_summary":"...","unresolved_ambiguities":["..."],"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":N${opts.processTaxonomyEnabled ? ', "process_code":"..."' : ''},"why_separate":"...","possible_merge_with":["optional summary"],"possible_split_note":"optional note"}]}
+
+- reasoning_summary: 1 short paragraph explaining the revised structure
+- unresolved_ambiguities: only scope questions that could still change feature boundaries
+- why_separate: 1 short sentence explaining why each feature stands on its own
+- possible_merge_with and possible_split_note are advisory only and may be omitted when not useful`;
+}
+
+export function buildDraftDescriptionRepairSystemPrompt(): string {
+  return `You are a principal business analyst rewriting only weak or awkward feature descriptions in a draft backlog.
+
+YOUR JOB:
+- Rewrite only the descriptions that are clearly awkward, ungrammatical, generic, malformed, or semantically flattened.
+- Do not change feature boundaries, summaries, story points, or process codes.
+- Preserve the original business meaning of each feature.
+
+DESCRIPTION RULES:
+- Each description must be exactly one sentence
+- Use the format: "As a [role], I need to [action] so that [benefit]"
+- Keep the sentence grammatical, action-led, and specific about business value
+- Slightly long but clear is better than short and awkward
+- Do not use filler benefits like "so that the requested outcome is achieved"
+- Do not add implementation detail, UI terms, or system-specific language
+
+OUTPUT FORMAT (strict):
+{"rewrites":[{"id":"feature-id","description":"As a ..."}]}`;
 }
 
 // ─── Pass 2: Acceptance Requirements ─────────────────────────────────────────

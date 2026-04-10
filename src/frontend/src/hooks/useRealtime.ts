@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, EffectiveSizingContract } from '../types';
+import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
@@ -19,9 +19,8 @@ export interface GenerationProgressPayload {
   draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
-  sizingAssessment?: unknown;
-  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; total?: number };
-  reviewDecision?: { suggestedAction: 'consolidate'; reason: string };
+  draftReview?: DraftReviewMetadata;
+  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; coverageCheck?: number; total?: number };
   resumeContext?: unknown;
   sources?: {
     projectKey: string;
@@ -85,9 +84,8 @@ function mergeGenerationPayload(
     draftFeatureCount: next.draftFeatureCount ?? previous.draftFeatureCount,
     featureProgress: next.featureProgress?.length ? next.featureProgress : previous.featureProgress,
     failedFeatureIds: next.failedFeatureIds ?? previous.failedFeatureIds,
-    sizingAssessment: next.sizingAssessment ?? previous.sizingAssessment,
+    draftReview: next.draftReview ?? previous.draftReview,
     stageDurationsMs: next.stageDurationsMs ?? previous.stageDurationsMs,
-    reviewDecision: next.reviewDecision ?? previous.reviewDecision,
     resumeContext: next.resumeContext ?? previous.resumeContext,
     sources: mergeGenerationSources(previous.sources, next.sources),
   };
