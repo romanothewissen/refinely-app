@@ -70,6 +70,7 @@ export function formatGoldExample(item: {
 export function buildDecompositionSystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
+  outputProfile?: 'business_first' | 'balanced' | 'technical_first';
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
   clarifyAnswerCount?: number;
@@ -93,6 +94,24 @@ export function buildDecompositionSystemPrompt(opts: {
   const processRule = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? '- Each feature MUST include a process_code from the taxonomy above (never invent a code)'
     : '- Omit process_code from output';
+
+  const outputProfile = opts.outputProfile ?? 'business_first';
+  const outputProfileGuidance = outputProfile === 'technical_first'
+    ? `OUTPUT PROFILE: TECHNICAL_FIRST
+- You may return technical enablers as first-class features when they are independently deliverable.
+- Tag business-facing capabilities as "business_capability", technical/integration/platform capabilities as "technical_enabler", and broad policy/guardrail capabilities as "cross_cutting_rule".
+- Even in this profile, never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`
+    : outputProfile === 'balanced'
+      ? `OUTPUT PROFILE: BALANCED
+- Prefer business-facing capabilities first.
+- Include a technical enabler as a separate feature only when it is independently deliverable or clearly requested.
+- Tag features as "business_capability", "technical_enabler", or "cross_cutting_rule".
+- Never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`
+      : `OUTPUT PROFILE: BUSINESS_FIRST
+- Prefer business-facing capabilities and confirmed cross-cutting rules.
+- Suppress standalone technical enablers unless the requirement or answered Q&A explicitly asks for them as deliverables.
+- Tag features as "business_capability", "technical_enabler", or "cross_cutting_rule".
+- Never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`;
 
   const planningGuidance = (() => {
     if (!opts.featurePlan) return '';
@@ -169,15 +188,19 @@ ${isHighComplexity
   const outputFormat = opts.reviewMode
     ? `OUTPUT FORMAT (strict):
 - Return a single JSON object with this shape:
-{"reasoning_summary":"...","unresolved_ambiguities":["..."],"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":N${opts.processTaxonomyEnabled ? ', "process_code":"..."' : ''},"why_separate":"...","possible_merge_with":["optional summary"],"possible_split_note":"optional note"}]}
+{"reasoning_summary":"...","unresolved_ambiguities":["..."],"open_decisions":[{"title":"...","detail":"...","category":"business_rules","impact":"...","blocking":true}],"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":N${opts.processTaxonomyEnabled ? ', "process_code":"..."' : ''},"feature_class":"business_capability","confidence":"confirmed","actor_source":"prompt","why_separate":"...","possible_merge_with":["optional summary"],"possible_split_note":"optional note"}]}
 - reasoning_summary: 1 short paragraph explaining why this draft is broken down this way
 - unresolved_ambiguities: only the open scope questions that could still change feature boundaries; return [] when none are material
+- open_decisions: only unresolved business decisions or role/lifecycle/policy questions that are still materially open; return [] when none remain
+- feature_class: one of "business_capability", "technical_enabler", "cross_cutting_rule"
+- confidence: "confirmed" when directly supported by the requirement or answered Q&A; "assumption_applied" only when you must carry a light assumption forward
+- actor_source: "prompt", "clarify", "workspace_role", or "fallback"
 - why_separate: 1 short sentence explaining the independent value of that feature
 - possible_merge_with: optional list of sibling feature summaries only when consolidation is plausibly reasonable
 - possible_split_note: optional short note only when the feature may still hide multiple deliverable slices
 - Keep acceptance_requirements empty arrays in this draft stage`
     : `Think step by step about the full scope of this requirement. Return JSON:
-{"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+{"open_decisions":[{"title":"...","detail":"...","category":"business_rules","impact":"...","blocking":true}],"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}, "feature_class":"business_capability","confidence":"confirmed","actor_source":"prompt"}]}`;
 
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
@@ -201,6 +224,7 @@ RULES:
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
+- Never turn an unanswered discovery question into a confirmed feature. If permissions, lifecycle handling, duplicate rules, ownership, or state transitions are still materially unresolved, return them in open_decisions instead.
 - Keep the description concise, grammatical, and specific. It must stay as one user-story sentence, but it does not need to be artificially compressed.
 - Keep workflow rules, exceptions, timing, feedback, and enforcement details out of the description unless they are essential to state the core action or benefit. Put that detail into acceptance requirements instead.
 - Frame the user's need as a positive capability or goal ("I need validation of X", "I need confirmation of Y") rather than as a passive prevention ("I need the system to prevent me from..."). The actor performs an action — the description should reflect what they are trying to accomplish, not what the system stops them from doing.
@@ -218,6 +242,7 @@ RULES:
 - Do NOT write acceptance_requirements — leave them as empty arrays
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
 ${processRule}
+${outputProfileGuidance ? `\n${outputProfileGuidance}` : ''}
 ${planningGuidance ? `\n${planningGuidance}` : ''}
 ${discoveryContextGuidance ? `\n${discoveryContextGuidance}` : ''}
 
@@ -228,6 +253,7 @@ ${outputFormat}`;
 
 export function buildDraftReviewSystemPrompt(opts: {
   domainContext: string;
+  outputProfile?: 'business_first' | 'balanced' | 'technical_first';
   processTaxonomyEnabled: boolean;
   action: 'broaden' | 'tighten' | 'merge_selected' | 'split_selected';
 }): string {
@@ -250,6 +276,9 @@ export function buildDraftReviewSystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 Your job is to revise the draft feature structure in response to a user review action.
 
+OUTPUT PROFILE:
+- ${opts.outputProfile ?? 'business_first'}
+
 REVIEW ACTION:
 - ${actionInstruction}
 
@@ -263,10 +292,11 @@ RULES:
 - If the action targets selected features, keep non-selected features stable unless a tiny wording adjustment is required for coherence.
 
 OUTPUT FORMAT (strict):
-{"reasoning_summary":"...","unresolved_ambiguities":["..."],"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":N${opts.processTaxonomyEnabled ? ', "process_code":"..."' : ''},"why_separate":"...","possible_merge_with":["optional summary"],"possible_split_note":"optional note"}]}
+{"reasoning_summary":"...","unresolved_ambiguities":["..."],"open_decisions":[{"title":"...","detail":"...","category":"business_rules","impact":"...","blocking":true}],"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":N${opts.processTaxonomyEnabled ? ', "process_code":"..."' : ''},"feature_class":"business_capability","confidence":"confirmed","actor_source":"prompt","why_separate":"...","possible_merge_with":["optional summary"],"possible_split_note":"optional note"}]}
 
 - reasoning_summary: 1 short paragraph explaining the revised structure
 - unresolved_ambiguities: only scope questions that could still change feature boundaries
+- open_decisions: unresolved business decisions or policy questions that should stay separate from confirmed features
 - why_separate: 1 short sentence explaining why each feature stands on its own
 - possible_merge_with and possible_split_note are advisory only and may be omitted when not useful`;
 }
@@ -365,6 +395,7 @@ RULES:
 - CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
 - Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
+- Treat any unresolved decisions from discovery as explicitly out of scope for AR generation. Do not invent rules that were left open.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
@@ -563,7 +594,7 @@ export function buildArPerFeatureUserMessage(opts: {
   attachmentText?: string;
   wiContextText?: string;
   similarStoriesText?: string;
-  feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string };
+  feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string; feature_class?: string; confidence?: string; actor_source?: string };
   siblingFeatures?: { summary: string; description: string }[];
 }): string {
   const reqText = (opts.requirement || '').trim().slice(0, 2000);
@@ -815,6 +846,7 @@ RULES:
 - Do not ask for implementation details.
 - A single feature is acceptable when its description and acceptance requirements preserve the important workflow-defining decisions.
 - Treat work instructions as higher-authority operational guidance than similar backlog stories when both are present.
+- Treat unresolved open decisions as separate from confirmed feature coverage. Something already captured in open_decisions is not missing coverage.
 - Return sufficient=true only when the current feature set and ARs clearly cover the main workflow, core decision paths, required inputs, and important exception handling for this request.
 
 When evaluating coverage, explicitly check for relevant branches such as:

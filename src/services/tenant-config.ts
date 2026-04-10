@@ -132,6 +132,11 @@ function normalizeConfig(config: TenantConfig): TenantConfig {
   const normalizedContexts = normalizeDomainContexts(config);
   return {
     ...config,
+    generationPreferences: {
+      outputProfile: config.generationPreferences?.outputProfile === 'balanced' || config.generationPreferences?.outputProfile === 'technical_first'
+        ? config.generationPreferences.outputProfile
+        : 'business_first',
+    },
     domainContexts: normalizedContexts,
   };
 }

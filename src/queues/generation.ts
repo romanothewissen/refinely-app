@@ -44,11 +44,12 @@ interface RealtimeEvent {
 
 interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
+  outputProfile?: GenerationContextMeta['outputProfile'];
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
-  draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
+  draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>>;
   draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
@@ -60,6 +61,7 @@ interface GenerationProgressPayload {
     attachmentText: string;
     projectKey: string;
     projectKeys: string[];
+    outputProfileOverride?: GenerationContextMeta['outputProfile'];
     draftFeatures: Feature[];
     draftReview?: DraftReviewMetadata;
     draftReviewIterations?: number;
@@ -152,12 +154,15 @@ function buildFeatureProgressState(
   }));
 }
 
-function mapDraftFeatures(features: Feature[]): Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> {
+function mapDraftFeatures(features: Feature[]): Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> {
   return features.map((feature) => ({
     id: feature.id,
     summary: feature.summary,
     description: feature.description,
-    storyPoints: feature.storyPoints,
+    ...(feature.storyPoints != null ? { storyPoints: feature.storyPoints } : {}),
+    ...(feature.featureClass ? { featureClass: feature.featureClass } : {}),
+    ...(feature.confidence ? { confidence: feature.confidence } : {}),
+    ...(feature.actorSource ? { actorSource: feature.actorSource } : {}),
   }));
 }
 
@@ -167,6 +172,7 @@ export function buildGenerationStartProgressUpdate(opts: {
   reviewedDraftFeatures?: Feature[];
   reviewedDraftReview?: DraftReviewMetadata;
   reviewedDraftDecision?: GenerationEvent['reviewedDraftDecision'];
+  outputProfile?: GenerationContextMeta['outputProfile'];
   advisorySizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   sources?: GenerationProgressPayload['sources'];
@@ -177,6 +183,7 @@ export function buildGenerationStartProgressUpdate(opts: {
     reviewedDraftFeatures,
     reviewedDraftReview,
     reviewedDraftDecision,
+    outputProfile,
     advisorySizingContract,
     advisoryTriage,
     sources,
@@ -208,6 +215,7 @@ export function buildGenerationStartProgressUpdate(opts: {
     message,
     payload: {
       stage,
+      outputProfile,
       triage: advisorySizingContract,
       sizingContract: advisorySizingContract,
       advisoryTriage,
@@ -244,6 +252,7 @@ export async function handler(event: { body: GenerationEvent }) {
     reviewedTriageSizingContract,
     reviewedAdvisoryTriage,
     priorStageDurationsMs,
+    outputProfileOverride,
     retryFeatureId,
     retryFeature,
     retryBaseFeatures,
@@ -347,6 +356,7 @@ export async function handler(event: { body: GenerationEvent }) {
       reviewedDraftFeatures,
       reviewedDraftReview,
       reviewedDraftDecision,
+      outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
       advisorySizingContract,
       advisoryTriage,
       sources: progressSources,
@@ -366,6 +376,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
+      outputProfileOverride,
       advisoryTriage,
       precomputedDraftFeatures: retryFeature ? [retryFeature] : reviewedDraftFeatures,
       precomputedDraftReview: reviewedDraftReview,
@@ -385,6 +396,7 @@ export async function handler(event: { body: GenerationEvent }) {
           1,
           {
             stage: 'draft_review',
+            outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
             triage: advisorySizingContract,
             sizingContract: advisorySizingContract,
             advisoryTriage,
@@ -398,6 +410,7 @@ export async function handler(event: { body: GenerationEvent }) {
               attachmentText: maskedAttachment.text,
               projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
               projectKeys: selectedProjectKeys,
+              outputProfileOverride,
               draftFeatures,
               draftReview,
               draftReviewIterations: liveDraftReviewIterations,
@@ -594,6 +607,7 @@ export async function handler(event: { body: GenerationEvent }) {
         message: 'Review drafted features before continuing.',
           payload: {
             stage: 'draft_review',
+            outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
             triage: advisorySizingContract,
             sizingContract: advisorySizingContract,
             advisoryTriage,
@@ -607,6 +621,7 @@ export async function handler(event: { body: GenerationEvent }) {
             attachmentText: maskedAttachment.text,
             projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
             projectKeys: selectedProjectKeys,
+            outputProfileOverride,
             draftFeatures: err.draftFeatures,
             draftReview: err.draftReview,
             draftReviewIterations: (reviewedDraftReviewIterations ?? 0) + 1,
@@ -625,6 +640,7 @@ export async function handler(event: { body: GenerationEvent }) {
         .filter((id): id is string => Boolean(id));
       const arFailurePayload: GenerationProgressPayload = {
         stage: 'acceptance_requirements',
+        outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
         triage: reviewedTriageSizingContract ?? clarifySizingContract,
         sizingContract: reviewedTriageSizingContract ?? clarifySizingContract,
         advisoryTriage: reviewedAdvisoryTriage ?? clarifyAdvisoryTriage,

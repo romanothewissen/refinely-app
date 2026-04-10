@@ -1,5 +1,5 @@
 import { invoke } from '@forge/bridge';
-import type { LlmProvider } from '../types';
+import type { LlmProvider, OutputProfile } from '../types';
 
 type Payload = Record<string, unknown>;
 const p = (v: unknown) => v as Payload;
@@ -23,6 +23,7 @@ export const api = {
     requirement: string;
     clarifyAnswers?: unknown[];
     attachmentText?: string;
+    outputProfileOverride?: OutputProfile;
     projectKey?: string;
     projectKeys?: string[];
     clarifyDiscoveryProfile?: unknown;

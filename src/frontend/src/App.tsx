@@ -18,7 +18,11 @@ import type {
   ClarifyProgressPayload,
   ClarifyQuestion,
   DraftReviewDecision,
+  FeatureActorSource,
+  FeatureClass,
+  FeatureConfidence,
   GenerationContextMeta,
+  OutputProfile,
   TokenUsageSummary,
   UndoableAiChange,
 } from './types';
@@ -30,6 +34,9 @@ export interface Feature {
   acceptanceRequirements: Array<{ given: string; when: string; then: string }>;
   storyPoints?: number;
   processCode?: string;
+  featureClass?: FeatureClass;
+  confidence?: FeatureConfidence;
+  actorSource?: FeatureActorSource;
   arGenerationStatus?: 'failed' | 'retrying';
   arGenerationError?: string;
   markdown?: string;
@@ -448,6 +455,8 @@ function LegacyApp({
   const [workspaceSelectionVersion, setWorkspaceSelectionVersion] = useState(0);
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
+  const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
+  const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
   const [wiDocs, setWiDocs] = useState<any[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
@@ -564,6 +573,10 @@ function LegacyApp({
     api.getConfig()
       .then((res: any) => {
         setBrandingLogoUrl(res?.branding?.logoUrl || null);
+        const profile = res?.generationPreferences?.outputProfile;
+        const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
+        setWorkspaceOutputProfile(normalizedProfile);
+        setRunOutputProfileOverride(normalizedProfile);
       })
       .catch(() => {});
   }, []); // eslint-disable-line
@@ -678,6 +691,10 @@ function LegacyApp({
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
       setBrandingLogoUrl(res?.branding?.logoUrl || null);
+      const profile = res?.generationPreferences?.outputProfile;
+      const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
+      setWorkspaceOutputProfile(normalizedProfile);
+      setRunOutputProfileOverride(normalizedProfile);
       setSavedDefaultProjectKey(typeof res.defaultProjectKey === 'string' ? res.defaultProjectKey : null);
     }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
@@ -1223,6 +1240,7 @@ function LegacyApp({
         requirement: req,
         clarifyAnswers,
         attachmentText,
+        outputProfileOverride: runOutputProfileOverride,
         projectKey,
         projectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
@@ -1515,6 +1533,9 @@ function LegacyApp({
               usage={usage}
               limits={limits}
               brandingLogoUrl={brandingLogoUrl}
+              workspaceOutputProfile={workspaceOutputProfile}
+              runOutputProfileOverride={runOutputProfileOverride}
+              setRunOutputProfileOverride={setRunOutputProfileOverride}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
               projectKeys={projectKeys}
@@ -1563,6 +1584,10 @@ function LegacyApp({
                 setBrandingLogoUrl(res?.branding?.logoUrl || null);
                 if (res.tier) setTier(res.tier);
                 if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
+                const profile = res?.generationPreferences?.outputProfile;
+                const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
+                setWorkspaceOutputProfile(normalizedProfile);
+                setRunOutputProfileOverride(normalizedProfile);
               })
               .catch(() => {});
           }}

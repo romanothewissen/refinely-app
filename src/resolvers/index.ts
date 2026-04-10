@@ -493,6 +493,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     attachmentText: payload.attachmentText ?? '',
     config,
     license: context?.license,
+    outputProfileOverride: payload?.outputProfileOverride,
     goldExamples: '',   // fetched inside queue consumer
     wiContext: '',      // fetched inside queue consumer
     projectKey: authorizedProjects.projectKey,
@@ -525,6 +526,7 @@ resolver.define('resumeGeneration', async ({ payload, context }) => {
         attachmentText: string;
         projectKey: string;
         projectKeys: string[];
+        outputProfileOverride?: import('../types').OutputProfile;
         draftFeatures: Feature[];
         draftReview?: import('../types').DraftReviewMetadata;
         draftReviewIterations?: number;
@@ -560,6 +562,7 @@ resolver.define('resumeGeneration', async ({ payload, context }) => {
     attachmentText: resumeContext.attachmentText,
     config,
     license: context?.license,
+    outputProfileOverride: resumeContext.outputProfileOverride,
     goldExamples: '',
     wiContext: '',
     projectKey: authorizedProjects.projectKey,

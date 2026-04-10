@@ -12,7 +12,11 @@ import type {
   DraftReviewDecision,
   DraftReviewMetadata,
   EffectiveSizingContract,
+  FeatureActorSource,
+  FeatureClass,
+  FeatureConfidence,
   GenerationContextMeta,
+  OutputProfile,
   RestructureScope,
   StructuralFeatureProposal,
   StructuralRestructureProposal,
@@ -69,13 +73,36 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union ? intersection / union : 0;
 }
 
+function formatFeatureClassLabel(value?: FeatureClass): string {
+  if (value === 'technical_enabler') return 'Technical';
+  if (value === 'cross_cutting_rule') return 'Cross-cutting';
+  return 'Business';
+}
+
+function formatConfidenceLabel(value?: FeatureConfidence): string {
+  return value === 'assumption_applied' ? 'Assumption applied' : 'Confirmed';
+}
+
+function formatActorSourceLabel(value?: FeatureActorSource): string {
+  if (value === 'workspace_role') return 'Workspace role';
+  if (value === 'clarify') return 'Discovery';
+  if (value === 'fallback') return 'Fallback';
+  return 'Prompt';
+}
+
+function formatOutputProfileLabel(value?: OutputProfile): string {
+  if (value === 'technical_first') return 'Technical-first';
+  if (value === 'balanced') return 'Balanced';
+  return 'Business-first';
+}
+
 type GenerationProgressMeta = {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
-  draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number; featureClass?: FeatureClass; confidence?: FeatureConfidence; actorSource?: FeatureActorSource }>;
   draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
@@ -93,6 +120,7 @@ type GenerationProgressMeta = {
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };
+  outputProfile?: OutputProfile;
 };
 
 type DiscoveryProgressMeta = ClarifyProgressPayload;
@@ -310,6 +338,7 @@ function DraftReviewCard({
   const draftFeatureCount = meta?.draftFeatureCount ?? draftFeatureList.length;
   const draftReview = meta?.draftReview;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [featureFilter, setFeatureFilter] = useState<'all' | FeatureClass>('all');
 
   useEffect(() => {
     setSelectedIds((previous) => previous.filter((id) => (draftFeatures ?? []).some((feature) => feature.id === id)));
@@ -328,6 +357,12 @@ function DraftReviewCard({
   const reviewSummary = draftReview?.reviewMessage || draftReview?.reasoningSummary || 'Review the drafted feature structure before acceptance requirements are written.';
   const unresolvedAmbiguities = draftReview?.unresolvedAmbiguities ?? [];
   const qualityWarnings = draftReview?.descriptionQuality?.warnings ?? [];
+  const openDecisions = draftReview?.openDecisions ?? [];
+  const roleCoverage = draftReview?.roleCoverage ?? [];
+  const coverageFindings = draftReview?.coverageFindings;
+  const filteredFeatures = featureFilter === 'all'
+    ? draftFeatureList
+    : draftFeatureList.filter((feature) => (feature.featureClass ?? 'business_capability') === featureFilter);
 
   return (
     <motion.div
@@ -365,6 +400,14 @@ function DraftReviewCard({
               <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>
               <div className="text-[14px] font-black text-[var(--rf-text)]">{draftFeatureCount}</div>
             </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Open decisions</div>
+              <div className="text-[14px] font-black text-[var(--rf-text)]">{openDecisions.length}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Output style</div>
+              <div className="text-[14px] font-black text-[var(--rf-text)]">{formatOutputProfileLabel(meta?.outputProfile)}</div>
+            </div>
           </div>
         </div>
 
@@ -387,9 +430,83 @@ function DraftReviewCard({
           </div>
         )}
 
+        {(roleCoverage.length > 0 || coverageFindings?.overlapWarnings?.length || coverageFindings?.duplicatedThemes?.length) && (
+          <div className="grid gap-3 md:grid-cols-2">
+            {roleCoverage.length > 0 && (
+              <div className="rounded-xl border border-[var(--rf-border)] bg-white/55 px-4 py-3 space-y-2">
+                <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role coverage</div>
+                {roleCoverage.map((item) => (
+                  <div key={`${item.role}-${item.source}`} className="flex items-center justify-between gap-3 text-[13px]">
+                    <div className="font-semibold text-[var(--rf-text)]">{item.role}</div>
+                    <div className="text-[var(--rf-text-tertiary)]">{formatActorSourceLabel(item.source)} · {item.status}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(coverageFindings?.overlapWarnings?.length || coverageFindings?.duplicatedThemes?.length) && (
+              <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-4 py-3 space-y-2">
+                <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Draft warnings</div>
+                {(coverageFindings?.overlapWarnings ?? []).map((item, index) => (
+                  <div key={`overlap-${index}`} className="text-[13px] text-[var(--rf-text-secondary)]">{normalizeDisplayText(item)}</div>
+                ))}
+                {(coverageFindings?.duplicatedThemes ?? []).map((item, index) => (
+                  <div key={`duplicate-${index}`} className="text-[13px] text-[var(--rf-text-secondary)]">Duplicated theme: {normalizeDisplayText(item)}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {openDecisions.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Open decisions</div>
+            <div className="space-y-2">
+              {openDecisions.map((decision) => (
+                <div key={decision.id} className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[14px] font-bold text-[var(--rf-text)]">{decision.title}</div>
+                    {decision.blocking && (
+                      <span className="inline-flex items-center rounded-md border border-[rgba(179,94,48,0.18)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-warning)]">
+                        Blocking
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)]">{normalizeDisplayText(decision.detail)}</div>
+                  {decision.impact && (
+                    <div className="mt-1 text-[12px] text-[var(--rf-text-tertiary)]">Impact: {normalizeDisplayText(decision.impact)}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-2">
-          <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Draft features</div>
-          {draftFeatureList.map((feature) => {
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Draft features</div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { key: 'all', label: 'All' },
+                { key: 'business_capability', label: 'Business' },
+                { key: 'technical_enabler', label: 'Technical' },
+                { key: 'cross_cutting_rule', label: 'Cross-cutting' },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setFeatureFilter(item.key as 'all' | FeatureClass)}
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                    featureFilter === item.key
+                      ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                      : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)]'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {filteredFeatures.map((feature) => {
             const note = featureNoteById.get(feature.id);
             const isSelected = selectedIds.includes(feature.id);
             const detailLines = [
@@ -419,6 +536,15 @@ function DraftReviewCard({
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="text-[14px] font-bold text-[var(--rf-text)]">{feature.summary}</div>
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-white px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                        {formatFeatureClassLabel(feature.featureClass)}
+                      </span>
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-white px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                        {formatConfidenceLabel(feature.confidence)}
+                      </span>
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-white px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                        {formatActorSourceLabel(feature.actorSource)}
+                      </span>
                       {adjustedFeatureIds.has(feature.id) && (
                         <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-brand)]">
                           Description adjusted
@@ -1021,6 +1147,9 @@ interface Feature {
   acceptanceRequirements: AcceptanceRequirement[];
   storyPoints?: number;
   processCode?: string;
+  featureClass?: FeatureClass;
+  confidence?: FeatureConfidence;
+  actorSource?: FeatureActorSource;
   arGenerationStatus?: 'failed' | 'retrying';
   arGenerationError?: string;
   isAccepted?: boolean;
@@ -1421,12 +1550,13 @@ export function MainContent({
     try {
       const exportedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
       const headerRowIndex = 4;
+      const overlapWarnings = generationContext?.coverageFindings?.overlapWarnings ?? [];
       const rows: Array<Array<string | number>> = [
         ['Refinely Feature Export'],
         [`Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`],
         [`Exported at (UTC): ${exportedAt}`],
         [`Features: ${features.length} | Acceptance requirements: ${totalArCount}`],
-        ['Type', 'Feature #', 'Feature Title', 'Feature Description / Note', 'AR #', 'Given', 'When', 'Then', 'Status', 'Jira Issue'],
+        ['Type', 'Feature #', 'Feature Title', 'Class', 'Confidence', 'Actor Source', 'Feature Description / Note', 'AR #', 'Given', 'When', 'Then', 'Overlap Warning', 'Status', 'Jira Issue'],
       ];
 
       const baseRowByFeature = new Map<number, number>();
@@ -1434,6 +1564,7 @@ export function MainContent({
       features.forEach((feature, idx) => {
         const featureNumber = idx + 1;
         const featureTitle = feature.title || feature.summary || `Feature ${featureNumber}`;
+        const overlapWarning = overlapWarnings.find((item) => item.toLowerCase().includes(feature.summary.toLowerCase())) ?? '';
         const status = feature.pendingRemoval
           ? 'Pending removal'
           : feature.pendingAddition
@@ -1449,11 +1580,15 @@ export function MainContent({
           'Feature',
           featureNumber,
           featureTitle,
+          formatFeatureClassLabel(feature.featureClass),
+          formatConfidenceLabel(feature.confidence),
+          formatActorSourceLabel(feature.actorSource),
           feature.description || feature.markdown || '',
           feature.acceptanceRequirements?.length || 0,
           '',
           '',
           '',
+          overlapWarning,
           status,
           feature.jiraIssueKey || '',
         ]);
@@ -1463,11 +1598,15 @@ export function MainContent({
             'AR',
             featureNumber,
             featureTitle,
+            formatFeatureClassLabel(feature.featureClass),
+            formatConfidenceLabel(feature.confidence),
+            formatActorSourceLabel(feature.actorSource),
             `Acceptance requirement ${arIdx + 1}`,
             arIdx + 1,
             ar.given || '',
             ar.when || '',
             ar.then || '',
+            overlapWarning,
             status,
             feature.jiraIssueKey || '',
           ]);
@@ -1482,34 +1621,38 @@ export function MainContent({
         { wch: 12 },
         { wch: 10 },
         { wch: 28 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 16 },
         { wch: 52 },
         { wch: 8 },
         { wch: 28 },
         { wch: 28 },
         { wch: 36 },
+        { wch: 28 },
         { wch: 18 },
         { wch: 18 },
       ];
       worksheet['!rows'] = rows.map((_, index) => ({ hpt: index <= 3 ? 20 : 42 }));
       worksheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 9 } },
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 9 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 13 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 13 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 13 } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 13 } },
       ];
-      worksheet['!autofilter'] = { ref: `A${headerRowIndex + 1}:J${rows.length}` };
+      worksheet['!autofilter'] = { ref: `A${headerRowIndex + 1}:N${rows.length}` };
       (worksheet as any)['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
 
       features.forEach((feature, idx) => {
         if (!feature.jiraIssueKey || !feature.jiraIssueUrl) return;
         const baseRow = baseRowByFeature.get(idx);
         if (typeof baseRow !== 'number') return;
-        const featureCellRef = XLSXUtils.encode_cell({ r: baseRow, c: 9 });
+        const featureCellRef = XLSXUtils.encode_cell({ r: baseRow, c: 13 });
         if (worksheet[featureCellRef]) {
           worksheet[featureCellRef].l = { Target: feature.jiraIssueUrl, Tooltip: `Open ${feature.jiraIssueKey}` };
         }
         (feature.acceptanceRequirements || []).forEach((_, arIdx) => {
-          const arCellRef = XLSXUtils.encode_cell({ r: baseRow + arIdx + 1, c: 9 });
+          const arCellRef = XLSXUtils.encode_cell({ r: baseRow + arIdx + 1, c: 13 });
           if (worksheet[arCellRef]) {
             worksheet[arCellRef].l = { Target: feature.jiraIssueUrl!, Tooltip: `Open ${feature.jiraIssueKey}` };
           }
@@ -1517,6 +1660,37 @@ export function MainContent({
       });
 
       XLSXUtils.book_append_sheet(workbook, worksheet, 'Features');
+      const openDecisionRows: Array<Array<string | number>> = [
+        ['Refinely Open Decisions Export'],
+        [`Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`],
+        [`Exported at (UTC): ${exportedAt}`],
+        [`Open decisions: ${generationContext?.openDecisions?.length ?? 0}`],
+        ['ID', 'Title', 'Category', 'Blocking', 'Impact', 'Detail'],
+        ...((generationContext?.openDecisions ?? []).map((decision) => [
+          decision.id,
+          decision.title,
+          decision.category,
+          decision.blocking ? 'Yes' : 'No',
+          decision.impact || '',
+          decision.detail || '',
+        ])),
+      ];
+      const openDecisionSheet = XLSXUtils.aoa_to_sheet(openDecisionRows);
+      openDecisionSheet['!cols'] = [
+        { wch: 18 },
+        { wch: 32 },
+        { wch: 18 },
+        { wch: 12 },
+        { wch: 28 },
+        { wch: 60 },
+      ];
+      openDecisionSheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } },
+      ];
+      XLSXUtils.book_append_sheet(workbook, openDecisionSheet, 'Open Decisions');
       const arrayBuffer = write(workbook, { bookType: 'xlsx', type: 'array' });
       const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
@@ -2139,6 +2313,11 @@ export function MainContent({
                     {generationContext.domainContextApplied && (
                       <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
                         Guidance on
+                      </span>
+                    )}
+                    {generationContext.outputProfile && (
+                      <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
+                        {formatOutputProfileLabel(generationContext.outputProfile)}
                       </span>
                     )}
                     {generationContext.attachmentIncluded && (

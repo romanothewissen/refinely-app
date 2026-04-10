@@ -84,6 +84,19 @@ const ROLE_HINT_WORDS = new Set([
   'planner',
 ]);
 
+const OPEN_DECISION_LEAKAGE_PATTERNS = [
+  /^\s*(what|how|who|when|should|do we|does it|is it|can it)\b/i,
+  /\bopen question\b/i,
+  /\bto be decided\b/i,
+  /\bdefine duplication criteria\b/i,
+];
+
+function looksLikeOpenDecisionText(text: string): boolean {
+  const normalized = String(text ?? '').trim();
+  if (!normalized) return false;
+  return OPEN_DECISION_LEAKAGE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 function extractRoleFromDescription(description: string): string | null {
   const match = description.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+/i);
   return match?.[1]?.trim() || null;
@@ -261,6 +274,11 @@ export function featureOverlapsToViolations(overlaps: FeatureOverlap[]): Validat
 
 export function validateFeatures(features: Feature[], config: TenantConfig): ValidationViolation[] {
   const violations: ValidationViolation[] = [];
+  const featureRoles = features
+    .map((feature) => extractRoleFromDescription(feature.description))
+    .filter((role): role is string => Boolean(role));
+  const hasSpecificRoleElsewhere = featureRoles.some((role) => normalizeRole(role) !== 'authorized user');
+  const configuredRoles = new Set((config.domainRoles ?? []).map((role) => normalizeRole(role)).filter(Boolean));
 
   for (const feature of features) {
     // Check description format
@@ -278,6 +296,14 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         featureId: feature.id,
         field: 'description',
         message: 'Description contains duplicated "so that" clause',
+      });
+    }
+
+    if (looksLikeOpenDecisionText(feature.summary) || looksLikeOpenDecisionText(feature.description)) {
+      violations.push({
+        featureId: feature.id,
+        field: 'description',
+        message: 'Feature appears to include unresolved decision wording instead of a confirmed requirement',
       });
     }
 
@@ -308,6 +334,25 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
 
     // Check ARs
     const featureRole = extractRoleFromDescription(feature.description);
+    if (
+      featureRole
+      && normalizeRole(featureRole) === 'authorized user'
+      && (hasSpecificRoleElsewhere || configuredRoles.size > 0)
+    ) {
+      violations.push({
+        featureId: feature.id,
+        field: 'description',
+        message: 'Feature uses generic role wording even though more specific roles are available',
+      });
+    }
+    if (feature.actorSource === 'fallback' && feature.confidence === 'confirmed') {
+      violations.push({
+        featureId: feature.id,
+        field: 'description',
+        message: 'Feature is marked confirmed even though the actor source is fallback',
+      });
+    }
+
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {
         violations.push({
@@ -373,6 +418,25 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
             featureId: feature.id,
             field: 'acceptanceRequirements',
             message: `AR role wording differs from feature role "${featureRole}": "${leadingRole}"`,
+          });
+        }
+      }
+
+      if (looksLikeOpenDecisionText(`${ar.given} ${ar.when} ${ar.then}`)) {
+        violations.push({
+          featureId: feature.id,
+          field: 'acceptanceRequirements',
+          message: 'AR appears to include unresolved decision wording instead of a testable rule',
+        });
+      }
+
+      if (feature.actorSource === 'fallback') {
+        const arRole = extractLeadingRolePhrase(ar.given) || extractLeadingRolePhrase(ar.when) || extractLeadingRolePhrase(ar.then);
+        if (arRole && normalizeRole(arRole) !== normalizeRole(featureRole ?? '')) {
+          violations.push({
+            featureId: feature.id,
+            field: 'acceptanceRequirements',
+            message: `AR introduces role wording "${arRole}" even though the feature actor source is fallback`,
           });
         }
       }

@@ -2,6 +2,7 @@ import React from 'react';
 import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UsageMeter } from './UsageMeter';
+import type { OutputProfile } from './types';
 
 interface SidebarProps {
   viewMode: 'generate' | 'settings';
@@ -21,6 +22,9 @@ interface SidebarProps {
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
   brandingLogoUrl?: string | null;
+  workspaceOutputProfile: OutputProfile;
+  runOutputProfileOverride: OutputProfile;
+  setRunOutputProfileOverride: (value: OutputProfile) => void;
   width?: number;
   originIssueKey?: string | null;
   projectKeys: string[];
@@ -66,6 +70,9 @@ export function Sidebar({
   usage,
   limits,
   brandingLogoUrl,
+  workspaceOutputProfile,
+  runOutputProfileOverride,
+  setRunOutputProfileOverride,
   width,
   originIssueKey,
   projectKeys,
@@ -119,6 +126,11 @@ export function Sidebar({
     .map((project) => ({ key: project.key, count: cacheCountsByProject[project.key] ?? 0 }))
     .filter((entry) => entry.key);
   const totalCachedStories = cacheBreakdown.reduce((sum, entry) => sum + entry.count, 0);
+  const outputProfileLabel = runOutputProfileOverride === 'technical_first'
+    ? 'Technical-first'
+    : runOutputProfileOverride === 'balanced'
+      ? 'Balanced'
+      : 'Business-first';
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -496,6 +508,34 @@ export function Sidebar({
             }`}>
               {hasPromptInput ? 'Ready' : 'Add input'}
             </span>
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="rf-sidebar-card px-4 py-3"
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={2.7}
+        >
+          <div className="flex flex-col gap-3">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Output style</div>
+              <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
+                Default: {workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}
+              </div>
+            </div>
+            <select
+              value={runOutputProfileOverride}
+              onChange={(e) => setRunOutputProfileOverride(e.target.value as OutputProfile)}
+              disabled={isWorking}
+              className="w-full rounded-xl border border-[var(--rf-border)] bg-white/80 px-3 py-2.5 text-[12px] font-semibold text-[var(--rf-text)] outline-none"
+              title={`Run output style: ${outputProfileLabel}`}
+            >
+              <option value="business_first">Business-first</option>
+              <option value="balanced">Balanced</option>
+              <option value="technical_first">Technical-first</option>
+            </select>
           </div>
         </motion.div>
 

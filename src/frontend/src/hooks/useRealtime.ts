@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
-import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract } from '../types';
+import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, OutputProfile } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
@@ -17,7 +17,7 @@ export interface GenerationProgressPayload {
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
-  draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
+  draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number; featureClass?: FeatureClass; confidence?: FeatureConfidence; actorSource?: FeatureActorSource }>;
   draftFeatureCount?: number;
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
@@ -35,6 +35,7 @@ export interface GenerationProgressPayload {
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };
+  outputProfile?: OutputProfile;
 }
 
 const GENERATION_STAGE_ORDER: Array<NonNullable<GenerationProgressPayload['stage']>> = [
@@ -93,6 +94,7 @@ function mergeGenerationPayload(
     stageDurationsMs: next.stageDurationsMs ?? previous.stageDurationsMs,
     resumeContext: next.resumeContext ?? previous.resumeContext,
     sources: mergeGenerationSources(previous.sources, next.sources),
+    outputProfile: next.outputProfile ?? previous.outputProfile,
   };
 }
 

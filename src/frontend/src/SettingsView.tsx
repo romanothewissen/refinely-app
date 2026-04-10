@@ -12,6 +12,7 @@ import type {
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
   LlmProvider,
+  OutputProfile,
   ProjectActivitySummaryRow,
   ProjectPersonaRoleSuggestion,
 } from './types';
@@ -376,6 +377,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // Personal + workspace state
   const [defaultProjectKey, setDefaultProjectKey] = useState('');
+  const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [tier, setTier] = useState<'free' | 'standard'>('standard');
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
@@ -578,6 +580,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         }
 
         if (existingConfig.tier) setTier(existingConfig.tier);
+        setWorkspaceOutputProfile(
+          existingConfig.generationPreferences?.outputProfile === 'balanced' || existingConfig.generationPreferences?.outputProfile === 'technical_first'
+            ? existingConfig.generationPreferences.outputProfile
+            : 'business_first',
+        );
         setComplianceEnabled(Boolean(existingConfig.compliance?.enabled));
         setTransparencyEnabled(Boolean(existingConfig.compliance?.transparencyReportsEnabled));
         setPiiMaskingEnabled(Boolean(existingConfig.compliance?.piiMaskingEnabled));
@@ -852,6 +859,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
           azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
           modelCatalogs,
+        },
+        generationPreferences: {
+          outputProfile: workspaceOutputProfile,
         },
         domainContext: '',
         domainContexts,
@@ -1603,6 +1613,30 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     />
                   </div>
                 </div>
+
+                {isAdmin && (
+                  <div className="rf-card p-5 space-y-5">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Generation output default</div>
+                      <div className="text-[13px] text-[var(--rf-text-tertiary)] mt-1">Choose how requirement generation should balance business readability and technical detail across the workspace.</div>
+                    </div>
+                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 flex flex-col gap-3">
+                      <label className="text-sm font-bold text-[var(--rf-text)]">Workspace output profile</label>
+                      <select
+                        value={workspaceOutputProfile}
+                        onChange={(e) => setWorkspaceOutputProfile(e.target.value as OutputProfile)}
+                        className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm font-semibold text-[var(--rf-text)] outline-none"
+                      >
+                        <option value="business_first">Business-first</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="technical_first">Technical-first</option>
+                      </select>
+                      <div className="text-[12px] text-[var(--rf-text-tertiary)]">
+                        Business-first keeps core output broad-use and readable by default. Teams can still override the style per run from the generator.
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 

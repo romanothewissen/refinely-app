@@ -123,6 +123,15 @@ export interface Branding {
   secondaryColor: string;
 }
 
+export type OutputProfile = 'business_first' | 'balanced' | 'technical_first';
+export type FeatureClass = 'business_capability' | 'technical_enabler' | 'cross_cutting_rule';
+export type FeatureConfidence = 'confirmed' | 'assumption_applied';
+export type FeatureActorSource = 'prompt' | 'clarify' | 'workspace_role' | 'fallback';
+
+export interface GenerationPreferences {
+  outputProfile: OutputProfile;
+}
+
 export interface ProjectArMapping {
   projectKey: string;   // e.g. "MYPROJ" or "*" for default
   issueType?: string;   // e.g. "Story" or "*"
@@ -148,6 +157,7 @@ export interface ProjectDomainContext {
 export interface TenantConfig {
   goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
+  generationPreferences: GenerationPreferences;
   /** @deprecated Legacy workspace-level guidance text. Prefer project-scoped domainContexts. */
   domainContext: string;
   /** @deprecated Legacy workspace-level persona roles. Prefer project-scoped domainContexts.personaRoles. */
@@ -203,6 +213,9 @@ export const DEFAULT_CONFIG: TenantConfig = {
     triageModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     themeModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     maxTokens: 8192,
+  },
+  generationPreferences: {
+    outputProfile: 'business_first',
   },
   domainContext: '',
   domainRoles: [],
@@ -267,6 +280,27 @@ export interface AcceptanceRequirement {
   then: string;
 }
 
+export interface OpenDecision {
+  id: string;
+  title: string;
+  detail: string;
+  category: ClarifyCategoryKey | 'general';
+  impact: string;
+  blocking: boolean;
+}
+
+export interface RoleCoverageItem {
+  role: string;
+  source: FeatureActorSource;
+  status: 'covered' | 'missing' | 'assumed';
+}
+
+export interface CoverageFindings {
+  missingUseCases: string[];
+  overlapWarnings: string[];
+  duplicatedThemes: string[];
+}
+
 export interface Feature {
   id: string;
   summary: string;
@@ -274,6 +308,9 @@ export interface Feature {
   acceptanceRequirements: AcceptanceRequirement[];
   storyPoints?: number;
   processCode?: string;          // only if taxonomy enabled
+  featureClass?: FeatureClass;
+  confidence?: FeatureConfidence;
+  actorSource?: FeatureActorSource;
   arGenerationStatus?: 'failed' | 'retrying';
   arGenerationError?: string;
   jiraIssueKey?: string;
@@ -293,6 +330,9 @@ export interface DraftFeatureReviewNote {
   whySeparate?: string;
   possibleMergeWith?: string[];
   possibleSplitNote?: string;
+  featureClass?: FeatureClass;
+  confidence?: FeatureConfidence;
+  actorSource?: FeatureActorSource;
   descriptionIssues?: string[];
   descriptionAdjusted?: boolean;
 }
@@ -307,6 +347,9 @@ export interface DraftReviewMetadata {
   reasoningSummary?: string;
   unresolvedAmbiguities: string[];
   featureNotes: DraftFeatureReviewNote[];
+  openDecisions?: OpenDecision[];
+  roleCoverage?: RoleCoverageItem[];
+  coverageFindings?: CoverageFindings;
   descriptionQuality?: DraftDescriptionQualityReview;
   lastAction?: DraftReviewDecision;
   reviewMessage?: string;
@@ -601,6 +644,7 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
+  outputProfile?: OutputProfile;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   sizingAssessment?: GenerationSizingAssessment;
@@ -608,6 +652,9 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   draftReviewTriggered?: boolean;
   draftReviewDecision?: DraftReviewDecision;
   draftReviewIterations?: number;
+  openDecisions?: OpenDecision[];
+  roleCoverage?: RoleCoverageItem[];
+  coverageFindings?: CoverageFindings;
   coverageReview?: CoverageReviewAdvice;
   failedFeatureIds?: string[];
   partialSuccess?: boolean;
@@ -870,6 +917,7 @@ export interface GenerationEvent {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   config: TenantConfig;
+  outputProfileOverride?: OutputProfile;
   projectKey?: string;
   projectKeys?: string[];
   goldExamples: string;
