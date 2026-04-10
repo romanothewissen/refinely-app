@@ -595,11 +595,12 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /Simplify syntax, not business meaning/i);
   assert.match(clarifyPrompt, /Earlier triage suggests moderate scope, high complexity, high ambiguity/i);
   assert.match(clarifyPrompt, /DISCOVERY EXEMPLARS/i);
-  assert.match(clarifyPrompt, /Which rule should decide whether an incoming WhatsApp or email updates an open case or creates a new one/i);
+  assert.match(clarifyPrompt, /Which rule should decide whether an incoming request updates an existing record or creates a new one/i);
   assert.doesNotMatch(clarifyPrompt, /profileReasoning/i);
   assert.doesNotMatch(clarifyPrompt, /must equal the number of questions you return/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
   assert.doesNotMatch(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
+  assert.doesNotMatch(clarifyPrompt, /WhatsApp|open case|customer reply/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
   assert.match(evaluatePrompt, /Ask however many follow-up questions are materially needed/i);
@@ -620,6 +621,7 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(triagePrompt, /Short capability-area asks that name a workflow domain without stating its rules, actors, or decision logic are often HIGH complexity/i);
   assert.match(triagePrompt, /Short but capability-heavy workflow area/i);
   assert.match(triagePrompt, /same guard rule applies to two closely related work item types/i);
+  assert.doesNotMatch(triagePrompt, /timesheets|payroll|support tickets|order status|billing details|customer onboarding/i);
 });
 
 test('decomposition prompt treats feature counts as hints and keeps support behavior inside the parent feature', () => {
@@ -733,6 +735,9 @@ test('per-feature AR prompt includes work instructions and clarifying context', 
       {
         question: 'How should the system decide whether to create a new case or link to an existing one?',
         answer: 'Use the customer identifier and open-case match first, and send uncertain matches for manual review.',
+        selectedSuggestions: ['Use the customer identifier first'],
+        categoryKey: 'business_rules',
+        intent: 'decision_logic',
       },
     ],
     wiContextText: 'If a serial number is missing, the communication must be queued for manual review before case creation. Case type is determined by communication intent and customer segment.',
@@ -744,6 +749,8 @@ test('per-feature AR prompt includes work instructions and clarifying context', 
   });
 
   assert.match(message, /WORK INSTRUCTIONS \/ OPERATIONAL GUIDANCE/i);
+  assert.match(message, /\[business_rules \| decision_logic\]/i);
+  assert.match(message, /Selected signals: Use the customer identifier first/i);
   assert.match(message, /serial number is missing/i);
   assert.match(message, /manual review/i);
   assert.match(message, /RELATED BACKLOG CONTEXT/i);

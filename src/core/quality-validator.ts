@@ -8,10 +8,10 @@ const SOLUTION_TERMS = [
 ];
 
 const IMPLEMENTATION_FLAVORED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /\bdesignated inbox\b/i, label: 'designated inbox' },
-  { pattern: /\bsubject(?: line)?\b/i, label: 'subject line' },
-  { pattern: /\b(?:case|reference)\s+(?:id|identifier)\b/i, label: 'reference ID' },
-  { pattern: /\bemail content\b/i, label: 'email content' },
+  { pattern: /\bdesignated inbox\b/i, label: 'named intake source' },
+  { pattern: /\bsubject(?: line)?\b/i, label: 'message metadata field' },
+  { pattern: /\b(?:case|reference)\s+(?:id|identifier)\b/i, label: 'record identifier' },
+  { pattern: /\bemail content\b/i, label: 'message content field' },
   { pattern: /\bappend(?:ed|s)?\b/i, label: 'append operation' },
   { pattern: /\bthe system\s+(?:identifies|matches|parses|reads|extracts|detects|appends)\b/i, label: 'system action wording' },
 ];
@@ -129,6 +129,10 @@ function clauseEndsOnStopWord(clause: string): boolean {
   const lastToken = tokens[tokens.length - 1]?.toLowerCase().replace(/[^a-z]/g, '');
   if (!lastToken) return false;
   return TRUNCATED_TRAILING_WORDS.has(lastToken);
+}
+
+export function textLooksTruncated(text: string): boolean {
+  return clauseEndsOnStopWord(String(text ?? ''));
 }
 
 function tokenizeArForFingerprint(ar: AcceptanceRequirement): Set<string> {
@@ -299,6 +303,14 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
       });
     }
 
+    if (textLooksTruncated(feature.description)) {
+      violations.push({
+        featureId: feature.id,
+        field: 'description',
+        message: 'Description appears truncated',
+      });
+    }
+
     if (looksLikeOpenDecisionText(feature.summary) || looksLikeOpenDecisionText(feature.description)) {
       violations.push({
         featureId: feature.id,
@@ -334,6 +346,18 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
 
     // Check ARs
     const featureRole = extractRoleFromDescription(feature.description);
+    if (
+      feature.featureClass === 'business_capability'
+      && featureRole
+      && /\b(integration|service|system|platform|pipeline|processor)\b/i.test(featureRole)
+      && !/\b(field service|technical support|service quality|administrator|manager)\b/i.test(featureRole)
+    ) {
+      violations.push({
+        featureId: feature.id,
+        field: 'featureClass',
+        message: 'Feature is labeled business-facing even though the actor reads as a technical/system actor',
+      });
+    }
     if (
       featureRole
       && normalizeRole(featureRole) === 'authorized user'

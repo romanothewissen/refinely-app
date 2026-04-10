@@ -50,6 +50,19 @@ test('validateFeatures flags AR clauses that end on a truncation stop-word', () 
   assert.match(hit!.message, /GIVEN/);
 });
 
+test('validateFeatures flags truncated feature descriptions', () => {
+  const features: Feature[] = [
+    makeFeature({
+      id: 'feat-1',
+      description: 'As a Technical Support Specialist, I need to review update outcomes so that the latest known',
+    }),
+  ];
+
+  const violations = validateFeatures(features, baseConfig);
+  const hit = violations.find(v => /Description appears truncated/.test(v.message));
+  assert.ok(hit, `expected truncated description violation, got: ${JSON.stringify(violations)}`);
+});
+
 test('validateFeatures does NOT flag AR clauses that end on a content word', () => {
   const features: Feature[] = [
     makeFeature({
@@ -110,6 +123,20 @@ test('validateFeatures flags implementation-flavored AR wording that should stay
   const violations = validateFeatures(features, baseConfig);
   const hit = violations.find(v => /implementation-flavored wording/.test(v.message));
   assert.ok(hit, `expected implementation-flavored wording violation, got: ${JSON.stringify(violations)}`);
+});
+
+test('validateFeatures flags business-labeled features with technical/system actors', () => {
+  const features: Feature[] = [
+    makeFeature({
+      id: 'feat-1',
+      description: 'As an integration service, I need to parse uploaded records so that structured fields are extracted.',
+      featureClass: 'business_capability',
+    }),
+  ];
+
+  const violations = validateFeatures(features, baseConfig);
+  const hit = violations.find(v => /technical\/system actor/i.test(v.message));
+  assert.ok(hit, `expected technical actor / business class violation, got: ${JSON.stringify(violations)}`);
 });
 
 test('detectFeatureOverlaps flags pairs that share most content tokens', () => {

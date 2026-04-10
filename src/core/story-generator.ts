@@ -45,6 +45,7 @@ import {
   DraftReviewDecision,
   DraftReviewMetadata,
   DraftFeatureReviewNote,
+  ValidationViolation,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage, LlmJsonParseError } from './llm';
 import { getTierModel } from '../services/billing';
@@ -656,6 +657,28 @@ function pushPromptSection(parts: string[], heading: string, text: string, maxCh
   parts.push(`${heading}:\n${trimmed}`);
 }
 
+function formatClarifyAnswersForPrompt(answers: ClarifyAnswer[]): string {
+  return answers
+    .map((answer, index) => {
+      const question = trimPromptText(String(answer.question ?? ''), 180);
+      const resolvedAnswer = trimPromptText(String(answer.answer ?? answer.customAnswer ?? ''), 240);
+      const selectedSuggestions = uniqueNonEmptyStrings(
+        (answer.selectedSuggestions ?? []).map((item) => trimPromptText(String(item ?? ''), 80)),
+      ).slice(0, 3);
+      const tags = [
+        answer.categoryKey ? labelForCategoryKey(answer.categoryKey) : '',
+        answer.intent ? String(answer.intent).trim() : '',
+      ].filter(Boolean);
+      const prefix = tags.length ? ` [${tags.join(' | ')}]` : '';
+      return [
+        `${index + 1}.${prefix} Q: ${question}`,
+        resolvedAnswer ? `A: ${resolvedAnswer}` : '',
+        selectedSuggestions.length ? `Selected signals: ${selectedSuggestions.join('; ')}` : '',
+      ].filter(Boolean).join('\n');
+    })
+    .join('\n\n');
+}
+
 function buildGenerationUserMessage(input: {
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
@@ -667,9 +690,7 @@ function buildGenerationUserMessage(input: {
   const parts = [`REQUIREMENT: ${trimPromptText(input.requirement, input.limits.requirement)}`];
 
   if (input.clarifyAnswers.length) {
-    const qaText = input.clarifyAnswers
-      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
-      .join('\n\n');
+    const qaText = formatClarifyAnswersForPrompt(input.clarifyAnswers);
     pushPromptSection(parts, 'CLARIFICATION Q&A', qaText, input.limits.clarify);
   }
 
@@ -1037,7 +1058,7 @@ function buildDraftReviewMetadata(input: {
     unresolvedAmbiguities: input.base.unresolvedAmbiguities,
     openDecisions: input.openDecisions ?? input.base.openDecisions,
     roleCoverage: buildRoleCoverage(input.features),
-    coverageFindings: buildCoverageFindings(input.features, input.base.openDecisions),
+    coverageFindings: buildCoverageFindings(input.features, input.openDecisions ?? input.base.openDecisions),
     featureNotes,
     descriptionQuality: input.descriptionQuality,
     lastAction: input.lastAction,
@@ -1627,7 +1648,7 @@ export async function assessRequirementWithLlmWithUsage(input: {
 }): Promise<{ triage: TriageResult | null; usage: { input: number; output: number } | null }> {
   try {
     const userMessage = input.clarifyAnswers?.length
-      ? `REQUIREMENT:\n${input.requirement}\n\nCLARIFYING Q&A:\n${input.clarifyAnswers.map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n')}`
+      ? `REQUIREMENT:\n${input.requirement}\n\nCLARIFYING Q&A:\n${formatClarifyAnswersForPrompt(input.clarifyAnswers)}`
       : `REQUIREMENT:\n${input.requirement}`;
 
     const result = await callLlmJsonWithUsage<Record<string, unknown>>({
@@ -2784,6 +2805,7 @@ export async function generateFeatures(opts: {
   let pass1Features: RawFeature[];
   let pass1DraftFeatures: Feature[];
   let openDecisions: OpenDecision[] = precomputedDraftReview?.openDecisions ?? [];
+  const autoRepairedIssues: string[] = [];
   if (!precomputedDraftFeatures?.length) {
     const pass1StartedAt = Date.now();
     const pass1UserMessage = buildGenerationUserMessage({
@@ -2845,23 +2867,70 @@ export async function generateFeatures(opts: {
 
     pass1DraftFeatures = descriptionRepair.features;
     pass1Features = pass1DraftFeatures.map(toRawFeature);
-    openDecisions = pass1Result.reviewMeta.openDecisions;
+    openDecisions = mergeOpenDecisions(
+      pass1Result.reviewMeta.openDecisions,
+      synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+    );
     pass1ResultUsage = {
       input: pass1Result.usage.input + descriptionRepair.usage.input,
       output: pass1Result.usage.output + descriptionRepair.usage.output,
     };
-    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
-
-    const draftReview = buildDraftReviewMetadata({
+    let draftReview = buildDraftReviewMetadata({
       features: pass1DraftFeatures,
       base: pass1Result.reviewMeta,
       openDecisions,
       descriptionQuality: descriptionRepair.descriptionQuality,
       reviewMessage: 'Review the drafted feature structure before acceptance requirements are written.',
     });
-    if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, draftReview, stageDurationsMs);
-    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-    throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, draftReview, stageDurationsMs);
+
+    const shouldAutoTighten =
+      (draftReview.coverageFindings?.overlapWarnings?.length ?? 0) > 0
+      || (draftReview.coverageFindings?.duplicatedThemes?.length ?? 0) > 0;
+
+    if (shouldAutoTighten) {
+      const tightened = await reviewDraftFeatureSet({
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        similarStoriesText,
+        wiContextText,
+        features: pass1DraftFeatures,
+        action: 'tighten',
+        currentReviewMeta: draftReview,
+        outputProfile,
+        config,
+        providerOpts,
+        shouldCancel,
+      });
+      pass1DraftFeatures = tightened.features;
+      pass1Features = pass1DraftFeatures.map(toRawFeature);
+      openDecisions = mergeOpenDecisions(
+        tightened.reviewMeta.openDecisions ?? [],
+        synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+      );
+      draftReview = {
+        ...tightened.reviewMeta,
+        openDecisions,
+      };
+      pass1ResultUsage = {
+        input: pass1ResultUsage.input + tightened.usage.input,
+        output: pass1ResultUsage.output + tightened.usage.output,
+      };
+      autoRepairedIssues.push('Tightened overlapping draft features before acceptance requirements were written.');
+    }
+
+    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
+
+    const requiresUserDecision =
+      Boolean(draftReview.openDecisions?.some((decision) => decision.blocking))
+      || Boolean(draftReview.coverageFindings?.overlapWarnings?.length)
+      || Boolean(draftReview.coverageFindings?.duplicatedThemes?.length);
+
+    if (requiresUserDecision) {
+      if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, draftReview, stageDurationsMs);
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+      throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, draftReview, stageDurationsMs);
+    }
   } else if (draftReviewDecision && draftReviewDecision !== 'continue') {
     const reviewStartedAt = Date.now();
     const reviewResult = await reviewDraftFeatureSet({
@@ -2881,17 +2950,34 @@ export async function generateFeatures(opts: {
     });
     pass1DraftFeatures = reviewResult.features;
     pass1Features = pass1DraftFeatures.map(toRawFeature);
-    openDecisions = reviewResult.reviewMeta.openDecisions ?? [];
+    openDecisions = mergeOpenDecisions(
+      reviewResult.reviewMeta.openDecisions ?? [],
+      synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+    );
     pass1ResultUsage = reviewResult.usage;
     stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - reviewStartedAt);
 
-    if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, reviewResult.reviewMeta, stageDurationsMs);
-    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-    throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, reviewResult.reviewMeta, stageDurationsMs);
+    const updatedReviewMeta = {
+      ...reviewResult.reviewMeta,
+      openDecisions,
+    };
+    const requiresUserDecision =
+      Boolean(updatedReviewMeta.openDecisions?.some((decision) => decision.blocking))
+      || Boolean(updatedReviewMeta.coverageFindings?.overlapWarnings?.length)
+      || Boolean(updatedReviewMeta.coverageFindings?.duplicatedThemes?.length);
+
+    if (requiresUserDecision) {
+      if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, updatedReviewMeta, stageDurationsMs);
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+      throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, updatedReviewMeta, stageDurationsMs);
+    }
   } else {
     pass1DraftFeatures = precomputedDraftFeatures;
     pass1Features = precomputedDraftFeatures.map(toRawFeature);
-    openDecisions = precomputedDraftReview?.openDecisions ?? [];
+    openDecisions = mergeOpenDecisions(
+      precomputedDraftReview?.openDecisions ?? [],
+      synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+    );
   }
 
   // ── Pass 2: Acceptance Requirements ──
@@ -3100,6 +3186,12 @@ export async function generateFeatures(opts: {
     ...coverageFindings.missingUseCases,
     ...coverageReview.advice.missingCoverage,
   ]);
+  const remainingBlockingIssues = collectRemainingBlockingIssues(violations, openDecisions, coverageFindings);
+  const requiresUserDecision = remainingBlockingIssues.some((issue) =>
+    openDecisions.some((decision) => decision.title === issue)
+    || coverageFindings.overlapWarnings.includes(issue)
+    || issue.startsWith('Duplicated theme:'),
+  );
 
   const tokenUsage: TokenUsageSummary = {
     input: pass1ResultUsage.input + pass2Usage.input + coverageReview.usage.input,
@@ -3128,6 +3220,9 @@ export async function generateFeatures(opts: {
       roleCoverage: buildRoleCoverage(features),
       coverageFindings,
       coverageReview: coverageReview.advice,
+      autoRepairedIssues: uniqueNonEmptyStrings(autoRepairedIssues),
+      remainingBlockingIssues,
+      requiresUserDecision,
       failedFeatureIds: [...failedFeatureIds],
       partialSuccess: failedFeatureIds.size > 0,
       partialSuccessMessage: failedFeatureIds.size > 0
@@ -3389,9 +3484,7 @@ export async function evaluateSufficiency(opts: {
       question: trimForPrompt(answer.question, 180),
       answer: trimForPrompt(answer.answer, 240),
     }));
-  const qaText = compactAnswers
-    .map(a => `Q: ${a.question}\nA: ${a.answer}`)
-    .join('\n\n');
+  const qaText = formatClarifyAnswersForPrompt(compactAnswers);
   const askedQuestionDetails = (opts.askedQuestions ?? opts.answers.map((answer) => ({
     question: answer.question,
     categoryKey: answer.categoryKey,
@@ -4148,19 +4241,112 @@ interface RoleGroundingContext {
   domainRoles?: string[];
 }
 
+const NON_SPECIFIC_ROLE_PATTERNS = [
+  /^authorized user$/i,
+  /^user$/i,
+  /^users$/i,
+  /^specific .* role$/i,
+  /^administrative user role$/i,
+  /^specific administrative user role$/i,
+  /^specific integration monitoring team$/i,
+  /^integration monitoring team$/i,
+];
+
+const CAPITALIZED_ROLE_PATTERN = /\b([A-Z]{2,}(?:\/[A-Z]{2,})+|[A-Z]{2,5}|(?:[A-Z][a-z]+|[A-Z]{2,})(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,})){1,4})\b/g;
+
 const TECHNICAL_FEATURE_TERMS = [
   'integration', 'ingest', 'ingestion', 'parse', 'parsing', 'sync', 'synchronization', 'transmission',
-  'monitor', 'monitoring', 'connection', 'connectivity', 'payload', 'logfile', 'event processing',
-  'mapping', 'import', 'export', 'retry', 'error notification', 'service status',
+  'payload', 'logfile', 'mapping', 'transform', 'monitor integration', 'integration status', 'data flow',
+  'external source', 'external system', 'event processing', 'processing pipeline', 'automated processing',
+  'event notification', 'polling mechanism', 'queue', 'batch processing',
 ];
 const CROSS_CUTTING_FEATURE_TERMS = [
-  'audit', 'permission', 'permissions', 'access', 'role', 'roles', 'duplicate', 'validation',
-  'history', 'traceability', 'compliance', 'retention', 'lifecycle', 'policy', 'notification',
+  'audit', 'audit trail', 'permission', 'permissions', 'access policy', 'role-based access',
+  'traceability', 'compliance', 'retention', 'cannot be deleted', 'must not be deleted',
+  'non-deletion', 'immutable history', 'historical integrity',
 ];
 
 function includesAnyPhrase(text: string, terms: string[]): boolean {
   const haystack = String(text ?? '').toLowerCase();
   return terms.some((term) => haystack.includes(term.toLowerCase()));
+}
+
+function countMatchedPhrases(text: string, terms: string[]): number {
+  const haystack = String(text ?? '').toLowerCase();
+  return terms.reduce((count, term) => count + (haystack.includes(term.toLowerCase()) ? 1 : 0), 0);
+}
+
+function looksLikeTechnicalActor(role: string): boolean {
+  const normalized = role.trim().toLowerCase();
+  if (!normalized) return false;
+  return /\b(integration|service|system|platform|pipeline|processor)\b/.test(normalized)
+    && !/\b(field service|technical support|support specialist|service quality|administrator)\b/.test(normalized);
+}
+
+function isNonSpecificRoleCandidate(role: string): boolean {
+  return NON_SPECIFIC_ROLE_PATTERNS.some((pattern) => pattern.test(role.trim()));
+}
+
+function roleCandidateLooksConcrete(role: string): boolean {
+  const candidate = role.trim();
+  if (!candidate || isNonSpecificRoleCandidate(candidate)) return false;
+  const tokens = tokenizeRole(candidate);
+  if (!tokens.length) return false;
+  if (/^[A-Z]{2,5}(?:\/[A-Z]{2,5})*$/.test(candidate)) return true;
+  return tokens.some((token) => ROLE_LABEL_HINTS.has(token));
+}
+
+function extractCapitalizedRoleCandidates(text: string): string[] {
+  const matches: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = CAPITALIZED_ROLE_PATTERN.exec(text)) !== null) {
+    const candidate = String(match[1] ?? '').trim();
+    if (!roleCandidateLooksConcrete(candidate)) continue;
+    matches.push(candidate);
+  }
+  CAPITALIZED_ROLE_PATTERN.lastIndex = 0;
+  return uniqueNonEmptyStrings(matches);
+}
+
+function findMentionedDomainRoles(domainRoles: string[] = [], text: string): string[] {
+  const haystack = String(text ?? '').toLowerCase();
+  return uniqueNonEmptyStrings(
+    domainRoles.filter((role) => {
+      const normalized = String(role ?? '').trim().toLowerCase();
+      return normalized && haystack.includes(normalized);
+    }),
+  );
+}
+
+function resolvePreferredRole(roleGrounding?: RoleGroundingContext): string | undefined {
+  if (!roleGrounding) return undefined;
+  const requirementActor = extractRoleFromDescription(String(roleGrounding.requirement ?? ''));
+  if (requirementActor && roleCandidateLooksConcrete(requirementActor)) return requirementActor;
+
+  const domainRoleMentions = findMentionedDomainRoles(
+    roleGrounding.domainRoles ?? [],
+    (roleGrounding.clarifyAnswers ?? [])
+      .flatMap((answer) => [answer.question, answer.answer, answer.customAnswer, ...(answer.selectedSuggestions ?? [])])
+      .filter(Boolean)
+      .join('\n'),
+  ).filter(roleCandidateLooksConcrete);
+  if (domainRoleMentions.length === 1) return domainRoleMentions[0];
+
+  const clarifyCandidates = uniqueNonEmptyStrings(
+    (roleGrounding.clarifyAnswers ?? [])
+      .flatMap((answer) => extractCapitalizedRoleCandidates([
+        answer.question,
+        answer.answer,
+        answer.customAnswer,
+        ...(answer.selectedSuggestions ?? []),
+      ].filter(Boolean).join('\n'))),
+  ).filter(roleCandidateLooksConcrete);
+
+  return clarifyCandidates.length === 1 ? clarifyCandidates[0] : undefined;
+}
+
+function replaceFeatureRole(description: string, role: string): string {
+  return description.replace(/^As an?\s+[^,]+,/i, `As ${articleForRole(role)} ${role},`);
 }
 
 function normalizeFeatureClass(value: unknown): FeatureClass | undefined {
@@ -4180,11 +4366,21 @@ function normalizeFeatureActorSource(value: unknown): FeatureActorSource | undef
 
 function determineFeatureClass(raw: RawFeature): FeatureClass {
   const explicit = normalizeFeatureClass(raw.feature_class ?? raw.featureClass);
-  if (explicit) return explicit;
   const content = `${raw.summary ?? ''} ${raw.description ?? ''}`;
-  if (includesAnyPhrase(content, TECHNICAL_FEATURE_TERMS)) return 'technical_enabler';
-  if (includesAnyPhrase(content, CROSS_CUTTING_FEATURE_TERMS)) return 'cross_cutting_rule';
-  return 'business_capability';
+  const role = extractRoleFromDescription(String(raw.description ?? '')) ?? '';
+  const strongCrossCuttingSignal =
+    countMatchedPhrases(content, CROSS_CUTTING_FEATURE_TERMS) >= 1
+    || /\b(audit trail|cannot be deleted|must not be deleted|retain(?:ed|ing)? history|historical integrity)\b/i.test(content);
+  const strongTechnicalSignal =
+    looksLikeTechnicalActor(role)
+    || countMatchedPhrases(content, TECHNICAL_FEATURE_TERMS) >= 2
+    || /\b(parse|extract|ingest|monitor|poll|match|map|transform|payload|external source|external system)\b/i.test(content);
+
+  if (explicit === 'cross_cutting_rule') return explicit;
+  if (strongCrossCuttingSignal) return 'cross_cutting_rule';
+  if (explicit === 'technical_enabler') return explicit;
+  if (strongTechnicalSignal) return 'technical_enabler';
+  return explicit ?? 'business_capability';
 }
 
 function determineActorSource(description: string, roleGrounding?: RoleGroundingContext, raw?: RawFeature): FeatureActorSource {
@@ -4195,7 +4391,7 @@ function determineActorSource(description: string, roleGrounding?: RoleGrounding
   const requirement = String(roleGrounding?.requirement ?? '').toLowerCase();
   if (requirement.includes(role)) return 'prompt';
   const clarifyTexts = (roleGrounding?.clarifyAnswers ?? [])
-    .flatMap((answer) => [answer.question, answer.answer])
+    .flatMap((answer) => [answer.question, answer.answer, answer.customAnswer, ...(answer.selectedSuggestions ?? [])])
     .join(' ')
     .toLowerCase();
   if (clarifyTexts.includes(role)) return 'clarify';
@@ -4250,6 +4446,101 @@ function buildCoverageFindings(features: Feature[], openDecisions: OpenDecision[
     overlapWarnings: uniqueNonEmptyStrings(overlapWarnings),
     duplicatedThemes: uniqueNonEmptyStrings(duplicatedThemes),
   };
+}
+
+function determineOpenDecisionCategory(text: string): ClarifyCategoryKey | 'general' {
+  const normalized = text.toLowerCase();
+  if (/\b(who|permission|permissions|role|roles|owner|ownership|notify|notified)\b/.test(normalized)) return 'user_personas';
+  if (/\b(when|trigger|receive|schedule|frequency|poll|event)\b/.test(normalized)) return 'context_trigger';
+  if (/\b(state|history|lifecycle|swap|exchange|deinstall|removed|moved|owner change|remain)\b/.test(normalized)) return 'state_lifecycle';
+  if (/\b(duplicate|match|identifier|criteria|version list|picklist|target version)\b/.test(normalized)) return 'information_architecture';
+  if (/\b(error|failure|disconnect|drop|unreadable|missing|no match|fallback)\b/.test(normalized)) return 'edge_cases_exceptions';
+  if (/\b(should|how|policy|priority|rule|rules|validation|allowed)\b/.test(normalized)) return 'business_rules';
+  return 'general';
+}
+
+function tokenizeDecisionText(text: string): Set<string> {
+  return new Set(
+    (String(text ?? '').toLowerCase().match(/\b[a-z][a-z0-9/-]{2,}\b/g) ?? [])
+      .filter((token) => !SIZING_STOPWORDS.has(token)),
+  );
+}
+
+function decisionLooksResolved(candidate: string, clarifyAnswers: ClarifyAnswer[]): boolean {
+  const candidateTokens = tokenizeDecisionText(candidate);
+  if (!candidateTokens.size) return false;
+  return clarifyAnswers.some((answer) => {
+    const answerTokens = tokenizeDecisionText([
+      answer.question,
+      answer.answer,
+      answer.customAnswer,
+      ...(answer.selectedSuggestions ?? []),
+    ].filter(Boolean).join(' '));
+    if (!answerTokens.size) return false;
+    return jaccard(candidateTokens, answerTokens) >= 0.18;
+  });
+}
+
+function synthesizeRequirementOpenDecisions(requirement: string, clarifyAnswers: ClarifyAnswer[]): OpenDecision[] {
+  const lines = String(requirement ?? '')
+    .split('\n')
+    .map((line) => sanitizeArClause(line))
+    .filter(Boolean);
+
+  const candidates = lines.filter((line) =>
+    /(?:\?|^\s*(?:what|how|who|when|should|do we|does it|is it|can it)\b)/i.test(line),
+  );
+
+  return candidates
+    .filter((line) => !decisionLooksResolved(line, clarifyAnswers))
+    .map((line, index) => {
+      const category = determineOpenDecisionCategory(line);
+      return {
+        id: `requirement-open-decision-${index + 1}`,
+        title: line.replace(/\?+$/g, '').slice(0, 140),
+        detail: line,
+        category,
+        impact: category === 'general'
+          ? 'This decision can materially change the generated scope or behavior.'
+          : `This unresolved ${category.replace(/_/g, ' ')} decision can materially change the generated scope or behavior.`,
+        blocking: true,
+      } as OpenDecision;
+    });
+}
+
+function mergeOpenDecisions(primary: OpenDecision[], secondary: OpenDecision[]): OpenDecision[] {
+  const seen = new Set<string>();
+  const merged: OpenDecision[] = [];
+  [...primary, ...secondary].forEach((decision) => {
+    const title = sanitizeArClause(decision.title).toLowerCase();
+    if (!title || seen.has(title)) return;
+    seen.add(title);
+    merged.push(decision);
+  });
+  return merged;
+}
+
+function collectRemainingBlockingIssues(
+  violations: ValidationViolation[],
+  openDecisions: OpenDecision[],
+  coverageFindings?: CoverageFindings,
+): string[] {
+  const blockingViolations = violations
+    .filter((violation) =>
+      /truncated|generic role wording|fallback|overlaps with|unresolved decision wording|description must follow/i.test(violation.message),
+    )
+    .map((violation) => violation.message);
+
+  const blockingDecisions = openDecisions
+    .filter((decision) => decision.blocking)
+    .map((decision) => decision.title);
+
+  return uniqueNonEmptyStrings([
+    ...blockingViolations,
+    ...(coverageFindings?.overlapWarnings ?? []),
+    ...(coverageFindings?.duplicatedThemes ?? []).map((item) => `Duplicated theme: ${item}`),
+    ...blockingDecisions,
+  ]);
 }
 
 function looksLikeRoleLabel(text: string): boolean {
@@ -4312,6 +4603,15 @@ function trimVerboseSegment(value: string, maxWords: number): string {
   return trimmed.replace(/[,:;.\s]+$/g, '').trim();
 }
 
+function normalizeClauseGrammar(clause: string): string {
+  return clause
+    .replace(/^they views\b/i, 'they view')
+    .replace(/^they reviews\b/i, 'they review')
+    .replace(/^they accesses\b/i, 'they access')
+    .replace(/^they confirms\b/i, 'they confirm')
+    .replace(/^they validates\b/i, 'they validate');
+}
+
 function deduplicateDescription(description: string): string {
   // Detect descriptions where the LLM concatenated two user-story sentences.
   // Strategy: find the last "As a[n] ..." occurrence and use that as the canonical sentence.
@@ -4347,13 +4647,21 @@ export function applyFeatureOutputGuardrails(
   feature: Feature,
   _roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
 ): Feature {
-  void _roleGrounding;
   const normalizedAcceptanceRequirements = (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity);
-  const description = normalizeDraftDescriptionText(feature.description);
+  let description = normalizeDraftDescriptionText(feature.description);
+  const preferredRole = resolvePreferredRole(_roleGrounding);
+  const currentRole = extractRoleFromDescription(description);
+  if (preferredRole && currentRole && currentRole.trim().toLowerCase() === 'authorized user') {
+    description = replaceFeatureRole(description, preferredRole);
+  }
   return harmonizeFeatureRoleLanguage({
     ...feature,
     description,
-    acceptanceRequirements: normalizedAcceptanceRequirements,
+    acceptanceRequirements: normalizedAcceptanceRequirements.map((ar) => ({
+      given: normalizeClauseGrammar(ar.given),
+      when: normalizeClauseGrammar(ar.when),
+      then: normalizeClauseGrammar(ar.then),
+    })),
   });
 }
 
@@ -4366,10 +4674,11 @@ function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext)
     storyPoints: raw.suggested_story_points,
     processCode: raw.process_code,
   };
-  draft.featureClass = determineFeatureClass(raw);
-  draft.actorSource = determineActorSource(draft.description, roleGrounding, raw);
-  draft.confidence = determineFeatureConfidence({ description: draft.description, actorSource: draft.actorSource, raw });
-  return applyFeatureOutputGuardrails(draft, roleGrounding);
+  const guarded = applyFeatureOutputGuardrails(draft, roleGrounding);
+  guarded.featureClass = determineFeatureClass({ ...raw, description: guarded.description });
+  guarded.actorSource = determineActorSource(guarded.description, roleGrounding, raw);
+  guarded.confidence = determineFeatureConfidence({ description: guarded.description, actorSource: guarded.actorSource, raw });
+  return guarded;
 }
 
 function buildLlmProviderOpts(config: TenantConfig) {

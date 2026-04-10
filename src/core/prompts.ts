@@ -236,7 +236,7 @@ RULES:
 - Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
 - Preserve meaningful workflow boundaries when actor responsibilities, decision paths, lifecycle branches, or exception handling would materially change what gets built or tested.
 - Do NOT split a trigger from its immediate behavior when the behaviors are inseparable parts of the same deliverable. If one event causes creation and first-pass classification of the same object, keep them together unless the requirement clearly indicates independent ownership or release value.
-- DO NOT promote configuration or settings screens ("define designated inboxes", "manage classification keywords", "configure X") into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable. Admin configuration is a property of the parent capability — fold it into the feature whose behavior it controls.
+- DO NOT promote configuration or settings screens ("define intake sources", "manage classification rules", "configure X") into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable. Admin configuration is a property of the parent capability — fold it into the feature whose behavior it controls.
 - Before finalizing, check whether any pair of features is truly duplicative. Merge only when they represent the same primary capability and outcome, not merely adjacent parts of the same workflow area.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
@@ -378,9 +378,9 @@ RULES:
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - No system-specific terms: no product names, module names, system object names
 - Write as if describing business outcomes to someone who has never seen the system
-- Translate technical event wording into plain business language. Prefer customer communications, open cases, approvals, routing, and outcomes over inbox names, subject lines, reference IDs, matching logic, append operations, parsing steps, or generic system actions.
-- BAD: "GIVEN an email is received in a designated inbox with a unique Case Reference ID in its subject WHEN the system identifies a matching active Case THEN the email content is appended to that existing Case"
-- GOOD: "GIVEN a customer reply clearly relates to an open case WHEN the communication is reviewed THEN the case history includes that reply"
+- Translate technical event wording into plain business language. Prefer business objects, active records, approvals, routing, and outcomes over intake-source names, metadata fields, identifiers, matching logic, append operations, parsing steps, or generic system actions.
+- BAD: "GIVEN a message arrives from intake source A with identifier metadata WHEN the system matches the payload THEN the source content is appended to the existing record"
+- GOOD: "GIVEN an incoming update clearly relates to an active record WHEN the update is reviewed THEN the record history includes that update"
 - Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
 - Each AR tests one distinct thing
 - Treat the feature description role as the default actor anchor for that feature.
@@ -388,7 +388,7 @@ RULES:
 - Only upgrade to a more specific role when that role is directly supported by the requirement, clarified answers, or other provided evidence. If you do upgrade, use that same specific role consistently across the feature instead of mixing generic and specific labels.
 - Do not replace the feature role with synonyms like user, worker, technician, operator, service professional, or agent unless the feature description itself uses that term
 - When multiple ARs for the same feature share the same actor, do not restate the full role label in every WHEN clause. After the role is established, role-neutral phrasing ("they attempt to", "a record is created") is preferred over mechanical repetition of the label.
-- When a requirement names two closely related object types subject to the same rule, prefer one WHEN clause that covers both ("WHEN a [role] attempts to create either a service case or a work order linked to that product") over four near-identical ARs that repeat the same scenario for each type separately.
+- When a requirement names two closely related object types subject to the same rule, prefer one WHEN clause that covers both ("WHEN a [role] attempts to create either linked record type") over four near-identical ARs that repeat the same scenario for each type separately.
 - If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
 - When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
 - Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
@@ -519,22 +519,22 @@ Reasoning: One output capability, one actor, a few formatting and scope question
 Output: {"reasoning": "...", "estimatedFeatures": 1, "estimatedQuestions": 5, "shape": "minimal", "complexity": "low", "arDepth": "lean"}
 
 EXAMPLE 3 — Stated multi-step workflow with known actors and rules:
-Requirement: "Managers must be able to approve or reject timesheets submitted by their direct reports. Approved timesheets flow to payroll. Rejected ones are returned to the employee with a mandatory comment."
-Reasoning: Four distinct deliverable behaviours: approval action, rejection action, payroll handoff, comment enforcement. Two actor groups (managers, employees). Core rule is stated; edge cases (late submission, delegation, resubmission) remain open but the workflow is clear. For this to be "high", multiple conflicting decision paths or 3+ actor groups would be needed.
+Requirement: "Managers must be able to approve or reject submissions from their direct reports. Approved submissions move to the next processing step. Rejected submissions are returned to the requester with a mandatory comment."
+Reasoning: Four distinct deliverable behaviours: approval action, rejection action, downstream handoff, comment enforcement. Two actor groups (managers, requesters). Core rule is stated; edge cases (late submission, delegation, resubmission) remain open but the workflow is clear. For this to be "high", multiple conflicting decision paths or 3+ actor groups would be needed.
 Output: {"reasoning": "...", "estimatedFeatures": 4, "estimatedQuestions": 7, "shape": "balanced", "complexity": "medium", "arDepth": "standard"}
 
 EXAMPLE 4 — Short but capability-heavy workflow area:
-Requirement: "As a support coordinator, I need one place to manage incoming customer communications and create or update cases from them."
-Reasoning: The actor is stated, but the operating logic is mostly not. Channel differences, case creation vs linking, duplicate handling, case typing, required captured information, matching rules, missing identifiers, and lifecycle handling are all materially unresolved. This is not just one focused rule; it is a short prompt that names a workflow area whose real behavior must largely be inferred. Each distinct handling path (new vs existing, different source types, matching confidence levels, exception paths) tends to surface as an independently deliverable capability. That should push complexity to high and require extensive discovery.
+Requirement: "As an operations coordinator, I need one place to manage incoming requests and create or update records from them."
+Reasoning: The actor is stated, but the operating logic is mostly not. Intake-path differences, record creation vs linking, duplicate handling, categorisation, required captured information, matching rules, missing identifiers, and lifecycle handling are all materially unresolved. This is not just one focused rule; it is a short prompt that names a workflow area whose real behavior must largely be inferred. Each distinct handling path (new vs existing, different source types, matching confidence levels, exception paths) tends to surface as an independently deliverable capability. That should push complexity to high and require extensive discovery.
 Output: {"reasoning": "...", "estimatedFeatures": 5, "estimatedQuestions": 12, "shape": "narrow", "complexity": "high", "arDepth": "thorough"}
 
 EXAMPLE 5 — Broad self-service platform:
-Requirement: "Build a self-service portal where customers can view their account, raise support tickets, track order status, manage their subscription, and update billing details."
-Reasoning: Five named capability areas, each implying multiple sub-features (e.g. account view includes profile, history, and preferences; support tickets include creation, tracking, and updates). Authentication, permissions, and notification behaviour are cross-cutting but independently deliverable. This genuinely yields 9+ independently deliverable items with 15+ questions needed to close the gaps across all five areas. For this to be "epic", the scope boundary itself would need to be unknown.
+Requirement: "Build a self-service workspace where users can view their profile, submit requests, track status, manage preferences, and update payment details."
+Reasoning: Five named capability areas, each implying multiple sub-features (e.g. profile view includes history and preferences; request handling includes creation, tracking, and updates). Authentication, permissions, and notification behaviour are cross-cutting but independently deliverable. This genuinely yields 9+ independently deliverable items with 15+ questions needed to close the gaps across all five areas. For this to be "epic", the scope boundary itself would need to be unknown.
 Output: {"reasoning": "...", "estimatedFeatures": 9, "estimatedQuestions": 15, "shape": "broad", "complexity": "high", "arDepth": "thorough"}
 
 EXAMPLE 6 — Open-ended strategic initiative:
-Requirement: "We need to modernise our entire customer onboarding process."
+Requirement: "We need to modernise our entire intake and activation process."
 Reasoning: No scope boundary, no actors, no rules, no trigger. Nearly every discovery dimension is open. This is genuinely epic — the scope is unknown, not just large. The question count must be high enough to establish scope boundaries, identify actor groups, and surface decision logic before any decomposition can happen. Expect 13+ features spanning multiple workflow areas once scope is established.
 Output: {"reasoning": "...", "estimatedFeatures": 13, "estimatedQuestions": 17, "shape": "epic", "complexity": "very_high", "arDepth": "comprehensive"}
 
@@ -590,7 +590,13 @@ Rules:
 
 export function buildArPerFeatureUserMessage(opts: {
   requirement: string;
-  clarifyAnswers?: { question: string; answer: string }[];
+  clarifyAnswers?: {
+    question: string;
+    answer: string;
+    selectedSuggestions?: string[];
+    categoryKey?: string;
+    intent?: string;
+  }[];
   attachmentText?: string;
   wiContextText?: string;
   similarStoriesText?: string;
@@ -603,7 +609,15 @@ export function buildArPerFeatureUserMessage(opts: {
   const answers = opts.clarifyAnswers ?? [];
   if (answers.length > 0) {
     const qaText = answers
-      .map(a => `Q: ${a.question}\nA: ${a.answer}`)
+      .map((a, index) => {
+        const tags = [a.categoryKey, a.intent].filter(Boolean).join(' | ');
+        const selected = (a.selectedSuggestions ?? []).filter(Boolean).slice(0, 3);
+        return [
+          `${index + 1}.${tags ? ` [${tags}]` : ''} Q: ${a.question}`,
+          `A: ${a.answer}`,
+          selected.length ? `Selected signals: ${selected.join('; ')}` : '',
+        ].filter(Boolean).join('\n');
+      })
       .join('\n\n')
       .slice(0, 1500);
     parts.push(`CLARIFYING Q&A:\n${qaText}`);
@@ -663,14 +677,14 @@ export function buildClarifySystemPrompt(opts: {
     : 'Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.';
   const exemplarBlock = `DISCOVERY EXEMPLARS:
 - Workflow-area ask:
-  Requirement: Manage phone, WhatsApp, text, and email intake and create cases automatically.
-  Strong question: Which rule should decide whether an incoming WhatsApp or email updates an open case or creates a new one?
+  Requirement: Manage inbound requests from several intake paths and create or update records automatically.
+  Strong question: Which rule should decide whether an incoming request updates an existing record or creates a new one?
 - Rule / policy ask:
-  Requirement: Prevent service case creation after end of service unless an approved exception applies.
-  Strong question: Who can approve an exception when a service case is blocked by the end-of-service rule?
+  Requirement: Prevent a record from being submitted after its eligibility window closes unless an approved exception applies.
+  Strong question: Who can approve an exception when the eligibility rule blocks the normal path?
 - Exception-heavy ask:
-  Requirement: Route incoming customer issues automatically but avoid duplicates and missing-data failures.
-  Strong question: What should happen when the incoming issue looks like a duplicate but the match is not certain enough to trust automatically?`;
+  Requirement: Route incoming requests automatically but avoid duplicates and missing-data failures.
+  Strong question: What should happen when an incoming request might be a duplicate but the match is not certain enough to trust automatically?`;
 
   return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
 ${discoveryEvidenceBlock(opts.domainContext)}
@@ -936,7 +950,7 @@ ACCEPTANCE REQUIREMENT RULES:
 - If you consolidate multiple features into fewer features, merge the coverage cleanly and rewrite the final ARs as complete standalone triples.
 - No solution language or system-specific terms
 - Business outcomes only — not implementation steps
-- When technical wording appears in the current draft, translate it into user-facing business language without losing the rule. Prefer customer communications, case history, approvals, routing, and outcomes over inboxes, subject lines, reference IDs, matching logic, append operations, or parsing steps.
+- When technical wording appears in the current draft, translate it into user-facing business language without losing the rule. Prefer business objects, active records, approvals, routing, and outcomes over transport metadata, identifiers, matching logic, append operations, or parsing steps.
 - Be CONCEPTUAL — describe behavior patterns, never example values
 - The GIVEN must describe a real-world business situation, not a system configuration state
 - Each AR tests one distinct thing; include happy path, key business rules, relevant edge cases
@@ -1065,7 +1079,7 @@ QUALITY RULES:
 - Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
 - Every acceptance_requirements array item must contain one COMPLETE GIVEN/WHEN/THEN triple. Never split a single AR across multiple entries.
 - Be CONCEPTUAL — describe behavior patterns, not specific instances
-- Translate technical event wording into plain business language. Prefer customer communications, open cases, approvals, routing, and outcomes over inbox names, subject lines, reference IDs, matching logic, append operations, or system internals.
+- Translate technical event wording into plain business language. Prefer business objects, active records, approvals, routing, and outcomes over intake-source names, metadata fields, matching logic, append operations, or system internals.
 - Preserve role wording exactly: if the feature description says "As a [role]", do not rename that actor inside related ARs unless the feedback explicitly changes the role
 - Never use the actor role as the subject of a GIVEN state condition. The actor (e.g. "Service Manager") is a human who acts — the GIVEN describes the state of a business object (e.g. "a service contract has expired"), not the actor. The actor belongs in WHEN, not GIVEN.
 

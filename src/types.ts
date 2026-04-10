@@ -667,6 +667,9 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   roleCoverage?: RoleCoverageItem[];
   coverageFindings?: CoverageFindings;
   coverageReview?: CoverageReviewAdvice;
+  autoRepairedIssues?: string[];
+  remainingBlockingIssues?: string[];
+  requiresUserDecision?: boolean;
   failedFeatureIds?: string[];
   partialSuccess?: boolean;
   partialSuccessMessage?: string;

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UsageMeter } from './UsageMeter';
 import type { OutputProfile } from './types';
 
 interface SidebarProps {
@@ -127,7 +126,6 @@ export function Sidebar({
   const contextReady = contextMode === 'global' || (contextMode === 'project' && primaryProjectKey !== '*');
   const hasPromptInput = Boolean(requirement.trim() || runAttachments.length);
   const brainstormDisabled = !contextReady || !hasPromptInput || isWorking;
-  const [showUsage, setShowUsage] = React.useState(true);
   const [projectFilter, setProjectFilter] = React.useState('');
   const wordCount = requirement.trim().split(/\s+/).filter(Boolean).length;
   const activeWiDocs = projectKeys.length
@@ -142,7 +140,6 @@ export function Sidebar({
   const projectTitle = selectedProjects.length
     ? selectedProjects.map(project => project.name ? `${project.key} · ${project.name}` : project.key).join(' + ')
     : 'Global Workspace';
-  const tierName = tier.charAt(0) ? `${tier.charAt(0).toUpperCase()}${tier.slice(1)}` : 'Standard';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
@@ -162,6 +159,22 @@ export function Sidebar({
       ? 'Balanced'
       : 'Business-first';
   const activeOutputProfile = OUTPUT_PROFILE_OPTIONS.find((option) => option.value === runOutputProfileOverride) ?? OUTPUT_PROFILE_OPTIONS[0];
+  const usageCurrent = usage?.currentMonth ?? 0;
+  const usageLimit = limits?.generationsPerMonth ?? 0;
+  const usagePercentage = !usage || !limits || hasUnlimitedUsage || usageLimit <= 0
+    ? 0
+    : Math.min(100, (usageCurrent / usageLimit) * 100);
+  const usageMeterTone = isAtLimit
+    ? 'var(--rf-warning)'
+    : usagePercentage >= 80
+      ? 'rgba(179,94,48,0.92)'
+      : 'var(--rf-brand)';
+  const usageLabel = !usage || !limits
+    ? 'Usage syncing'
+    : hasUnlimitedUsage
+      ? 'Unlimited usage'
+      : `${Math.max(0, usageLimit - usageCurrent)} left before guidance`;
+  const shouldShowHeaderUsage = Boolean(usage && limits && !hasUnlimitedUsage);
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -239,9 +252,49 @@ export function Sidebar({
         </div>
 
         <div className="flex min-w-0 items-center gap-2">
-          <span className="rf-pane-header-badge hidden min-[360px]:inline-flex">
-            Tier <strong>{tierName}</strong>
-          </span>
+          {shouldShowHeaderUsage && (
+            <motion.div
+              className="hidden min-[380px]:flex min-w-0 flex-1 max-w-[220px] items-center gap-2 rounded-[18px] border border-[var(--rf-border)] bg-white/72 px-2.5 py-2 shadow-[0_10px_24px_-18px_rgba(43,89,74,0.45)] backdrop-blur-xl"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.12, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+              title={isAtLimit ? 'Included monthly usage guidance has been reached.' : `${usageCurrent}/${usageLimit} included generations used this month.`}
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[12px] border ${
+                    isAtLimit
+                      ? 'border-[var(--rf-warning)]/30 bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]'
+                      : 'border-[var(--rf-border)] bg-white/85 text-[var(--rf-brand)]'
+                  }`}
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+                    Usage
+                  </div>
+                  <div className="truncate text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                    {usageLabel}
+                  </div>
+                </div>
+              </div>
+              <div className="hidden min-[430px]:flex w-[72px] shrink-0 flex-col items-end gap-1">
+                <div className="text-[10px] font-bold tracking-[0.08em] text-[var(--rf-text-tertiary)]">
+                  {usageCurrent}/{usageLimit}
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full border border-[rgba(0,0,0,0.04)] bg-white/80">
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ background: usageMeterTone }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${usagePercentage}%` }}
+                    transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
           {isAdmin && (
             <button
               onClick={() => setViewMode('settings')}
@@ -266,7 +319,7 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Scrollable body ── */}
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-3 py-3 gap-2.5 overflow-y-auto custom-scrollbar">
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-3 py-3 gap-2 overflow-y-auto custom-scrollbar">
 
         {/* ── Workspace card ── */}
         <motion.div
@@ -708,25 +761,6 @@ export function Sidebar({
         </motion.div>
       </div>
 
-      {/* ── Usage footer ── */}
-      {!hasUnlimitedUsage && showUsage && (
-        <motion.div
-          className="px-3 pb-3 pt-1 shrink-0"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35, duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="relative overflow-hidden rounded-[18px] border border-[var(--rf-border)] bg-white/72 backdrop-blur-xl px-3 py-2.5">
-            <button
-              onClick={() => setShowUsage(false)}
-              className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] transition hover:bg-white/70 hover:text-[var(--rf-text)]"
-            >
-              <X className="w-3 h-3" />
-            </button>
-            <UsageMeter usage={usage} limits={limits} tier={tier} isCompact={true} className="pr-6" />
-          </div>
-        </motion.div>
-      )}
     </aside>
   );
 }

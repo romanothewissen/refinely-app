@@ -51,6 +51,33 @@ function normalizeDisplayText(value: string): string {
     .trim();
 }
 
+const EXPORT_TRUNCATION_WORDS = new Set([
+  'a', 'an', 'the',
+  'and', 'or', 'but',
+  'for', 'to', 'of', 'in', 'on', 'at', 'by', 'with', 'from', 'into', 'about', 'as',
+  'that', 'which', 'who', 'when', 'where', 'while',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had',
+  'does', 'do', 'did', 'can', 'could', 'should', 'would', 'may', 'might', 'must', 'shall', 'will',
+  'contains', 'matches', 'indicates', 'receives', 'attempts',
+]);
+
+function exportTextLooksTruncated(value: string): boolean {
+  const cleaned = String(value ?? '').replace(/[.,;:!?)"'\s]+$/g, '').trim();
+  if (!cleaned) return false;
+  const parts = cleaned.split(/\s+/);
+  const last = parts[parts.length - 1]?.toLowerCase().replace(/[^a-z]/g, '');
+  return Boolean(last && EXPORT_TRUNCATION_WORDS.has(last));
+}
+
+function sanitizeExportText(value: string): string {
+  const normalized = normalizeDisplayText(value);
+  if (!normalized) return '';
+  if (exportTextLooksTruncated(normalized)) {
+    return '[Incomplete content blocked from export]';
+  }
+  return normalized;
+}
+
 function normaliseWhitespace(text: string): string {
   return (text || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -1564,7 +1591,9 @@ export function MainContent({
       features.forEach((feature, idx) => {
         const featureNumber = idx + 1;
         const featureTitle = feature.title || feature.summary || `Feature ${featureNumber}`;
-        const overlapWarning = overlapWarnings.find((item) => item.toLowerCase().includes(feature.summary.toLowerCase())) ?? '';
+        const overlapWarning = overlapWarnings
+          .filter((item) => item.toLowerCase().includes(feature.summary.toLowerCase()))
+          .join(' | ');
         const status = feature.pendingRemoval
           ? 'Pending removal'
           : feature.pendingAddition
@@ -1583,7 +1612,7 @@ export function MainContent({
           formatFeatureClassLabel(feature.featureClass),
           formatConfidenceLabel(feature.confidence),
           formatActorSourceLabel(feature.actorSource),
-          feature.description || feature.markdown || '',
+          sanitizeExportText(feature.description || feature.markdown || ''),
           feature.acceptanceRequirements?.length || 0,
           '',
           '',
@@ -1603,9 +1632,9 @@ export function MainContent({
             formatActorSourceLabel(feature.actorSource),
             `Acceptance requirement ${arIdx + 1}`,
             arIdx + 1,
-            ar.given || '',
-            ar.when || '',
-            ar.then || '',
+            sanitizeExportText(ar.given || ''),
+            sanitizeExportText(ar.when || ''),
+            sanitizeExportText(ar.then || ''),
             overlapWarning,
             status,
             feature.jiraIssueKey || '',
@@ -1691,6 +1720,24 @@ export function MainContent({
         { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } },
       ];
       XLSXUtils.book_append_sheet(workbook, openDecisionSheet, 'Open Decisions');
+      const qualitySummaryRows: Array<Array<string | number>> = [
+        ['Refinely Quality Summary'],
+        [`Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`],
+        [`Exported at (UTC): ${exportedAt}`],
+        [`Resolved automatically: ${generationContext?.autoRepairedIssues?.length ?? 0} | Remaining blocking issues: ${generationContext?.remainingBlockingIssues?.length ?? 0}`],
+        ['Type', 'Detail'],
+        ...((generationContext?.autoRepairedIssues ?? []).map((item) => ['Auto-repaired', sanitizeExportText(item)])),
+        ...((generationContext?.remainingBlockingIssues ?? []).map((item) => ['Remaining blocking issue', sanitizeExportText(item)])),
+      ];
+      const qualitySummarySheet = XLSXUtils.aoa_to_sheet(qualitySummaryRows);
+      qualitySummarySheet['!cols'] = [{ wch: 24 }, { wch: 72 }];
+      qualitySummarySheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 1 } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 1 } },
+      ];
+      XLSXUtils.book_append_sheet(workbook, qualitySummarySheet, 'Quality Summary');
       const arrayBuffer = write(workbook, { bookType: 'xlsx', type: 'array' });
       const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
@@ -2353,6 +2400,32 @@ export function MainContent({
                           {normalizeDisplayText(detail)}
                         </div>
                       ))}
+                    </div>
+                  ) : null}
+                  {(generationContext.autoRepairedIssues?.length || generationContext.remainingBlockingIssues?.length) ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {(generationContext.autoRepairedIssues?.length ?? 0) > 0 && (
+                        <div className="rounded-xl border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                          <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Resolved automatically</div>
+                          {(generationContext.autoRepairedIssues ?? []).map((item, index) => (
+                            <div key={`auto-repair-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
+                              {normalizeDisplayText(item)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(generationContext.remainingBlockingIssues?.length ?? 0) > 0 && (
+                        <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                          <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
+                            {generationContext.requiresUserDecision ? 'Needs input' : 'Remaining blockers'}
+                          </div>
+                          {(generationContext.remainingBlockingIssues ?? []).map((item, index) => (
+                            <div key={`blocking-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
+                              {normalizeDisplayText(item)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>

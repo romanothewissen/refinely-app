@@ -905,7 +905,7 @@ test('applyFeatureOutputGuardrails preserves a valid but detailed feature descri
   assert.equal(guarded.acceptanceRequirements[0].when.includes('for example'), false);
 });
 
-test('applyFeatureOutputGuardrails does not promote a generic feature role from AR evidence alone', () => {
+test('applyFeatureOutputGuardrails promotes a generic feature role when the requirement states one clear actor', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
     summary: 'Block unsupported record creation',
@@ -927,11 +927,11 @@ test('applyFeatureOutputGuardrails does not promote a generic feature role from 
     domainRoles: ['Technical Support Specialist', 'Supervisor'],
   });
 
-  assert.match(guarded.description, /^As an authorized user, I need to /);
+  assert.match(guarded.description, /^As a Technical Support Specialist, I need to /);
   assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
 });
 
-test('applyFeatureOutputGuardrails keeps repeated WHEN role labels when the feature role stays generic', () => {
+test('applyFeatureOutputGuardrails keeps repeated WHEN role labels after grounding the feature role from the requirement', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
     summary: 'Block unsupported record creation',
@@ -953,6 +953,7 @@ test('applyFeatureOutputGuardrails keeps repeated WHEN role labels when the feat
     domainRoles: ['Technical Support Specialist'],
   });
 
+  assert.match(guarded.description, /^As a Technical Support Specialist, I need to /);
   assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
   assert.match(guarded.acceptanceRequirements[1].when, /^the Technical Support Specialist attempts to create the linked work order$/i);
 });
