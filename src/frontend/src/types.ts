@@ -428,9 +428,19 @@ export type ClarifyDiscoveryStatus = 'needs_clarification' | 'ready_for_generati
 export type ClarifyFailureReasonCode =
   | 'timeout'
   | 'queue_error'
-  | 'invalid_empty_questions'
-  | 'invalid_underpowered_questions'
-  | 'invalid_generic_questions';
+  | 'json_parse_failed'
+  | 'question_array_missing'
+  | 'question_shape_invalid'
+  | 'question_array_empty_when_discovery_required'
+  | 'question_set_generic'
+  | 'question_set_truncated';
+
+export interface ClarifyFailureDiagnostics {
+  technicalSummary: string;
+  userActionHint: string;
+  generatedQuestionCount?: number;
+  parseShape?: string;
+}
 
 export interface DiscoveryProfile {
   scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
@@ -559,6 +569,7 @@ export interface ContextSourceMeta {
 export interface ClarifyContextMeta extends ContextSourceMeta {
   discoveryStatus?: ClarifyDiscoveryStatus;
   failureReasonCode?: ClarifyFailureReasonCode;
+  failureDiagnostics?: ClarifyFailureDiagnostics;
   goldExamplesCount?: number;
   referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;

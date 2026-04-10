@@ -208,7 +208,7 @@ test('validateAndRepairInitialDiscovery rejects an empty model output when disco
     requirement: 'As a TSS, I need to manage various input channels and have cases created automatically.',
   });
 
-  assert.equal(repaired.failureReasonCode, 'invalid_empty_questions');
+  assert.equal(repaired.failureReasonCode, 'question_array_empty_when_discovery_required');
   assert.deepEqual(repaired.questions, []);
 });
 
@@ -293,7 +293,7 @@ test('broad multi-input automation asks still infer unresolved discovery categor
     requirement: 'As a TSS, I need to be able to manage my various input channels efficiently (phone, whatsapp, text, email) and have cases created from it automatically',
   });
 
-  assert.equal(repaired.failureReasonCode, 'invalid_empty_questions');
+  assert.equal(repaired.failureReasonCode, 'question_array_empty_when_discovery_required');
   assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
   assert.equal(repaired.discoveryProfile.scope, 'moderate');
   assert.equal(repaired.discoveryProfile.ambiguity, 'medium');
@@ -579,7 +579,8 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /visible "question" field must be short and plain-language first/i);
   assert.match(clarifyPrompt, /optional "details" field/i);
   assert.match(clarifyPrompt, /Preserve requirement-native domain wording/i);
-  assert.match(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
+  assert.match(clarifyPrompt, /Suggestions are optional/i);
+  assert.match(clarifyPrompt, /provide 1-3 short grounded options/i);
   assert.match(clarifyPrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
   assert.match(clarifyPrompt, /Never write discovery questions in first person/i);
   assert.match(clarifyPrompt, /normalize the question voice into third-person business language/i);
@@ -593,22 +594,26 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /Discovery must size itself from the unresolved business ambiguity you find/i);
   assert.match(clarifyPrompt, /Simplify syntax, not business meaning/i);
   assert.match(clarifyPrompt, /Earlier triage suggests moderate scope, high complexity, high ambiguity/i);
+  assert.match(clarifyPrompt, /DISCOVERY EXEMPLARS/i);
+  assert.match(clarifyPrompt, /Which rule should decide whether an incoming WhatsApp or email updates an open case or creates a new one/i);
+  assert.doesNotMatch(clarifyPrompt, /profileReasoning/i);
+  assert.doesNotMatch(clarifyPrompt, /must equal the number of questions you return/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
-  assert.doesNotMatch(clarifyPrompt, /Provide 2-3 suggestions by default/i);
+  assert.doesNotMatch(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
   assert.match(evaluatePrompt, /Ask however many follow-up questions are materially needed/i);
   assert.match(evaluatePrompt, /missingCategoryKeys/);
   assert.match(evaluatePrompt, /Prefer one visible follow-up question per remaining business gap/i);
-  assert.match(evaluatePrompt, /Provide exactly 4 suggestions per follow-up question/i);
+  assert.match(evaluatePrompt, /Follow-up suggestions are optional/i);
+  assert.match(evaluatePrompt, /provide 1-3 short grounded options/i);
   assert.match(evaluatePrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
-  assert.match(evaluatePrompt, /medium-length starter answers/i);
   assert.match(evaluatePrompt, /Reuse concrete business nouns/i);
   assert.match(evaluatePrompt, /optional "details" field/i);
   assert.match(evaluatePrompt, /Preserve the domain wording already present/i);
   assert.doesNotMatch(evaluatePrompt, /system-agnostic/i);
   assert.doesNotMatch(evaluatePrompt, /grouped follow-up questions/i);
-  assert.doesNotMatch(evaluatePrompt, /Provide 2-3 suggestions per follow-up question by default/i);
+  assert.doesNotMatch(evaluatePrompt, /Provide exactly 4 suggestions per follow-up question/i);
 
   assert.doesNotMatch(triagePrompt, /\bSAP\b/i);
   assert.doesNotMatch(triagePrompt, /\bServiceMax\b/i);

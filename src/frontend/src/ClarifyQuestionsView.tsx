@@ -112,6 +112,7 @@ export function ClarifyQuestionsView({
   const [showContextDetails, setShowContextDetails] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [expandedQuestionDetails, setExpandedQuestionDetails] = useState<Record<number, boolean>>({});
+  const failureDiagnostics = contextMeta?.failureDiagnostics;
 
   useEffect(() => {
     const priorByQuestion = new Map(
@@ -422,6 +423,16 @@ export function ClarifyQuestionsView({
                   <p className="mt-2 text-sm text-[var(--rf-text-secondary)] leading-relaxed">
                     {blockingState.message}
                   </p>
+                  {failureDiagnostics?.userActionHint && (
+                    <p className="mt-2 text-sm text-[var(--rf-text-secondary)] leading-relaxed">
+                      What to change: {failureDiagnostics.userActionHint}
+                    </p>
+                  )}
+                  {failureDiagnostics?.technicalSummary && (
+                    <p className="mt-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
+                      {failureDiagnostics.technicalSummary}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs font-medium text-[var(--rf-text-tertiary)]">
                     Requirement discovery did not complete successfully, so generation is paused until you retry or skip explicitly.
                   </p>

@@ -113,6 +113,16 @@ function summarizeJsonParseInput(text: string): Record<string, string | number |
   };
 }
 
+export class LlmJsonParseError extends Error {
+  parseShape: string;
+
+  constructor(message: string, parseShape: string) {
+    super(message);
+    this.name = 'LlmJsonParseError';
+    this.parseShape = parseShape;
+  }
+}
+
 function buildTimeoutError(label: string, timeoutMs: number): Error {
   return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s.`);
 }
@@ -804,6 +814,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
   piiMaskingEnabled?: boolean;
 }): Promise<{ data: T; usage: { input: number; output: number }; piiMasking?: PiiMaskingStats }> {
   let lastError: Error | null = null;
+  let lastParseShape = '';
   let totalInput = 0;
   let totalOutput = 0;
   const piiMaskingTotals: PiiMaskingStats = { enabled: !!opts.piiMaskingEnabled, totalRedactions: 0, byType: {} };
@@ -830,6 +841,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
     } catch (err) {
       lastError = err as Error;
       const parseShape = summarizeJsonParseInput(res.text);
+      lastParseShape = JSON.stringify(parseShape);
       if (attempt === 0) {
         console.warn('[llm-json] Failed to parse model response as JSON; retrying with stricter instruction.', {
           provider,
@@ -860,5 +872,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
     }
   }
 
-  throw lastError ?? new Error('LLM JSON extraction failed');
+  if (lastError) {
+    throw new LlmJsonParseError(lastError.message || 'LLM JSON extraction failed', lastParseShape);
+  }
+  throw new LlmJsonParseError('LLM JSON extraction failed', lastParseShape);
 }

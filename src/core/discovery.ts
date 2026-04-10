@@ -1154,7 +1154,7 @@ function validateInitialDiscoveryQuestions(
     return {
       valid: false,
       requiredCategoryKeys,
-      failureReasonCode: 'invalid_empty_questions',
+      failureReasonCode: 'question_array_empty_when_discovery_required',
     };
   }
 

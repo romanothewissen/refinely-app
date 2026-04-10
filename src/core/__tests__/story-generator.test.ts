@@ -6,6 +6,7 @@ import { buildSingleFeatureRefineSystemPrompt } from '../prompts';
 import {
   AcceptanceRequirementsGenerationError,
   annotateFailedAcceptanceRequirementFeatures,
+  assessInitialDiscoveryResponse,
   applyFeatureOutputGuardrails,
   applySmallAskTriageGuardrails,
   assessSizingHeuristics,
@@ -16,11 +17,14 @@ import {
   findFeaturesMissingCompleteAcceptanceRequirements,
   followupQuestionsLookWeak,
   initialQuestionsLookWeak,
+  parseQuestionCandidates,
   repairAcceptanceRequirements,
+  buildClarifyFailureDiagnostics,
   shouldPauseForDraftReview,
   triageToSizingContract,
   validateStructuralRestructureProposal,
 } from '../story-generator';
+import { buildBlockedClarifyContext } from '../../queues/clarify';
 import {
   formatGenerationFeatureTarget,
   getApprovedDraftStructureNote,
@@ -450,6 +454,163 @@ test('followupQuestionsLookWeak still rejects a broad initial-style follow-up qu
   ];
 
   assert.equal(followupQuestionsLookWeak(questions, groundingTerms), true);
+});
+
+test('parseQuestionCandidates accepts valid discovery questions without suggestions', () => {
+  const parsed = parseQuestionCandidates({
+    discoveryProfile: {
+      scope: 'moderate',
+      complexity: 'medium',
+      ambiguity: 'high',
+      missingCategoryKeys: ['business_rules'],
+      recommendedInitialCount: 3,
+      followupCap: 2,
+    },
+    questions: [
+      {
+        categoryKey: 'business_rules',
+        intent: 'decision_logic',
+        question: 'Which rule should decide whether an incoming message updates an open case or creates a new one?',
+      },
+    ],
+  });
+
+  assert.equal(parsed.length, 1);
+  assert.deepEqual(parsed[0]?.suggestions, []);
+});
+
+test('parseQuestionCandidates keeps shorter grounded suggestion arrays intact', () => {
+  const parsed = parseQuestionCandidates({
+    questions: [
+      {
+        categoryKey: 'edge_cases_exceptions',
+        intent: 'conflicts_duplicates',
+        question: 'What should happen when the incoming issue looks like a duplicate but the match is not certain enough to trust automatically?',
+        suggestions: [
+          'Reuse the open case only when the identifier and issue context both match clearly',
+          'Send uncertain duplicates for review instead of deciding automatically',
+        ],
+      },
+    ],
+  });
+
+  assert.equal(parsed.length, 1);
+  assert.deepEqual(parsed[0]?.suggestions, [
+    'Reuse the open case only when the identifier and issue context both match clearly',
+    'Send uncertain duplicates for review instead of deciding automatically',
+  ]);
+});
+
+test('assessInitialDiscoveryResponse classifies a missing questions array explicitly', () => {
+  const assessed = assessInitialDiscoveryResponse({
+    rawData: {
+      discoveryProfile: {
+        scope: 'moderate',
+        complexity: 'medium',
+        ambiguity: 'high',
+        missingCategoryKeys: ['business_rules'],
+        recommendedInitialCount: 6,
+        followupCap: 4,
+      },
+    },
+    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.',
+  });
+
+  assert.equal(assessed.failureReasonCode, 'question_array_missing');
+});
+
+test('assessInitialDiscoveryResponse classifies malformed question entries explicitly', () => {
+  const assessed = assessInitialDiscoveryResponse({
+    rawData: {
+      discoveryProfile: {
+        scope: 'moderate',
+        complexity: 'medium',
+        ambiguity: 'high',
+        missingCategoryKeys: ['business_rules'],
+        recommendedInitialCount: 6,
+        followupCap: 4,
+      },
+      questions: [
+        { categoryKey: 'business_rules', intent: 'decision_logic', prompt: 'wrong field name' },
+      ],
+    },
+    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.',
+  });
+
+  assert.equal(assessed.failureReasonCode, 'question_shape_invalid');
+});
+
+test('assessInitialDiscoveryResponse classifies generic discovery questions explicitly', () => {
+  const requirement = 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.';
+  const assessed = assessInitialDiscoveryResponse({
+    rawData: {
+      discoveryProfile: {
+        scope: 'moderate',
+        complexity: 'high',
+        ambiguity: 'high',
+        missingCategoryKeys: ['business_rules', 'edge_cases_exceptions'],
+        recommendedInitialCount: 6,
+        followupCap: 4,
+      },
+      questions: [
+        {
+          categoryKey: 'context_trigger',
+          intent: 'business_outcome',
+          question: 'What business problem should this capability solve?',
+        },
+      ],
+    },
+    requirement,
+  });
+
+  assert.equal(assessed.failureReasonCode, 'question_set_generic');
+});
+
+test('assessInitialDiscoveryResponse classifies truncated discovery questions explicitly', () => {
+  const assessed = assessInitialDiscoveryResponse({
+    rawData: {
+      discoveryProfile: {
+        scope: 'moderate',
+        complexity: 'medium',
+        ambiguity: 'high',
+        missingCategoryKeys: ['business_rules'],
+        recommendedInitialCount: 6,
+        followupCap: 4,
+      },
+      questions: [
+        {
+          categoryKey: 'business_rules',
+          intent: 'decision_logic',
+          question: 'Which rule should decide whether an incoming email updates an open case or',
+        },
+      ],
+    },
+    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.',
+  });
+
+  assert.equal(assessed.failureReasonCode, 'question_set_truncated');
+});
+
+test('buildClarifyFailureDiagnostics returns actionable guidance for generic discovery questions', () => {
+  const diagnostics = buildClarifyFailureDiagnostics('question_set_generic', {
+    generatedQuestionCount: 2,
+  });
+
+  assert.match(diagnostics.technicalSummary, /too generic/i);
+  assert.match(diagnostics.userActionHint, /business object, actor, trigger/i);
+  assert.equal(diagnostics.generatedQuestionCount, 2);
+});
+
+test('buildBlockedClarifyContext preserves actionable discovery diagnostics', () => {
+  const context = buildBlockedClarifyContext(
+    'SUP',
+    'question_array_empty_when_discovery_required',
+    buildClarifyFailureDiagnostics('question_array_empty_when_discovery_required'),
+  );
+
+  assert.equal(context.failureReasonCode, 'question_array_empty_when_discovery_required');
+  assert.match(context.failureDiagnostics?.userActionHint ?? '', /narrowing the ask to one workflow/i);
+  assert.match(context.failureDiagnostics?.technicalSummary ?? '', /returned no usable questions/i);
 });
 
 test('deriveSizingGuidance preserves explicit manual vs automated workflow splits', () => {

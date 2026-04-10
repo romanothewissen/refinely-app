@@ -661,6 +661,16 @@ export function buildClarifySystemPrompt(opts: {
   const questionPlanHint = opts.advisoryForecast
     ? `Earlier triage suggests ${opts.advisoryForecast.scope} scope, ${opts.advisoryForecast.complexity} complexity, ${opts.advisoryForecast.ambiguity} ambiguity, about ${opts.advisoryForecast.recommendedInitialCount} initial discovery questions, and up to ${opts.advisoryForecast.followupCap} follow-up questions. Treat that as advisory context only. Discovery must size itself from the unresolved business ambiguity you find. Return zero only when the requirement is already precise enough to write testable acceptance requirements.`
     : 'Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.';
+  const exemplarBlock = `DISCOVERY EXEMPLARS:
+- Workflow-area ask:
+  Requirement: Manage phone, WhatsApp, text, and email intake and create cases automatically.
+  Strong question: Which rule should decide whether an incoming WhatsApp or email updates an open case or creates a new one?
+- Rule / policy ask:
+  Requirement: Prevent service case creation after end of service unless an approved exception applies.
+  Strong question: Who can approve an exception when a service case is blocked by the end-of-service rule?
+- Exception-heavy ask:
+  Requirement: Route incoming customer issues automatically but avoid duplicates and missing-data failures.
+  Strong question: What should happen when the incoming issue looks like a duplicate but the match is not certain enough to trust automatically?`;
 
   return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
 ${discoveryEvidenceBlock(opts.domainContext)}
@@ -674,6 +684,7 @@ YOUR MISSION:
 - Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
 - Think like an experienced BA who is trying to prevent rework: probe for ownership, preconditions, decision logic, downstream impact, lifecycle, and exceptions before anyone writes requirements.
 - Treat missingCategoryKeys as a discovery coverage aid, not as proof that the implementation is large or complex. A small, well-bounded requirement can legitimately touch several categories while still remaining narrow.
+${exemplarBlock}
 
 WORKING COVERAGE AREAS:
 - Roles & Personas: who initiates, owns, approves, receives, overrides, or is affected
@@ -722,10 +733,10 @@ DISCOVERY RULES:
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
 - For requirements that name a broad workflow area without stating its rules, you usually need coverage across actor responsibilities, decision logic, handling path differences, data requirements, state transitions, exception behavior, and downstream impacts when those details remain ambiguous.
-- Suggestions should be medium-length starter answers or fuller phrase fragments, not terse chips and not mini-paragraphs. They should help the user answer quickly while still exposing the likely tradeoffs.
+- Suggestions are optional. Only include them when they sharpen the question with grounded starter answers.
+- If you include suggestions, provide 1-3 short grounded options. Prefer no suggestions over generic filler.
 - Suggestions must preserve the domain-specific wording already present in the requirement, question, or details. Do not rewrite them into generic fallback terminology unless the original wording is unusable.
 - Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
-- Provide exactly 4 suggestions per question.
 
 DISCOVERY PROFILE DEFINITIONS — reason through these before populating discoveryProfile:
 - scope: narrow = 1-3 deliverable capabilities clearly stated; moderate = 4-6 capabilities or clear workflow with some gaps; broad = 7-10 capabilities or multi-domain scope; very_broad = 11+ capabilities or scope boundary unknown. Most requirements are narrow or moderate. Only use very_broad when you cannot bound the scope.
@@ -734,12 +745,8 @@ DISCOVERY PROFILE DEFINITIONS — reason through these before populating discove
 - A single well-bounded rule can require questions in several taxonomy categories without becoming broad or high complexity. Discovery breadth is not the same as delivery breadth.
 - When the request names a capability area but leaves actor responsibilities, decision logic, handling paths, state transitions, exception behavior, or required data unresolved, treat that as materially missing business logic rather than implementation detail.
 
-OUTPUT CONTRACT:
-Reason before scoring. Populate "profileReasoning" first: (1) what is explicitly stated — actors, trigger, rules, outcome; (2) what is genuinely missing vs merely an unstated detail; (3) why the chosen scope level fits and what would have to be true for a higher level to apply.
-
 Return JSON in this shape:
 {
-  "profileReasoning": "...",
   "discoveryProfile": {
     "scope": "narrow|moderate|broad|very_broad",
     "complexity": "low|medium|high|very_high",
@@ -754,22 +761,24 @@ Return JSON in this shape:
       "intent": "trigger_event",
       "question": "...",
       "details": "...",
-      "suggestions": ["...", "...", "...", "..."]
+      "suggestions": ["...", "..."]
     }
   ]
 }
 
 OUTPUT RULES:
-- "recommendedInitialCount" must equal the number of questions you return. It may be zero when no discovery questions are needed.
+- "recommendedInitialCount" is advisory. It does not need to equal the number of questions you return.
+- "recommendedInitialCount" may be zero when no discovery questions are needed.
 - "followupCap" should reflect how many additional delta questions might still be needed later if answers remain materially incomplete.
 - "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
 - Every question should be a single focused prompt.
 - "question" is the short primary prompt shown on the card.
 - "details" is optional and should only be included when extra business context is needed to avoid losing domain fidelity.
+- "suggestions" is optional and should be omitted when grounded starter answers would add no value.
 - Each question should read like one clear business decision, not a request for an exhaustive list.
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".
-- Anti-bias: guard rules and single-actor focused asks often score low complexity; short asks naming a workflow domain with mostly unstated rules often score high complexity. Do not default to medium just because you are uncertain — reason through what is stated versus genuinely unknown and choose the level that fits. Justify any high rating explicitly in profileReasoning, but do not suppress a high rating when the requirement names a workflow domain with mostly unstated actors, rules, or decision logic. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;
+- Anti-bias: guard rules and single-actor focused asks often score low complexity; short asks naming a workflow domain with mostly unstated rules often score high complexity. Do not default to medium just because you are uncertain — reason through what is stated versus genuinely unknown and choose the level that fits. Do not suppress a high rating when the requirement names a workflow domain with mostly unstated actors, rules, or decision logic. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;
 }
 
 // ─── Evaluate Q&A Sufficiency ─────────────────────────────────────────────────
@@ -821,14 +830,15 @@ RULES:
 - Keep the visible question direct, short, and business-focused.
 - Preserve the domain wording already present in the requirement or prior answers. Shorter wording must not flatten the business meaning.
 - If extra nuance is needed, put it in an optional "details" field instead of making the main question long.
-- Provide exactly 4 suggestions per follow-up question, and make them medium-length starter answers that reflect likely business tradeoffs in this request.
+- Follow-up suggestions are optional. Only include them when they add grounded starter answers for this exact question.
+- If you include follow-up suggestions, provide 1-3 short grounded options and prefer none over generic filler.
 - Keep follow-up suggestions tightly aligned to the exact follow-up question being asked, and preserve the domain-specific wording already in play.
 - Return only fixed-category follow-up questions with "categoryKey" and "intent".
 - Also return "missingCategoryKeys" and compact uppercase "reasonCodes" that explain why more discovery is needed.
 
 Return JSON only in one of these shapes:
 {"sufficient": true, "missingCategoryKeys": [], "reasonCodes": []}
-{"sufficient": false, "missingCategoryKeys": ["business_rules"], "reasonCodes": ["MISSING_RULES"], "questions": [{"categoryKey": "business_rules", "intent": "decision_logic", "question": "...", "details": "...", "suggestions": ["...", "...", "...", "..."]}]}`;
+{"sufficient": false, "missingCategoryKeys": ["business_rules"], "reasonCodes": ["MISSING_RULES"], "questions": [{"categoryKey": "business_rules", "intent": "decision_logic", "question": "...", "details": "...", "suggestions": ["...", "..."]}]}`;
 }
 
 export function buildCoverageCheckSystemPrompt(opts: {

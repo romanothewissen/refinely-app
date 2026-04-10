@@ -52,6 +52,36 @@ const fadeUp = {
   }),
 };
 
+const OUTPUT_PROFILE_OPTIONS: Array<{
+  value: OutputProfile;
+  label: string;
+  shortLabel: string;
+  accent: string;
+  blurb: string;
+}> = [
+  {
+    value: 'business_first',
+    label: 'Business-first',
+    shortLabel: 'Business',
+    accent: 'linear-gradient(135deg, rgba(31,64,53,0.9), rgba(58,112,98,0.9))',
+    blurb: 'Clear business framing and outcome-led scope.',
+  },
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    shortLabel: 'Balanced',
+    accent: 'linear-gradient(135deg, rgba(122,92,41,0.92), rgba(185,145,71,0.88))',
+    blurb: 'Mix business language with implementation signal.',
+  },
+  {
+    value: 'technical_first',
+    label: 'Technical-first',
+    shortLabel: 'Technical',
+    accent: 'linear-gradient(135deg, rgba(22,52,92,0.92), rgba(55,108,173,0.88))',
+    blurb: 'Sharper implementation detail and system specificity.',
+  },
+];
+
 export function Sidebar({
   viewMode,
   setViewMode,
@@ -131,6 +161,7 @@ export function Sidebar({
     : runOutputProfileOverride === 'balanced'
       ? 'Balanced'
       : 'Business-first';
+  const activeOutputProfile = OUTPUT_PROFILE_OPTIONS.find((option) => option.value === runOutputProfileOverride) ?? OUTPUT_PROFILE_OPTIONS[0];
 
   React.useEffect(() => {
     setLogoLoadFailed(false);
@@ -525,17 +556,61 @@ export function Sidebar({
                 Default: {workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}
               </div>
             </div>
-            <select
-              value={runOutputProfileOverride}
-              onChange={(e) => setRunOutputProfileOverride(e.target.value as OutputProfile)}
-              disabled={isWorking}
-              className="w-full rounded-xl border border-[var(--rf-border)] bg-white/80 px-3 py-2.5 text-[12px] font-semibold text-[var(--rf-text)] outline-none"
+            <div
+              className={`rounded-[20px] border border-[var(--rf-border)] bg-white/85 p-1.5 shadow-[0_10px_24px_-16px_rgba(43,89,74,0.45)] transition ${
+                isWorking ? 'opacity-60' : ''
+              }`}
               title={`Run output style: ${outputProfileLabel}`}
             >
-              <option value="business_first">Business-first</option>
-              <option value="balanced">Balanced</option>
-              <option value="technical_first">Technical-first</option>
-            </select>
+              <div className="relative grid grid-cols-3 gap-1">
+                {OUTPUT_PROFILE_OPTIONS.map((option) => {
+                  const selected = option.value === runOutputProfileOverride;
+                  return (
+                    <motion.button
+                      key={option.value}
+                      type="button"
+                      onClick={() => !isWorking && setRunOutputProfileOverride(option.value)}
+                      disabled={isWorking}
+                      className={`relative z-10 rounded-[16px] px-2.5 py-2 text-[11px] font-black tracking-[0.01em] transition ${
+                        selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                      }`}
+                      whileTap={isWorking ? undefined : { scale: 0.97 }}
+                    >
+                      {selected && (
+                        <motion.span
+                          layoutId="output-profile-slider"
+                          className="absolute inset-0 rounded-[16px] shadow-[0_10px_20px_-14px_rgba(31,64,53,0.95)]"
+                          style={{ background: option.accent }}
+                          transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                        />
+                      )}
+                      <span className="relative z-10">{option.shortLabel}</span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={activeOutputProfile.value}
+                  className="mt-2.5 rounded-[16px] border border-[var(--rf-border-subtle)] bg-[rgba(247,249,247,0.92)] px-3 py-2.5"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-black text-[var(--rf-text)]">{activeOutputProfile.label}</span>
+                    <span
+                      className="h-2.5 w-10 rounded-full"
+                      style={{ background: activeOutputProfile.accent }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-[var(--rf-text-secondary)]">
+                    {activeOutputProfile.blurb}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </div>
         </motion.div>
 

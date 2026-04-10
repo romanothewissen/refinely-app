@@ -20,6 +20,7 @@ import {
   ClarifyQuestion,
   ClarifyAnswer,
   ClarifyCategoryKey,
+  ClarifyFailureDiagnostics,
   ClarifyFailureReasonCode,
   TenantConfig,
   GenerationResult,
@@ -45,7 +46,7 @@ import {
   DraftReviewMetadata,
   DraftFeatureReviewNote,
 } from '../types';
-import { callLlm, callLlmJson, callLlmJsonWithUsage } from './llm';
+import { callLlm, callLlmJson, callLlmJsonWithUsage, LlmJsonParseError } from './llm';
 import { getTierModel } from '../services/billing';
 import {
   buildDecompositionSystemPrompt,
@@ -291,11 +292,13 @@ export class GenerationCancelledError extends Error {
 
 export class ClarifyDiscoveryError extends Error {
   reasonCode: ClarifyFailureReasonCode;
+  diagnostics: ClarifyFailureDiagnostics;
 
-  constructor(reasonCode: ClarifyFailureReasonCode, message?: string) {
-    super(message ?? 'Clarifying question discovery failed');
+  constructor(reasonCode: ClarifyFailureReasonCode, diagnostics: ClarifyFailureDiagnostics, message?: string) {
+    super(message ?? diagnostics.technicalSummary ?? 'Clarifying question discovery failed');
     this.name = 'ClarifyDiscoveryError';
     this.reasonCode = reasonCode;
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -467,6 +470,184 @@ export function initialQuestionsLookWeak(
   return allQuestionsWeak
     || groundedQuestionCount < Math.min(2, questions.length)
     || strongQuestionCount === 0;
+}
+
+type DiscoveryCandidateSource = 'root_array' | 'questions' | 'features' | 'missing';
+
+type ParsedQuestionCandidatesResult = {
+  questions: ClarifyQuestion[];
+  source: DiscoveryCandidateSource;
+  rawCandidateCount: number;
+  validQuestionObjectCount: number;
+  stringQuestionCount: number;
+  truncatedQuestionCount: number;
+  parseShape: string;
+};
+
+function summarizeDiscoveryJsonShape(rawData: unknown): string {
+  if (Array.isArray(rawData)) return 'root:Array';
+  if (!rawData || typeof rawData !== 'object') return `root:${typeof rawData}`;
+
+  const root = rawData as Record<string, unknown>;
+  const keys = Object.keys(root).sort();
+  const questionShape = Array.isArray(root.questions) ? `questions:Array(${root.questions.length})` : `questions:${typeof root.questions}`;
+  const featureShape = Array.isArray(root.features) ? `features:Array(${root.features.length})` : `features:${typeof root.features}`;
+  return `root:Object keys=${keys.join(',') || '(none)'} ${questionShape} ${featureShape}`;
+}
+
+function resolveDiscoveryQuestionCandidates(rawData: unknown): { source: DiscoveryCandidateSource; candidates: unknown[] } {
+  if (Array.isArray(rawData)) {
+    return { source: 'root_array', candidates: rawData };
+  }
+  if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).questions)) {
+    return { source: 'questions', candidates: (rawData as any).questions };
+  }
+  if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).features)) {
+    return { source: 'features', candidates: (rawData as any).features };
+  }
+  return { source: 'missing', candidates: [] };
+}
+
+function looksLikeTruncatedDiscoveryQuestion(value: string): boolean {
+  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  if (/\.\.\.$/.test(normalized)) return true;
+  if (/[`"'([{,:;/-]$/.test(normalized)) return true;
+  if (/\b(and|or|the|a|an|to|for|with|when|if|is|are|should|can|could|would|will)\s*$/i.test(normalized)) return true;
+  return false;
+}
+
+function parseQuestionCandidatesDetailed(rawData: unknown): ParsedQuestionCandidatesResult {
+  const { source, candidates } = resolveDiscoveryQuestionCandidates(rawData);
+  let validQuestionObjectCount = 0;
+  let stringQuestionCount = 0;
+  let truncatedQuestionCount = 0;
+
+  const questions = candidates
+    .filter((candidate) => {
+      if (typeof candidate !== 'object' || candidate === null) return false;
+      validQuestionObjectCount += 1;
+      const rawQuestion = (candidate as any).question;
+      if (typeof rawQuestion !== 'string') return false;
+      stringQuestionCount += 1;
+      if (looksLikeTruncatedDiscoveryQuestion(rawQuestion)) truncatedQuestionCount += 1;
+      return true;
+    })
+    .flatMap((candidate) => expandRawQuestionCandidate({
+      categoryKey: (candidate as any).categoryKey,
+      category: (candidate as any).category,
+      intent: (candidate as any).intent,
+      question: trimClarifyCopy(String((candidate as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
+      details: trimClarifyCopy(String((candidate as any).details ?? ''), MAX_CLARIFY_DETAILS_CHARS),
+      suggestions: Array.isArray((candidate as any).suggestions)
+        ? (candidate as any).suggestions
+          .map((suggestion: unknown) => trimClarifyCopy(String(suggestion ?? ''), MAX_CLARIFY_SUGGESTION_CHARS))
+          .filter(Boolean)
+          .slice(0, 3)
+        : [],
+    }))
+    .map((question) => ({
+      ...question,
+      question: trimClarifyCopy(question.question, MAX_CLARIFY_QUESTION_CHARS),
+      details: trimClarifyCopy(question.details ?? '', MAX_CLARIFY_DETAILS_CHARS) || undefined,
+      suggestions: question.suggestions
+        .map((suggestion) => trimClarifyCopy(suggestion, MAX_CLARIFY_SUGGESTION_CHARS))
+        .filter(Boolean)
+        .slice(0, 3),
+    }))
+    .filter((question) => question.question.length > 0);
+
+  return {
+    questions,
+    source,
+    rawCandidateCount: candidates.length,
+    validQuestionObjectCount,
+    stringQuestionCount,
+    truncatedQuestionCount,
+    parseShape: summarizeDiscoveryJsonShape(rawData),
+  };
+}
+
+export function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
+  return parseQuestionCandidatesDetailed(rawData).questions;
+}
+
+export function buildClarifyFailureDiagnostics(
+  reasonCode: ClarifyFailureReasonCode,
+  opts: {
+    generatedQuestionCount?: number;
+    parseShape?: string;
+    technicalSummary?: string;
+  } = {},
+): ClarifyFailureDiagnostics {
+  const generatedQuestionCount = Number.isFinite(opts.generatedQuestionCount)
+    ? Number(opts.generatedQuestionCount)
+    : undefined;
+  const technicalSummary = opts.technicalSummary ?? (() => {
+    switch (reasonCode) {
+      case 'json_parse_failed':
+        return 'The discovery model did not return valid JSON after the built-in JSON retry.';
+      case 'question_array_missing':
+        return 'The discovery response was valid JSON, but it did not include a usable questions array.';
+      case 'question_shape_invalid':
+        return 'The discovery response included question entries, but none matched the expected question shape.';
+      case 'question_array_empty_when_discovery_required':
+        return 'Discovery still found unresolved ambiguity, but the response returned no usable questions.';
+      case 'question_set_generic':
+        return 'The discovery response returned questions, but they were too generic to trust.';
+      case 'question_set_truncated':
+        return 'The discovery response contained partial or truncated question text that could not be normalized safely.';
+      case 'timeout':
+        return 'Discovery timed out before it could prepare a usable question set.';
+      case 'queue_error':
+      default:
+        return 'Discovery hit an unexpected backend error before it could prepare a usable question set.';
+    }
+  })();
+  const userActionHint = (() => {
+    switch (reasonCode) {
+      case 'question_array_empty_when_discovery_required':
+        return 'Try narrowing the ask to one workflow, or name the actor, trigger, and key decision rules explicitly.';
+      case 'question_set_generic':
+        return 'Add the concrete business object, actor, trigger, and duplicate or exception policy so discovery can ask grounded questions.';
+      case 'question_array_missing':
+      case 'question_shape_invalid':
+      case 'question_set_truncated':
+      case 'json_parse_failed':
+        return 'Your requirement is probably fine. Retry once first; if it repeats, add one concrete example of the workflow or rule you need clarified.';
+      case 'timeout':
+        return 'Retry once. If it keeps timing out, shorten the requirement or remove non-essential background detail.';
+      case 'queue_error':
+      default:
+        return 'Retry once. If it repeats, try a shorter requirement with the key actor, trigger, and business rule stated directly.';
+    }
+  })();
+
+  return {
+    technicalSummary,
+    userActionHint,
+    ...(generatedQuestionCount !== undefined ? { generatedQuestionCount } : {}),
+    ...(opts.parseShape ? { parseShape: opts.parseShape } : {}),
+  };
+}
+
+function discoveryFailureMessage(reasonCode: ClarifyFailureReasonCode): string {
+  switch (reasonCode) {
+    case 'question_array_empty_when_discovery_required':
+      return 'Discovery could not prepare focused questions because the requirement is still too open-ended.';
+    case 'question_set_generic':
+      return 'Discovery only produced generic questions, so it stopped instead of guessing.';
+    case 'question_array_missing':
+    case 'question_shape_invalid':
+    case 'question_set_truncated':
+    case 'json_parse_failed':
+      return 'Discovery could not format a usable question set this time.';
+    case 'timeout':
+      return 'Discovery timed out before clarifying questions were ready.';
+    case 'queue_error':
+    default:
+      return 'Discovery could not prepare clarifying questions.';
+  }
 }
 
 function pushPromptSection(parts: string[], heading: string, text: string, maxChars: number) {
@@ -2346,43 +2527,6 @@ export function assessRequirement(input: {
   };
 }
 
-function parseQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
-  let candidates: any[] = [];
-  if (Array.isArray(rawData)) {
-    candidates = rawData;
-  } else if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).questions)) {
-    candidates = (rawData as any).questions;
-  } else if (rawData && typeof rawData === 'object' && Array.isArray((rawData as any).features)) {
-    candidates = (rawData as any).features;
-  }
-
-  return candidates
-    .filter(x => typeof x === 'object' && x !== null && typeof (x as any).question === 'string')
-    .flatMap((candidate) => expandRawQuestionCandidate({
-      categoryKey: (candidate as any).categoryKey,
-      category: (candidate as any).category,
-      intent: (candidate as any).intent,
-      question: trimClarifyCopy(String((candidate as any).question ?? ''), MAX_CLARIFY_QUESTION_CHARS),
-      details: trimClarifyCopy(String((candidate as any).details ?? ''), MAX_CLARIFY_DETAILS_CHARS),
-      suggestions: Array.isArray((candidate as any).suggestions)
-        ? (candidate as any).suggestions
-          .map((suggestion: unknown) => trimClarifyCopy(String(suggestion ?? ''), MAX_CLARIFY_SUGGESTION_CHARS))
-          .filter(Boolean)
-          .slice(0, 4)
-        : [],
-    }))
-    .map((question) => ({
-      ...question,
-      question: trimClarifyCopy(question.question, MAX_CLARIFY_QUESTION_CHARS),
-      details: trimClarifyCopy(question.details ?? '', MAX_CLARIFY_DETAILS_CHARS) || undefined,
-      suggestions: question.suggestions
-        .map((suggestion) => trimClarifyCopy(suggestion, MAX_CLARIFY_SUGGESTION_CHARS))
-        .filter(Boolean)
-        .slice(0, 4),
-    }))
-    .filter((question) => question.question.length > 0);
-}
-
 function parseDiscoveryProfileCandidate(rawData: unknown): Partial<DiscoveryProfile> | null {
   if (!rawData || typeof rawData !== 'object') return null;
   const root = rawData as Record<string, unknown>;
@@ -2444,6 +2588,87 @@ function parseCategoryKeyList(rawData: unknown): ClarifyCategoryKey[] {
     keys.push(normalized);
   });
   return keys;
+}
+
+function shouldRetrySchemaRepair(reasonCode: ClarifyFailureReasonCode, durationMs?: number): boolean {
+  const duration = Number.isFinite(durationMs) ? Number(durationMs) : 0;
+  if (duration > 0 && duration >= 12000) return false;
+  return reasonCode === 'question_array_missing'
+    || reasonCode === 'question_shape_invalid'
+    || reasonCode === 'question_set_truncated';
+}
+
+function determineInitialDiscoveryFailureReason(
+  parsed: ParsedQuestionCandidatesResult,
+  repairedDiscovery: {
+    questions: ClarifyQuestion[];
+    discoveryProfile: DiscoveryProfile;
+    failureReasonCode: ClarifyFailureReasonCode | null;
+  },
+  groundingTerms: Set<string>,
+): ClarifyFailureReasonCode | null {
+  if (parsed.source === 'missing') return 'question_array_missing';
+  if (parsed.rawCandidateCount > 0 && parsed.stringQuestionCount === 0) return 'question_shape_invalid';
+  if (parsed.stringQuestionCount > 0 && parsed.questions.length === 0 && parsed.truncatedQuestionCount > 0) return 'question_set_truncated';
+  if (repairedDiscovery.failureReasonCode) return repairedDiscovery.failureReasonCode;
+
+  const zeroQuestionDiscoveryAllowed = allowsZeroQuestionDiscovery(repairedDiscovery.discoveryProfile);
+  if (!repairedDiscovery.questions.length && !zeroQuestionDiscoveryAllowed) {
+    return 'question_array_empty_when_discovery_required';
+  }
+  if (repairedDiscovery.questions.length > 0 && initialQuestionsLookWeak(repairedDiscovery.questions, groundingTerms)) {
+    return 'question_set_generic';
+  }
+  return null;
+}
+
+export function assessInitialDiscoveryResponse(opts: {
+  rawData: unknown;
+  requirement: string;
+  attachmentText?: string;
+  wiContextText?: string;
+  similarStoriesText?: string;
+  profileFallback?: Partial<DiscoveryProfile> | null;
+  advisoryForecast?: AdvisoryTriageContract['discoveryForecast'];
+  domainSignals?: string[];
+  domainRoles?: string[];
+  groundingTerms?: Set<string>;
+}): {
+  questions: ClarifyQuestion[];
+  discoveryProfile: DiscoveryProfile;
+  failureReasonCode: ClarifyFailureReasonCode | null;
+  parseShape: string;
+} {
+  const parsed = parseQuestionCandidatesDetailed(opts.rawData);
+  const normalizedProfile = normalizeDiscoveryProfile(
+    parseDiscoveryProfileCandidate(opts.rawData) ?? opts.profileFallback ?? null,
+    parsed.questions.length || opts.profileFallback?.recommendedInitialCount || 0,
+    opts.advisoryForecast,
+  );
+  const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfile, {
+    requirement: opts.requirement,
+    attachmentText: opts.attachmentText,
+    wiContextText: opts.wiContextText,
+    similarStoriesText: opts.similarStoriesText,
+    domainSignals: opts.domainSignals,
+    domainRoles: opts.domainRoles,
+  });
+  const groundingTerms = opts.groundingTerms ?? collectDiscoveryGroundingTerms([
+    opts.requirement,
+    opts.attachmentText ?? '',
+    opts.wiContextText ?? '',
+    opts.similarStoriesText ?? '',
+    ...(opts.domainSignals ?? []),
+    ...(opts.domainRoles ?? []),
+  ]);
+  const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery, groundingTerms);
+
+  return {
+    questions: repairedDiscovery.questions,
+    discoveryProfile: repairedDiscovery.discoveryProfile,
+    failureReasonCode,
+    parseShape: parsed.parseShape,
+  };
 }
 
 function ambiguityAssessmentFromDiscoveryProfile(
@@ -2987,6 +3212,7 @@ export async function generateClarifyingQuestions(opts: {
   if (domainSignals.length) {
     contextParts.push(`DOMAIN SIGNALS TO REUSE: ${domainSignals.join(', ')}`);
   }
+  const baseUserMessage = contextParts.join('\n\n');
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
@@ -2995,60 +3221,106 @@ export async function generateClarifyingQuestions(opts: {
     advisoryForecast: clarifyTriageResult?.discoveryForecast,
   });
 
-  const raw = await callLlmJsonWithUsage<Record<string, unknown>>({
-    model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
-    systemPrompt: system,
-    userMessage: contextParts.join('\n\n'),
-    maxTokens: clarifyMaxTokens,
-    reasoningEffort: 'medium',
-    ...buildLlmProviderOpts(config),
-  });
+  const runInitialDiscoveryPass = async (
+    userMessage: string,
+    stageKey: 'clarify' | 'clarifySchemaRepair',
+  ) => {
+    const startedAt = Date.now();
+    try {
+      const raw = await callLlmJsonWithUsage<Record<string, unknown>>({
+        model: getTierModel(config.generatorConfig.clarifyModel, config.tier),
+        systemPrompt: system,
+        userMessage,
+        maxTokens: clarifyMaxTokens,
+        reasoningEffort: 'medium',
+        ...buildLlmProviderOpts(config),
+      });
+      const durationMs = Date.now() - startedAt;
 
-  const parsedQuestions = parseQuestionCandidates(raw.data);
-  const normalizedProfileCandidate = normalizeDiscoveryProfile(
-    parseDiscoveryProfileCandidate(raw.data),
-    parsedQuestions.length || desiredQuestionCount,
-    clarifyTriageResult?.discoveryForecast,
-  );
-  const normalizedProfile = {
-    ...normalizedProfileCandidate,
-    recommendedInitialCount: parsedQuestions.length || normalizedProfileCandidate.recommendedInitialCount,
+      const parsed = parseQuestionCandidatesDetailed(raw.data);
+      const normalizedProfileCandidate = normalizeDiscoveryProfile(
+        parseDiscoveryProfileCandidate(raw.data),
+        parsed.questions.length || desiredQuestionCount,
+        clarifyTriageResult?.discoveryForecast,
+      );
+      const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfileCandidate, {
+        requirement,
+        attachmentText,
+        wiContextText,
+        similarStoriesText,
+        domainSignals,
+        domainRoles: config.domainRoles,
+      });
+      const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery, groundingTerms);
+
+      return {
+        rawData: raw.data,
+        parsed,
+        repairedDiscovery,
+        failureReasonCode,
+        durationMs,
+        usage: raw.usage,
+        stageKey,
+      };
+    } catch (err) {
+      if (err instanceof LlmJsonParseError) {
+        throw new ClarifyDiscoveryError(
+          'json_parse_failed',
+          buildClarifyFailureDiagnostics('json_parse_failed', {
+            parseShape: err.parseShape,
+          }),
+          discoveryFailureMessage('json_parse_failed'),
+        );
+      }
+      throw err;
+    }
   };
-  const repairedDiscovery = validateAndRepairInitialDiscovery(parsedQuestions, normalizedProfile, {
-    requirement,
-    attachmentText,
-    wiContextText,
-    similarStoriesText,
-    domainSignals,
-    domainRoles: config.domainRoles,
-  });
-  if (repairedDiscovery.questions.length > 0 && initialQuestionsLookWeak(repairedDiscovery.questions, groundingTerms)) {
-    console.warn('[discovery] rejected generic initial question set', {
-      generatedQuestions: repairedDiscovery.questions.length,
-      requirementExcerpt: requirement.slice(0, 180),
+
+  const discoveryPasses = [await runInitialDiscoveryPass(baseUserMessage, 'clarify')];
+  const firstPass = discoveryPasses[0];
+  if (firstPass.failureReasonCode && shouldRetrySchemaRepair(firstPass.failureReasonCode, firstPass.durationMs)) {
+    console.warn('[discovery] retrying initial discovery with schema-only repair', {
+      failureReasonCode: firstPass.failureReasonCode,
+      generatedQuestions: firstPass.repairedDiscovery.questions.length,
+      parseShape: firstPass.parsed.parseShape,
     });
-    throw new ClarifyDiscoveryError(
-      'invalid_generic_questions',
-      'Discovery produced questions that were too generic to present safely.',
-    );
+
+    const retryMessage = [
+      baseUserMessage,
+      'SCHEMA REPAIR ONLY: Your previous response parsed as JSON, but the discovery question set was not in the required shape.',
+      'Re-emit the same discovery judgment in the required JSON contract. Do not invent new business questions, do not broaden the scope, and do not add generic filler suggestions.',
+      'Keep the same discoveryProfile assessment unless the prior shape made that impossible to express.',
+      'Return JSON only with this structure: {"discoveryProfile": {...}, "questions": [{"categoryKey": "...", "intent": "...", "question": "...", "details": "...", "suggestions": ["...", "..."]}]}',
+      `PREVIOUS JSON RESPONSE:\n${JSON.stringify(firstPass.rawData, null, 2)}`,
+    ].join('\n\n');
+
+    discoveryPasses.push(await runInitialDiscoveryPass(retryMessage, 'clarifySchemaRepair'));
   }
 
-  const zeroQuestionDiscoveryAllowed = allowsZeroQuestionDiscovery(repairedDiscovery.discoveryProfile);
-  if ((!repairedDiscovery.questions.length && !zeroQuestionDiscoveryAllowed) || repairedDiscovery.failureReasonCode) {
-    const rejectionReasonCode = repairedDiscovery.failureReasonCode
-      ?? (repairedDiscovery.questions.length === 0 ? 'invalid_empty_questions' : 'invalid_underpowered_questions');
+  const finalPass = discoveryPasses[discoveryPasses.length - 1];
+  const repairedDiscovery = finalPass.repairedDiscovery;
+  const failureReasonCode = finalPass.failureReasonCode;
+  if (failureReasonCode) {
+    const diagnostics = buildClarifyFailureDiagnostics(failureReasonCode, {
+      generatedQuestionCount: repairedDiscovery.questions.length,
+      parseShape: finalPass.parsed.parseShape,
+    });
     console.warn('[discovery] rejected initial discovery result', {
-      failureReasonCode: rejectionReasonCode,
+      failureReasonCode,
       generatedQuestions: repairedDiscovery.questions.length,
       recommendedInitialCount: repairedDiscovery.discoveryProfile.recommendedInitialCount,
       ambiguity: repairedDiscovery.discoveryProfile.ambiguity,
       missingCategoryKeys: repairedDiscovery.discoveryProfile.missingCategoryKeys,
+      parseShape: finalPass.parsed.parseShape,
     });
     throw new ClarifyDiscoveryError(
-      rejectionReasonCode,
-      'Discovery did not produce a valid question set.',
+      failureReasonCode,
+      diagnostics,
+      discoveryFailureMessage(failureReasonCode),
     );
   }
+
+  const zeroQuestionDiscoveryAllowed = allowsZeroQuestionDiscovery(repairedDiscovery.discoveryProfile);
   if (!repairedDiscovery.questions.length && zeroQuestionDiscoveryAllowed) {
     console.info('[discovery] accepted explicit zero-question discovery result', {
       ambiguity: repairedDiscovery.discoveryProfile.ambiguity,
@@ -3059,7 +3331,7 @@ export async function generateClarifyingQuestions(opts: {
   const discoveryProfile: DiscoveryProfile = calibrateDiscoveryProfile(
     {
       ...repairedDiscovery.discoveryProfile,
-      recommendedInitialCount: filteredQuestions.length,
+      recommendedInitialCount: repairedDiscovery.discoveryProfile.recommendedInitialCount,
     },
     {
       requiredCategoryKeys: repairedDiscovery.discoveryProfile.missingCategoryKeys,
@@ -3067,9 +3339,19 @@ export async function generateClarifyingQuestions(opts: {
       repairedQuestionCount: filteredQuestions.length,
     },
   );
-  const totalInputTokens = raw.usage.input;
-  const totalOutputTokens = raw.usage.output;
+  const totalInputTokens = discoveryPasses.reduce((sum, pass) => sum + pass.usage.input, 0);
+  const totalOutputTokens = discoveryPasses.reduce((sum, pass) => sum + pass.usage.output, 0);
   const totalTokens = totalInputTokens + totalOutputTokens;
+  const byStage = Object.fromEntries(
+    discoveryPasses.map((pass) => [
+      pass.stageKey,
+      {
+        input: pass.usage.input,
+        output: pass.usage.output,
+        total: pass.usage.input + pass.usage.output,
+      },
+    ]),
+  );
 
   return {
     questions: filteredQuestions,
@@ -3080,7 +3362,7 @@ export async function generateClarifyingQuestions(opts: {
       input: totalInputTokens,
       output: totalOutputTokens,
       total: totalTokens,
-      byStage: { clarify: { input: totalInputTokens, output: totalOutputTokens, total: totalTokens } },
+      byStage,
     },
     ambiguityAssessment: ambiguityAssessmentFromDiscoveryProfile(discoveryProfile, filteredQuestions.length),
   };
@@ -3159,7 +3441,7 @@ export async function evaluateSufficiency(opts: {
 
   const runEvaluationPass = async (
     userMessage: string,
-    stageKey: 'clarifyEvaluate' | 'clarifyEvaluateRetry',
+    stageKey: 'clarifyEvaluate',
   ) => {
     const startedAt = Date.now();
     const result = await callLlmJsonWithUsage<Record<string, unknown>>({
@@ -3223,24 +3505,7 @@ export async function evaluateSufficiency(opts: {
   };
 
   const evaluationPasses = [await runEvaluationPass(baseUserMessage, 'clarifyEvaluate')];
-  const firstPass = evaluationPasses[0];
-  const shouldRetryFollowup = !firstPass.sufficient
-    && followupCap > 0
-    && firstPass.durationMs < 9000
-    && followupQuestionsLookWeak(firstPass.questions, groundingTerms);
-
-  if (shouldRetryFollowup) {
-    const retryMessage = [
-      baseUserMessage,
-      'FOLLOW-UP RETRY INSTRUCTION: Your previous follow-up set was too generic, too weakly grounded, or empty.',
-      'Retry only if you can ask requirement-specific DELTA questions that clearly depend on the actual requirement and answered Q&A.',
-      'Do not ask broad context or business-outcome questions unless the requirement itself is explicitly asking for that.',
-      'If there is no clearly grounded follow-up question left, return {"sufficient": true, "missingCategoryKeys": [], "reasonCodes": []}.',
-    ].join('\n\n');
-    evaluationPasses.push(await runEvaluationPass(retryMessage, 'clarifyEvaluateRetry'));
-  }
-
-  const finalPass = evaluationPasses[evaluationPasses.length - 1];
+  const finalPass = evaluationPasses[0];
   const finalQuestions = !finalPass.sufficient && !followupQuestionsLookWeak(finalPass.questions, groundingTerms)
     ? finalPass.questions
     : [];

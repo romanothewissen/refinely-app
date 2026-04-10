@@ -8,8 +8,8 @@
  * Result is stored in Forge Storage; the frontend polls getClarifyResult.
  */
 
-import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
-import { assessRequirementWithLlm, ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
+import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureDiagnostics, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
+import { assessRequirementWithLlm, buildClarifyFailureDiagnostics, ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
 import { extractDiscoverySignals } from '../core/discovery';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
@@ -302,12 +302,24 @@ export async function handler(event: { body: ClarifyEvent }) {
       err instanceof ClarifyDiscoveryError
         ? err.reasonCode
         : 'queue_error';
-    const message = err instanceof Error ? err.message : 'Clarify failed';
+    const failureDiagnostics: ClarifyFailureDiagnostics =
+      err instanceof ClarifyDiscoveryError
+        ? err.diagnostics
+        : buildClarifyFailureDiagnostics('queue_error', {
+            technicalSummary: err instanceof Error ? err.message : 'Clarify failed',
+          });
+    const message = err instanceof ClarifyDiscoveryError
+      ? err.message
+      : 'Discovery could not prepare clarifying questions.';
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'blocked',
       error: message,
       reasonCode: failureReasonCode,
-      contextMeta: buildBlockedClarifyContext(resolvePrimaryProjectKey(projectKey, projectKeys), failureReasonCode),
+      contextMeta: buildBlockedClarifyContext(
+        resolvePrimaryProjectKey(projectKey, projectKeys),
+        failureReasonCode,
+        failureDiagnostics,
+      ),
       ...(inputSignature ? { inputSignature } : {}),
       updatedAt: Date.now(),
     });
@@ -369,15 +381,17 @@ async function markCancelled(sessionId: string, inputSignature?: string) {
   });
 }
 
-function buildBlockedClarifyContext(
+export function buildBlockedClarifyContext(
   projectKey: string,
   failureReasonCode: ClarifyFailureReasonCode,
+  failureDiagnostics?: ClarifyFailureDiagnostics,
 ): ClarifyContextMeta {
   return {
     projectKey,
     domainRolesUsed: [],
     discoveryStatus: 'discovery_failed',
     failureReasonCode,
+    ...(failureDiagnostics ? { failureDiagnostics } : {}),
     roundsCompleted: 0,
     initialQuestionCount: 0,
     followupQuestionCount: 0,
