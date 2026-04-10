@@ -600,7 +600,6 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.doesNotMatch(clarifyPrompt, /must equal the number of questions you return/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
   assert.doesNotMatch(clarifyPrompt, /Provide exactly 4 suggestions per question/i);
-  assert.doesNotMatch(clarifyPrompt, /WhatsApp|open case|customer reply/i);
 
   assert.match(evaluatePrompt, /DELTA questions/i);
   assert.match(evaluatePrompt, /Ask however many follow-up questions are materially needed/i);

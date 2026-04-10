@@ -11,7 +11,7 @@ function makeFeature(overrides: Partial<Feature>): Feature {
   return {
     id: 'feature-id',
     summary: 'Untitled',
-    description: 'As a Technical Support Specialist, I need to do the thing so that outcomes happen.',
+    description: 'As an Operations Specialist, I need to do the thing so that outcomes happen.',
     acceptanceRequirements: [],
     ...overrides,
   };
@@ -21,7 +21,7 @@ test('validateFeatures flags descriptions with duplicated "so that" clauses', ()
   const features: Feature[] = [
     makeFeature({
       id: 'feat-1',
-      description: 'As a Technical Support Specialist, I need to classify cases so that issues are routed. so that the requested outcome is achieved.',
+      description: 'As an Operations Specialist, I need to classify records so that issues are routed. so that the requested outcome is achieved.',
     }),
   ];
 
@@ -54,7 +54,7 @@ test('validateFeatures flags truncated feature descriptions', () => {
   const features: Feature[] = [
     makeFeature({
       id: 'feat-1',
-      description: 'As a Technical Support Specialist, I need to review update outcomes so that the latest known',
+      description: 'As an Operations Specialist, I need to review update outcomes so that the latest known state of the',
     }),
   ];
 
@@ -143,13 +143,13 @@ test('detectFeatureOverlaps flags pairs that share most content tokens', () => {
   const features: Feature[] = [
     makeFeature({
       id: 'feat-1',
-      summary: 'Automatic Case Creation from Designated Support Emails',
-      description: 'As a Technical Support Specialist, I need to receive automatically created cases from designated support emails so that manual case creation is eliminated.',
+      summary: 'Automatic Record Creation from Inbound Messages',
+      description: 'As an Operations Specialist, I need inbound messages automatically turned into records so that manual creation is eliminated.',
     }),
     makeFeature({
       id: 'feat-2',
-      summary: 'Automatic Case Classification by Issue Type',
-      description: 'As a Technical Support Specialist, I need incoming support emails automatically converted into cases and classified so that manual case creation and initial categorization is eliminated.',
+      summary: 'Automatic Record Classification',
+      description: 'As an Operations Specialist, I need incoming messages automatically converted into records and classified so that manual creation and initial categorization are eliminated.',
     }),
   ];
 
@@ -166,13 +166,13 @@ test('detectFeatureOverlaps flags summary-subset relationships', () => {
   const features: Feature[] = [
     makeFeature({
       id: 'feat-1',
-      summary: 'Define Designated Support Inboxes',
-      description: 'As a Technical Support Specialist, I need to specify which email addresses trigger automatic case creation so that only official channels generate cases.',
+      summary: 'Define Approved Intake Sources',
+      description: 'As an Operations Specialist, I need to specify which intake sources trigger automatic record creation so that only approved channels generate records.',
     }),
     makeFeature({
       id: 'feat-2',
-      summary: 'Define Designated Support Inboxes for Case Creation Administration',
-      description: 'As a Technical Support Specialist, I need administrative controls for designating support inboxes so that admins can manage the list.',
+      summary: 'Define Approved Intake Sources for Administration',
+      description: 'As an Operations Specialist, I need administrative controls for intake sources so that admins can manage the list.',
     }),
   ];
 
@@ -184,18 +184,18 @@ test('detectFeatureOverlaps does NOT flag clearly distinct features', () => {
   const features: Feature[] = [
     makeFeature({
       id: 'feat-1',
-      summary: 'Automatic Case Creation from Emails',
-      description: 'As a Technical Support Specialist, I need incoming support emails converted into cases so that manual creation is eliminated.',
+      summary: 'Automatic Record Creation from Messages',
+      description: 'As an Operations Specialist, I need incoming messages converted into records so that manual creation is eliminated.',
     }),
     makeFeature({
       id: 'feat-2',
-      summary: 'Link Incoming Emails to Existing Cases',
-      description: 'As a Technical Support Specialist, I need reply emails attached to their original cases so that communication history stays consolidated.',
+      summary: 'Link Incoming Messages to Existing Records',
+      description: 'As an Operations Specialist, I need incoming updates linked to their original records so that history stays consolidated.',
     }),
     makeFeature({
       id: 'feat-3',
       summary: 'Configure Classification Keywords',
-      description: 'As a Technical Support Specialist, I need to manage the keywords used for classification so that incoming items are routed correctly.',
+      description: 'As an Operations Specialist, I need to manage the keywords used for classification so that incoming items are routed correctly.',
     }),
   ];
 

@@ -174,6 +174,11 @@ export function Sidebar({
     : hasUnlimitedUsage
       ? 'Unlimited usage'
       : `${Math.max(0, usageLimit - usageCurrent)} left before guidance`;
+  const usageCompactLabel = !usage || !limits
+    ? 'Syncing'
+    : hasUnlimitedUsage
+      ? 'Unlimited'
+      : `${Math.max(0, usageLimit - usageCurrent)} left`;
   const shouldShowHeaderUsage = Boolean(usage && limits && !hasUnlimitedUsage);
 
   React.useEffect(() => {
@@ -254,7 +259,7 @@ export function Sidebar({
         <div className="flex min-w-0 items-center gap-2">
           {shouldShowHeaderUsage && (
             <motion.div
-              className="hidden min-[380px]:flex min-w-0 flex-1 max-w-[220px] items-center gap-2 rounded-[18px] border border-[var(--rf-border)] bg-white/72 px-2.5 py-2 shadow-[0_10px_24px_-18px_rgba(43,89,74,0.45)] backdrop-blur-xl"
+              className="hidden min-[380px]:flex min-w-0 flex-1 max-w-[236px] items-center gap-2 rounded-[18px] border border-[var(--rf-border)] bg-white/72 px-2.5 py-2 shadow-[0_10px_24px_-18px_rgba(43,89,74,0.45)] backdrop-blur-xl"
               initial={{ opacity: 0, x: 10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.12, duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
@@ -274,12 +279,17 @@ export function Sidebar({
                   <div className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
                     Usage
                   </div>
-                  <div className="truncate text-[11px] font-semibold text-[var(--rf-text-secondary)]">
-                    {usageLabel}
+                  <div className="text-[11px] font-semibold text-[var(--rf-text-secondary)] leading-tight">
+                    <span className="block truncate min-[440px]:hidden">
+                      {usageCompactLabel}
+                    </span>
+                    <span className="hidden truncate min-[440px]:block">
+                      {usageLabel}
+                    </span>
                   </div>
                 </div>
               </div>
-              <div className="hidden min-[430px]:flex w-[72px] shrink-0 flex-col items-end gap-1">
+              <div className="flex w-[66px] shrink-0 flex-col items-end gap-1 min-[440px]:w-[72px]">
                 <div className="text-[10px] font-bold tracking-[0.08em] text-[var(--rf-text-tertiary)]">
                   {usageCurrent}/{usageLimit}
                 </div>

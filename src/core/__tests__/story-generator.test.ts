@@ -41,7 +41,7 @@ function makeFeature(summary: string, arCount: number, description?: string) {
   return {
     id: summary.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     summary,
-    description: description ?? `As a Service Manager, I need to ${summary.toLowerCase()} so that the service process stays compliant.`,
+    description: description ?? `As an Operations Manager, I need to ${summary.toLowerCase()} so that the workflow stays aligned.`,
     acceptanceRequirements: Array.from({ length: arCount }, (_, index) => ({
       given: `a relevant business condition ${index + 1} exists`,
       when: 'the rule is evaluated',
@@ -54,7 +54,7 @@ test('isCompleteAcceptanceRequirement rejects ARs with a missing then clause', (
   assert.equal(
     isCompleteAcceptanceRequirement({
       given: 'a standard procedure needs to be enforced',
-      when: 'a Service Process Owner defines a rule',
+      when: 'an Operations Process Owner defines a rule',
       then: '',
     }),
     false,
@@ -65,8 +65,8 @@ test('isCompleteAcceptanceRequirement accepts fully written ARs', () => {
   assert.equal(
     isCompleteAcceptanceRequirement({
       given: 'a standard procedure needs to be enforced',
-      when: 'a Service Process Owner defines a rule',
-      then: 'the rule is created and used for future work orders.',
+      when: 'an Operations Process Owner defines a rule',
+      then: 'the rule is created and used for future linked records.',
     }),
     true,
   );
@@ -106,7 +106,7 @@ test('findFeaturesMissingCompleteAcceptanceRequirements flags features with miss
       acceptanceRequirements: [
         {
           given: 'an owner is reviewing the contract',
-          when: 'a blocking work order exists',
+          when: 'a blocking linked record exists',
           then: '',
         },
       ],
@@ -176,7 +176,7 @@ test('feedbackRequestsStructuralRefinement keeps stylistic bulk feedback in per-
 
 test('feedbackRequestsStructuralRefinement detects explicit backlog restructuring requests', () => {
   assert.equal(feedbackRequestsStructuralRefinement('merge overlapping features and remove duplicate features'), true);
-  assert.equal(feedbackRequestsStructuralRefinement('split this into separate service case and work order features'), true);
+  assert.equal(feedbackRequestsStructuralRefinement('split this into separate primary record and linked record features'), true);
 });
 
 test('validateStructuralRestructureProposal accepts complete merge coverage', () => {
@@ -195,11 +195,11 @@ test('validateStructuralRestructureProposal accepts complete merge coverage', ()
         {
           id: 'merged-intake',
           summary: 'Manage incoming communications',
-          description: 'As a Service Manager, I need to manage incoming communications so that intake handling stays coordinated.',
+          description: 'As an Operations Manager, I need to manage incoming communications so that intake handling stays coordinated.',
           acceptanceRequirements: [
             {
               given: 'incoming communications are waiting to be processed',
-              when: 'the service manager reviews the intake workspace',
+              when: 'the operations manager reviews the intake workspace',
               then: 'the communications can be reviewed and actioned from one coordinated feature scope.',
             },
           ],
@@ -231,12 +231,12 @@ test('validateStructuralRestructureProposal rejects duplicated AR ownership', ()
         {
           id: 'proposal-a',
           summary: 'Create a case',
-          description: 'As a Service Manager, I need to create a case so that intake work can proceed.',
+          description: 'As an Operations Manager, I need to create a record so that intake work can proceed.',
           acceptanceRequirements: [
             {
               given: 'a valid intake exists',
-              when: 'the service manager creates a case',
-              then: 'the case is opened.',
+              when: 'the operations manager creates a record',
+              then: 'the record is opened.',
             },
           ],
           sourceFeatureIds: [selected[0].id],
@@ -245,13 +245,13 @@ test('validateStructuralRestructureProposal rejects duplicated AR ownership', ()
         },
         {
           id: 'proposal-b',
-          summary: 'Validate case preconditions',
-          description: 'As a Service Manager, I need to validate case preconditions so that invalid cases are blocked.',
+          summary: 'Validate record preconditions',
+          description: 'As an Operations Manager, I need to validate record preconditions so that invalid records are blocked.',
           acceptanceRequirements: [
             {
-              given: 'a case is about to be created',
+              given: 'a record is about to be created',
               when: 'a blocking condition exists',
-              then: 'the case creation is stopped.',
+              then: 'the record creation is stopped.',
             },
           ],
           sourceFeatureIds: [selected[0].id],
@@ -284,11 +284,11 @@ test('validateStructuralRestructureProposal rejects missing source coverage', ()
         {
           id: 'contact-linking-only',
           summary: 'Link incoming communications to contacts',
-          description: 'As a Service Manager, I need to link incoming communications to contacts so that existing context is reused.',
+          description: 'As an Operations Manager, I need to link incoming communications to contacts so that existing context is reused.',
           acceptanceRequirements: [
             {
               given: 'an incoming communication matches a known contact',
-              when: 'the service manager reviews the communication',
+              when: 'the operations manager reviews the communication',
               then: 'the communication is linked to that contact.',
             },
           ],
@@ -323,15 +323,15 @@ test('buildSingleFeatureRefineSystemPrompt can forbid splitting during bulk refi
 test('assessSizingHeuristics flags oversized split guard-rule backlogs', () => {
   const assessment = assessSizingHeuristics({
     stage: 'final',
-    requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
+    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
     features: [
-      makeFeature('Prevent Service Case creation for products past their end of service date', 7),
-      makeFeature('Allow Service Case creation for products without an end of service date', 1),
-      makeFeature('Exempt product decommissioning cases from the end of service date restriction', 3),
-      makeFeature('Override the end-of-service block for Service Case creation with a reason', 7),
-      makeFeature('Prevent Work Order creation for products past their end of service date', 8),
-      makeFeature('Override the end-of-service block for Work Order creation with a reason', 4),
-      makeFeature('Audit end-of-service creation attempts', 4),
+      makeFeature('Prevent primary record creation for items past their eligibility date', 7),
+      makeFeature('Allow primary record creation for items without an eligibility date', 1),
+      makeFeature('Exempt archive records from the eligibility-date restriction', 3),
+      makeFeature('Override the eligibility block for primary record creation with a reason', 7),
+      makeFeature('Prevent linked record creation for items past their eligibility date', 8),
+      makeFeature('Override the eligibility block for linked record creation with a reason', 4),
+      makeFeature('Audit blocked creation attempts', 4),
     ],
   });
 
@@ -396,7 +396,7 @@ test('applySmallAskTriageGuardrails leaves successful LLM advisory triage unchan
     },
   };
   const guarded = applySmallAskTriageGuardrails({
-    requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
+    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
     triage,
   });
 
@@ -615,7 +615,7 @@ test('buildBlockedClarifyContext preserves actionable discovery diagnostics', ()
 
 test('deriveSizingGuidance preserves explicit manual vs automated workflow splits', () => {
   const guidance = deriveSizingGuidance({
-    requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
+    requirement: 'We must ensure no records can be created after the eligibility deadline, with separate handling for manual creation and automated creation.',
   });
 
   assert.equal(guidance.minimumPreservedFeatureCount, 2);
@@ -642,7 +642,7 @@ test('applySmallAskTriageGuardrails keeps explicitly split small asks unchanged 
     },
   };
   const guarded = applySmallAskTriageGuardrails({
-    requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
+    requirement: 'We must ensure no records can be created after the eligibility deadline, with separate handling for manual creation and automated creation.',
     triage,
   });
 
@@ -668,7 +668,7 @@ test('capDiscoveryProfileFloorForSmallAsk does not override successful advisory 
     },
   };
   const capped = capDiscoveryProfileFloorForSmallAsk({
-    requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
+    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
     triage,
   });
 
@@ -694,7 +694,7 @@ test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors fro
     },
   };
   const capped = capDiscoveryProfileFloorForSmallAsk({
-    requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
+    requirement: 'We must ensure no records can be created after the eligibility deadline, with separate handling for manual creation and automated creation.',
     triage,
   });
 
@@ -884,23 +884,23 @@ test('triageToSizingContract preserves the committed LLM sizing contract', () =>
 test('applyFeatureOutputGuardrails preserves a valid but detailed feature description', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
-    summary: 'Prevent creation after end of service',
-    description: 'As a Field Service Engineer, I need to be prevented from creating service cases or work orders when the primary installed product has reached its designated end of service date so that unsupported requests are blocked and users receive clear feedback about the policy.',
+    summary: 'Prevent creation after the eligibility deadline',
+    description: 'As an Operations Coordinator, I need to be prevented from creating primary or linked records when the related item has reached its designated eligibility deadline so that unsupported requests are blocked and users receive clear feedback about the policy.',
     acceptanceRequirements: [
       {
-        given: 'a primary installed product has an end of service date that has already passed',
-        when: 'a Field Service Engineer attempts to create a service case or work order for that product, with an explanatory error message shown for example to clarify the exact date and the policy reason',
+        given: 'a related item has an eligibility date that has already passed',
+        when: 'an Operations Coordinator attempts to create a primary or linked record for that item, with an explanatory error message shown for example to clarify the exact date and the policy reason',
         then: 'the creation is prevented and the system explains why the request is blocked and what should happen next',
       },
     ],
   }, {
-    requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
-    domainRoles: ['Field Service Engineer', 'Technical Support Specialist'],
+    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
+    domainRoles: ['Operations Coordinator', 'Operations Specialist'],
   });
 
   assert.equal(
     guarded.description,
-    'As a Field Service Engineer, I need to be prevented from creating service cases or work orders when the primary installed product has reached its designated end of service date so that unsupported requests are blocked and users receive clear feedback about the policy.',
+    'As an Operations Coordinator, I need to be prevented from creating primary or linked records when the related item has reached its designated eligibility deadline so that unsupported requests are blocked and users receive clear feedback about the policy.',
   );
   assert.equal(guarded.acceptanceRequirements[0].when.includes('for example'), false);
 });
@@ -912,23 +912,23 @@ test('applyFeatureOutputGuardrails promotes a generic feature role when the requ
     description: 'As an authorized user, I need to create supported records so that unsupported products are not processed.',
     acceptanceRequirements: [
       {
-        given: 'a product has passed its end of service date',
-        when: 'a Technical Support Specialist attempts to create the record',
+        given: 'an item has passed its eligibility date',
+        when: 'an Operations Specialist attempts to create the record',
         then: 'the record is not created',
       },
       {
-        given: 'a product has passed its end of service date',
-        when: 'a Technical Support Specialist attempts to create the record with a linked work order',
-        then: 'the linked work order is not created',
+        given: 'an item has passed its eligibility date',
+        when: 'an Operations Specialist attempts to create the record with a linked record',
+        then: 'the linked record is not created',
       },
     ],
   }, {
-    requirement: 'As a Technical Support Specialist, I need to prevent creation of service records for unsupported products.',
-    domainRoles: ['Technical Support Specialist', 'Supervisor'],
+    requirement: 'As an Operations Specialist, I need to prevent creation of records for ineligible items.',
+    domainRoles: ['Operations Specialist', 'Supervisor'],
   });
 
-  assert.match(guarded.description, /^As a Technical Support Specialist, I need to /);
-  assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
+  assert.match(guarded.description, /^As an Operations Specialist, I need to /);
+  assert.match(guarded.acceptanceRequirements[0].when, /^an Operations Specialist attempts to create the record$/i);
 });
 
 test('applyFeatureOutputGuardrails keeps repeated WHEN role labels after grounding the feature role from the requirement', () => {
@@ -938,24 +938,24 @@ test('applyFeatureOutputGuardrails keeps repeated WHEN role labels after groundi
     description: 'As an authorized user, I need to create supported records so that unsupported products are not processed.',
     acceptanceRequirements: [
       {
-        given: 'a product has passed its end of service date',
-        when: 'a Technical Support Specialist attempts to create the record',
+        given: 'an item has passed its eligibility date',
+        when: 'an Operations Specialist attempts to create the record',
         then: 'the record is not created',
       },
       {
-        given: 'a product has passed its end of service date',
-        when: 'the Technical Support Specialist attempts to create the linked work order',
-        then: 'the linked work order is not created',
+        given: 'an item has passed its eligibility date',
+        when: 'the Operations Specialist attempts to create the linked record',
+        then: 'the linked record is not created',
       },
     ],
   }, {
-    requirement: 'As a Technical Support Specialist, I need to prevent creation of service records for unsupported products.',
-    domainRoles: ['Technical Support Specialist'],
+    requirement: 'As an Operations Specialist, I need to prevent creation of records for ineligible items.',
+    domainRoles: ['Operations Specialist'],
   });
 
-  assert.match(guarded.description, /^As a Technical Support Specialist, I need to /);
-  assert.match(guarded.acceptanceRequirements[0].when, /^a Technical Support Specialist attempts to create the record$/i);
-  assert.match(guarded.acceptanceRequirements[1].when, /^the Technical Support Specialist attempts to create the linked work order$/i);
+  assert.match(guarded.description, /^As an Operations Specialist, I need to /);
+  assert.match(guarded.acceptanceRequirements[0].when, /^an Operations Specialist attempts to create the record$/i);
+  assert.match(guarded.acceptanceRequirements[1].when, /^they attempt to create the linked record$/i);
 });
 
 test('applyFeatureOutputGuardrails does not promote a generic feature role when multiple AR roles are present', () => {
@@ -965,8 +965,8 @@ test('applyFeatureOutputGuardrails does not promote a generic feature role when 
     description: 'As an authorized user, I need to handle unsupported records so that the right follow-up occurs.',
     acceptanceRequirements: [
       {
-        given: 'a product has passed its end of service date',
-        when: 'a Technical Support Specialist attempts to create the record',
+        given: 'an item has passed its eligibility date',
+        when: 'an Operations Specialist attempts to create the record',
         then: 'the record is blocked',
       },
       {
@@ -977,7 +977,7 @@ test('applyFeatureOutputGuardrails does not promote a generic feature role when 
     ],
   }, {
     requirement: 'Unsupported record handling must block creation and route exceptions for review when needed.',
-    domainRoles: ['Technical Support Specialist', 'Supervisor'],
+    domainRoles: ['Operations Specialist', 'Supervisor'],
   });
 
   assert.match(guarded.description, /^As an authorized user, I need to /);
@@ -990,20 +990,20 @@ test('applyFeatureOutputGuardrails is idempotent — a second pass does not dupl
   // append twice, producing "... so that X. so that the requested outcome is achieved. so that the requested outcome is achieved."
   const raw = {
     id: 'feature-1',
-    summary: 'Automatic Case Classification by Issue Type',
-    description: 'As a Technical Support Specialist, I need incoming support emails to be automatically converted into cases and classified by issue type so that I can focus on resolving customer problems instead of manual case creation and initial categorization.',
+    summary: 'Automatic Record Classification',
+    description: 'As an Operations Specialist, I need incoming requests to be automatically converted into records and classified by type so that I can focus on resolution instead of manual creation and initial categorization.',
     acceptanceRequirements: [
       {
-        given: 'an email is received in a designated support inbox, and its content indicates a product issue',
-        when: 'the email is processed',
-        then: 'a new case is automatically created and classified as a product issue',
+        given: 'an inbound request arrives through an approved intake source and clearly indicates a category',
+        when: 'the request is processed',
+        then: 'a new record is automatically created and classified',
       },
     ],
   };
 
   const roleGrounding = {
-    requirement: 'Our technical assistance center needs email to case capability for the Technical Support Specialist to distinguish between product issues and general inquiries.',
-    domainRoles: ['Technical Support Specialist'],
+    requirement: 'The intake team needs request-to-record capability for the Operations Specialist to distinguish between request types.',
+    domainRoles: ['Operations Specialist'],
   };
 
   const firstPass = applyFeatureOutputGuardrails(raw, roleGrounding);
@@ -1025,24 +1025,24 @@ test('applyFeatureOutputGuardrails does not slice AR clauses mid-sentence on lon
   // used to be clipped at word 22, leaving a trailing stop-word like "indicates" or "exactly".
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
-    summary: 'Automatic Case Creation from Designated Support Emails',
-    description: 'As a Technical Support Specialist, I need to receive automatically created cases so that I do not have to create them manually.',
+    summary: 'Automatic Record Creation from Approved Intake Sources',
+    description: 'As an Operations Specialist, I need to receive automatically created records so that I do not have to create them manually.',
     acceptanceRequirements: [
       {
-        given: 'a support email address is designated for automatic case creation, and an email is received from an existing contact that clearly indicates a product issue',
-        when: 'the system processes the email',
-        then: 'a new case is automatically created and classified as a Product Issue',
+        given: 'an intake source is designated for automatic record creation, and an incoming request clearly indicates a category',
+        when: 'the system processes the request',
+        then: 'a new record is automatically created and classified',
       },
     ],
   }, {
-    requirement: 'Email to case capability for the Technical Support Specialist.',
-    domainRoles: ['Technical Support Specialist'],
+    requirement: 'Request-to-record capability for the Operations Specialist.',
+    domainRoles: ['Operations Specialist'],
   });
 
   const given = guarded.acceptanceRequirements[0].given;
   // The GIVEN must contain the full original phrase — no mid-sentence truncation.
   assert.ok(
-    given.includes('clearly indicates a product issue'),
+    given.includes('clearly indicates a category'),
     `GIVEN clause was truncated mid-sentence: "${given}"`,
   );
   // And it must NOT end on a truncation-indicating stop-word.

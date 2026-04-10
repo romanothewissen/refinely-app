@@ -2704,7 +2704,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                             <input
                               value={row.role}
                               onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item) })}
-                              placeholder="Field Service Engineer"
+                              placeholder="Operations Coordinator"
                               className="w-full rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
                             />
                           </div>
@@ -2713,7 +2713,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                             <textarea
                               value={row.activities}
                               onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item) })}
-                              placeholder="Schedules visits, checks service windows, and confirms completion."
+                              placeholder="Coordinates intake, checks timing windows, and confirms completion."
                               className="min-h-[64px] w-full resize-none rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
                             />
                           </div>

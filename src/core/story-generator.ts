@@ -4527,7 +4527,7 @@ function collectRemainingBlockingIssues(
 ): string[] {
   const blockingViolations = violations
     .filter((violation) =>
-      /truncated|generic role wording|fallback|overlaps with|unresolved decision wording|description must follow/i.test(violation.message),
+      /truncated|generic role wording|fallback|overlaps with|unresolved decision wording|description must follow|business-facing even though/i.test(violation.message),
     )
     .map((violation) => violation.message);
 
