@@ -149,13 +149,14 @@ function buildClarifyLoadingMeta(
     : undefined;
 
   const basePayload: ClarifyProgressPayload | null = livePayload || clarifyContext
-    ? {
-        ...livePayload,
-        sizingContract: livePayload?.sizingContract ?? clarifyContext?.sizingContract,
-        discoveryProfile: livePayload?.discoveryProfile ?? clarifyContext?.discoveryProfile,
-        ambiguityAssessment: livePayload?.ambiguityAssessment ?? clarifyContext?.ambiguityAssessment,
-        sources: livePayload?.sources ?? contextSources,
-      }
+      ? {
+          ...livePayload,
+          sizingContract: livePayload?.sizingContract ?? clarifyContext?.sizingContract,
+          advisoryTriage: livePayload?.advisoryTriage ?? clarifyContext?.advisoryTriage,
+          discoveryProfile: livePayload?.discoveryProfile ?? clarifyContext?.discoveryProfile,
+          ambiguityAssessment: livePayload?.ambiguityAssessment ?? clarifyContext?.ambiguityAssessment,
+          sources: livePayload?.sources ?? contextSources,
+        }
     : null;
 
   if (workflowStage === 'sufficiency_check') {
@@ -1226,6 +1227,7 @@ function LegacyApp({
         projectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
         clarifySizingContract: clarifyContext?.sizingContract ?? undefined,
+        clarifyAdvisoryTriage: clarifyContext?.advisoryTriage ?? undefined,
       }) as any;
 
       if (res?.success) {

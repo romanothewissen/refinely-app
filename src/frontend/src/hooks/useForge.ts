@@ -27,6 +27,7 @@ export const api = {
     projectKeys?: string[];
     clarifyDiscoveryProfile?: unknown;
     clarifySizingContract?: unknown;
+    clarifyAdvisoryTriage?: unknown;
   }) => invoke('startGeneration', payload),
   resumeGeneration: (payload: {
     sessionId: string;

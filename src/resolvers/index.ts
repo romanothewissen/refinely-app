@@ -499,6 +499,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     projectKeys: selectedProjectKeys,
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
     clarifySizingContract: payload.clarifySizingContract ?? undefined,
+    clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage ?? undefined,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
@@ -568,6 +569,8 @@ resolver.define('resumeGeneration', async ({ payload, context }) => {
     reviewedDraftDecision: reviewDecision,
     reviewedDraftSelectedFeatureIds: selectedFeatureIds,
     reviewedDraftReviewIterations: resumeContext.draftReviewIterations,
+    reviewedTriageSizingContract: resumeContext.sizingContract,
+    reviewedAdvisoryTriage: resumeContext.advisoryTriage,
     priorStageDurationsMs: resumeContext.priorStageDurationsMs,
   };
 
@@ -619,6 +622,7 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     projectKey: authorizedProjects.projectKey,
     projectKeys: authorizedProjects.projectKeys,
     clarifySizingContract: retryContext?.sizingContract,
+    clarifyAdvisoryTriage: retryContext?.advisoryTriage,
     retryFeatureId: retryFeature.id,
     retryFeature,
     retryBaseFeatures,

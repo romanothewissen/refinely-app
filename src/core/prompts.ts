@@ -97,15 +97,14 @@ export function buildDecompositionSystemPrompt(opts: {
   const planningGuidance = (() => {
     if (!opts.featurePlan) return '';
     const { shape, complexity, target, min, max } = opts.featurePlan;
-    const isBroadOrEpic = shape === 'broad' || shape === 'epic';
-    const estimateGuidance = isBroadOrEpic
-      ? `- The estimate (${min}–${max}, midpoint ${target}) is a reliable floor for this scope. Expect to find this many independently deliverable capabilities — only consolidate where features are genuinely inseparable, not just closely related.`
-      : `- Treat that range as reasoning context, not as a quota or upper bound. If the requirement is genuinely focused, return fewer features — even below the range. If deep analysis reveals more independently deliverable capabilities than the initial estimate anticipated, return more — even above the range.
+    const estimateGuidance = `- Earlier triage suggests roughly ${min}-${max} independently valuable features (midpoint ${target}), but this is advisory only.
+- Treat that forecast as a comparison point, not as a floor, quota, or upper bound.
+- If the requirement is genuinely focused, return fewer features. If deeper analysis reveals more independently deliverable capabilities, return more.
 - Your own decomposition reasoning takes priority over the triage estimate. The triage was a fast shallow pass; you have the full context.`;
     const base = `OUTPUT CALIBRATION:
 - The requirement shape appears: ${shape.toUpperCase()}
 - The requirement complexity appears: ${complexity.toUpperCase()}
-- The prior assessment estimates ${min}-${max} independently valuable features (midpoint: ${target}).
+- The earlier triage forecast suggests ${min}-${max} independently valuable features (midpoint: ${target}).
 ${estimateGuidance}`;
 
     if (shape === 'minimal')
@@ -140,7 +139,7 @@ ${isHighComplexity
 
     if (shape === 'broad')
       return `${base}
-- This is a broad requirement covering multiple capabilities. The planning estimate is a floor — a broad requirement typically has multiple independently deliverable capabilities, and your job is to surface all of them.
+- This is a broad requirement covering multiple capabilities. Use the forecast to sanity-check your reasoning, not to force the count upward.
 - Work through the decomposition framework to find distinct workflows, role-specific behaviors, and independently testable capabilities. Do not collapse them to keep count low.
 - Each distinct workflow or role-specific behavior should be its own feature. Only consolidate when features are genuinely inseparable — not just closely related.
 - Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature unless it is explicitly requested as a separate deliverable.
@@ -519,7 +518,41 @@ WHAT TO LOOK FOR WHEN REASONING:
 - Do not anchor to word count alone. Distinguish two kinds of brevity: (1) precise brevity — short because the trigger, actor, and outcome are stated clearly — complexity comes from what is stated, not from what is missing; (2) vague brevity — short because the requirement names a capability area without stating actors, rules, states, or edge cases. In case (2), most behaviour must be inferred from domain knowledge — rate it as high, not medium, because the unknown-unknowns dominate. This affects both estimatedQuestions (more questions needed to uncover the unstated scope) and arDepth (implied behaviour must be covered). A long requirement can still be narrow if it is repetitive or over-specified; a short one can be high complexity if any practitioner in that domain would immediately recognise it implies multiple sub-workflows.
 - If you cannot decide between two adjacent values, choose the one your reasoning step supports more strongly. Do not default to the lower value — that creates systematic under-sizing for complex asks.
 
-Output JSON with reasoning first: {"reasoning": "...", "estimatedFeatures": N, "estimatedQuestions": N, "shape": "...", "complexity": "...", "arDepth": "..."}`;
+OUTPUT CONTRACT:
+- Return one advisory triage object, not a final decision for downstream stages.
+- Discovery owns the final discovery profile and question count after deeper reasoning.
+- Decomposition owns the final feature count and AR depth after deeper reasoning.
+- Your job is to provide a strong early forecast with clear reasoning and confidence.
+
+Return JSON in this shape:
+{
+  "reasoning": "...",
+  "confidence": "low|medium|high",
+  "deliveryForecast": {
+    "shape": "minimal|narrow|balanced|broad|epic",
+    "complexity": "trivial|low|medium|high|very_high",
+    "featureTarget": N,
+    "featureMin": N,
+    "featureMax": N,
+    "arDepth": "minimal|lean|standard|thorough|comprehensive",
+    "arTarget": N
+  },
+  "discoveryForecast": {
+    "scope": "narrow|moderate|broad|very_broad",
+    "complexity": "low|medium|high|very_high",
+    "ambiguity": "low|medium|high",
+    "recommendedInitialCount": N,
+    "followupCap": N
+  }
+}
+
+Rules:
+- Keep reasoning concise but specific.
+- featureTarget must be 1 or more.
+- featureMin and featureMax should bracket featureTarget when you include them.
+- recommendedInitialCount may be 0 only when the requirement is already precise enough for generation without discovery.
+- followupCap should reflect how much ambiguity could remain after an initial round.
+- Do not default to medium values unless your reasoning truly supports them.`;
 }
 
 // ─── Per-Feature AR User Message (for parallel AR generation) ────────────────
@@ -580,7 +613,13 @@ export function buildClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
   domainSignals?: string[];
-  questionPlan?: { min: number; max: number; target: number };
+  advisoryForecast?: {
+    scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
+    complexity: 'low' | 'medium' | 'high' | 'very_high';
+    ambiguity: 'low' | 'medium' | 'high';
+    recommendedInitialCount: number;
+    followupCap: number;
+  };
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already relevant to the request or supporting evidence.`
@@ -588,8 +627,8 @@ export function buildClarifySystemPrompt(opts: {
   const domainSignalHint = opts.domainSignals?.length
     ? `Important domain signals from the requirement and supporting evidence: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they sharpen the question.`
     : '';
-  const questionPlanHint = opts.questionPlan
-    ? `Prior assessment signal: this request may need ${opts.questionPlan.min}-${opts.questionPlan.max} discovery questions (initial estimate: ${opts.questionPlan.target}). Treat that range as guidance, not a quota. Return however many questions are materially needed — if deep reasoning reveals more unresolved ambiguity than the initial estimate anticipated, go higher within or even beyond the range. Your deep reasoning takes priority over the triage estimate. Return zero only when the requirement is already precise enough to write testable acceptance requirements.`
+  const questionPlanHint = opts.advisoryForecast
+    ? `Earlier triage suggests ${opts.advisoryForecast.scope} scope, ${opts.advisoryForecast.complexity} complexity, ${opts.advisoryForecast.ambiguity} ambiguity, about ${opts.advisoryForecast.recommendedInitialCount} initial discovery questions, and up to ${opts.advisoryForecast.followupCap} follow-up questions. Treat that as advisory context only. Discovery must size itself from the unresolved business ambiguity you find. Return zero only when the requirement is already precise enough to write testable acceptance requirements.`
     : 'Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.';
 
   return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.

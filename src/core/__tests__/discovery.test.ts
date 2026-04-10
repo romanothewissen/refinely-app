@@ -549,7 +549,13 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
     domainSignals: ['phone', 'WhatsApp', 'case creation'],
-    questionPlan: { min: 4, max: 6, target: 5 },
+    advisoryForecast: {
+      scope: 'moderate',
+      complexity: 'high',
+      ambiguity: 'high',
+      recommendedInitialCount: 5,
+      followupCap: 4,
+    },
   });
   const evaluatePrompt = buildEvaluateSystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
@@ -584,8 +590,9 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /Important domain signals from the requirement and supporting evidence/i);
   assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
   assert.match(clarifyPrompt, /company-specific internal terms/i);
-  assert.match(clarifyPrompt, /Return however many questions are materially needed/i);
+  assert.match(clarifyPrompt, /Discovery must size itself from the unresolved business ambiguity you find/i);
   assert.match(clarifyPrompt, /Simplify syntax, not business meaning/i);
+  assert.match(clarifyPrompt, /Earlier triage suggests moderate scope, high complexity, high ambiguity/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
   assert.doesNotMatch(clarifyPrompt, /Provide 2-3 suggestions by default/i);
 
@@ -625,8 +632,8 @@ test('decomposition prompt treats feature counts as hints and keeps support beha
     },
   });
 
-  assert.match(prompt, /planning hint/i);
-  assert.match(prompt, /reasoning context, not as a quota or upper bound/i);
+  assert.match(prompt, /advisory only/i);
+  assert.match(prompt, /comparison point, not as a floor, quota, or upper bound/i);
   assert.match(prompt, /independent business value/i);
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
   assert.match(prompt, /work instructions or operational guidance/i);
@@ -673,25 +680,23 @@ test('sizing prompts calibrate consolidation around independently valuable scope
 });
 
 test('generation fallback is operational only when triage is unavailable', () => {
-  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.featurePlan, {
-    min: 1,
-    max: 1,
-    target: 1,
+  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.deliveryForecast, {
     shape: 'minimal',
     complexity: 'low',
+    featureTarget: 1,
+    featureMin: 1,
+    featureMax: 1,
+    arDepth: 'standard',
+    arTarget: 0,
   });
-  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.arPlan, {
-    min: 0,
-    max: 0,
-    target: 0,
-    depth: 'standard',
+  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.discoveryForecast, {
+    scope: 'narrow',
+    complexity: 'low',
+    ambiguity: 'medium',
+    recommendedInitialCount: 0,
+    followupCap: 0,
   });
-  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.questionPlan, {
-    min: 0,
-    max: 0,
-    target: 0,
-    clarity: 'medium',
-  });
+  assert.equal(DEFAULT_GENERATION_TRIAGE_FALLBACK.telemetry?.fallbackUsed, true);
 });
 
 test('decomposition prompt preserves workflow-defining scope when clarifying context is thin', () => {

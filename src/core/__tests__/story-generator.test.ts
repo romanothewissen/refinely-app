@@ -351,11 +351,21 @@ test('assessSizingHeuristics does not falsely compress workflow-area asks', () =
       makeFeature('Handle source-specific exception paths', 4),
     ],
     triage: {
-      estimatedFeatures: 5,
-      estimatedQuestions: 12,
-      shape: 'narrow',
-      complexity: 'high',
-      arDepth: 'thorough',
+      reasoning: 'Short workflow-area ask with unresolved handling paths.',
+      confidence: 'medium',
+      deliveryForecast: {
+        featureTarget: 5,
+        shape: 'narrow',
+        complexity: 'high',
+        arDepth: 'thorough',
+      },
+      discoveryForecast: {
+        scope: 'moderate',
+        complexity: 'high',
+        ambiguity: 'high',
+        recommendedInitialCount: 12,
+        followupCap: 6,
+      },
     },
   });
 
@@ -363,22 +373,30 @@ test('assessSizingHeuristics does not falsely compress workflow-area asks', () =
   assert.notEqual(assessment.verdict, 'oversized');
 });
 
-test('applySmallAskTriageGuardrails narrows precise guard-rule triage estimates', () => {
+test('applySmallAskTriageGuardrails leaves successful LLM advisory triage unchanged', () => {
+  const triage = {
+    reasoning: 'One tightly bounded guard rule.',
+    confidence: 'high' as const,
+    deliveryForecast: {
+      featureTarget: 5,
+      shape: 'balanced' as const,
+      complexity: 'high' as const,
+      arDepth: 'thorough' as const,
+    },
+    discoveryForecast: {
+      scope: 'moderate' as const,
+      complexity: 'medium' as const,
+      ambiguity: 'high' as const,
+      recommendedInitialCount: 10,
+      followupCap: 4,
+    },
+  };
   const guarded = applySmallAskTriageGuardrails({
     requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
-    triage: {
-      estimatedFeatures: 5,
-      estimatedQuestions: 10,
-      shape: 'balanced',
-      complexity: 'high',
-      arDepth: 'thorough',
-    },
+    triage,
   });
 
-  assert.equal(guarded?.estimatedFeatures, 1);
-  assert.equal(guarded?.shape, 'minimal');
-  assert.equal(guarded?.complexity, 'medium');
-  assert.equal(guarded?.arDepth, 'standard');
+  assert.deepEqual(guarded, triage);
 });
 
 test('initialQuestionsLookWeak accepts a mixed but grounded initial discovery set', () => {
@@ -444,53 +462,82 @@ test('deriveSizingGuidance preserves explicit manual vs automated workflow split
   assert.deepEqual(guidance.preferredFeatureRange, { min: 2, max: 2 });
 });
 
-test('applySmallAskTriageGuardrails keeps explicitly split small asks above one feature', () => {
+test('applySmallAskTriageGuardrails keeps explicitly split small asks unchanged when triage succeeds', () => {
+  const triage = {
+    reasoning: 'Explicit manual and automated paths stay separate.',
+    confidence: 'medium' as const,
+    deliveryForecast: {
+      featureTarget: 5,
+      shape: 'balanced' as const,
+      complexity: 'high' as const,
+      arDepth: 'thorough' as const,
+    },
+    discoveryForecast: {
+      scope: 'moderate' as const,
+      complexity: 'high' as const,
+      ambiguity: 'high' as const,
+      recommendedInitialCount: 10,
+      followupCap: 4,
+    },
+  };
   const guarded = applySmallAskTriageGuardrails({
     requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
-    triage: {
-      estimatedFeatures: 5,
-      estimatedQuestions: 10,
-      shape: 'balanced',
-      complexity: 'high',
-      arDepth: 'thorough',
-    },
+    triage,
   });
 
-  assert.equal(guarded?.estimatedFeatures, 2);
-  assert.equal(guarded?.shape, 'narrow');
+  assert.deepEqual(guarded, triage);
 });
 
-test('capDiscoveryProfileFloorForSmallAsk prevents broad floor inflation for focused guard rules', () => {
+test('capDiscoveryProfileFloorForSmallAsk does not override successful advisory triage', () => {
+  const triage = {
+    reasoning: 'Guard rule with bounded delivery scope.',
+    confidence: 'medium' as const,
+    deliveryForecast: {
+      featureTarget: 7,
+      shape: 'broad' as const,
+      complexity: 'medium' as const,
+      arDepth: 'thorough' as const,
+    },
+    discoveryForecast: {
+      scope: 'moderate' as const,
+      complexity: 'medium' as const,
+      ambiguity: 'medium' as const,
+      recommendedInitialCount: 6,
+      followupCap: 4,
+    },
+  };
   const capped = capDiscoveryProfileFloorForSmallAsk({
     requirement: 'We must ensure no service cases and work orders can be created when the end of service date of the product is reached',
-    triage: {
-      estimatedFeatures: 7,
-      estimatedQuestions: 6,
-      shape: 'broad',
-      complexity: 'medium',
-      arDepth: 'thorough',
-    },
+    triage,
   });
 
-  assert.equal(capped?.estimatedFeatures, 1);
-  assert.equal(capped?.shape, 'minimal');
-  assert.equal(capped?.complexity, 'medium');
+  assert.deepEqual(capped, triage);
 });
 
-test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors from discovery', () => {
+test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors from discovery without mutation', () => {
+  const triage = {
+    reasoning: 'Separate manual and automated handling paths are explicit.',
+    confidence: 'medium' as const,
+    deliveryForecast: {
+      featureTarget: 7,
+      shape: 'broad' as const,
+      complexity: 'medium' as const,
+      arDepth: 'thorough' as const,
+    },
+    discoveryForecast: {
+      scope: 'moderate' as const,
+      complexity: 'medium' as const,
+      ambiguity: 'medium' as const,
+      recommendedInitialCount: 6,
+      followupCap: 4,
+    },
+  };
   const capped = capDiscoveryProfileFloorForSmallAsk({
     requirement: 'We must ensure no service cases can be created after end of service, with separate handling for manual creation and automated creation.',
-    triage: {
-      estimatedFeatures: 7,
-      estimatedQuestions: 6,
-      shape: 'broad',
-      complexity: 'medium',
-      arDepth: 'thorough',
-    },
+    triage,
   });
 
-  assert.equal(capped?.estimatedFeatures, 2);
-  assert.equal(capped?.shape, 'narrow');
+  assert.deepEqual(capped, triage);
 });
 
 test('generation progress copy labels draft output as provisional', () => {
@@ -645,16 +692,30 @@ test('generation progress copy no longer surfaces automatic consolidation notes'
 
 test('triageToSizingContract preserves the committed LLM sizing contract', () => {
   assert.deepEqual(triageToSizingContract({
-    estimatedFeatures: 4,
-    estimatedQuestions: 9,
-    shape: 'balanced',
-    complexity: 'high',
-    arDepth: 'thorough',
+    reasoning: 'Moderately broad workflow with material ambiguity.',
+    confidence: 'high',
+    deliveryForecast: {
+      featureTarget: 4,
+      featureMin: 3,
+      featureMax: 6,
+      shape: 'balanced',
+      complexity: 'high',
+      arDepth: 'thorough',
+      arTarget: 5,
+    },
+    discoveryForecast: {
+      scope: 'moderate',
+      complexity: 'high',
+      ambiguity: 'high',
+      recommendedInitialCount: 9,
+      followupCap: 4,
+    },
   }), {
     shape: 'balanced',
     complexity: 'high',
     featureTarget: 4,
     arDepth: 'thorough',
+    arTarget: 5,
     estimatedQuestions: 9,
   });
 });

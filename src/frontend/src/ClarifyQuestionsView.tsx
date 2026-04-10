@@ -292,8 +292,8 @@ export function ClarifyQuestionsView({
               {questions.length > 0 && (() => {
                 const profile = contextMeta?.discoveryProfile;
                 const qPlan = contextMeta?.ambiguityAssessment?.questionPlan;
-                const sizingContract = contextMeta?.sizingContract;
-                const complexityKey = sizingContract?.complexity ?? profile?.complexity;
+                const advisoryTriage = contextMeta?.advisoryTriage;
+                const complexityKey = profile?.complexity ?? advisoryTriage?.discoveryForecast.complexity;
                 const ci = complexityKey ? (DISCOVERY_COMPLEXITY_MAP[complexityKey] ?? 2) : 2;
 
                 return (
@@ -342,7 +342,7 @@ export function ClarifyQuestionsView({
                         )}
                           <div>
                             <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
-                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{typeof (sizingContract?.estimatedQuestions ?? qPlan?.target) === 'number' && (sizingContract?.estimatedQuestions ?? qPlan?.target) !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> planned {sizingContract?.estimatedQuestions ?? qPlan?.target}</span> : ''}</div>
+                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{typeof ((profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount) ?? qPlan?.target) === 'number' && ((profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount) ?? qPlan?.target) !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> planned {(profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount) ?? qPlan?.target}</span> : ''}</div>
                           </div>
                       </div>
                     )}

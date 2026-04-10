@@ -10,6 +10,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
   AcceptanceRequirement,
+  AdvisoryDiscoveryForecast,
+  AdvisoryTriageConfidence,
+  AdvisoryTriageContract,
   Feature,
   ClarifyQuestion,
   ClarifyAnswer,
@@ -149,7 +152,6 @@ interface ClarifyQuestionPlan {
   min: number;
   max: number;
   target: number;
-  clarity: 'clear' | 'medium' | 'vague';
 }
 
 interface FeaturePlan {
@@ -189,14 +191,6 @@ interface SizingGuidance {
   explicitSplitEvidence: ExplicitSplitEvidence[];
 }
 
-export interface RequirementAssessment {
-  questionPlan: ClarifyQuestionPlan;
-  featurePlan: FeaturePlan;
-  arPlan: ArPlan;
-  ambiguityScore: number;
-  ambiguityReasons: string[];
-}
-
 interface ClarifyAmbiguityAssessment {
   level: 'clear' | 'medium' | 'vague';
   score: number;
@@ -210,6 +204,7 @@ interface ClarifyDiscoveryResult {
   tokenUsage: TokenUsageSummary;
   ambiguityAssessment: ClarifyAmbiguityAssessment;
   discoveryProfile: DiscoveryProfile;
+  advisoryTriage?: AdvisoryTriageContract;
   sizingContract?: EffectiveSizingContract;
 }
 
@@ -1145,79 +1140,179 @@ async function backfillMissingAcceptanceRequirements(input: {
 
 // ─── LLM-based Requirement Triage ────────────────────────────────────────────
 
-export interface TriageResult {
-  estimatedFeatures: number;
-  estimatedQuestions: number;
-  shape: FeaturePlan['shape'];
-  complexity: FeaturePlan['complexity'];
-  arDepth: ArPlan['depth'];
-}
+export interface TriageResult extends AdvisoryTriageContract {}
 
-export const DEFAULT_GENERATION_TRIAGE_FALLBACK: RequirementAssessment = {
-  questionPlan: { min: 0, max: 0, target: 0, clarity: 'medium' },
-  featurePlan: { min: 1, max: 1, target: 1, shape: 'minimal', complexity: 'low' },
-  arPlan: { min: 0, max: 0, target: 0, depth: 'standard' },
-  ambiguityScore: 2,
-  ambiguityReasons: ['Triage could not be completed; using operational fallback metadata only.'],
+export const DEFAULT_GENERATION_TRIAGE_FALLBACK: AdvisoryTriageContract = {
+  reasoning: 'Triage could not be completed; using operational fallback metadata only.',
+  confidence: 'low',
+  deliveryForecast: {
+    shape: 'minimal',
+    complexity: 'low',
+    featureTarget: 1,
+    featureMin: 1,
+    featureMax: 1,
+    arDepth: 'standard',
+    arTarget: 0,
+  },
+  discoveryForecast: {
+    scope: 'narrow',
+    complexity: 'low',
+    ambiguity: 'medium',
+    recommendedInitialCount: 0,
+    followupCap: 0,
+  },
+  telemetry: {
+    fallbackUsed: true,
+  },
 };
 
 const VALID_SHAPES = new Set<FeaturePlan['shape']>(['minimal', 'narrow', 'balanced', 'broad', 'epic']);
 const VALID_COMPLEXITIES = new Set<FeaturePlan['complexity']>(['trivial', 'low', 'medium', 'high', 'very_high']);
 const VALID_AR_DEPTHS = new Set<ArPlan['depth']>(['minimal', 'lean', 'standard', 'thorough', 'comprehensive']);
+const VALID_DISCOVERY_SCOPES = new Set<DiscoveryProfile['scope']>(['narrow', 'moderate', 'broad', 'very_broad']);
+const VALID_DISCOVERY_COMPLEXITIES = new Set<DiscoveryProfile['complexity']>(['low', 'medium', 'high', 'very_high']);
+const VALID_DISCOVERY_AMBIGUITIES = new Set<DiscoveryProfile['ambiguity']>(['low', 'medium', 'high']);
+const VALID_TRIAGE_CONFIDENCE = new Set<AdvisoryTriageConfidence>(['low', 'medium', 'high']);
 
 function parseTriageResult(raw: unknown): TriageResult | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
-  const estimatedFeatures = typeof obj.estimatedFeatures === 'number' ? obj.estimatedFeatures : null;
-  const shape = typeof obj.shape === 'string' && VALID_SHAPES.has(obj.shape as FeaturePlan['shape'])
-    ? obj.shape as FeaturePlan['shape'] : null;
-  const complexity = typeof obj.complexity === 'string' && VALID_COMPLEXITIES.has(obj.complexity as FeaturePlan['complexity'])
-    ? obj.complexity as FeaturePlan['complexity'] : null;
-  const arDepth = typeof obj.arDepth === 'string' && VALID_AR_DEPTHS.has(obj.arDepth as ArPlan['depth'])
-    ? obj.arDepth as ArPlan['depth'] : null;
-  if (estimatedFeatures == null || !shape || !complexity || !arDepth) return null;
-  const estimatedQuestions = typeof obj.estimatedQuestions === 'number'
-    ? Math.max(0, Math.round(obj.estimatedQuestions))
-    : 0;
+  const deliveryRoot = (obj.deliveryForecast && typeof obj.deliveryForecast === 'object'
+    ? obj.deliveryForecast
+    : obj) as Record<string, unknown>;
+  const discoveryRoot = (obj.discoveryForecast && typeof obj.discoveryForecast === 'object'
+    ? obj.discoveryForecast
+    : obj) as Record<string, unknown>;
+
+  const featureTarget = typeof deliveryRoot.featureTarget === 'number'
+    ? deliveryRoot.featureTarget
+    : typeof obj.estimatedFeatures === 'number'
+      ? obj.estimatedFeatures
+      : null;
+  const shape = typeof deliveryRoot.shape === 'string' && VALID_SHAPES.has(deliveryRoot.shape as FeaturePlan['shape'])
+    ? deliveryRoot.shape as FeaturePlan['shape']
+    : null;
+  const deliveryComplexity = typeof deliveryRoot.complexity === 'string' && VALID_COMPLEXITIES.has(deliveryRoot.complexity as FeaturePlan['complexity'])
+    ? deliveryRoot.complexity as FeaturePlan['complexity']
+    : null;
+  const arDepth = typeof deliveryRoot.arDepth === 'string' && VALID_AR_DEPTHS.has(deliveryRoot.arDepth as ArPlan['depth'])
+    ? deliveryRoot.arDepth as ArPlan['depth']
+    : null;
+  const discoveryScope = typeof discoveryRoot.scope === 'string' && VALID_DISCOVERY_SCOPES.has(discoveryRoot.scope as DiscoveryProfile['scope'])
+    ? discoveryRoot.scope as DiscoveryProfile['scope']
+    : shape === 'epic'
+      ? 'very_broad'
+      : shape === 'broad'
+        ? 'broad'
+        : shape === 'balanced'
+          ? 'moderate'
+          : shape === 'minimal' || shape === 'narrow'
+            ? 'narrow'
+            : null;
+  const discoveryComplexity = typeof discoveryRoot.complexity === 'string' && VALID_DISCOVERY_COMPLEXITIES.has(discoveryRoot.complexity as DiscoveryProfile['complexity'])
+    ? discoveryRoot.complexity as DiscoveryProfile['complexity']
+    : deliveryComplexity === 'trivial'
+      ? 'low'
+      : deliveryComplexity === 'very_high'
+        ? 'very_high'
+        : deliveryComplexity as DiscoveryProfile['complexity'] | null;
+  const discoveryAmbiguity = typeof discoveryRoot.ambiguity === 'string' && VALID_DISCOVERY_AMBIGUITIES.has(discoveryRoot.ambiguity as DiscoveryProfile['ambiguity'])
+    ? discoveryRoot.ambiguity as DiscoveryProfile['ambiguity']
+    : typeof obj.estimatedQuestions === 'number'
+      ? (obj.estimatedQuestions >= 10 ? 'high' : obj.estimatedQuestions >= 7 ? 'medium' : 'low')
+      : null;
+  const recommendedInitialCount = typeof discoveryRoot.recommendedInitialCount === 'number'
+    ? discoveryRoot.recommendedInitialCount
+    : typeof obj.estimatedQuestions === 'number'
+      ? obj.estimatedQuestions
+      : null;
+  const followupCap = typeof discoveryRoot.followupCap === 'number'
+    ? discoveryRoot.followupCap
+    : recommendedInitialCount != null
+      ? (recommendedInitialCount >= 12 ? 6 : recommendedInitialCount >= 7 ? 4 : 2)
+      : null;
+  const confidence = typeof obj.confidence === 'string' && VALID_TRIAGE_CONFIDENCE.has(obj.confidence as AdvisoryTriageConfidence)
+    ? obj.confidence as AdvisoryTriageConfidence
+    : 'medium';
+  const reasoning = typeof obj.reasoning === 'string' ? obj.reasoning.trim() : '';
+
+  if (
+    featureTarget == null
+    || !shape
+    || !deliveryComplexity
+    || !arDepth
+    || !discoveryScope
+    || !discoveryComplexity
+    || !discoveryAmbiguity
+    || recommendedInitialCount == null
+    || followupCap == null
+  ) {
+    return null;
+  }
+
+  const featureMin = typeof deliveryRoot.featureMin === 'number' ? Math.max(1, Math.round(deliveryRoot.featureMin)) : undefined;
+  const featureMax = typeof deliveryRoot.featureMax === 'number' ? Math.max(1, Math.round(deliveryRoot.featureMax)) : undefined;
+  const arTarget = typeof deliveryRoot.arTarget === 'number' ? Math.max(0, Math.round(deliveryRoot.arTarget)) : undefined;
+
   return {
-    estimatedFeatures: Math.max(1, Math.round(estimatedFeatures)),
-    estimatedQuestions,
-    shape,
-    complexity,
-    arDepth,
+    reasoning,
+    confidence,
+    deliveryForecast: {
+      shape,
+      complexity: deliveryComplexity,
+      featureTarget: clampCount(featureTarget, 1, 15),
+      ...(featureMin != null ? { featureMin } : {}),
+      ...(featureMax != null ? { featureMax } : {}),
+      arDepth,
+      ...(arTarget != null ? { arTarget: clampCount(arTarget, 0, 8) } : {}),
+    },
+    discoveryForecast: {
+      scope: discoveryScope,
+      complexity: discoveryComplexity,
+      ambiguity: discoveryAmbiguity,
+      recommendedInitialCount: clampCount(recommendedInitialCount, 0, 20),
+      followupCap: clampCount(followupCap, 0, 10),
+    },
   };
 }
 
+function clampCount(value: number, min: number, max: number): number {
+  const rounded = Math.round(Number(value));
+  if (!Number.isFinite(rounded)) return min;
+  return Math.min(max, Math.max(min, rounded));
+}
+
+function ambiguityLevelFromProfile(ambiguity: AdvisoryDiscoveryForecast['ambiguity']): ClarifyAmbiguityAssessment['level'] {
+  return ambiguity === 'high' ? 'vague' : ambiguity === 'low' ? 'clear' : 'medium';
+}
+
 export function triageToAssessment(triage: TriageResult): { featurePlan: FeaturePlan; arPlan: ArPlan; questionPlan: ClarifyQuestionPlan } {
-  const est = Math.max(1, triage.estimatedFeatures);
-  const isHighComplexity = triage.complexity === 'high' || triage.complexity === 'very_high';
-  const upwardBuffer = isHighComplexity
-    ? Math.max(4, Math.ceil(est * 0.8))
-    : Math.max(2, Math.ceil(est * 0.5));
+  const est = Math.max(1, triage.deliveryForecast.featureTarget);
+  const isHighComplexity = triage.deliveryForecast.complexity === 'high' || triage.deliveryForecast.complexity === 'very_high';
+  const upwardBuffer = Math.max(1, (triage.deliveryForecast.featureMax ?? (est + (isHighComplexity ? Math.max(4, Math.ceil(est * 0.8)) : Math.max(2, Math.ceil(est * 0.5))))) - est);
   const featurePlan: FeaturePlan = {
-    min: Math.max(1, est - 1),
-    max: est + upwardBuffer,
+    min: Math.max(1, triage.deliveryForecast.featureMin ?? (est - 1)),
+    max: Math.max(est, triage.deliveryForecast.featureMax ?? (est + upwardBuffer)),
     target: est,
-    shape: triage.shape,
-    complexity: triage.complexity,
+    shape: triage.deliveryForecast.shape,
+    complexity: triage.deliveryForecast.complexity,
   };
 
   const arPlan: ArPlan = {
     min: 0,
     max: 0,
-    target: 0,
-    depth: triage.arDepth,
+    target: Math.max(0, triage.deliveryForecast.arTarget ?? 0),
+    depth: triage.deliveryForecast.arDepth,
   };
 
-  const q = Math.max(0, triage.estimatedQuestions);
-  const isHighQ = triage.complexity === 'high' || triage.complexity === 'very_high';
+  const q = Math.max(0, triage.discoveryForecast.recommendedInitialCount);
+  const isHighQ = triage.discoveryForecast.complexity === 'high' || triage.discoveryForecast.complexity === 'very_high';
   const qMin = Math.max(0, q - 2);
   const qMax = isHighQ ? Math.min(q + 8, 20) : Math.min(q + 4, 16);
   const questionPlan: ClarifyQuestionPlan = {
     min: qMin,
     max: qMax,
     target: q,
-    clarity: q >= 10 ? 'vague' : q >= 7 ? 'medium' : 'clear',
   };
 
   return { featurePlan, arPlan, questionPlan };
@@ -1225,11 +1320,12 @@ export function triageToAssessment(triage: TriageResult): { featurePlan: Feature
 
 export function triageToSizingContract(triage: TriageResult): EffectiveSizingContract {
   return {
-    shape: triage.shape,
-    complexity: triage.complexity,
-    featureTarget: Math.max(1, triage.estimatedFeatures),
-    arDepth: triage.arDepth,
-    estimatedQuestions: Math.max(0, triage.estimatedQuestions),
+    shape: triage.deliveryForecast.shape,
+    complexity: triage.deliveryForecast.complexity,
+    featureTarget: Math.max(1, triage.deliveryForecast.featureTarget),
+    arDepth: triage.deliveryForecast.arDepth,
+    ...(typeof triage.deliveryForecast.arTarget === 'number' ? { arTarget: triage.deliveryForecast.arTarget } : {}),
+    estimatedQuestions: Math.max(0, triage.discoveryForecast.recommendedInitialCount),
   };
 }
 
@@ -1466,7 +1562,7 @@ function determinePreferredFeatureRange(input: {
       return { min, max };
     }
     case 'workflow_area': {
-      const highComplexity = input.triage?.complexity === 'high' || input.triage?.complexity === 'very_high';
+      const highComplexity = input.triage?.deliveryForecast.complexity === 'high' || input.triage?.deliveryForecast.complexity === 'very_high';
       const baseRange = highComplexity ? { min: 3, max: 6 } : { min: 2, max: 4 };
       return {
         min: Math.max(baseRange.min, input.minimumPreservedFeatureCount),
@@ -1494,14 +1590,14 @@ function determinePreferredArDepth(input: {
     case 'guard_rule':
       return hasExplicitExceptions ? 'standard' : 'lean';
     case 'focused_capability':
-      return input.triage?.complexity === 'high' ? 'standard' : 'lean';
+      return input.triage?.deliveryForecast.complexity === 'high' ? 'standard' : 'lean';
     case 'workflow_area':
-      return input.triage?.complexity === 'high' || input.triage?.complexity === 'very_high'
+      return input.triage?.deliveryForecast.complexity === 'high' || input.triage?.deliveryForecast.complexity === 'very_high'
         ? 'thorough'
         : 'standard';
     case 'broad_platform':
     default:
-      return input.triage?.complexity === 'very_high' ? 'comprehensive' : 'thorough';
+      return input.triage?.deliveryForecast.complexity === 'very_high' ? 'comprehensive' : 'thorough';
   }
 }
 
@@ -1747,28 +1843,7 @@ export function applySmallAskTriageGuardrails(input: {
   clarifyAnswers?: ClarifyAnswer[];
   triage: TriageResult | null;
 }): TriageResult | null {
-  if (!input.triage) return null;
-
-  const guidance = deriveSizingGuidance({
-    requirement: input.requirement,
-    clarifyAnswers: input.clarifyAnswers,
-    triage: input.triage,
-  });
-
-  if (guidance.archetype !== 'guard_rule') {
-    return input.triage;
-  }
-
-  const cappedFeatureMax = Math.max(guidance.minimumPreservedFeatureCount, guidance.preferredFeatureRange.max);
-  const shapeCap: FeaturePlan['shape'] = cappedFeatureMax <= 1 ? 'minimal' : 'narrow';
-
-  return {
-    estimatedFeatures: Math.min(input.triage.estimatedFeatures, cappedFeatureMax),
-    estimatedQuestions: Math.min(input.triage.estimatedQuestions, 6),
-    shape: cappedByOrder(input.triage.shape, shapeCap, TRIAGE_SHAPE_ORDER),
-    complexity: cappedByOrder(input.triage.complexity, 'medium', TRIAGE_COMPLEXITY_ORDER),
-    arDepth: cappedByOrder(input.triage.arDepth, 'standard', SIZING_AR_DEPTH_ORDER) as ArPlan['depth'],
-  };
+  return input.triage;
 }
 
 export function capDiscoveryProfileFloorForSmallAsk(input: {
@@ -1776,26 +1851,7 @@ export function capDiscoveryProfileFloorForSmallAsk(input: {
   clarifyAnswers?: ClarifyAnswer[];
   triage: TriageResult | null;
 }): TriageResult | null {
-  if (!input.triage) return null;
-
-  const guidance = deriveSizingGuidance({
-    requirement: input.requirement,
-    clarifyAnswers: input.clarifyAnswers,
-    triage: input.triage,
-  });
-
-  if (guidance.archetype !== 'guard_rule') {
-    return input.triage;
-  }
-
-  const cappedFeatureMax = Math.max(guidance.minimumPreservedFeatureCount, guidance.preferredFeatureRange.max);
-  const shapeCap: FeaturePlan['shape'] = cappedFeatureMax <= 1 ? 'minimal' : 'narrow';
-
-  return {
-    ...input.triage,
-    estimatedFeatures: Math.min(input.triage.estimatedFeatures, cappedFeatureMax),
-    shape: cappedByOrder(input.triage.shape, shapeCap, TRIAGE_SHAPE_ORDER),
-  };
+  return input.triage;
 }
 
 export function shouldPauseForDraftReview(input: {
@@ -1990,7 +2046,7 @@ export function assessRequirement(input: {
   wiContextText: string;
   similarStoriesText?: string;
   clarifyAnswers?: ClarifyAnswer[];
-}): RequirementAssessment {
+}): AdvisoryTriageContract {
   const requirement = input.requirement?.trim() ?? '';
   const attachment = input.attachmentText?.trim() ?? '';
   const wi = input.wiContextText?.trim() ?? '';
@@ -2085,10 +2141,10 @@ export function assessRequirement(input: {
   // ── Question plan (unchanged thresholds) ──
   const questionPlan: ClarifyQuestionPlan =
     clarityScore >= 4
-      ? { min: 4, max: 6, target: 5, clarity: 'clear' }
+      ? { min: 4, max: 6, target: 5 }
       : clarityScore <= 1
-        ? { min: 7, max: 11, target: 9, clarity: 'vague' }
-        : { min: 5, max: 8, target: 7, clarity: 'medium' };
+        ? { min: 7, max: 11, target: 9 }
+        : { min: 5, max: 8, target: 7 };
 
   // ── Shape tier (5 buckets) ──
   // Floor: short underspecified requirements with any broad concept should not
@@ -2160,12 +2216,51 @@ export function assessRequirement(input: {
   if (exceptionMentions === 0) ambiguityReasons.push('Edge cases and failure handling are not defined.');
   if (!hasConstraints) ambiguityReasons.push('Business constraints are still implicit.');
 
+  const discoveryComplexity: DiscoveryProfile['complexity'] =
+    complexity === 'very_high'
+      ? 'very_high'
+      : complexity === 'high'
+        ? 'high'
+        : complexity === 'medium'
+          ? 'medium'
+          : 'low';
+  const discoveryScope: DiscoveryProfile['scope'] =
+    shape === 'epic'
+      ? 'very_broad'
+      : shape === 'broad'
+        ? 'broad'
+        : shape === 'balanced'
+          ? 'moderate'
+          : 'narrow';
+  const discoveryAmbiguity: DiscoveryProfile['ambiguity'] =
+    clarityScore <= 1 ? 'high' : clarityScore >= 4 ? 'low' : 'medium';
+
   return {
-    questionPlan,
-    featurePlan,
-    arPlan,
-    ambiguityScore: Math.max(0, ambiguityPenalty - (hasConstraints ? 1 : 0)),
-    ambiguityReasons,
+    reasoning: ambiguityReasons.join(' '),
+    confidence: 'low',
+    deliveryForecast: {
+      shape,
+      complexity,
+      featureTarget: clampCount(featurePlan.target, 1, 15),
+      featureMin: clampCount(featurePlan.min, 1, 15),
+      featureMax: clampCount(featurePlan.max, 1, 15),
+      arDepth: arPlan.depth,
+      arTarget: clampCount(arPlan.target, 0, 8),
+    },
+    discoveryForecast: {
+      scope: discoveryScope,
+      complexity: discoveryComplexity,
+      ambiguity: discoveryAmbiguity,
+      recommendedInitialCount: clampCount(questionPlan.target, 0, 20),
+      followupCap: clampCount(
+        discoveryAmbiguity === 'high' ? 6 : discoveryAmbiguity === 'medium' ? 4 : 2,
+        0,
+        10,
+      ),
+    },
+    telemetry: {
+      fallbackUsed: true,
+    },
   };
 }
 
@@ -2272,15 +2367,7 @@ function parseCategoryKeyList(rawData: unknown): ClarifyCategoryKey[] {
 function ambiguityAssessmentFromDiscoveryProfile(
   profile: DiscoveryProfile,
   generatedQuestions: number,
-  questionPlan?: ClarifyQuestionPlan,
 ): ClarifyAmbiguityAssessment {
-  const level: ClarifyAmbiguityAssessment['level'] =
-    profile.ambiguity === 'high'
-      ? 'vague'
-      : profile.ambiguity === 'low'
-        ? 'clear'
-        : 'medium';
-
   const score =
     profile.ambiguity === 'high'
       ? 8
@@ -2289,15 +2376,15 @@ function ambiguityAssessmentFromDiscoveryProfile(
         : 2;
 
   return {
-    level,
+    level: ambiguityLevelFromProfile(profile.ambiguity),
     score,
     reasons: profile.missingCategoryKeys.length
       ? profile.missingCategoryKeys.map((categoryKey) => `${labelForCategoryKey(categoryKey)} still needs clarification.`)
       : ['Discovery is focused on confirming the remaining implementation details.'],
     questionPlan: {
-      min: questionPlan?.min ?? generatedQuestions,
-      max: questionPlan?.max ?? generatedQuestions,
-      target: questionPlan?.target ?? profile.recommendedInitialCount,
+      min: generatedQuestions,
+      max: generatedQuestions,
+      target: profile.recommendedInitialCount,
     },
     generatedQuestions,
   };
@@ -2323,6 +2410,7 @@ export async function generateFeatures(opts: {
   similarStoriesText: string;
   wiContextText: string;
   config: TenantConfig;
+  advisoryTriage?: AdvisoryTriageContract;
   precomputedDraftFeatures?: Feature[];
   precomputedDraftReview?: DraftReviewMetadata;
   draftReviewDecision?: DraftReviewDecision;
@@ -2340,6 +2428,7 @@ export async function generateFeatures(opts: {
     similarStoriesText,
     wiContextText,
     config,
+    advisoryTriage,
     precomputedDraftFeatures,
     precomputedDraftReview,
     draftReviewDecision,
@@ -2402,6 +2491,23 @@ export async function generateFeatures(opts: {
       processTaxonomyEnabled: config.processTaxonomyEnabled,
       clarifyAnswerCount: clarifyAnswers.length,
       reviewMode: true,
+      featurePlan: advisoryTriage
+        ? {
+            min: Math.max(1, advisoryTriage.deliveryForecast.featureMin ?? Math.max(1, advisoryTriage.deliveryForecast.featureTarget - 1)),
+            max: Math.max(
+              1,
+              advisoryTriage.deliveryForecast.featureMax
+              ?? (advisoryTriage.deliveryForecast.featureTarget + (
+                advisoryTriage.deliveryForecast.complexity === 'high' || advisoryTriage.deliveryForecast.complexity === 'very_high'
+                  ? Math.max(4, Math.ceil(advisoryTriage.deliveryForecast.featureTarget * 0.8))
+                  : Math.max(2, Math.ceil(advisoryTriage.deliveryForecast.featureTarget * 0.5))
+              )),
+            ),
+            target: Math.max(1, advisoryTriage.deliveryForecast.featureTarget),
+            shape: advisoryTriage.deliveryForecast.shape,
+            complexity: advisoryTriage.deliveryForecast.complexity,
+          }
+        : undefined,
     });
 
     const pass1Result = await runDecompositionPass({
@@ -2722,8 +2828,10 @@ export async function generateClarifyingQuestions(opts: {
     arDepth?: EffectiveSizingContract['arDepth'];
     arTarget?: number;
     estimatedQuestions?: number;
-    clarity: 'clear' | 'medium' | 'vague';
-    questionPlan: { min: number; max: number; target: number };
+    confidence?: AdvisoryTriageConfidence;
+    reasoning?: string;
+    deliveryForecast?: AdvisoryTriageContract['deliveryForecast'];
+    discoveryForecast?: AdvisoryTriageContract['discoveryForecast'];
   }) => Promise<void>;
 }): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config, onTriageComplete } = opts;
@@ -2736,22 +2844,17 @@ export async function generateClarifyingQuestions(opts: {
         tier: config.tier,
         providerOpts: buildLlmProviderOpts(config),
       });
-  const questionPlan = clarifyTriageResult
-    ? triageToAssessment(clarifyTriageResult).questionPlan
-    : undefined;
   const sizingContract = clarifyTriageResult ? triageToSizingContract(clarifyTriageResult) : undefined;
   if (onTriageComplete) {
     await onTriageComplete({
       ...(sizingContract ?? {}),
-      clarity: questionPlan?.clarity ?? 'medium',
-      questionPlan: {
-        min: questionPlan?.min ?? 0,
-        max: questionPlan?.max ?? 0,
-        target: questionPlan?.target ?? 0,
-      },
+      confidence: clarifyTriageResult?.confidence,
+      reasoning: clarifyTriageResult?.reasoning,
+      deliveryForecast: clarifyTriageResult?.deliveryForecast,
+      discoveryForecast: clarifyTriageResult?.discoveryForecast,
     });
   }
-  const desiredQuestionCount = questionPlan?.target ?? 0;
+  const desiredQuestionCount = clarifyTriageResult?.discoveryForecast.recommendedInitialCount ?? 0;
   const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 8192), 6144);
   const domainSignals = extractDiscoverySignals([
     requirement,
@@ -2771,9 +2874,9 @@ export async function generateClarifyingQuestions(opts: {
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
   ];
-  if (questionPlan) {
+  if (clarifyTriageResult?.discoveryForecast) {
     contextParts.push(
-      `DISCOVERY SIGNAL: the prior assessment estimates ${questionPlan.min}-${questionPlan.max} clarifying questions for this request (midpoint: ${desiredQuestionCount}). Treat that range as guidance only — return however many questions are materially needed to close the ambiguity gaps you identify. More is better than fewer when genuine business ambiguity remains.`,
+      `DISCOVERY SIGNAL: earlier triage suggests ${clarifyTriageResult.discoveryForecast.scope} scope, ${clarifyTriageResult.discoveryForecast.complexity} complexity, ${clarifyTriageResult.discoveryForecast.ambiguity} ambiguity, about ${desiredQuestionCount} initial questions, and up to ${clarifyTriageResult.discoveryForecast.followupCap} follow-up questions. Treat that as advisory only — discovery must size itself from unresolved business ambiguity.`,
     );
   }
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
@@ -2787,7 +2890,7 @@ export async function generateClarifyingQuestions(opts: {
     domainContext: config.domainContext,
     domainRoles: config.domainRoles,
     domainSignals,
-    questionPlan,
+    advisoryForecast: clarifyTriageResult?.discoveryForecast,
   });
 
   const raw = await callLlmJsonWithUsage<Record<string, unknown>>({
@@ -2803,19 +2906,7 @@ export async function generateClarifyingQuestions(opts: {
   const normalizedProfileCandidate = normalizeDiscoveryProfile(
     parseDiscoveryProfileCandidate(raw.data),
     parsedQuestions.length || desiredQuestionCount,
-    sizingContract ? {
-      scope: sizingContract.shape === 'epic'
-        ? 'very_broad'
-        : sizingContract.shape === 'broad'
-          ? 'broad'
-          : sizingContract.shape === 'balanced'
-            ? 'moderate'
-            : 'narrow',
-      complexity: sizingContract.complexity === 'trivial' ? 'low' : sizingContract.complexity,
-      ambiguity: questionPlan?.clarity === 'vague' ? 'high' : questionPlan?.clarity === 'medium' ? 'medium' : 'low',
-      recommendedInitialCount: sizingContract.estimatedQuestions,
-      followupCap: 4,
-    } : undefined,
+    clarifyTriageResult?.discoveryForecast,
   );
   const normalizedProfile = {
     ...normalizedProfileCandidate,
@@ -2880,6 +2971,7 @@ export async function generateClarifyingQuestions(opts: {
 
   return {
     questions: filteredQuestions,
+    advisoryTriage: clarifyTriageResult ?? undefined,
     sizingContract,
     discoveryProfile,
     tokenUsage: {
@@ -2888,7 +2980,7 @@ export async function generateClarifyingQuestions(opts: {
       total: totalTokens,
       byStage: { clarify: { input: totalInputTokens, output: totalOutputTokens, total: totalTokens } },
     },
-    ambiguityAssessment: ambiguityAssessmentFromDiscoveryProfile(discoveryProfile, filteredQuestions.length, questionPlan),
+    ambiguityAssessment: ambiguityAssessmentFromDiscoveryProfile(discoveryProfile, filteredQuestions.length),
   };
 }
 

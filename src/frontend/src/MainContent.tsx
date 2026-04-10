@@ -6,6 +6,7 @@ import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
 import type {
   AiChangeActionType,
+  AdvisoryTriageContract,
   ClarifyContextMeta,
   ClarifyProgressPayload,
   DraftReviewDecision,
@@ -71,6 +72,8 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 type GenerationProgressMeta = {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
+  sizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   draftFeatureCount?: number;
@@ -211,12 +214,28 @@ function ContextChipList({ chips }: { chips: string[] }) {
   );
 }
 
-function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] }) {
-  if (!triage) {
+function TriageScoreCard({
+  advisoryTriage,
+  sizingContract,
+}: {
+  advisoryTriage?: GenerationProgressMeta['advisoryTriage'];
+  sizingContract?: GenerationProgressMeta['sizingContract'];
+}) {
+  const forecast = advisoryTriage?.deliveryForecast ?? (sizingContract
+    ? {
+        shape: sizingContract.shape,
+        complexity: sizingContract.complexity,
+        featureTarget: sizingContract.featureTarget,
+        arDepth: sizingContract.arDepth,
+        arTarget: sizingContract.arTarget,
+      }
+    : null);
+
+  if (!forecast) {
     return (
       <div>
         <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
+          <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advisory triage</span>
           <span className="text-[12px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing…</span>
         </div>
         <div className="flex gap-1 mb-1">
@@ -237,35 +256,41 @@ function TriageScoreCard({ triage }: { triage: GenerationProgressMeta['triage'] 
     );
   }
 
-  const complexityLabel = COMPLEXITY_LEVELS.find(l => l.key === triage.complexity)?.label ?? triage.complexity;
+  const complexityLabel = COMPLEXITY_LEVELS.find(l => l.key === forecast.complexity)?.label ?? forecast.complexity;
+  const forecastedQuestions = advisoryTriage?.discoveryForecast.recommendedInitialCount ?? sizingContract?.estimatedQuestions;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Complexity</span>
+        <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advisory triage</span>
         <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{complexityLabel}</span>
       </div>
-      <ComplexityBar current={triage.complexity} />
+      <ComplexityBar current={forecast.complexity} />
+      {advisoryTriage?.confidence && (
+        <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
+          Fast-pass confidence: <span className="font-semibold text-[var(--rf-text-secondary)]">{advisoryTriage.confidence}</span>
+        </div>
+      )}
 
       <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Shape</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">{SHAPE_LABELS[triage.shape] ?? triage.shape}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{SHAPE_LABELS[forecast.shape] ?? forecast.shape}</div>
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{getGenerationFeatureTargetLabel()}</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">{formatGenerationFeatureTarget(triage.featureTarget)}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{formatGenerationFeatureTarget(forecast.featureTarget)}</div>
         </div>
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions asked</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof triage.estimatedQuestions === 'number' ? triage.estimatedQuestions : 'LLM-led'}</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Discovery forecast</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof forecastedQuestions === 'number' ? `~${forecastedQuestions} questions` : 'LLM-led'}</div>
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">ARs / feature</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {typeof triage.arTarget === 'number' ? triage.arTarget : 'LLM-led'} <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">({AR_DEPTH_LABELS[triage.arDepth] ?? triage.arDepth})</span>
+            {typeof forecast.arTarget === 'number' ? forecast.arTarget : 'LLM-led'} <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">({AR_DEPTH_LABELS[forecast.arDepth] ?? forecast.arDepth})</span>
           </div>
         </div>
       </div>
@@ -473,13 +498,15 @@ function DiscoveryScoreCard({
   context?: ClarifyContextMeta | null;
 }) {
   const discoveryProfile = meta?.discoveryProfile ?? context?.discoveryProfile;
+  const advisoryTriage = meta?.advisoryTriage ?? context?.advisoryTriage;
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
   const assessment = meta?.assessment ?? null;
   const sizingContract = meta?.sizingContract ?? context?.sizingContract;
-  const complexityKey = sizingContract?.complexity ?? discoveryProfile?.complexity ?? assessment?.complexity ?? null;
-  const plannedQuestions = sizingContract?.estimatedQuestions ?? ambiguityAssessment?.questionPlan?.target ?? assessment?.questionPlan?.target ?? discoveryProfile?.recommendedInitialCount;
+  const complexityKey = discoveryProfile?.complexity ?? advisoryTriage?.discoveryForecast.complexity ?? null;
+  const plannedQuestions = discoveryProfile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount ?? ambiguityAssessment?.questionPlan?.target ?? assessment?.estimatedQuestions;
   const discoveryHeadline = getDiscoveryProfileHeadline(discoveryProfile);
   const sourceChips = getSourceContextChips(meta?.sources ?? context ?? null);
+  const isFinalProfile = Boolean(discoveryProfile);
 
   if (!discoveryProfile && !assessment && !ambiguityAssessment && !sizingContract) {
     return (
@@ -511,10 +538,18 @@ function DiscoveryScoreCard({
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="flex items-center justify-between mb-2.5">
         <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
-        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{discoveryHeadline}</span>
+        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{isFinalProfile ? discoveryHeadline : 'Advisory forecast'}</span>
       </div>
       <ContextChipList chips={sourceChips} />
       <ComplexityBar current={complexityKey} />
+      {!isFinalProfile && advisoryTriage?.discoveryForecast && (
+        <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
+          Early forecast: {getDiscoveryProfileHeadline({
+            ...advisoryTriage.discoveryForecast,
+            missingCategoryKeys: [],
+          } as ClarifyProgressPayload['discoveryProfile'])}
+        </div>
+      )}
 
       <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
 
@@ -524,7 +559,9 @@ function DiscoveryScoreCard({
           <div className="text-[14px] font-black text-[var(--rf-text)]">
             {discoveryProfile
               ? (DISCOVERY_SCOPE_LABELS[discoveryProfile.scope] ?? discoveryProfile.scope)
-              : 'Assessing'}
+              : advisoryTriage?.discoveryForecast
+                ? (DISCOVERY_SCOPE_LABELS[advisoryTriage.discoveryForecast.scope] ?? advisoryTriage.discoveryForecast.scope)
+                : 'Assessing'}
           </div>
         </div>
         <div>
@@ -532,7 +569,9 @@ function DiscoveryScoreCard({
           <div className="text-[14px] font-black text-[var(--rf-text)]">
             {discoveryProfile
               ? (DISCOVERY_AMBIGUITY_LABELS[discoveryProfile.ambiguity] ?? discoveryProfile.ambiguity)
-              : 'Assessing'}
+              : advisoryTriage?.discoveryForecast
+                ? (DISCOVERY_AMBIGUITY_LABELS[advisoryTriage.discoveryForecast.ambiguity] ?? advisoryTriage.discoveryForecast.ambiguity)
+                : 'Assessing'}
           </div>
         </div>
         <div>
@@ -544,7 +583,11 @@ function DiscoveryScoreCard({
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Follow-up cap</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {typeof discoveryProfile?.followupCap === 'number' ? discoveryProfile.followupCap : 'Pending'}
+            {typeof discoveryProfile?.followupCap === 'number'
+              ? discoveryProfile.followupCap
+              : typeof advisoryTriage?.discoveryForecast.followupCap === 'number'
+                ? advisoryTriage.discoveryForecast.followupCap
+                : 'Pending'}
           </div>
         </div>
       </div>
@@ -680,7 +723,7 @@ function GeneratingPipeline({
   projectKey: string;
 }) {
   const stageIndex = getGenerationStageIndex(meta, progress);
-  const triage = meta?.triage;
+  const triage = meta?.triage ?? meta?.sizingContract;
   const arProgress = meta?.arProgress;
   const draftFeatures = meta?.draftFeatures ?? [];
   const featureProgress = meta?.featureProgress ?? [];
@@ -791,12 +834,12 @@ function GeneratingPipeline({
 
         {/* Triage scores + Context */}
         <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
-          <TriageScoreCard triage={triage} />
+          <TriageScoreCard advisoryTriage={meta?.advisoryTriage} sizingContract={triage} />
           {typeof meta?.draftFeatureCount === 'number' && meta.stage !== 'triage' && (
             <div className="mt-3 pt-3 border-t border-[var(--rf-border)] grid grid-cols-2 gap-x-4 gap-y-2">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Triage estimate</div>
-                <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof triage?.featureTarget === 'number' ? `Forecast ${triage.featureTarget}` : 'Assessing'}</div>
+                <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof (meta?.advisoryTriage?.deliveryForecast.featureTarget ?? triage?.featureTarget) === 'number' ? `Forecast ${meta?.advisoryTriage?.deliveryForecast.featureTarget ?? triage?.featureTarget}` : 'Assessing'}</div>
               </div>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>

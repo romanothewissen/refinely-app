@@ -398,6 +398,62 @@ export interface DiscoveryProfile {
   followupCap: number;
 }
 
+export type AdvisoryTriageConfidence = 'low' | 'medium' | 'high';
+
+export interface AdvisoryDeliveryForecast {
+  shape: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
+  complexity: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+  featureTarget: number;
+  featureMin?: number;
+  featureMax?: number;
+  arDepth: 'minimal' | 'lean' | 'standard' | 'thorough' | 'comprehensive';
+  arTarget?: number;
+}
+
+export interface AdvisoryDiscoveryForecast {
+  scope: DiscoveryProfile['scope'];
+  complexity: DiscoveryProfile['complexity'];
+  ambiguity: DiscoveryProfile['ambiguity'];
+  recommendedInitialCount: number;
+  followupCap: number;
+}
+
+export interface AdvisoryTriageContract {
+  reasoning: string;
+  confidence: AdvisoryTriageConfidence;
+  deliveryForecast: AdvisoryDeliveryForecast;
+  discoveryForecast: AdvisoryDiscoveryForecast;
+  telemetry?: {
+    fallbackUsed?: boolean;
+    heuristicDivergence?: {
+      deliveryShape?: {
+        llm: AdvisoryDeliveryForecast['shape'];
+        heuristic: AdvisoryDeliveryForecast['shape'];
+      };
+      deliveryComplexity?: {
+        llm: AdvisoryDeliveryForecast['complexity'];
+        heuristic: AdvisoryDeliveryForecast['complexity'];
+      };
+      discoveryScope?: {
+        llm: AdvisoryDiscoveryForecast['scope'];
+        heuristic: AdvisoryDiscoveryForecast['scope'];
+      };
+      discoveryComplexity?: {
+        llm: AdvisoryDiscoveryForecast['complexity'];
+        heuristic: AdvisoryDiscoveryForecast['complexity'];
+      };
+      discoveryAmbiguity?: {
+        llm: AdvisoryDiscoveryForecast['ambiguity'];
+        heuristic: AdvisoryDiscoveryForecast['ambiguity'];
+      };
+      recommendedInitialCount?: {
+        llm: number;
+        heuristic: number;
+      };
+    };
+  };
+}
+
 export interface EffectiveSizingContract {
   shape: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
   complexity: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
@@ -422,14 +478,17 @@ export interface ClarifyAssessmentSummary {
   arDepth?: EffectiveSizingContract['arDepth'];
   arTarget?: number;
   estimatedQuestions?: number;
-  clarity?: 'clear' | 'medium' | 'vague';
-  questionPlan?: { min: number; max: number; target: number };
+  confidence?: AdvisoryTriageConfidence;
+  reasoning?: string;
+  discoveryForecast?: AdvisoryDiscoveryForecast;
+  deliveryForecast?: AdvisoryDeliveryForecast;
 }
 
 export interface ClarifyProgressPayload {
   stage?: 'context' | 'assessment' | 'question_generation' | 'finalize' | 'sufficiency' | 'followup';
   assessment?: ClarifyAssessmentSummary;
   sizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   discoveryProfile?: DiscoveryProfile;
   ambiguityAssessment?: ClarifyContextMeta['ambiguityAssessment'];
   sources?: {
@@ -462,6 +521,7 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   sizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   discoveryProfile?: DiscoveryProfile;
   ambiguityAssessment?: {
     level: 'clear' | 'medium' | 'vague';
@@ -542,6 +602,7 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   sizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   sizingAssessment?: GenerationSizingAssessment;
   pass1DraftFeatureCount?: number;
   draftReviewTriggered?: boolean;
@@ -818,7 +879,11 @@ export interface GenerationEvent {
   reviewedDraftDecision?: DraftReviewDecision;
   reviewedDraftSelectedFeatureIds?: string[];
   reviewedDraftReviewIterations?: number;
+  clarifyDiscoveryProfile?: DiscoveryProfile;
+  clarifySizingContract?: EffectiveSizingContract;
+  clarifyAdvisoryTriage?: AdvisoryTriageContract;
   reviewedTriageSizingContract?: EffectiveSizingContract;
+  reviewedAdvisoryTriage?: AdvisoryTriageContract;
   priorStageDurationsMs?: GenerationStageDurationsMs;
   retryFeatureId?: string;
   retryFeature?: Feature;

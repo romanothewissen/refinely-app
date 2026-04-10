@@ -113,7 +113,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       },
     });
     const clarifyStartedAt = Date.now();
-    const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, sizingContract } = await generateClarifyingQuestions({
+    const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, advisoryTriage, sizingContract } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
@@ -121,12 +121,12 @@ export async function handler(event: { body: ClarifyEvent }) {
       config,
       precomputedTriage,
       onTriageComplete: async (assessment) => {
-        const questionText = assessment.questionPlan.target > 0
-          ? `targeting about ${assessment.questionPlan.target} questions`
+        const questionText = typeof assessment.discoveryForecast?.recommendedInitialCount === 'number'
+          ? `with an early forecast of about ${assessment.discoveryForecast.recommendedInitialCount} questions`
           : 'letting the discovery model decide how many questions are actually needed';
         await sendClarifyProgress(
           sessionId,
-          `Discovery is sizing the ambiguity, ${questionText}, with ${assessment.clarity} clarity so far…`,
+          `Discovery is sizing the ambiguity, ${questionText}, from the unresolved business logic it still sees…`,
           inputSignature,
           {
             stage: 'question_generation',
@@ -138,8 +138,16 @@ export async function handler(event: { body: ClarifyEvent }) {
                   featureTarget: assessment.featureTarget,
                   arDepth: assessment.arDepth,
                   arTarget: assessment.arTarget,
-                  estimatedQuestions: assessment.estimatedQuestions ?? assessment.questionPlan.target,
+                  estimatedQuestions: assessment.estimatedQuestions ?? assessment.discoveryForecast?.recommendedInitialCount ?? 0,
                 } as const)
+              : undefined,
+            advisoryTriage: assessment.deliveryForecast && assessment.discoveryForecast
+              ? {
+                  reasoning: assessment.reasoning ?? '',
+                  confidence: assessment.confidence ?? 'medium',
+                  deliveryForecast: assessment.deliveryForecast,
+                  discoveryForecast: assessment.discoveryForecast,
+                }
               : undefined,
             sources: {
               projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
@@ -163,6 +171,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     await sendClarifyProgress(sessionId, 'Finalizing discovery questions and coverage gaps…', inputSignature, {
       stage: 'finalize',
       sizingContract,
+      advisoryTriage,
       discoveryProfile,
       ambiguityAssessment: {
         ...ambiguityAssessment,
@@ -188,6 +197,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
       sizingContract,
+      advisoryTriage,
       discoveryProfile,
       ambiguityAssessment: {
         ...ambiguityAssessment,

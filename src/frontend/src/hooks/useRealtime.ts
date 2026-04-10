@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
-import type { ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract } from '../types';
+import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
@@ -14,6 +14,8 @@ export interface GenerationProgress {
 export interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
+  sizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number }>;
   draftFeatureCount?: number;
@@ -80,6 +82,8 @@ function mergeGenerationPayload(
   return {
     stage: resolveStage(previous.stage, next.stage),
     triage: next.triage ?? previous.triage,
+    sizingContract: next.sizingContract ?? previous.sizingContract,
+    advisoryTriage: next.advisoryTriage ?? previous.advisoryTriage,
     arProgress: next.arProgress ?? previous.arProgress,
     draftFeatures: next.draftFeatures?.length ? next.draftFeatures : previous.draftFeatures,
     draftFeatureCount: next.draftFeatureCount ?? previous.draftFeatureCount,
@@ -116,6 +120,7 @@ function mergeClarifyPayload(
     stage: next.stage ?? previous.stage,
     assessment: next.assessment ?? previous.assessment,
     sizingContract: next.sizingContract ?? previous.sizingContract,
+    advisoryTriage: next.advisoryTriage ?? previous.advisoryTriage,
     discoveryProfile: next.discoveryProfile ?? previous.discoveryProfile,
     ambiguityAssessment: next.ambiguityAssessment ?? previous.ambiguityAssessment,
     sources: next.sources ?? previous.sources,

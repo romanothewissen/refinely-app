@@ -7,7 +7,7 @@
  * Progress is streamed back to the UI via Forge Realtime.
  */
 
-import { ClarifyAnswer, DraftReviewMetadata, EffectiveSizingContract, Feature, GenerationContextMeta, GenerationEvent, GenerationStageDurationsMs, TokenUsageSummary } from '../types';
+import { AdvisoryTriageContract, ClarifyAnswer, DraftReviewMetadata, EffectiveSizingContract, Feature, GenerationContextMeta, GenerationEvent, GenerationStageDurationsMs, TokenUsageSummary } from '../types';
 import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
@@ -45,6 +45,8 @@ interface RealtimeEvent {
 interface GenerationProgressPayload {
   stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
+  sizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>>;
   draftFeatureCount?: number;
@@ -61,6 +63,8 @@ interface GenerationProgressPayload {
     draftFeatures: Feature[];
     draftReview?: DraftReviewMetadata;
     draftReviewIterations?: number;
+    sizingContract?: EffectiveSizingContract;
+    advisoryTriage?: AdvisoryTriageContract;
     priorStageDurationsMs?: GenerationStageDurationsMs;
   };
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
@@ -164,6 +168,7 @@ export function buildGenerationStartProgressUpdate(opts: {
   reviewedDraftReview?: DraftReviewMetadata;
   reviewedDraftDecision?: GenerationEvent['reviewedDraftDecision'];
   advisorySizingContract?: EffectiveSizingContract;
+  advisoryTriage?: AdvisoryTriageContract;
   sources?: GenerationProgressPayload['sources'];
 }): { message: string; payload: GenerationProgressPayload } {
   const {
@@ -173,6 +178,7 @@ export function buildGenerationStartProgressUpdate(opts: {
     reviewedDraftReview,
     reviewedDraftDecision,
     advisorySizingContract,
+    advisoryTriage,
     sources,
   } = opts;
 
@@ -203,6 +209,8 @@ export function buildGenerationStartProgressUpdate(opts: {
     payload: {
       stage,
       triage: advisorySizingContract,
+      sizingContract: advisorySizingContract,
+      advisoryTriage,
       ...(seededDraftFeatures.length
         ? {
             draftFeatures: seededDraftFeatures,
@@ -227,12 +235,14 @@ export async function handler(event: { body: GenerationEvent }) {
     projectKey,
     projectKeys,
     clarifySizingContract,
+    clarifyAdvisoryTriage,
     reviewedDraftFeatures,
     reviewedDraftReview,
     reviewedDraftDecision,
     reviewedDraftSelectedFeatureIds,
     reviewedDraftReviewIterations,
     reviewedTriageSizingContract,
+    reviewedAdvisoryTriage,
     priorStageDurationsMs,
     retryFeatureId,
     retryFeature,
@@ -284,6 +294,7 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentIncluded: Boolean(attachmentText?.trim()),
     };
     const advisorySizingContract = reviewedTriageSizingContract ?? clarifySizingContract;
+    const advisoryTriage = reviewedAdvisoryTriage ?? clarifyAdvisoryTriage;
     const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(
@@ -337,6 +348,7 @@ export async function handler(event: { body: GenerationEvent }) {
       reviewedDraftReview,
       reviewedDraftDecision,
       advisorySizingContract,
+      advisoryTriage,
       sources: progressSources,
     });
 
@@ -354,6 +366,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       config,
+      advisoryTriage,
       precomputedDraftFeatures: retryFeature ? [retryFeature] : reviewedDraftFeatures,
       precomputedDraftReview: reviewedDraftReview,
       draftReviewDecision: retryFeatureId ? undefined : reviewedDraftDecision,
@@ -373,6 +386,8 @@ export async function handler(event: { body: GenerationEvent }) {
           {
             stage: 'draft_review',
             triage: advisorySizingContract,
+            sizingContract: advisorySizingContract,
+            advisoryTriage,
             draftFeatures: liveDraftFeatures,
             draftFeatureCount: draftFeatures.length,
             draftReview,
@@ -386,6 +401,8 @@ export async function handler(event: { body: GenerationEvent }) {
               draftFeatures,
               draftReview,
               draftReviewIterations: liveDraftReviewIterations,
+              sizingContract: advisorySizingContract,
+              advisoryTriage,
               priorStageDurationsMs: stageDurationsMs,
             },
             sources: progressSources,
@@ -403,6 +420,8 @@ export async function handler(event: { body: GenerationEvent }) {
         await updateProgress(message, 2, {
           stage: 'acceptance_requirements',
           triage: advisorySizingContract,
+          sizingContract: advisorySizingContract,
+          advisoryTriage,
           draftFeatures: liveDraftFeatures,
           draftFeatureCount: liveDraftFeatures.length,
           draftReview: liveDraftReview,
@@ -452,6 +471,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
       sizingContract: advisorySizingContract,
+      advisoryTriage,
       pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
       draftReviewTriggered: Boolean(reviewedDraftFeatures?.length || reviewedDraftReviewIterations),
       draftReviewDecision: reviewedDraftDecision,
@@ -491,6 +511,7 @@ export async function handler(event: { body: GenerationEvent }) {
         projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
         projectKeys: selectedProjectKeys,
         sizingContract: generationContext.sizingContract,
+        advisoryTriage: generationContext.advisoryTriage,
       },
     );
 
@@ -564,16 +585,19 @@ export async function handler(event: { body: GenerationEvent }) {
       await markCancelled(sessionId);
       return;
     }
-    if (err instanceof Pass1DraftReviewRequiredError) {
-      const advisorySizingContract = reviewedTriageSizingContract ?? clarifySizingContract;
-      await entitySet(KEYS.generationProgress(sessionId), {
+      if (err instanceof Pass1DraftReviewRequiredError) {
+        const advisorySizingContract = reviewedTriageSizingContract ?? clarifySizingContract;
+        const advisoryTriage = reviewedAdvisoryTriage ?? clarifyAdvisoryTriage;
+        await entitySet(KEYS.generationProgress(sessionId), {
         type: 'review',
         sessionId,
         message: 'Review drafted features before continuing.',
-        payload: {
-          stage: 'draft_review',
-          triage: advisorySizingContract,
-          draftFeatures: mapDraftFeatures(err.draftFeatures),
+          payload: {
+            stage: 'draft_review',
+            triage: advisorySizingContract,
+            sizingContract: advisorySizingContract,
+            advisoryTriage,
+            draftFeatures: mapDraftFeatures(err.draftFeatures),
           draftFeatureCount: err.draftFeatures.length,
           draftReview: err.draftReview,
           stageDurationsMs: err.stageDurationsMs,
@@ -602,6 +626,8 @@ export async function handler(event: { body: GenerationEvent }) {
       const arFailurePayload: GenerationProgressPayload = {
         stage: 'acceptance_requirements',
         triage: reviewedTriageSizingContract ?? clarifySizingContract,
+        sizingContract: reviewedTriageSizingContract ?? clarifySizingContract,
+        advisoryTriage: reviewedAdvisoryTriage ?? clarifyAdvisoryTriage,
         draftFeatures: mapDraftFeatures(arError.draftFeatures),
         featureProgress: arError.draftFeatures.map((feature) => ({
           id: feature.id,
@@ -666,6 +692,7 @@ async function saveConversationTurn(
     projectKey: string;
     projectKeys: string[];
     sizingContract?: EffectiveSizingContract;
+    advisoryTriage?: AdvisoryTriageContract;
   },
 ) {
   try {
