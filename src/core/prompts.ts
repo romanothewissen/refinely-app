@@ -747,8 +747,8 @@ DISCOVERY RULES:
 - Strong questions often probe ownership, eligibility, tie-breakers, exception handling, downstream visibility, or auditability.
 - For optimization, scheduling, assignment, prioritization, ranking, or automation asks, you usually need coverage across ownership, decision factors, timing, exceptions, overrides, and visibility when those details remain ambiguous.
 - For requirements that name a broad workflow area without stating its rules, you usually need coverage across actor responsibilities, decision logic, handling path differences, data requirements, state transitions, exception behavior, and downstream impacts when those details remain ambiguous.
-- Suggestions are optional. Only include them when they sharpen the question with grounded starter answers.
-- If you include suggestions, provide 1-3 short grounded options. Prefer no suggestions over generic filler.
+- Include suggestions for most questions. Omit them only when no grounded starter answer exists and guessing would mislead.
+- Provide up to 3 short, grounded options per question. Do not pad with generic filler just to reach 3 — fewer strong options are better than more weak ones.
 - Suggestions must preserve the domain-specific wording already present in the requirement, question, or details. Do not rewrite them into generic fallback terminology unless the original wording is unusable.
 - Keep the suggestions aligned to the actual question being asked; do not broaden them into a different decision area just to make the set feel more complete.
 
@@ -789,7 +789,7 @@ OUTPUT RULES:
 - Every question should be a single focused prompt.
 - "question" is the short primary prompt shown on the card.
 - "details" is optional and should only be included when extra business context is needed to avoid losing domain fidelity.
-- "suggestions" is optional and should be omitted when grounded starter answers would add no value.
+- "suggestions" should be included for most questions (up to 3 grounded options). Omit only when no meaningful starter answer exists.
 - Each question should read like one clear business decision, not a request for an exhaustive list.
 - Do NOT output free-form category labels like "TRIGGER / CONTEXT & INPUTS".
 - Anti-bias: guard rules and single-actor focused asks often score low complexity; short asks naming a workflow domain with mostly unstated rules often score high complexity. Do not default to medium just because you are uncertain — reason through what is stated versus genuinely unknown and choose the level that fits. Do not suppress a high rating when the requirement names a workflow domain with mostly unstated actors, rules, or decision logic. Brief requirements that imply multi-step workflows, multiple actor groups, or significant unstated decision logic are frequently high complexity with 10+ questions needed.`;

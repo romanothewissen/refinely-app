@@ -479,7 +479,7 @@ export function ClarifyQuestionsView({
                 {items.map(({ idx, q }) => {
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
-                  const suggestions = q.suggestions.slice(0, 4);
+                  const suggestions = q.suggestions.slice(0, 3);
                   const hasDetails = Boolean(q.details?.trim());
                   const detailsOpen = Boolean(expandedQuestionDetails[idx]);
 
