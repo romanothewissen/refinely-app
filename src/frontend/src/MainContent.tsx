@@ -2394,10 +2394,16 @@ export function MainContent({
                   </div>
                 </div>
                   {coverageReviewSummary?.details.length ? (
-                    <div className="mt-3 rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                    <div className="mt-3 rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3">
+                      {coverageReviewSummary.heading && (
+                        <div className="mb-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
+                          {coverageReviewSummary.heading}
+                        </div>
+                      )}
                       {coverageReviewSummary.details.map((detail, index) => (
-                        <div key={`${detail}-${index}`} className={index > 0 ? 'mt-1.5' : ''}>
-                          {normalizeDisplayText(detail)}
+                        <div key={`${detail}-${index}`} className={`flex items-start gap-2 text-[13px] text-[var(--rf-text-secondary)]${index > 0 ? ' mt-1.5' : ''}`}>
+                          <span className="mt-0.5 shrink-0 text-[var(--rf-warning)]">•</span>
+                          <span>{normalizeDisplayText(detail)}</span>
                         </div>
                       ))}
                     </div>

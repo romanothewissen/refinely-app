@@ -29,7 +29,7 @@ export function getApprovedDraftStructureNote(): string {
 
 export function getCoverageReviewSummary(
   coverageReview?: CoverageReviewAdvice | null,
-): { label: string; tone: 'success' | 'warning'; details: string[] } | null {
+): { label: string; tone: 'success' | 'warning'; details: string[]; heading?: string } | null {
   if (!coverageReview) return null;
   if (coverageReview.sufficient) {
     return {
@@ -45,6 +45,7 @@ export function getCoverageReviewSummary(
     label: `Coverage check found ${count} area${count === 1 ? '' : 's'} to review`,
     tone: 'warning',
     details,
+    heading: count === 1 ? 'Gap to review' : `${count} gaps to review`,
   };
 }
 

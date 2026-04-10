@@ -235,7 +235,10 @@ RULES:
 - If work instructions or operational guidance in the user message define relevant business rules, decision logic, handling paths, state transitions, actor responsibilities, or exception behavior, preserve that scope explicitly rather than generalizing it away.
 - Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
 - Preserve meaningful workflow boundaries when actor responsibilities, decision paths, lifecycle branches, or exception handling would materially change what gets built or tested.
-- Do NOT split a trigger from its immediate behavior when the behaviors are inseparable parts of the same deliverable. If one event causes creation and first-pass classification of the same object, keep them together unless the requirement clearly indicates independent ownership or release value.
+- Do NOT split a trigger from its immediate behavior when the behaviors are inseparable parts of the same deliverable. If one event causes creation and first-pass classification of the same object, keep them together unless:
+  (a) the requirement explicitly names each classification outcome as a distinct concern with its own handling, routing, or ownership — in that case classification is a separately deliverable business rule, not merely the immediate effect of the trigger; or
+  (b) the requirement names distinct downstream paths (different queues, assignees, next-step workflows, or SLA treatment) that diverge per outcome — routing divergence is independently testable and often independently releasable.
+  When either exception applies, the record creation capability and the classification/routing capability may be separate features. Judgment call: if classification appears as a single incidental clause with no distinct handling described, keep it together; if the requirement gives named, differentiated treatment to each outcome, split.
 - DO NOT promote configuration or settings screens ("define intake sources", "manage classification rules", "configure X") into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable. Admin configuration is a property of the parent capability — fold it into the feature whose behavior it controls.
 - Before finalizing, check whether any pair of features is truly duplicative. Merge only when they represent the same primary capability and outcome, not merely adjacent parts of the same workflow area.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
@@ -405,6 +408,8 @@ COMMON MISTAKES TO AVOID:
 - Never reference internal system concepts or admin configurations as preconditions
 - Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
 - CRITICAL — never confuse the actor role with the business object. The actor (from "As a [role]") is a human who performs actions. The GIVEN describes the state of a business object, not the state of the actor. BAD: "GIVEN an Operations Manager has expired" — the Operations Manager is the human role; the thing that expires is the agreement. CORRECT: "GIVEN an agreement has expired". The actor belongs in WHEN ("WHEN the Operations Manager triggers the process"), never as the subject of an expired/completed/failed state in GIVEN.
+- CLASSIFICATION OUTCOMES must name the business state or category, not the detection mechanism that produces it. BAD: "GIVEN a record contains the required keywords THEN it is classified as eligible" — "contains keywords" names the algorithm, not the business situation. GOOD: "GIVEN a record meets the eligibility criteria THEN it is marked as eligible". Never write: keywords, keyword matching, pattern matching, contains [word] or phrase, keyword detection, rules engine, classifier, scoring threshold, match score. Write what is true about the business situation — not how the system detects or tests for it.
+- CLASSIFICATION FRAMING must use the positive category name when the requirement provides one. BAD: "THEN the record is marked as not eligible" or "THEN the request is classified as not a priority type" — these name absence, not outcome. GOOD: "THEN the record is marked as standard" or "THEN the request is routed as a general inquiry". When a requirement explicitly names two or more classification categories, every AR that assigns or routes to a category must use that exact category name, never its negation.
 ${arGuidance ? `\n${arGuidance}` : ''}
 
 OUTPUT FORMAT (strict):
@@ -880,6 +885,15 @@ When evaluating coverage, explicitly check for relevant branches such as:
 - state transitions and lifecycle behavior
 - exception handling and fallback paths
 - downstream impacts and visibility requirements
+
+AUTOMATED RECORD CREATION CHECKLIST — when the requirement involves automated creation or update of records triggered by an inbound source (incoming messages, submitted forms, external events, scheduled imports, or any trigger not initiated by the primary user), additionally check for:
+- Deduplication and association: when the same source can trigger multiple times for the same underlying situation (a follow-up message, a retry, a re-submission), is there coverage for whether subsequent triggers create new records or associate with the existing one?
+- Source-to-record field mapping: is there coverage for which source data populates which record fields, and what happens when required fields are missing, malformed, or ambiguous?
+- Supplementary content preservation: if the inbound source can carry attachments, linked items, or supplementary content, is there coverage for whether that content is accessible on the resulting record?
+- Classification and routing per named outcome: when the requirement names multiple distinct categories or routing paths, is there an AR for each named outcome and one covering the case where no category can be determined?
+- Processing failure visibility: is there coverage for what happens when automated processing cannot complete — due to unrecognisable content, missing data, or an ambiguous match — and whether that failure is surfaced to the responsible operator?
+
+Only apply this checklist when the requirement describes automated record creation or update from an inbound source. Skip for purely human-initiated workflows.
 
 Return JSON only:
 {"sufficient": true, "missingCoverage": [], "reasoning": "..."}

@@ -14,6 +14,9 @@ const IMPLEMENTATION_FLAVORED_PATTERNS: Array<{ pattern: RegExp; label: string }
   { pattern: /\bemail content\b/i, label: 'message content field' },
   { pattern: /\bappend(?:ed|s)?\b/i, label: 'append operation' },
   { pattern: /\bthe system\s+(?:identifies|matches|parses|reads|extracts|detects|appends)\b/i, label: 'system action wording' },
+  { pattern: /\bkeyword(?:s|\s+matching|\s+detection|\s+based)?\b/i, label: 'keyword mechanism language' },
+  { pattern: /\bcontains\s+(?:\w+\s+){0,3}(?:keyword|pattern|term|phrase)\b/i, label: 'pattern-match mechanism language' },
+  { pattern: /\bnot\s+(?:a|an)\s+\w+\s+(?:issue|case|inquiry|request|type|category)\b/i, label: 'negative classification framing' },
 ];
 
 // Stop-words / incomplete-sentence terminators. An AR clause that ends on one of these reads as truncated.
