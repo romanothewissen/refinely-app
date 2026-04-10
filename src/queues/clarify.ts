@@ -28,6 +28,8 @@ import {
   summarizeReferencedWiSections,
 } from '../services/project-selection';
 
+const PROGRESS_HEARTBEAT_MS = 15000;
+
 /**
  * When the user provides only an attachment (empty requirement), fall back to
  * using the first 600 chars of the attachment as the BM25 retrieval query.
@@ -49,12 +51,22 @@ export async function handler(event: { body: ClarifyEvent }) {
     domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
+  let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
+  let stopHeartbeat: (() => void) | null = null;
+
+  const sendProgress = async (
+    message: string,
+    payload?: ClarifyProgressPayload,
+  ) => {
+    currentProgress = { message, payload };
+    await sendClarifyProgress(sessionId, message, inputSignature, payload);
+  };
 
   try {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
-    await sendClarifyProgress(sessionId, 'Reading project guidance, work instructions, and related stories…', inputSignature, {
+    await sendProgress('Reading project guidance, work instructions, and related stories…', {
       stage: 'context',
       sources: {
         projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
@@ -63,6 +75,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         domainContextApplied: Boolean(config.domainContext?.trim()),
       },
     });
+    stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
     const triagePromise = assessRequirementWithLlm({
       requirement: maskedRequirement.text,
       generatorConfig: config.generatorConfig,
@@ -101,7 +114,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       return;
     }
 
-    await sendClarifyProgress(sessionId, 'Assessing scope, ambiguity, and question budget…', inputSignature, {
+    await sendProgress('Assessing scope, ambiguity, and question budget…', {
       stage: 'assessment',
       sources: {
         projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
@@ -124,10 +137,8 @@ export async function handler(event: { body: ClarifyEvent }) {
         const questionText = typeof assessment.discoveryForecast?.recommendedInitialCount === 'number'
           ? `with an early forecast of about ${assessment.discoveryForecast.recommendedInitialCount} questions`
           : 'letting the discovery model decide how many questions are actually needed';
-        await sendClarifyProgress(
-          sessionId,
+        await sendProgress(
           `Discovery is sizing the ambiguity, ${questionText}, from the unresolved business logic it still sees…`,
-          inputSignature,
           {
             stage: 'question_generation',
             assessment,
@@ -168,7 +179,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       return;
     }
 
-    await sendClarifyProgress(sessionId, 'Finalizing discovery questions and coverage gaps…', inputSignature, {
+    await sendProgress('Finalizing discovery questions and coverage gaps…', {
       stage: 'finalize',
       sizingContract,
       advisoryTriage,
@@ -300,6 +311,8 @@ export async function handler(event: { body: ClarifyEvent }) {
       ...(inputSignature ? { inputSignature } : {}),
       updatedAt: Date.now(),
     });
+  } finally {
+    stopHeartbeat?.();
   }
 }
 
@@ -317,6 +330,28 @@ async function sendClarifyProgress(
     ...(payload ? { payload } : {}),
     updatedAt: Date.now(),
   });
+}
+
+function startClarifyProgressHeartbeat(
+  sessionId: string,
+  inputSignature: string | undefined,
+  getCurrentProgress: () => { message?: string; payload?: ClarifyProgressPayload },
+) {
+  let stopped = false;
+  let inFlight = false;
+  const timer = setInterval(() => {
+    const current = getCurrentProgress();
+    if (stopped || inFlight || !current.message) return;
+    inFlight = true;
+    void sendClarifyProgress(sessionId, current.message, inputSignature, current.payload).finally(() => {
+      inFlight = false;
+    });
+  }, PROGRESS_HEARTBEAT_MS);
+
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 async function isWorkflowCancelled(sessionId: string): Promise<boolean> {

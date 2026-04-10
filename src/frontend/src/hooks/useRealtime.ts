@@ -101,8 +101,10 @@ const NO_FIRST_EVENT_MS = 60000;
 const STALE_PROGRESS_MS = 90000;
 const PROGRESS_STABILITY_MS = 250;
 
-const CLARIFY_TIMEOUT_MS = 90000;
-const CLARIFY_STALE_PROGRESS_MS = 75000;
+// Clarify runs in a 15-minute queue worker, so client-side timeouts should
+// allow long discovery sessions and only fail when progress actually goes stale.
+const CLARIFY_TIMEOUT_MS = 960000;
+const CLARIFY_STALE_PROGRESS_MS = 120000;
 
 export interface ClarifyBlockedPayload {
   message: string;
