@@ -197,6 +197,10 @@ RULES:
 - If work instructions or operational guidance in the user message define relevant business rules, decision logic, handling paths, state transitions, actor responsibilities, or exception behavior, preserve that scope explicitly rather than generalizing it away.
 - Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
 - If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
+- DO NOT split a trigger from its immediate behavior. If one event causes creation AND classification AND routing of the same object, that is ONE feature — not three. Classification, routing, and initial state assignment are properties of the creation flow, not separate features.
+- DO NOT promote configuration or settings screens ("define designated inboxes", "manage classification keywords", "configure X") into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable. Admin configuration is a property of the parent capability — fold it into the feature whose behavior it controls.
+- Self-check for overlap before emitting: no two features in your output should share the same trigger AND target object AND actor. If any pair shares two of those three, merge them or clearly re-scope one of them.
+- If one strong feature with complete acceptance requirements can cover the ask, prefer that over several thin features.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
@@ -278,6 +282,7 @@ RULES:
 - If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
 - When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
 - Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
+- CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
 - Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
 

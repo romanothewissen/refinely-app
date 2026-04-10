@@ -728,3 +728,69 @@ test('applyFeatureOutputGuardrails does not promote a generic feature role when 
 
   assert.match(guarded.description, /^As an authorized user, I need to /);
 });
+
+test('applyFeatureOutputGuardrails is idempotent — a second pass does not duplicate the "so that" clause', () => {
+  // Regression for the triple "so that" bug: LLM emits "I need" (no "to"), so the strict regex in
+  // replaceFeatureRole fails and the fallback used to append a boilerplate "so that" even though
+  // the description already had one. Running the pipeline twice (Pass 1 + post-Pass-2) would then
+  // append twice, producing "... so that X. so that the requested outcome is achieved. so that the requested outcome is achieved."
+  const raw = {
+    id: 'feature-1',
+    summary: 'Automatic Case Classification by Issue Type',
+    description: 'As a Technical Support Specialist, I need incoming support emails to be automatically converted into cases and classified by issue type so that I can focus on resolving customer problems instead of manual case creation and initial categorization.',
+    acceptanceRequirements: [
+      {
+        given: 'an email is received in a designated support inbox, and its content indicates a product issue',
+        when: 'the email is processed',
+        then: 'a new case is automatically created and classified as a product issue',
+      },
+    ],
+  };
+
+  const roleGrounding = {
+    requirement: 'Our technical assistance center needs email to case capability for the Technical Support Specialist to distinguish between product issues and general inquiries.',
+    domainRoles: ['Technical Support Specialist'],
+  };
+
+  const firstPass = applyFeatureOutputGuardrails(raw, roleGrounding);
+  const secondPass = applyFeatureOutputGuardrails(firstPass, roleGrounding);
+
+  // Exactly one "so that" in both passes
+  const firstSoThatCount = (firstPass.description.match(/\bso that\b/gi) || []).length;
+  const secondSoThatCount = (secondPass.description.match(/\bso that\b/gi) || []).length;
+  assert.equal(firstSoThatCount, 1, `first pass description has ${firstSoThatCount} "so that" clauses: ${firstPass.description}`);
+  assert.equal(secondSoThatCount, 1, `second pass description has ${secondSoThatCount} "so that" clauses: ${secondPass.description}`);
+  // No boilerplate fallback
+  assert.doesNotMatch(firstPass.description, /so that the requested outcome is achieved/);
+  // Second pass is identical to first pass (idempotent)
+  assert.equal(secondPass.description, firstPass.description);
+});
+
+test('applyFeatureOutputGuardrails does not slice AR clauses mid-sentence on long compound conditions', () => {
+  // Regression for the trimVerboseSegment mid-sentence slicing bug: a 22-word compound "AND" condition
+  // used to be clipped at word 22, leaving a trailing stop-word like "indicates" or "exactly".
+  const guarded = applyFeatureOutputGuardrails({
+    id: 'feature-1',
+    summary: 'Automatic Case Creation from Designated Support Emails',
+    description: 'As a Technical Support Specialist, I need to receive automatically created cases so that I do not have to create them manually.',
+    acceptanceRequirements: [
+      {
+        given: 'a support email address is designated for automatic case creation, and an email is received from an existing contact that clearly indicates a product issue',
+        when: 'the system processes the email',
+        then: 'a new case is automatically created and classified as a Product Issue',
+      },
+    ],
+  }, {
+    requirement: 'Email to case capability for the Technical Support Specialist.',
+    domainRoles: ['Technical Support Specialist'],
+  });
+
+  const given = guarded.acceptanceRequirements[0].given;
+  // The GIVEN must contain the full original phrase — no mid-sentence truncation.
+  assert.ok(
+    given.includes('clearly indicates a product issue'),
+    `GIVEN clause was truncated mid-sentence: "${given}"`,
+  );
+  // And it must NOT end on a truncation-indicating stop-word.
+  assert.doesNotMatch(given, /\b(indicates|that|for|and|or|with|the|a|an|exactly|matches|does|is)\s*$/i);
+});

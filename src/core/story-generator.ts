@@ -46,7 +46,7 @@ import {
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
 } from './prompts';
-import { validateFeatures } from './quality-validator';
+import { detectFeatureOverlaps, validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import {
   allowsZeroQuestionDiscovery,
@@ -1558,6 +1558,7 @@ export function shouldPauseForDraftReview(input: {
   draftFeatureCount: number;
   triageFeatureTarget?: number;
   sizingAssessment: SizingAssessmentSnapshot;
+  overlapCount?: number;
 }): boolean {
   const triageTarget = Math.max(1, Math.round(input.triageFeatureTarget ?? 0));
   const exceedsForecast = triageTarget > 0 && input.draftFeatureCount > Math.ceil(triageTarget * 1.5);
@@ -1565,8 +1566,11 @@ export function shouldPauseForDraftReview(input: {
     input.sizingAssessment.verdict === 'oversized'
     && (input.sizingAssessment.confidence === 'high' || input.sizingAssessment.confidence === 'medium')
     && input.sizingAssessment.featureCount > input.sizingAssessment.preferredFeatureRange.max;
+  // Any detected feature-level overlap is grounds for a draft review — we don't want Pass 2 to burn
+  // LLM calls on overlapping features since the ARs will unavoidably duplicate.
+  const hasOverlaps = (input.overlapCount ?? 0) > 0;
 
-  return exceedsForecast || assessmentSignalsInflation;
+  return exceedsForecast || assessmentSignalsInflation || hasOverlaps;
 }
 
 function toRawFeature(feature: Feature): RawFeature {
@@ -2342,10 +2346,23 @@ export async function generateFeatures(opts: {
       };
   if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, decompositionSizingAssessment, triageSizingContract, stageDurationsMs);
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+  const pass1Overlaps = detectFeatureOverlaps(pass1DraftFeatures);
+  if (pass1Overlaps.length > 0) {
+    console.warn(
+      `[generation] Pass 1 feature overlap detected (${pass1Overlaps.length} pair${pass1Overlaps.length === 1 ? '' : 's'}):`,
+      pass1Overlaps.map((overlap) => ({
+        left: overlap.leftSummary,
+        right: overlap.rightSummary,
+        similarity: Number(overlap.similarity.toFixed(2)),
+        reason: overlap.reason,
+      })),
+    );
+  }
   if (!precomputedDraftFeatures?.length && shouldPauseForDraftReview({
     draftFeatureCount: pass1DraftFeatures.length,
     triageFeatureTarget: triageSizingContract.featureTarget,
     sizingAssessment: decompositionSizingAssessment,
+    overlapCount: pass1Overlaps.length,
   })) {
     throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, decompositionSizingAssessment, triageSizingContract, stageDurationsMs);
   }
@@ -3748,13 +3765,18 @@ function replaceFeatureRole(description: string, role: string): string {
   if (!trimmedRole) return description;
 
   // Deduplicate before attempting role replacement to avoid wrapping an already-malformed string.
-  const cleaned = deduplicateDescription(description);
+  let cleaned = deduplicateDescription(description).trim();
 
-  if (/^As an?\s+.+?,\s*I need to\s+/i.test(cleaned)) {
-    return cleaned.replace(/^As an?\s+(.+?)(,\s*I need to\s+)/i, `As ${articleForRole(trimmedRole)} ${trimmedRole}$2`);
+  // Strip any existing "As a[n] X, I need (to)? " wrapper so we never double-wrap on repeated normalization.
+  cleaned = cleaned.replace(/^As an?\s+[^,]+,\s*I need(?:\s+to)?\s+/i, '').trim();
+
+  const article = articleForRole(trimmedRole);
+  // If the cleaned body already contains a "so that ..." clause, do NOT append another fallback benefit.
+  if (/\bso that\b/i.test(cleaned)) {
+    return `As ${article} ${trimmedRole}, I need to ${cleaned}`.replace(/\s+/g, ' ').trim();
   }
 
-  return `As ${articleForRole(trimmedRole)} ${trimmedRole}, I need to ${cleaned.trim()} so that the requested outcome is achieved.`;
+  return `As ${article} ${trimmedRole}, I need to ${cleaned} so that the requested outcome is achieved.`;
 }
 
 function trimVerboseSegment(value: string, maxWords: number): string {
@@ -3779,11 +3801,9 @@ function trimVerboseSegment(value: string, maxWords: number): string {
     }
   }
 
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  if (words.length > maxWords) {
-    trimmed = words.slice(0, maxWords).join(' ');
-  }
-
+  // Do NOT hard-slice at the word boundary — that truncates mid-sentence and corrupts meaning.
+  // If the segment is still verbose after the clause-marker pass, leave it intact. Verbosity is
+  // controlled at the prompt layer; this function is a backstop for trailing filler only.
   return trimmed.replace(/[,:;.\s]+$/g, '').trim();
 }
 
