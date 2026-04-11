@@ -26,11 +26,11 @@
     "@atlaskit/toggle": "^15.2.14",
     "@atlaskit/tokens": "^11.4.0",
     "@forge/bridge": "5.14.1",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "xlsx": "^0.18.5"
+    "react-dom": "^18.2.0"
   },
   "overrides": {
     "lodash": "^4.18.1"

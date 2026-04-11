@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2, Settings, RefreshCcw, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { utils as XLSXUtils, write } from 'xlsx';
+import ExcelJS from 'exceljs';
 import { api } from './hooks/useForge';
 import { router } from '@forge/bridge';
 import type {
@@ -1712,7 +1712,7 @@ export function MainContent({
     return [];
   }, [changeTargetFeatureId, selectedFeatureIds]);
 
-  const exportFeaturesToExcel = () => {
+  const exportFeaturesToExcel = async () => {
     if (!features.length) return;
 
     try {
@@ -1785,51 +1785,58 @@ export function MainContent({
         rows.push(['', '', '', '', '', '', '', '', '', '']);
       });
 
-      const workbook = XLSXUtils.book_new();
-      const worksheet = XLSXUtils.aoa_to_sheet(rows);
-      worksheet['!cols'] = [
-        { wch: 12 },
-        { wch: 10 },
-        { wch: 28 },
-        { wch: 16 },
-        { wch: 18 },
-        { wch: 16 },
-        { wch: 52 },
-        { wch: 8 },
-        { wch: 28 },
-        { wch: 28 },
-        { wch: 36 },
-        { wch: 28 },
-        { wch: 18 },
-        { wch: 18 },
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Features', {
+        views: [{ state: 'frozen', xSplit: 0, ySplit: headerRowIndex + 1 }],
+      });
+
+      worksheet.addRows(rows);
+      worksheet.columns = [
+        { width: 12 },
+        { width: 10 },
+        { width: 28 },
+        { width: 16 },
+        { width: 18 },
+        { width: 16 },
+        { width: 52 },
+        { width: 8 },
+        { width: 28 },
+        { width: 28 },
+        { width: 36 },
+        { width: 28 },
+        { width: 18 },
+        { width: 18 },
       ];
-      worksheet['!rows'] = rows.map((_, index) => ({ hpt: index <= 3 ? 20 : 42 }));
-      worksheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 13 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 13 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 13 } },
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 13 } },
-      ];
-      worksheet['!autofilter'] = { ref: `A${headerRowIndex + 1}:N${rows.length}` };
-      (worksheet as any)['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
+      rows.forEach((row, index) => {
+        const worksheetRow = worksheet.getRow(index + 1);
+        worksheetRow.height = index <= 3 ? 20 : 42;
+        worksheetRow.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+          if (index >= headerRowIndex && row[columnNumber - 1] !== undefined) {
+            cell.alignment = { vertical: 'top', wrapText: true };
+          }
+        });
+      });
+      worksheet.mergeCells(1, 1, 1, 14);
+      worksheet.mergeCells(2, 1, 2, 14);
+      worksheet.mergeCells(3, 1, 3, 14);
+      worksheet.mergeCells(4, 1, 4, 14);
+      worksheet.autoFilter = {
+        from: { row: headerRowIndex + 1, column: 1 },
+        to: { row: rows.length, column: 14 },
+      };
 
       features.forEach((feature, idx) => {
         if (!feature.jiraIssueKey || !feature.jiraIssueUrl) return;
         const baseRow = baseRowByFeature.get(idx);
         if (typeof baseRow !== 'number') return;
-        const featureCellRef = XLSXUtils.encode_cell({ r: baseRow, c: 13 });
-        if (worksheet[featureCellRef]) {
-          worksheet[featureCellRef].l = { Target: feature.jiraIssueUrl, Tooltip: `Open ${feature.jiraIssueKey}` };
-        }
+        const featureCell = worksheet.getRow(baseRow + 1).getCell(14);
+        featureCell.value = { text: feature.jiraIssueKey, hyperlink: feature.jiraIssueUrl, tooltip: `Open ${feature.jiraIssueKey}` };
         (feature.acceptanceRequirements || []).forEach((_, arIdx) => {
-          const arCellRef = XLSXUtils.encode_cell({ r: baseRow + arIdx + 1, c: 13 });
-          if (worksheet[arCellRef]) {
-            worksheet[arCellRef].l = { Target: feature.jiraIssueUrl!, Tooltip: `Open ${feature.jiraIssueKey}` };
-          }
+          const arCell = worksheet.getRow(baseRow + arIdx + 2).getCell(14);
+          arCell.value = { text: feature.jiraIssueKey!, hyperlink: feature.jiraIssueUrl!, tooltip: `Open ${feature.jiraIssueKey}` };
         });
       });
 
-      XLSXUtils.book_append_sheet(workbook, worksheet, 'Features');
       const openDecisionRows: Array<Array<string | number>> = [
         ['Refinely Open Decisions Export'],
         [`Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`],
@@ -1845,22 +1852,28 @@ export function MainContent({
           decision.detail || '',
         ])),
       ];
-      const openDecisionSheet = XLSXUtils.aoa_to_sheet(openDecisionRows);
-      openDecisionSheet['!cols'] = [
-        { wch: 18 },
-        { wch: 32 },
-        { wch: 18 },
-        { wch: 12 },
-        { wch: 28 },
-        { wch: 60 },
+      const openDecisionSheet = workbook.addWorksheet('Open Decisions');
+      openDecisionSheet.addRows(openDecisionRows);
+      openDecisionSheet.columns = [
+        { width: 18 },
+        { width: 32 },
+        { width: 18 },
+        { width: 12 },
+        { width: 28 },
+        { width: 60 },
       ];
-      openDecisionSheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } },
-      ];
-      XLSXUtils.book_append_sheet(workbook, openDecisionSheet, 'Open Decisions');
+      openDecisionSheet.mergeCells(1, 1, 1, 6);
+      openDecisionSheet.mergeCells(2, 1, 2, 6);
+      openDecisionSheet.mergeCells(3, 1, 3, 6);
+      openDecisionSheet.mergeCells(4, 1, 4, 6);
+      openDecisionRows.forEach((row, index) => {
+        const worksheetRow = openDecisionSheet.getRow(index + 1);
+        worksheetRow.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+          if (index >= 4 && row[columnNumber - 1] !== undefined) {
+            cell.alignment = { vertical: 'top', wrapText: true };
+          }
+        });
+      });
       const qualitySummaryRows: Array<Array<string | number>> = [
         ['Refinely Quality Summary'],
         [`Workspace scope: ${projectKey === '*' ? 'Global workspace' : projectKey}`],
@@ -1870,16 +1883,22 @@ export function MainContent({
         ...((generationContext?.autoRepairedIssues ?? []).map((item) => ['Auto-repaired', sanitizeExportText(item)])),
         ...((generationContext?.remainingBlockingIssues ?? []).map((item) => ['Remaining blocking issue', sanitizeExportText(item)])),
       ];
-      const qualitySummarySheet = XLSXUtils.aoa_to_sheet(qualitySummaryRows);
-      qualitySummarySheet['!cols'] = [{ wch: 24 }, { wch: 72 }];
-      qualitySummarySheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 1 } },
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 1 } },
-      ];
-      XLSXUtils.book_append_sheet(workbook, qualitySummarySheet, 'Quality Summary');
-      const arrayBuffer = write(workbook, { bookType: 'xlsx', type: 'array' });
+      const qualitySummarySheet = workbook.addWorksheet('Quality Summary');
+      qualitySummarySheet.addRows(qualitySummaryRows);
+      qualitySummarySheet.columns = [{ width: 24 }, { width: 72 }];
+      qualitySummarySheet.mergeCells(1, 1, 1, 2);
+      qualitySummarySheet.mergeCells(2, 1, 2, 2);
+      qualitySummarySheet.mergeCells(3, 1, 3, 2);
+      qualitySummarySheet.mergeCells(4, 1, 4, 2);
+      qualitySummaryRows.forEach((row, index) => {
+        const worksheetRow = qualitySummarySheet.getRow(index + 1);
+        worksheetRow.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+          if (index >= 4 && row[columnNumber - 1] !== undefined) {
+            cell.alignment = { vertical: 'top', wrapText: true };
+          }
+        });
+      });
+      const arrayBuffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
