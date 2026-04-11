@@ -1,5 +1,5 @@
 import { invoke } from '@forge/bridge';
-import type { LlmProvider, OutputProfile } from '../types';
+import type { CanvasEditIntent, CanvasEditScope, LlmProvider, OutputProfile } from '../types';
 
 type Payload = Record<string, unknown>;
 const p = (v: unknown) => v as Payload;
@@ -72,6 +72,15 @@ export const api = {
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>
     invoke('refineFeatures', { sessionId, requirement, features, feedback }),
+  changeCanvas: (payload: {
+    sessionId: string;
+    requirement: string;
+    features: unknown[];
+    instruction: string;
+    intent: CanvasEditIntent;
+    scope: CanvasEditScope;
+    selectedFeatureIds?: string[];
+  }) => invoke('changeCanvas', payload),
   restructureFeatures: (payload: {
     sessionId: string;
     requirement: string;

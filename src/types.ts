@@ -362,6 +362,39 @@ export interface CoverageReviewAdvice {
   reasoning?: string;
 }
 
+export type CanvasEditIntent = 'light_refine' | 'add_requirements' | 'add_feature' | 'reorganize';
+export type CanvasEditScope = 'current' | 'selected' | 'all';
+export type CoverageGapCategory =
+  | 'trigger_outcome'
+  | 'roles_ownership'
+  | 'required_information_linkage'
+  | 'rules_routing'
+  | 'lifecycle_matching'
+  | 'exceptions_duplicates';
+export type CoverageGapConfidence = 'low' | 'medium' | 'high';
+export type CoverageGapAction = 'add_to_feature' | 'add_feature' | 'ask_followup';
+
+export interface EditRoutingDecision {
+  intent: CanvasEditIntent;
+  confidence: CoverageGapConfidence;
+  reason: string;
+  followupQuestion?: string;
+  followupWhy?: string;
+  followupUnlocks?: string;
+}
+
+export interface CoverageGap {
+  id: string;
+  category: CoverageGapCategory;
+  label: string;
+  confidence: CoverageGapConfidence;
+  suggestedAction: CoverageGapAction;
+  why: string;
+  question?: string;
+  targetFeatureId?: string;
+  suggestedIntent?: CanvasEditIntent;
+}
+
 export type RestructureScope = 'all' | 'selected';
 
 export interface StructuralFeatureProposal extends Feature {
@@ -379,7 +412,7 @@ export interface StructuralRestructureProposal {
   removedAcceptanceRequirementRefs: string[];
 }
 
-export type AiChangeActionType = 'refine_single' | 'refine_all' | 'restructure';
+export type AiChangeActionType = 'refine_single' | 'refine_all' | 'restructure' | 'add_requirements' | 'add_feature';
 
 export interface UndoableAiChange {
   actionType: AiChangeActionType;
@@ -983,9 +1016,11 @@ export interface RefineEvent {
   license?: any;
   projectKey: string;
   projectKeys?: string[];
-  mode?: 'refine' | 'restructure';
+  mode?: 'refine' | 'restructure' | 'add_feature';
   restructureScope?: RestructureScope;
   selectedFeatureIds?: string[];
+  intent?: CanvasEditIntent;
+  scope?: CanvasEditScope;
 }
 
 // ─── Project Activity ────────────────────────────────────────────────────────

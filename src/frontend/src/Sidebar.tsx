@@ -146,6 +146,7 @@ export function Sidebar({
     : 'Global Workspace';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
+  const [advancedExpanded, setAdvancedExpanded] = React.useState(false);
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
     contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
   );
@@ -333,7 +334,7 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Scrollable body ── */}
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-3 py-3 gap-2 overflow-y-auto custom-scrollbar">
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-3 gap-3 overflow-y-auto custom-scrollbar">
 
         {/* ── Workspace card ── */}
         <motion.div
@@ -610,17 +611,25 @@ export function Sidebar({
         </motion.div>
 
         <motion.div
-          className="rf-sidebar-card px-4 py-3"
+          className="rf-sidebar-card px-3.5 py-3"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
           custom={2.7}
         >
-          <div className="flex flex-col gap-3">
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Output style</div>
-              <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
-                Default: {workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Output style</div>
+                <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
+                  {activeOutputProfile.label} for this run
+                </div>
+              </div>
+              <div
+                className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
+                title={`Workspace default: ${workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}`}
+              >
+                Workspace default
               </div>
             </div>
             <div
@@ -656,25 +665,56 @@ export function Sidebar({
                   );
                 })}
               </div>
-              {/* Active profile label + review toggle */}
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">{activeOutputProfile.label}</span>
+              <div className="mt-2 flex items-center justify-between gap-2 px-1">
+                <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">{activeOutputProfile.blurb}</span>
                 <span className="h-1.5 w-7 rounded-full shrink-0" style={{ background: activeOutputProfile.accent }} />
               </div>
-              <div className="mt-2 pt-2 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">Review features before ARs</span>
-                <button
-                  type="button"
-                  disabled={isWorking}
-                  onClick={() => setReviewBeforeARs(!reviewBeforeARs)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
-                    reviewBeforeARs ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-border-strong)]'
-                  }`}
-                  title={reviewBeforeARs ? 'Pause and review features before generating ARs (on)' : 'Auto-proceed to AR generation (off)'}
-                >
-                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${reviewBeforeARs ? 'translate-x-4' : 'translate-x-0'}`} />
-                </button>
-              </div>
+            </div>
+            <div className="rounded-[18px] border border-[var(--rf-border)] bg-white/70">
+              <button
+                type="button"
+                onClick={() => setAdvancedExpanded((value) => !value)}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+              >
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Advanced generation</div>
+                  <div className="mt-0.5 text-[12px] text-[var(--rf-text-secondary)]">
+                    Review checkpoint before requirements
+                  </div>
+                </div>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform ${advancedExpanded ? 'rotate-180' : ''}`} />
+              </button>
+              <AnimatePresence initial={false}>
+                {advancedExpanded && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                    className="overflow-hidden border-t border-[var(--rf-border-subtle)]"
+                  >
+                    <div className="flex items-center justify-between gap-3 px-3 py-3">
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-[var(--rf-text-secondary)]">Pause before requirements</div>
+                        <div className="mt-0.5 text-[11px] text-[var(--rf-text-tertiary)]">
+                          Stop after features when you want a manual coverage check.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isWorking}
+                        onClick={() => setReviewBeforeARs(!reviewBeforeARs)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+                          reviewBeforeARs ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-border-strong)]'
+                        }`}
+                        title={reviewBeforeARs ? 'Pause and review features before generating requirements (on)' : 'Continue automatically into requirements (off)'}
+                      >
+                        <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${reviewBeforeARs ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </motion.div>

@@ -21,6 +21,7 @@ import {
 import { api } from './hooks/useForge';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import { getCatalogEntriesForProvider, getCatalogModelId } from './modelStrategy';
+import { getCanvasIntentLabel, routeCanvasEditInstruction } from './canvasChange';
 import type {
   AcceptanceRequirement,
   LlmModelCatalogByVendor,
@@ -41,7 +42,7 @@ type DraftViewMode = 'diff' | 'result';
 
 interface QuickRefineAppProps {
   surface: QuickRefineSurface;
-  onOpenFullWorkflow?: () => void;
+  onOpenFullWorkflow?: (prefillInstruction?: string) => void;
   onOpenSettings?: () => void;
   initialState?: QuickRefineViewState | null;
   onStateChange?: (state: QuickRefineViewState | null) => void;
@@ -296,7 +297,7 @@ function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromp
       >
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">AI Refine</p>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--jira-text-subtle)]">Change Draft</p>
             <h3 className="text-[15px] font-semibold text-[var(--jira-text)]">{title}</h3>
           </div>
           <button
@@ -312,7 +313,7 @@ function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromp
           rows={4}
           value={instructions}
           onChange={(event) => setInstructions(event.target.value)}
-          placeholder='Example: "Tighten the scope to internal users only and add one AR for invalid input."'
+          placeholder='Example: "Tighten the scope to internal users only" or "Add missing acceptance coverage for unmatched references."'
           className="w-full rounded border border-[var(--jira-border)] bg-[var(--jira-bg)] px-3 py-2 text-[13px] text-[var(--jira-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-1 focus:ring-[var(--rf-brand-subtle)] resize-y"
         />
         {error ? (
@@ -321,7 +322,7 @@ function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromp
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3">
-          <p className="text-[12px] text-[var(--jira-text-subtle)]">Refines the current draft without discarding your manual edits.</p>
+          <p className="text-[12px] text-[var(--jira-text-subtle)]">Keeps small changes in quick refine and hands broader changes off to the full canvas when needed.</p>
           <button
             type="button"
             disabled={busy || !instructions.trim()}
@@ -329,7 +330,7 @@ function AiPromptDialog({ open, title, busy, error, onClose, onSubmit }: AiPromp
             className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <WandSparkles className="w-3.5 h-3.5" />}
-            Refine Draft
+            Change Draft
           </button>
         </div>
       </motion.div>
@@ -386,6 +387,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
   const [answers, setAnswers] = useState<QuickRefineAnswer[]>([]);
   const [draft, setDraft] = useState<QuickRefineDraft | null>(null);
   const [handoffReason, setHandoffReason] = useState('');
+  const [pendingFullWorkflowInstruction, setPendingFullWorkflowInstruction] = useState('');
   const [applyResult, setApplyResult] = useState<QuickRefineApplyResult | null>(null);
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -781,6 +783,17 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
 
   const handleAiRefine = async (instructions: string) => {
     if (!issueKey || !sessionId || !draft) return;
+    const routingDecision = routeCanvasEditInstruction(instructions);
+    if (routingDecision.intent === 'add_feature' || routingDecision.intent === 'reorganize') {
+      const handoffCopy = `${getCanvasIntentLabel(routingDecision.intent)} is better handled in the full canvas. ${routingDecision.reason} Original request: ${instructions.trim()}`;
+      setAiDialogOpen(false);
+      setAiError('');
+      setPendingFullWorkflowInstruction(instructions.trim());
+      setHandoffReason(handoffCopy);
+      setStage('handoff');
+      setSession((current) => current ? { ...current, status: 'handoff', handoffReason: handoffCopy } : current);
+      return;
+    }
     setAiBusy(true);
     setAiError('');
     try {
@@ -894,7 +907,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
     <div className="h-full w-full overflow-auto">
       <AiPromptDialog
         open={aiDialogOpen}
-        title="Refine this quick-rewrite draft"
+        title="Change this quick-rewrite draft"
         busy={aiBusy}
         error={aiError}
         onClose={() => setAiDialogOpen(false)}
@@ -956,7 +969,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                       className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]"
                     >
                       <WandSparkles className="w-3.5 h-3.5" />
-                      AI Refine
+                      Change Draft
                     </button>
                   ) : null}
                   {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
@@ -1039,7 +1052,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                     className="inline-flex items-center gap-1 rounded border border-[var(--jira-border)] bg-white px-2.5 py-1 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:border-[var(--rf-brand)] hover:text-[var(--rf-brand)]"
                   >
                     <WandSparkles className="w-3.5 h-3.5" />
-                    AI Refine
+                    Change Draft
                   </button>
                 ) : null}
                 {!busy && !isSessionProcessing && (stage === 'draft' || stage === 'questions' || stage === 'handoff' || hasResume) ? (
@@ -1153,7 +1166,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                 {onOpenFullWorkflow ? (
                   <button
                     type="button"
-                    onClick={onOpenFullWorkflow}
+                    onClick={() => onOpenFullWorkflow(pendingFullWorkflowInstruction || handoffReason)}
                     className="inline-flex items-center gap-1.5 rounded bg-[var(--rf-brand)] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[var(--rf-brand-hover)]"
                   >
                     Open Full Refinely
@@ -1439,7 +1452,7 @@ export function QuickRefineApp({ surface, onOpenFullWorkflow, onOpenSettings, in
                     {draft.handoffRecommended && onOpenFullWorkflow ? (
                       <button
                         type="button"
-                        onClick={onOpenFullWorkflow}
+                        onClick={() => onOpenFullWorkflow(pendingFullWorkflowInstruction || draft.handoffReason)}
                         className="inline-flex items-center gap-1.5 rounded border border-[var(--jira-border)] bg-white px-3 py-1.5 text-[12px] font-medium text-[var(--jira-text-subtle)] transition hover:text-[var(--jira-text)]"
                       >
                         Open Full Refinely

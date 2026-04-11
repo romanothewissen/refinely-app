@@ -976,6 +976,46 @@ ${taxonomySection}
 Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ...", ...], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
 }
 
+export function buildAddFeatureSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles: string[];
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? processTaxonomyBlock(opts.processTaxonomy)
+    : '';
+
+  return `You are a principal business analyst extending an existing Jira feature backlog.
+${platformContextBlock(opts.domainContext)}
+YOUR JOB: Add only the missing feature coverage requested by the user without rewriting or removing the existing feature set.
+
+RULES:
+- Return ONLY the new feature or features that should be appended to the canvas
+- Do not rewrite, remove, merge, split, or rename existing features
+- Add a feature only when the feedback introduces missing capability coverage that is not already safely covered by the existing features
+- If the missing behavior can be handled as stronger acceptance requirements on an existing feature instead of a new feature, return an empty array
+- Keep descriptions and acceptance requirements domain-, company-, and system-agnostic
+
+FEATURE RULES:
+- Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
+- No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names
+- Resolve the role label from evidence in this order: original requirement actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
+- Requirement-stated actors outrank domain context and reference stories
+${opts.processTaxonomyEnabled ? '- Each feature MUST include a valid process_code from the taxonomy\n' : ''}
+
+ACCEPTANCE REQUIREMENT RULES:
+- Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Never write ARs in first person
+- Every returned feature MUST include at least one complete acceptance requirement
+- Cover the new missing behavior cleanly, including the most relevant rule or exception when appropriate
+- No solution language or implementation detail
+
+${taxonomySection}
+
+Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+}
+
 export function buildRestructureSystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];

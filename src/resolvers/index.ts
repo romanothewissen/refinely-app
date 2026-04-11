@@ -59,6 +59,8 @@ import {
   submitQuickRefineAnswers,
 } from '../core/quick-refine';
 import {
+  CanvasEditIntent,
+  CanvasEditScope,
   ClarifyAnswer,
   Feature,
   GenerationEvent,
@@ -860,6 +862,69 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
     return { success: true, queued: true };
   } catch (err: any) {
     console.error('refineFeatures failed:', err);
+    return { success: false, error: err?.message || 'Unknown error' };
+  }
+});
+
+resolver.define('changeCanvas', async ({ payload, context }) => {
+  try {
+    const config = await getConfig();
+    const refineQueue = new Queue({ key: 'refine-queue' });
+    const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+    const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+    const selectedProjectKeys = authorizedProjects.projectKeys;
+    const intent = (
+      payload.intent === 'add_requirements'
+      || payload.intent === 'add_feature'
+      || payload.intent === 'reorganize'
+      ? payload.intent
+      : 'light_refine'
+    ) as CanvasEditIntent;
+    const scope = (
+      payload.scope === 'current'
+      || payload.scope === 'selected'
+      ? payload.scope
+      : 'all'
+    ) as CanvasEditScope;
+    const selectedFeatureIds = Array.isArray(payload.selectedFeatureIds)
+      ? payload.selectedFeatureIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      : [];
+    const event: RefineEvent = {
+      sessionId: payload.sessionId,
+      accountId,
+      requirement: payload.requirement ?? '',
+      feedback: payload.instruction ?? payload.feedback ?? '',
+      features: payload.features as Feature[],
+      config,
+      license: context?.license,
+      projectKey: authorizedProjects.projectKey,
+      projectKeys: selectedProjectKeys,
+      mode: intent === 'reorganize' ? 'restructure' : intent === 'add_feature' ? 'add_feature' : 'refine',
+      intent,
+      scope,
+      restructureScope: scope === 'all' ? 'all' : 'selected',
+      selectedFeatureIds: scope === 'all' ? [] : selectedFeatureIds,
+    };
+
+    await entitySet(KEYS.refineProgress(payload.sessionId), {
+      type: 'progress',
+      sessionId: payload.sessionId,
+      operationType: intent,
+      intent,
+      message: intent === 'reorganize'
+        ? 'Queuing reorganization preview…'
+        : intent === 'add_feature'
+          ? 'Queuing missing feature coverage…'
+          : intent === 'add_requirements'
+            ? 'Queuing requirement coverage update…'
+            : 'Queuing draft refinement…',
+      updatedAt: Date.now(),
+    });
+    await refineQueue.push({ body: event });
+
+    return { success: true, queued: true };
+  } catch (err: any) {
+    console.error('changeCanvas failed:', err);
     return { success: false, error: err?.message || 'Unknown error' };
   }
 });

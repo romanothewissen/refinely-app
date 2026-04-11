@@ -11,6 +11,7 @@ import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
 import QuickRefineApp, { type QuickRefineViewState } from './QuickRefineApp';
 import type {
+  CanvasEditIntent,
   ClarifyAnswer,
   ClarifyCategoryKey,
   ClarifyContextMeta,
@@ -49,6 +50,7 @@ export interface Feature {
   pendingAddition?: boolean;
   pendingChangeSource?: 'refine' | 'restructure';
   pendingChangeScope?: 'single' | 'all' | 'selected';
+  pendingChangeIntent?: CanvasEditIntent;
 }
 
 
@@ -354,10 +356,12 @@ async function fileToBase64(file: File): Promise<string> {
 function LegacyApp({
   initialViewMode = 'generate',
   initialSettingsTab = 'models',
+  initialRequirement = '',
   onCloseSettings,
 }: {
   initialViewMode?: 'generate' | 'settings';
   initialSettingsTab?: 'models' | 'jira' | 'domain' | 'billing';
+  initialRequirement?: string;
   onCloseSettings?: () => void;
 }) {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>(initialViewMode);
@@ -463,6 +467,13 @@ function LegacyApp({
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
   const [runAttachmentError, setRunAttachmentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialRequirement.trim()) return;
+    setRequirement(initialRequirement);
+    setViewMode('generate');
+    setSidebarOpen(true);
+  }, [initialRequirement]);
 
   // History
   const [conversations, setConversations] = useState<any[]>([]);
@@ -1758,6 +1769,7 @@ export default function App() {
   const [openLegacyWorkflow, setOpenLegacyWorkflow] = useState(false);
   const [legacyLaunchMode, setLegacyLaunchMode] = useState<'generate' | 'settings'>('generate');
   const [legacySettingsTab, setLegacySettingsTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
+  const [legacyPrefillRequirement, setLegacyPrefillRequirement] = useState('');
   const [quickRefineViewState, setQuickRefineViewState] = useState<QuickRefineViewState | null>(null);
   const [returnToQuickRefine, setReturnToQuickRefine] = useState(false);
 
@@ -1788,7 +1800,8 @@ export default function App() {
         surface={surface}
         initialState={quickRefineViewState}
         onStateChange={setQuickRefineViewState}
-        onOpenFullWorkflow={() => {
+        onOpenFullWorkflow={(prefillInstruction) => {
+          setLegacyPrefillRequirement(String(prefillInstruction ?? '').trim());
           setLegacyLaunchMode('generate');
           setLegacySettingsTab('models');
           setReturnToQuickRefine(false);
@@ -1808,6 +1821,7 @@ export default function App() {
     <LegacyApp
       initialViewMode={legacyLaunchMode}
       initialSettingsTab={legacySettingsTab}
+      initialRequirement={legacyPrefillRequirement}
       onCloseSettings={returnToQuickRefine ? () => {
         setOpenLegacyWorkflow(false);
         setReturnToQuickRefine(false);

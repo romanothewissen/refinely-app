@@ -7,8 +7,11 @@ import { router } from '@forge/bridge';
 import type {
   AiChangeActionType,
   AdvisoryTriageContract,
+  CanvasEditIntent,
+  CanvasEditScope,
   ClarifyContextMeta,
   ClarifyProgressPayload,
+  CoverageGap,
   DraftReviewDecision,
   DraftReviewMetadata,
   EffectiveSizingContract,
@@ -24,6 +27,7 @@ import type {
 } from './types';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
+import { detectCoverageGaps, getCanvasIntentLabel, getPendingChangeLabel, routeCanvasEditInstruction } from './canvasChange';
 import {
   formatGenerationFeatureTarget,
   getApprovedDraftStructureNote,
@@ -1244,6 +1248,7 @@ interface Feature {
   pendingAddition?: boolean;
   pendingChangeSource?: 'refine' | 'restructure';
   pendingChangeScope?: 'single' | 'all' | 'selected';
+  pendingChangeIntent?: CanvasEditIntent;
   jiraIssueKey?: string;
   jiraIssueUrl?: string;
 }
@@ -1342,7 +1347,11 @@ function alignFeaturesDetailed(original: Feature[], proposed: Feature[]): Featur
   return rows;
 }
 
-function annotateBulkRefinementResults(original: Feature[], proposed: Feature[]): Feature[] {
+function annotateBulkRefinementResults(
+  original: Feature[],
+  proposed: Feature[],
+  intent: CanvasEditIntent = 'light_refine',
+): Feature[] {
   return alignFeaturesDetailed(original, proposed).map((row) => {
     if (row.type === 'removed') {
       return {
@@ -1352,6 +1361,7 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingRemoval: true,
         pendingChangeSource: 'refine',
         pendingChangeScope: 'all',
+        pendingChangeIntent: 'light_refine',
       };
     }
 
@@ -1363,6 +1373,7 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingAddition: true,
         pendingChangeSource: 'refine',
         pendingChangeScope: 'all',
+        pendingChangeIntent: intent === 'add_feature' ? 'add_feature' : intent,
       };
     }
 
@@ -1374,6 +1385,7 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingRemoval: false,
         pendingChangeSource: undefined,
         pendingChangeScope: undefined,
+        pendingChangeIntent: undefined,
       };
     }
 
@@ -1383,6 +1395,7 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
       pendingRemoval: false,
       pendingChangeSource: 'refine',
       pendingChangeScope: 'all',
+      pendingChangeIntent: intent,
       pendingRefinement: {
         ...row.proposed,
         id: row.original.id,
@@ -1391,6 +1404,7 @@ function annotateBulkRefinementResults(original: Feature[], proposed: Feature[])
         pendingRefinement: undefined,
         pendingChangeSource: undefined,
         pendingChangeScope: undefined,
+        pendingChangeIntent: undefined,
       },
     };
   });
@@ -1410,6 +1424,10 @@ function buildUndoableAiChange(
     ? scope === 'selected'
       ? 'Undo restructure of selected features'
       : 'Undo restructure'
+    : actionType === 'add_feature'
+      ? 'Undo feature addition'
+      : actionType === 'add_requirements'
+        ? 'Undo requirement coverage change'
     : actionType === 'refine_all'
       ? 'Undo refine all'
       : 'Undo refine';
@@ -1446,6 +1464,7 @@ function annotateStructuralProposalResults(
         pendingAddition: true,
         pendingChangeSource: 'restructure',
         pendingChangeScope: proposal.scope,
+        pendingChangeIntent: 'reorganize',
       });
     }
   });
@@ -1465,6 +1484,7 @@ function annotateStructuralProposalResults(
           pendingRemoval: false,
           pendingChangeSource: undefined,
           pendingChangeScope: undefined,
+          pendingChangeIntent: undefined,
         });
       } else {
         next.push({
@@ -1473,6 +1493,7 @@ function annotateStructuralProposalResults(
           pendingRemoval: false,
           pendingChangeSource: 'restructure',
           pendingChangeScope: proposal.scope,
+          pendingChangeIntent: 'reorganize',
           pendingRefinement: {
             ...first,
             id: feature.id,
@@ -1481,6 +1502,7 @@ function annotateStructuralProposalResults(
             pendingRefinement: undefined,
             pendingChangeSource: undefined,
             pendingChangeScope: undefined,
+            pendingChangeIntent: undefined,
           },
         });
       }
@@ -1492,6 +1514,7 @@ function annotateStructuralProposalResults(
           pendingRefinement: undefined,
           pendingChangeSource: 'restructure',
           pendingChangeScope: proposal.scope,
+          pendingChangeIntent: 'reorganize',
         });
       });
       return;
@@ -1505,6 +1528,7 @@ function annotateStructuralProposalResults(
         pendingRemoval: true,
         pendingChangeSource: 'restructure',
         pendingChangeScope: proposal.scope,
+        pendingChangeIntent: 'reorganize',
       });
       return;
     }
@@ -1521,6 +1545,7 @@ function annotateStructuralProposalResults(
         pendingRefinement: undefined,
         pendingChangeSource: 'restructure',
         pendingChangeScope: proposal.scope,
+        pendingChangeIntent: 'reorganize',
       });
     });
   });
@@ -1606,6 +1631,15 @@ export function MainContent({
   const restructureStartedAtRef = useRef<number>(0);
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<Set<string>>(new Set());
   const [restructureMode, setRestructureMode] = useState(false);
+  const [showChangeCanvas, setShowChangeCanvas] = useState(false);
+  const [changeInstruction, setChangeInstruction] = useState('');
+  const [changeIntentOverride, setChangeIntentOverride] = useState<CanvasEditIntent | null>(null);
+  const [changeScope, setChangeScope] = useState<CanvasEditScope>('all');
+  const [changeTargetFeatureId, setChangeTargetFeatureId] = useState<string | null>(null);
+  const [isChangingCanvas, setIsChangingCanvas] = useState(false);
+  const [changeProgress, setChangeProgress] = useState('');
+  const changePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const changeStartedAtRef = useRef<number>(0);
 
   useEffect(() => {
     setSelectedFeatureIds((previous) => {
@@ -1622,7 +1656,19 @@ export function MainContent({
     const hasWarnings = coverageReviewSummary?.tone === 'warning'
       || (generationContext?.remainingBlockingIssues?.length ?? 0) > 0;
     setRunContextExpanded(hasWarnings);
-  }, [generationContext]);
+  }, [coverageReviewSummary?.tone, generationContext?.remainingBlockingIssues?.length]);
+
+  const coverageGaps = React.useMemo<CoverageGap[]>(() => detectCoverageGaps({
+    requirement,
+    features,
+    existingMissingCoverage: generationContext?.coverageReview?.missingCoverage,
+  }), [features, generationContext?.coverageReview?.missingCoverage, requirement]);
+
+  const routingDecision = React.useMemo(
+    () => routeCanvasEditInstruction(changeInstruction),
+    [changeInstruction],
+  );
+  const effectiveChangeIntent = changeIntentOverride ?? routingDecision.intent;
 
   const persistConversationFeatures = React.useCallback((
     nextFeatures: Feature[],
@@ -1638,6 +1684,28 @@ export function MainContent({
     }
     api.updateConversationFeatures(sessionId, nextFeatures, payload);
   }, [onSetLastAiChange, sessionId]);
+
+  const openChangeCanvas = React.useCallback((options?: {
+    instruction?: string;
+    intent?: CanvasEditIntent | null;
+    scope?: CanvasEditScope;
+    targetFeatureId?: string | null;
+  }) => {
+    setChangeInstruction(options?.instruction ?? '');
+    setChangeIntentOverride(options?.intent ?? null);
+    setChangeScope(options?.scope ?? 'all');
+    setChangeTargetFeatureId(options?.targetFeatureId ?? null);
+    if (options?.scope === 'current' && options?.targetFeatureId) {
+      setSelectedFeatureIds(new Set([options.targetFeatureId]));
+    }
+    setShowChangeCanvas(true);
+  }, []);
+
+  const getSelectedIdsForScope = React.useCallback((scope: CanvasEditScope) => {
+    if (scope === 'current' && changeTargetFeatureId) return [changeTargetFeatureId];
+    if (scope === 'selected') return [...selectedFeatureIds];
+    return [];
+  }, [changeTargetFeatureId, selectedFeatureIds]);
 
   const exportFeaturesToExcel = () => {
     if (!features.length) return;
@@ -1665,9 +1733,9 @@ export function MainContent({
         const status = feature.pendingRemoval
           ? 'Pending removal'
           : feature.pendingAddition
-            ? 'Pending addition'
+            ? getPendingChangeLabel(feature.pendingChangeIntent)
           : feature.pendingRefinement
-            ? 'Pending refinement'
+            ? getPendingChangeLabel(feature.pendingChangeIntent)
             : feature.isAccepted
               ? 'Accepted'
               : 'Draft';
@@ -1862,7 +1930,13 @@ export function MainContent({
         persistConversationFeatures(next, {
           lastAiChange: buildUndoableAiChange(
             prev,
-            features[idx]?.pendingChangeSource === 'restructure' ? 'restructure' : 'refine_single',
+            features[idx]?.pendingChangeSource === 'restructure'
+              ? 'restructure'
+              : features[idx]?.pendingChangeIntent === 'add_feature'
+                ? 'add_feature'
+                : features[idx]?.pendingChangeIntent === 'add_requirements'
+                  ? 'add_requirements'
+                  : 'refine_single',
             features[idx]?.pendingChangeScope ?? 'single',
             [features[idx]?.id].filter(Boolean) as string[],
           ),
@@ -1876,7 +1950,7 @@ export function MainContent({
       const source = n[idx].pendingChangeSource;
       const scope = n[idx].pendingChangeScope ?? 'single';
       if (n[idx].pendingAddition) {
-        n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined };
+        n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined, pendingChangeIntent: undefined };
       } else if (n[idx].pendingRefinement) {
         n[idx] = {
           ...n[idx].pendingRefinement!,
@@ -1886,12 +1960,19 @@ export function MainContent({
           pendingRemoval: undefined,
           pendingChangeSource: undefined,
           pendingChangeScope: undefined,
+          pendingChangeIntent: undefined,
         };
       }
       persistConversationFeatures(n, {
         lastAiChange: buildUndoableAiChange(
           prev,
-          source === 'restructure' ? 'restructure' : 'refine_single',
+          source === 'restructure'
+            ? 'restructure'
+            : prev[idx]?.pendingChangeIntent === 'add_feature'
+              ? 'add_feature'
+              : prev[idx]?.pendingChangeIntent === 'add_requirements'
+                ? 'add_requirements'
+                : 'refine_single',
           scope,
           [prev[idx]?.id].filter(Boolean) as string[],
         ),
@@ -1906,7 +1987,7 @@ export function MainContent({
     }
     setFeatures(prev => {
       const n = [...prev];
-      n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined };
+      n[idx] = { ...n[idx], pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined, pendingChangeIntent: undefined };
       persistConversationFeatures(n, { clearLastAiChange: true });
       return n;
     });
@@ -1933,7 +2014,7 @@ export function MainContent({
   };
   const clearPendingRemoval = (idx: number) => {
     setFeatures(prev => {
-      const next = prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false, pendingChangeSource: undefined, pendingChangeScope: undefined } : f);
+      const next = prev.map((f, i) => i === idx ? { ...f, pendingRemoval: false, pendingChangeSource: undefined, pendingChangeScope: undefined, pendingChangeIntent: undefined } : f);
       persistConversationFeatures(next, { clearLastAiChange: true });
       return next;
     });
@@ -2189,12 +2270,144 @@ export function MainContent({
     }
   };
 
+  useEffect(() => {
+    if (!isChangingCanvas) {
+      if (changePollRef.current) {
+        clearInterval(changePollRef.current);
+        changePollRef.current = null;
+      }
+      if (!showChangeCanvas) setChangeProgress('');
+      return;
+    }
+
+    let active = true;
+    changeStartedAtRef.current = Date.now();
+    setChangeProgress((previous) => previous || 'Starting canvas change…');
+
+    changePollRef.current = setInterval(async () => {
+      if (!active) return;
+      try {
+        const res = await api.getBulkRefineResult(sessionId) as any;
+        if (!active || !res?.success) return;
+        const event = res.progress;
+
+        if (!event) {
+          if (Date.now() - changeStartedAtRef.current > 90_000) {
+            throw new Error('The canvas change did not start. Please try again.');
+          }
+          return;
+        }
+
+        if (event.type === 'progress') {
+          if (event.message) setChangeProgress(event.message);
+          const updatedAt = event.updatedAt ?? 0;
+          if (updatedAt > 0 && Date.now() - updatedAt > 180_000) {
+            throw new Error('The canvas change is taking unusually long. Please try again, or switch to a faster model in Settings.');
+          }
+          return;
+        }
+
+        if (changePollRef.current) {
+          clearInterval(changePollRef.current);
+          changePollRef.current = null;
+        }
+
+        if (event.type === 'complete') {
+          const eventIntent = (event.intent ?? effectiveChangeIntent) as CanvasEditIntent;
+          if (event.proposal) {
+            setFeatures((prev) => {
+              const annotated = annotateStructuralProposalResults(prev, event.proposal as StructuralRestructureProposal);
+              persistConversationFeatures(annotated);
+              return annotated;
+            });
+          } else if (Array.isArray(event.features)) {
+            setFeatures((prev) => {
+              const annotated = annotateBulkRefinementResults(prev, event.features as Feature[], eventIntent);
+              persistConversationFeatures(annotated);
+              return annotated;
+            });
+          } else {
+            throw new Error('The canvas change completed without returning updated features.');
+          }
+          if (event.tokenUsage?.total) {
+            onWorkflowTokenUsage?.(event.tokenUsage as { input: number; output: number; total: number });
+          }
+          setShowChangeCanvas(false);
+          setChangeInstruction('');
+          setChangeIntentOverride(null);
+          setChangeTargetFeatureId(null);
+          setChangeProgress('');
+          setIsChangingCanvas(false);
+          setRestructureMode(false);
+          return;
+        }
+
+        if (event.type === 'cancelled') {
+          setChangeProgress('');
+          setIsChangingCanvas(false);
+          return;
+        }
+
+        throw new Error(event.message || 'Canvas change failed');
+      } catch (err: any) {
+        if (changePollRef.current) {
+          clearInterval(changePollRef.current);
+          changePollRef.current = null;
+        }
+        if (!active) return;
+        console.error('Canvas change failed:', err);
+        setChangeProgress('');
+        setIsChangingCanvas(false);
+        alert(`Canvas change failed: ${err.message || 'Unknown error'}. Please try again.`);
+      }
+    }, 1500);
+
+    return () => {
+      active = false;
+      if (changePollRef.current) {
+        clearInterval(changePollRef.current);
+        changePollRef.current = null;
+      }
+    };
+  }, [effectiveChangeIntent, isChangingCanvas, onWorkflowTokenUsage, persistConversationFeatures, sessionId, setFeatures, showChangeCanvas]);
+
+  const handleChangeCanvas = async () => {
+    const instruction = changeInstruction.trim();
+    if (!instruction || isChangingCanvas) return;
+    const selectedIds = getSelectedIdsForScope(changeScope);
+    if ((changeScope === 'current' || changeScope === 'selected') && selectedIds.length === 0) {
+      alert(changeScope === 'current' ? 'Choose a current feature first.' : 'Select one or more features first.');
+      return;
+    }
+
+    try {
+      const res = await api.changeCanvas({
+        sessionId,
+        requirement,
+        features,
+        instruction,
+        intent: effectiveChangeIntent,
+        scope: changeScope,
+        selectedFeatureIds: selectedIds,
+      }) as any;
+      if (!res?.success) {
+        throw new Error(res?.error || 'Canvas change failed');
+      }
+      setChangeProgress('Queuing canvas change…');
+      setIsChangingCanvas(true);
+    } catch (err: any) {
+      console.error('Canvas change failed:', err);
+      setChangeProgress('');
+      alert(`Canvas change failed: ${err.message || 'Unknown error'}. Please try again.`);
+    }
+  };
+
   const discardAllProposed = () => {
     if (window.confirm('Discard all pending AI improvements?')) {
       setFeatures(prev => {
         const next = prev
           .filter(f => !f.pendingAddition)
-          .map(f => ({ ...f, pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined }));
+          .map(f => ({ ...f, pendingAddition: undefined, pendingRefinement: undefined, pendingRemoval: undefined, pendingChangeSource: undefined, pendingChangeScope: undefined, pendingChangeIntent: undefined }));
         persistConversationFeatures(next, { clearLastAiChange: true });
         return next;
       });
@@ -2205,6 +2418,8 @@ export function MainContent({
     setFeatures(prev => {
       const pendingFeatures = prev.filter((feature) => feature.pendingRefinement || feature.pendingAddition || feature.pendingRemoval);
       const restructurePending = pendingFeatures.some((feature) => feature.pendingChangeSource === 'restructure');
+      const addFeaturePending = pendingFeatures.some((feature) => feature.pendingChangeIntent === 'add_feature');
+      const addRequirementsPending = pendingFeatures.some((feature) => feature.pendingChangeIntent === 'add_requirements');
       const scope = pendingFeatures.some((feature) => feature.pendingChangeScope === 'selected') ? 'selected' : 'all';
       const next = prev
         .filter(f => !f.pendingRemoval)
@@ -2217,6 +2432,7 @@ export function MainContent({
               pendingRemoval: undefined,
               pendingChangeSource: undefined,
               pendingChangeScope: undefined,
+              pendingChangeIntent: undefined,
             };
           }
           if (!f.pendingRefinement) return f;
@@ -2229,13 +2445,14 @@ export function MainContent({
             pendingRemoval: undefined,
             pendingChangeSource: undefined,
             pendingChangeScope: undefined,
+            pendingChangeIntent: undefined,
             isAccepted: true
           };
         });
       persistConversationFeatures(next, {
         lastAiChange: buildUndoableAiChange(
           prev,
-          restructurePending ? 'restructure' : 'refine_all',
+          restructurePending ? 'restructure' : addFeaturePending ? 'add_feature' : addRequirementsPending ? 'add_requirements' : 'refine_all',
           scope,
           pendingFeatures.map((feature) => feature.id),
         ),
@@ -2330,37 +2547,30 @@ export function MainContent({
                 <Download className="w-3.5 h-3.5" />
                 Export
               </motion.button>
-              {restructureMode ? (
-                <motion.button
-                  onClick={() => {
-                    setRestructureScope(selectedFeatureIds.size > 0 ? 'selected' : 'all');
-                    setShowRestructure(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand)] transition hover:bg-white/90"
-                  whileTap={{ scale: 0.97 }}
-                  title={selectedFeatureIds.size > 0 ? `Restructure selected features (${selectedFeatureIds.size})` : 'Restructure the whole canvas'}
-                >
-                  <RefreshCcw className="w-3.5 h-3.5" />
-                  {selectedFeatureIds.size > 0 ? `Restructure (${selectedFeatureIds.size} selected)` : 'Restructure all'}
-                </motion.button>
-              ) : (
-                <motion.button
-                  onClick={() => setRestructureMode(true)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
-                  whileTap={{ scale: 0.97 }}
-                  title="Select features to merge or split, or restructure the whole canvas"
-                >
-                  <RefreshCcw className="w-3.5 h-3.5" />
-                  Restructure
-                </motion.button>
-              )}
               <motion.button
-                onClick={() => setShowBulkRefine(true)}
+                onClick={() => setRestructureMode((value) => !value)}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[12px] font-bold transition backdrop-blur-sm ${
+                  restructureMode
+                    ? 'border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                    : 'border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90'
+                }`}
+                whileTap={{ scale: 0.97 }}
+                title="Select one or more features for a scoped canvas change"
+              >
+                <RefreshCcw className="w-3.5 h-3.5" />
+                {restructureMode ? `Selecting (${selectedFeatureIds.size})` : 'Select features'}
+              </motion.button>
+              <motion.button
+                onClick={() => openChangeCanvas({
+                  scope: selectedFeatureIds.size > 0 ? 'selected' : 'all',
+                  targetFeatureId: selectedFeatureIds.size === 1 ? [...selectedFeatureIds][0] : null,
+                })}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/70"
                 whileTap={{ scale: 0.97 }}
+                title="Refine wording, add missing requirements, add a feature, or reorganize features from one place"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                Refine All
+                Change canvas
               </motion.button>
             </div>
           </div>
@@ -2537,12 +2747,91 @@ export function MainContent({
               </motion.div>
             )}
 
+            {coverageGaps.length > 0 && (
+              <div className="rounded-[20px] border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-4 py-4 shadow-[0_10px_30px_-20px_rgba(160,81,30,0.45)]">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--rf-warning)]">Missing something?</div>
+                    <div className="mt-1 text-[14px] font-semibold text-[var(--rf-text)]">
+                      The canvas may still have a few gaps worth checking before export.
+                    </div>
+                    <div className="mt-1 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                      You can add missing detail here without needing to decide between a small refine and a full restructure first.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openChangeCanvas({ scope: 'all' })}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[rgba(179,94,48,0.22)] bg-white/80 px-3 py-2 text-[12px] font-bold text-[var(--rf-warning)] transition hover:bg-white"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Review in change flow
+                  </button>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {coverageGaps.map((gap) => (
+                    <div key={gap.id} className="rounded-2xl border border-[rgba(179,94,48,0.14)] bg-white/82 px-3.5 py-3 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[13px] font-semibold text-[var(--rf-text)]">{gap.label}</div>
+                        <span className="rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+                          {gap.confidence}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">{gap.why}</div>
+                      {gap.question ? (
+                        <div className="mt-2 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] text-[var(--rf-text-secondary)]">
+                          {gap.question}
+                        </div>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openChangeCanvas({
+                            intent: gap.suggestedIntent ?? 'add_requirements',
+                            scope: gap.targetFeatureId ? 'current' : 'all',
+                            targetFeatureId: gap.targetFeatureId ?? null,
+                            instruction: `Add the missing coverage for ${gap.label.toLowerCase()}. ${gap.question ? gap.question : ''}`.trim(),
+                          })}
+                          className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:text-[var(--rf-brand)]"
+                        >
+                          {gap.targetFeatureId ? 'Add to this feature' : 'Add in place'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openChangeCanvas({
+                            intent: 'add_feature',
+                            scope: 'all',
+                            instruction: `Add a new feature to cover ${gap.label.toLowerCase()}. ${gap.question ? gap.question : ''}`.trim(),
+                          })}
+                          className="rounded-lg border border-[rgba(46,125,86,0.18)] bg-[var(--rf-success-subtle)] px-3 py-1.5 text-[11px] font-bold text-[var(--rf-success)] transition hover:brightness-[0.98]"
+                        >
+                          Add as new feature
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openChangeCanvas({
+                            intent: gap.suggestedIntent ?? 'add_requirements',
+                            scope: gap.targetFeatureId ? 'current' : 'all',
+                            targetFeatureId: gap.targetFeatureId ?? null,
+                            instruction: gap.question ?? `Ask one focused follow-up about ${gap.label.toLowerCase()}.`,
+                          })}
+                          className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:text-[var(--rf-brand)]"
+                        >
+                          Ask 1 follow-up
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {restructureMode && (
               <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] px-4 py-2.5">
                 <span className="text-[13px] font-semibold text-[var(--rf-brand)]">
                   {selectedFeatureIds.size > 0
-                    ? `${selectedFeatureIds.size} feature${selectedFeatureIds.size === 1 ? '' : 's'} selected — click Restructure in the toolbar`
-                    : 'Select features to merge or split, then click Restructure in the toolbar'}
+                    ? `${selectedFeatureIds.size} feature${selectedFeatureIds.size === 1 ? '' : 's'} selected — open Change canvas to run a scoped update`
+                    : 'Select features you want to target, then open Change canvas'}
                 </span>
                 <button
                   type="button"
@@ -2630,7 +2919,7 @@ export function MainContent({
                                     ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
                                     : 'border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)]'
                                 }`}
-                                title={selectedFeatureIds.has(feature.id) ? 'Deselect for restructure' : 'Select for restructure'}
+                                title={selectedFeatureIds.has(feature.id) ? 'Deselect for scoped changes' : 'Select for scoped changes'}
                               >
                                 {selectedFeatureIds.has(feature.id) ? <Check className="h-3.5 w-3.5" /> : <span className="h-2.5 w-2.5 rounded-sm border border-current/40" />}
                               </button>
@@ -2647,6 +2936,11 @@ export function MainContent({
                               <span className="inline-flex min-w-[54px] justify-center items-center rounded-lg px-2.5 py-1 bg-white/60 text-[var(--rf-text-secondary)] text-[12px] font-semibold tracking-widest border border-[var(--rf-border)]">
                                 {feature.acceptanceRequirements?.length || 0} ARs
                               </span>
+                              {(feature.pendingRefinement || feature.pendingAddition || feature.pendingRemoval) && !feature.pendingRemoval && (
+                                <span className="inline-flex items-center rounded-lg border border-[rgba(43,89,74,0.12)] bg-[var(--rf-brand-muted)] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-brand)]">
+                                  {getPendingChangeLabel(feature.pendingChangeIntent)}
+                                </span>
+                              )}
                               <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] transition-transform duration-300 ${expandedIndices.has(idx) ? 'rotate-180' : ''}`} />
                             </div>
                           </div>
@@ -2661,7 +2955,17 @@ export function MainContent({
                           ) : (
                             <>
                               <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-text-tertiary)] hover:bg-white/70 hover:text-[var(--rf-text)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
-                              <motion.button onClick={() => setRefinePopupIdx(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Sparkles className="w-3.5 h-3.5" /> Refine</motion.button>
+                              <motion.button
+                                onClick={() => openChangeCanvas({
+                                  scope: 'current',
+                                  targetFeatureId: feature.id,
+                                  intent: null,
+                                })}
+                                className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] rounded-xl transition flex items-center gap-1.5"
+                                whileTap={{ scale: 0.97 }}
+                              >
+                                <Sparkles className="w-3.5 h-3.5" /> Change
+                              </motion.button>
                               {featureNeedsArRetry ? (
                                 <motion.button
                                   onClick={() => onRetryFailedFeature?.(feature.id)}
@@ -2735,7 +3039,7 @@ export function MainContent({
                       {feature.pendingAddition && (
                         <div className="mb-4 p-4 rounded-xl bg-[var(--rf-success-subtle)] border border-[var(--rf-success-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                            <div className="flex items-center gap-2 text-[var(--rf-success)] font-bold text-sm">
-                             <Plus className="w-4 h-4" /> Proposed as New Feature
+                             <Plus className="w-4 h-4" /> {feature.pendingChangeIntent === 'add_feature' ? 'Proposed as New Feature' : `${getPendingChangeLabel(feature.pendingChangeIntent)} preview`}
                            </div>
                            <div className="flex items-center gap-2">
                              <motion.button onClick={() => rejectRefinement(idx)} className="px-4 py-2 text-xs font-bold text-[var(--rf-text-secondary)] bg-white border border-[var(--rf-border)] hover:bg-[var(--rf-surface-soft)] rounded-lg shadow-sm" whileTap={{ scale: 0.97 }}>Reject</motion.button>
@@ -2958,6 +3262,172 @@ export function MainContent({
       </div>
 
       <AnimatePresence>
+        {showChangeCanvas && (
+          <div className="fixed inset-0 z-[85] flex items-end justify-center p-4 sm:items-center">
+            <motion.div
+              className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
+              onClick={!isChangingCanvas ? () => {
+                setShowChangeCanvas(false);
+                setChangeIntentOverride(null);
+                setChangeTargetFeatureId(null);
+              } : undefined}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="relative rf-glass-card w-full max-w-2xl overflow-hidden"
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <div className="border-b border-[var(--rf-border-subtle)] bg-white/40 px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
+                    <span className="text-sm font-bold text-[var(--rf-text)]">Change canvas</span>
+                  </div>
+                  {!isChangingCanvas && (
+                    <button
+                      onClick={() => {
+                        setShowChangeCanvas(false);
+                        setChangeIntentOverride(null);
+                        setChangeTargetFeatureId(null);
+                      }}
+                      className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
+                  Describe the missing detail or change you want. The app will detect whether this should be a light refine, stronger requirements, a new feature, or a reorganization preview.
+                </p>
+              </div>
+
+              <div className="space-y-4 px-5 py-5">
+                <textarea
+                  autoFocus
+                  placeholder="For example: add coverage for identifying a referenced item and linking it to the case."
+                  value={changeInstruction}
+                  onChange={(e) => {
+                    setChangeInstruction(e.target.value);
+                    setChangeIntentOverride(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      handleChangeCanvas();
+                    }
+                  }}
+                  className="min-h-[140px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                />
+
+                <div className="rounded-xl border border-[var(--rf-border)] bg-white/70 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Detected intent</span>
+                    <span className="rounded-full border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-3 py-1 text-[12px] font-bold text-[var(--rf-brand)]">
+                      {getCanvasIntentLabel(routingDecision.intent)}
+                    </span>
+                    <span className="rounded-full border border-[var(--rf-border)] bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+                      {routingDecision.confidence}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[13px] text-[var(--rf-text-secondary)]">{routingDecision.reason}</div>
+                  {routingDecision.followupQuestion ? (
+                    <div className="mt-3 rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-3 py-3">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-warning)]">Focused follow-up</div>
+                      <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{routingDecision.followupQuestion}</div>
+                      <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
+                        {routingDecision.followupWhy} {routingDecision.followupUnlocks ? ` ${routingDecision.followupUnlocks}` : ''}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Intent override</div>
+                  <div className="flex flex-wrap gap-2">
+                    {(['light_refine', 'add_requirements', 'add_feature', 'reorganize'] as CanvasEditIntent[]).map((intent) => {
+                      const selected = effectiveChangeIntent === intent;
+                      return (
+                        <button
+                          key={intent}
+                          type="button"
+                          onClick={() => setChangeIntentOverride(intent)}
+                          className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition ${
+                            selected
+                              ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                              : 'border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                          }`}
+                        >
+                          {getCanvasIntentLabel(intent)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Scope</div>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { value: 'current', label: 'Current feature', disabled: !changeTargetFeatureId },
+                      { value: 'selected', label: `Selected features${selectedFeatureIds.size ? ` (${selectedFeatureIds.size})` : ''}`, disabled: selectedFeatureIds.size === 0 },
+                      { value: 'all', label: 'Whole canvas', disabled: false },
+                    ] as Array<{ value: CanvasEditScope; label: string; disabled: boolean }>).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={option.disabled}
+                        onClick={() => setChangeScope(option.value)}
+                        className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition disabled:opacity-45 ${
+                          changeScope === option.value
+                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                            : 'border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-secondary)]'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  {changeScope === 'selected' && selectedFeatureIds.size > 0 ? (
+                    <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
+                      Scoped to the feature selections already marked on the canvas.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                    {isChangingCanvas ? (changeProgress || 'Preparing canvas change…') : 'Cmd/Ctrl + Enter to prepare a preview'}
+                  </span>
+                  <motion.button
+                    onClick={handleChangeCanvas}
+                    disabled={!changeInstruction.trim() || isChangingCanvas}
+                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {isChangingCanvas ? (
+                      <>
+                        <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Preparing...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-3.5 w-3.5" />
+                        Prepare preview
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showBulkRefine && (
           <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
             <motion.div
@@ -3163,9 +3633,11 @@ export function MainContent({
                   ...refinedFeatures[0],
                   pendingChangeSource: undefined,
                   pendingChangeScope: undefined,
+                  pendingChangeIntent: undefined,
                 },
                 pendingChangeSource: 'refine',
                 pendingChangeScope: 'single',
+                pendingChangeIntent: 'light_refine',
               };
               // Additional features from a split are inserted after the original as pending additions.
               if (refinedFeatures.length > 1) {
@@ -3176,6 +3648,7 @@ export function MainContent({
                   pendingRemoval: false,
                   pendingChangeSource: 'refine' as const,
                   pendingChangeScope: 'single' as const,
+                  pendingChangeIntent: 'light_refine' as const,
                 }));
                 n.splice(refinePopupIdx + 1, 0, ...additions);
               }

@@ -60,6 +60,7 @@ import {
   buildEvaluateSystemPrompt,
   buildRestructureSystemPrompt,
   buildCoverageCheckSystemPrompt,
+  buildAddFeatureSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
 } from './prompts';
@@ -3917,6 +3918,65 @@ export async function refineFeatures(opts: {
     config,
     onProgress,
   });
+}
+
+export async function addFeaturesFromFeedback(opts: {
+  requirement: string;
+  features: Feature[];
+  feedback: string;
+  config: TenantConfig;
+  selectedFeatureIds?: string[];
+}): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
+  const { requirement, features, feedback, config, selectedFeatureIds = [] } = opts;
+  const system = buildAddFeatureSystemPrompt({
+    domainContext: config.domainContext,
+    domainRoles: config.domainRoles,
+    processTaxonomy: config.processTaxonomy,
+    processTaxonomyEnabled: config.processTaxonomyEnabled,
+  });
+  const roleGrounding: RoleGroundingContext = {
+    requirement,
+    domainRoles: config.domainRoles,
+  };
+  const targetedFeatures = selectedFeatureIds.length
+    ? features.filter((feature) => selectedFeatureIds.includes(feature.id))
+    : features;
+  const userMessage = [
+    `REQUIREMENT: ${requirement}`,
+    `USER INSTRUCTION: ${feedback}`,
+    `CURRENT FEATURE SET (read-only context):\n${JSON.stringify(features, null, 2)}`,
+    `TARGETED FEATURE CONTEXT:\n${JSON.stringify(targetedFeatures, null, 2)}`,
+  ].join('\n\n');
+
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(config.generatorConfig.refineModel, config.tier),
+    systemPrompt: system,
+    userMessage,
+    maxTokens: Math.min(config.generatorConfig.maxTokens, 4096),
+    reasoningEffort: 'medium',
+    ...buildLlmProviderOpts(config),
+  });
+
+  const existingSummaries = new Set(features.map((feature) => feature.summary.trim().toLowerCase()).filter(Boolean));
+  const addedFeatures = (result.data.features ?? [])
+    .map((raw) => applyFeatureOutputGuardrails(normaliseFeature(raw, roleGrounding), roleGrounding))
+    .filter((feature) => feature.acceptanceRequirements.length > 0)
+    .filter((feature) => {
+      const summaryKey = feature.summary.trim().toLowerCase();
+      if (!summaryKey || existingSummaries.has(summaryKey)) return false;
+      existingSummaries.add(summaryKey);
+      return true;
+    });
+
+  return {
+    features: addedFeatures,
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: { add_feature: toStageUsage(result.usage) },
+    },
+  };
 }
 
 // ─── Single Feature Refinement ────────────────────────────────────────────────
