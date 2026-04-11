@@ -238,7 +238,7 @@ interface DiscoverySufficiencyEvaluation {
 
 interface ArObligations {
   confirmedOutcomes: string[];
-  confirmedExclusions: string[];
+  scopeBoundaries: string[];
   confirmedDataObligations: string[];
   unresolvedDecisions: string[];
 }
@@ -2852,46 +2852,8 @@ export async function generateFeatures(opts: {
       autoRepairedIssues.push('Tightened overlapping draft features before acceptance requirements were written.');
     }
 
-    // Auto-broaden: run an LLM coverage audit to add missing business capability dimensions
-    const hasCoverageGaps =
-      !draftReview.openDecisions?.some((decision) => decision.blocking)
-      && pass1DraftFeatures.length >= 2;
-    if (hasCoverageGaps) {
-      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-      const broadened = await reviewDraftFeatureSet({
-        requirement,
-        clarifyAnswers,
-        attachmentText,
-        similarStoriesText,
-        wiContextText,
-        features: pass1DraftFeatures,
-        action: 'broaden',
-        currentReviewMeta: draftReview,
-        outputProfile,
-        config,
-        providerOpts,
-        shouldCancel,
-      });
-      if (broadened.features.length > pass1DraftFeatures.length) {
-        pass1DraftFeatures = broadened.features;
-        pass1Features = pass1DraftFeatures.map(toRawFeature);
-        openDecisions = mergeOpenDecisions(
-          broadened.reviewMeta.openDecisions ?? [],
-          synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
-        );
-        arObligations = buildArObligations({
-          requirement,
-          clarifyAnswers,
-          wiContextText,
-          openDecisions,
-        });
-        pass1ResultUsage = {
-          input: pass1ResultUsage.input + broadened.usage.input,
-          output: pass1ResultUsage.output + broadened.usage.output,
-        };
-        autoRepairedIssues.push('Broadened draft features to cover missing business capability dimensions.');
-      }
-    }
+    // Auto-broaden removed — coverage gaps are surfaced as user-facing suggestions
+    // via coverageReview.missingCoverage instead of silently inventing features.
 
     stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
   } else {
@@ -4586,7 +4548,7 @@ function buildArObligations(input: {
       .filter((answer) => answer.categoryKey === 'business_rules' || answer.categoryKey === 'state_lifecycle')
       .map(summarizeAnswerForObligation),
   ]);
-  const confirmedExclusions = uniquePromptSummaries([
+  const scopeBoundaries = uniquePromptSummaries([
     ...input.clarifyAnswers
       .filter((answer) => answer.categoryKey === 'business_rules')
       .map(summarizeAnswerForObligation),
@@ -4612,7 +4574,7 @@ function buildArObligations(input: {
 
   return {
     confirmedOutcomes,
-    confirmedExclusions,
+    scopeBoundaries,
     confirmedDataObligations,
     unresolvedDecisions,
   };

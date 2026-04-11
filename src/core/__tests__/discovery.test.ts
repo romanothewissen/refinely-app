@@ -50,7 +50,7 @@ test('normalizeDiscoveryProfile allows zero-question discovery', () => {
   assert.equal(profile.followupCap, 0);
 });
 
-test('validateAndRepairInitialDiscovery preserves the higher discovery depth signal after repair', () => {
+test('validateAndRepairInitialDiscovery uses actual finalized count not aspirational plan', () => {
   const repaired = validateAndRepairInitialDiscovery(
     [
       {
@@ -71,7 +71,7 @@ test('validateAndRepairInitialDiscovery preserves the higher discovery depth sig
     },
   );
 
-  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 6);
+  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 1);
   assert.deepEqual(repaired.discoveryProfile.missingCategoryKeys, ['business_rules', 'functional_flow']);
 });
 

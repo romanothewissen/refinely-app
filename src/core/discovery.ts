@@ -358,7 +358,7 @@ export function validateAndRepairInitialDiscovery(
     questions: finalizedQuestions,
     discoveryProfile: {
       ...profile,
-      recommendedInitialCount: Math.max(profile.recommendedInitialCount, finalizedQuestions.length),
+      recommendedInitialCount: finalizedQuestions.length,
     },
     repairApplied,
     failureReasonCode,

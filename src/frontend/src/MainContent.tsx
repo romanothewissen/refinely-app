@@ -3109,6 +3109,68 @@ export function MainContent({
         </AnimatePresence>
       </div>
 
+      {/* ── Gap suggestions ── */}
+      {hasFeatures && !isGenerating && (() => {
+        const missingCoverage = generationContext?.coverageReview?.missingCoverage ?? [];
+        const nonBlockingDecisions = (generationContext?.openDecisions ?? []).filter(d => !d.blocking);
+        const hasGaps = missingCoverage.length > 0 || nonBlockingDecisions.length > 0;
+        if (!hasGaps) return null;
+        return (
+          <div className="shrink-0 border-t border-[var(--rf-border-subtle)] bg-[rgba(245,164,76,0.06)] px-5 py-2.5">
+            <div className="flex items-center gap-2 mb-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-warning)]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Potential gaps</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById('rf-gap-suggestions');
+                  if (el) el.style.display = 'none';
+                }}
+                className="ml-auto text-[11px] font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)] transition"
+              >
+                Dismiss
+              </button>
+            </div>
+            <div id="rf-gap-suggestions" className="flex flex-wrap gap-1.5">
+              {missingCoverage.map((gap, i) => (
+                <motion.button
+                  key={`gap-${i}`}
+                  type="button"
+                  onClick={() => {
+                    setChangeIntentOverride('add_feature');
+                    setChangeScope('all');
+                    setChangeInstruction(gap);
+                    requestAnimationFrame(() => refineBarRef.current?.focus());
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-[rgba(179,94,48,0.25)] bg-white/80 px-2.5 py-1 text-[11px] font-bold text-[rgba(140,75,30,0.85)] transition hover:border-[rgba(179,94,48,0.45)] hover:bg-white"
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <Plus className="w-3 h-3" />
+                  {gap.length > 60 ? gap.slice(0, 57) + '…' : gap}
+                </motion.button>
+              ))}
+              {nonBlockingDecisions.map((decision) => (
+                <motion.button
+                  key={`decision-${decision.id}`}
+                  type="button"
+                  onClick={() => {
+                    setChangeIntentOverride('add_feature');
+                    setChangeScope('all');
+                    setChangeInstruction(`${decision.title}: ${decision.detail}`);
+                    requestAnimationFrame(() => refineBarRef.current?.focus());
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:border-[rgba(179,94,48,0.35)] hover:text-[rgba(140,75,30,0.85)]"
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  {decision.title.length > 55 ? decision.title.slice(0, 52) + '…' : decision.title}
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Inline refine bar ── */}
       {hasFeatures && !isGenerating && (
         <div className="shrink-0 border-t border-[var(--rf-border-subtle)] bg-white/70 backdrop-blur-xl">

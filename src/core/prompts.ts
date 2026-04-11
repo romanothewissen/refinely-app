@@ -157,12 +157,12 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 6. CONSOLIDATED VISIBILITY: Who needs to see the end-to-end status of the process? What consolidated view enables a different role to track progress without reviewing individual sub-records? Separate when visibility serves a different actor with different information needs.
 7. ADAPTATION & MODIFICATION: What happens when conditions change after execution begins? How does the user modify, add, or remove items from an active plan? What financial or authorization consequences follow from mid-execution changes?
 
-Each dimension helps you test whether a distinct, deliverable BUSINESS CAPABILITY exists. Key judgment rule: variants of the same capability (e.g., initiate loaners vs initiate installation vs initiate deinstallation) belong in ONE feature with scenario-level ARs — NOT separate features with identical structure.
+Each dimension helps you test whether a distinct, deliverable BUSINESS CAPABILITY exists. Key judgment rule: variants of the same capability that follow a similar process belong in ONE feature with scenario-level ARs — NOT separate features with identical structure.
 
 ANTI-PATTERNS TO AVOID:
-- NOUN-SPLITTING: Do NOT create a separate feature for each noun the requirement names. If the requirement says "loaners, deinstallations, installations" and these are all initiated from the same plan through a similar process, they are ONE downstream execution capability with ARs covering each scenario. Only split when the business behavior genuinely diverges (e.g., loaners have return logistics, in-house service has transport logistics).
+- NOUN-SPLITTING: Do NOT create a separate feature for each noun the requirement names. If the requirement names multiple variants that are all initiated from the same parent entity through a similar process, they are ONE downstream execution capability with ARs covering each scenario. Only split when the business behavior genuinely diverges (e.g., one variant has return/reversal logistics while another does not).
 - LIFECYCLE PADDING: Do NOT create thin lifecycle features (cancel, track status, submit for approval) unless they have independently complex business rules. Simple status transitions and cancellation guards belong as ARs on the parent workflow feature.
-- SINGLE-ACTOR DOMINANCE: If the requirement or discovery answers name multiple roles (e.g., support specialist, billing specialist, service manager), distribute feature ownership across them. The actor in the "As a [role]" description should be the person who OWNS that business outcome.
+- SINGLE-ACTOR DOMINANCE: If the requirement or discovery answers name multiple roles, distribute feature ownership across them. The actor in the "As a [role]" description should be the person who OWNS that business outcome.
 - PATTERN CLONING: If you realize you are writing features with identical structure where only one noun changes, stop and consolidate them into one feature.
 
 COVERAGE MAPPING — verify before finalizing:
@@ -355,6 +355,9 @@ RULES:
 - CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
 - Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
+- When sibling features are listed, do not write ARs that duplicate another sibling's likely scope. If a sibling feature's description covers the same enforcement rule, lifecycle gate, or authorization check, let that sibling own the AR. Each business rule should be tested exactly once across the entire feature set.
+- scopeBoundaries in AR OBLIGATIONS define what is OUT OF SCOPE for the feature set. Do NOT write ARs that test these boundaries by creating "WHEN ... attempts ... THEN ... is prevented" scenarios for out-of-scope items. Instead, treat them as context that narrows what the feature covers. Only write enforcement ARs when the boundary represents an active business rule the system must check at runtime (authorization, eligibility, contractual coverage), not when it simply marks something the system does not handle.
+- When the requirement or discovery answers list multiple examples of the same category, do NOT enumerate all of them in a single THEN clause. Write the AR at the capability level — what the system does with items of that type — not as an inventory of every named variant. Write separate ARs for specific variants ONLY when their business behavior genuinely diverges.
 - Treat any unresolved decisions from discovery as explicitly out of scope for AR generation. Do not invent rules that were left open.
 
 SCENARIO DEPTH — go beyond status gates:
@@ -831,6 +834,7 @@ RULES:
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
 - The taxonomy is a completeness checklist, not a quota. Only mark a category as missing if its absence would materially block precise, testable acceptance requirements for this specific requirement.
+- For state_lifecycle: if answers reference named statuses or stages for the primary entity, verify that the answers establish the trigger and actor for EACH transition. If a status is referenced (in answers or the requirement) but no answer explains how the entity reaches that status, flag it as a gap. Approval, authorization, and acceptance steps are especially prone to being assumed rather than defined.
 - Before generating any follow-up question, check DISCOVERY QUESTIONS ALREADY ASKED. You MUST NOT ask a question that covers the same category and business gap as one already asked, even if the wording would differ. A category is only "still open" if its Q&A answer is vague, contradictory, or explicitly deferred — not merely because it could have been answered more thoroughly.
 - If all 6 categories already have a specific, actionable answer in the DISCOVERY ANSWERS, return {"sufficient": true}.
 - Ask however many follow-up questions are materially needed to close the remaining gaps. Zero is correct when the current answers are sufficient.

@@ -348,7 +348,7 @@ export function ClarifyQuestionsView({
                         )}
                           <div>
                             <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
-                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}{typeof ((profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount) ?? qPlan?.target) === 'number' && ((profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount) ?? qPlan?.target) !== questions.length ? <span className="text-[var(--rf-text-tertiary)] font-normal"> planned {(profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount) ?? qPlan?.target}</span> : ''}</div>
+                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}</div>
                           </div>
                       </div>
                     )}
