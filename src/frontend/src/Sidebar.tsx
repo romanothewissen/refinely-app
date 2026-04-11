@@ -147,6 +147,7 @@ export function Sidebar({
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
   const [advancedExpanded, setAdvancedExpanded] = React.useState(false);
+  const [sessionExpanded, setSessionExpanded] = React.useState(false);
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
     contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
   );
@@ -334,7 +335,7 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Scrollable body ── */}
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-3 gap-3 overflow-y-auto custom-scrollbar">
+      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-2.5 gap-2.5 overflow-y-auto custom-scrollbar">
 
         {/* ── Workspace card ── */}
         <motion.div
@@ -345,14 +346,14 @@ export function Sidebar({
           custom={1}
         >
           {/* Project row */}
-          <div className="px-3 pt-3 pb-2.5">
+          <div className="px-3 pt-3 pb-3">
             {/* Header: current workspace + collapse toggle */}
             <motion.button
               type="button"
               onClick={() => setWorkspaceExpanded((prev) => !prev)}
               aria-expanded={workspaceExpanded}
               aria-controls="workspace-selector"
-              className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 p-3 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
+              className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
               whileTap={{ scale: 0.99 }}
               title={workspaceExpanded ? 'Collapse project picker' : 'Expand project picker'}
             >
@@ -370,8 +371,36 @@ export function Sidebar({
                     </div>
                   </div>
                 </div>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
               </div>
+              {contextReady && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenProjectSettings('jira', primaryProjectKey);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-border)] bg-white/78 px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-text)]"
+                    title="Open backlog cache settings"
+                  >
+                    <Database className="h-3 w-3 text-[var(--rf-brand)]" />
+                    <span>{selectedProjects.length ? `${totalCachedStories} stories` : 'All projects'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenProjectSettings('jira', primaryProjectKey);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-border)] bg-white/78 px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text-secondary)] transition hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-text)]"
+                    title="Open linked docs and workspace context"
+                  >
+                    <FileText className="h-3 w-3 text-[var(--rf-brand)]" />
+                    <span>{activeWiDocs.length > 0 ? `${activeWiDocs.length} docs` : 'No docs'}</span>
+                  </button>
+                </div>
+              )}
             </motion.button>
 
             <AnimatePresence initial={false}>
@@ -474,54 +503,21 @@ export function Sidebar({
                     <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
                       Select up to 2 projects to merge their backlog, docs, and guidance.
                     </p>
+                    {cacheBreakdown.length > 1 && (
+                      <div className="rounded-xl border border-[var(--rf-border-subtle)] bg-white/55 px-3 py-2 text-[11px] text-[var(--rf-text-tertiary)]">
+                        {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-
-          {/* Backlog + Docs stats row — only shown once scope is chosen */}
-          {contextReady && (
-            <div className="mx-3 mb-3 grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
-                className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
-                title="Open backlog cache settings"
-              >
-                <Database className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
-                <div className="min-w-0 text-left">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Backlog</div>
-                  <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                    {selectedProjects.length ? `${totalCachedStories} stories` : 'All projects'}
-                  </div>
-                  {cacheBreakdown.length > 1 && (
-                    <div className="text-[10px] text-[var(--rf-text-tertiary)] truncate">
-                      {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
-                    </div>
-                  )}
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenProjectSettings('jira', primaryProjectKey)}
-                className="group flex min-w-0 items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/50 px-2.5 py-2 transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/80"
-              >
-                <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 group-hover:opacity-100 transition-opacity" />
-                <div className="min-w-0 text-left">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Docs</div>
-                  <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
-                    {activeWiDocs.length > 0 ? `${activeWiDocs.length} linked` : 'None stored'}
-                  </div>
-                </div>
-              </button>
-            </div>
-          )}
         </motion.div>
 
         {/* ── Input card ── */}
         <motion.div
-          className="rf-sidebar-card flex-1 flex flex-col min-h-0 overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
+          className="rf-sidebar-card flex-[1.25] flex flex-col min-h-[320px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
@@ -592,7 +588,7 @@ export function Sidebar({
             onChange={(e) => setRequirement(e.target.value)}
             placeholder={!contextReady ? 'Pick a scope above first…' : 'Describe your feature or requirement…'}
             disabled={isWorking || !contextReady}
-            className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-3 pt-2.5 pb-2 custom-scrollbar"
+            className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[13px] leading-relaxed resize-none disabled:opacity-50 px-3 pt-2 pb-2 custom-scrollbar"
           />
 
           {/* Card footer */}
@@ -611,112 +607,138 @@ export function Sidebar({
         </motion.div>
 
         <motion.div
-          className="rf-sidebar-card px-3.5 py-3"
+          className="rf-sidebar-card overflow-hidden"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
           custom={2.7}
         >
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Output style</div>
-                <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
-                  {activeOutputProfile.label} for this run
-                </div>
-              </div>
-              <div
-                className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
-                title={`Workspace default: ${workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}`}
-              >
-                Workspace default
+          <button
+            type="button"
+            onClick={() => setSessionExpanded((value) => !value)}
+            className="flex w-full items-start justify-between gap-3 px-3.5 py-3 text-left"
+          >
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Session</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/72 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                  {activeOutputProfile.shortLabel}
+                </span>
+                <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/72 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                  {reviewBeforeARs ? 'Review before ARs' : 'Auto continue'}
+                </span>
               </div>
             </div>
-            <div
-              className={`rounded-[20px] border border-[var(--rf-border)] bg-white/85 p-1.5 shadow-[0_10px_24px_-16px_rgba(43,89,74,0.45)] transition ${
-                isWorking ? 'opacity-60' : ''
-              }`}
-              title={`Run output style: ${outputProfileLabel}`}
-            >
-              <div className="relative grid grid-cols-3 gap-1">
-                {OUTPUT_PROFILE_OPTIONS.map((option) => {
-                  const selected = option.value === runOutputProfileOverride;
-                  return (
-                    <motion.button
-                      key={option.value}
-                      type="button"
-                      onClick={() => !isWorking && setRunOutputProfileOverride(option.value)}
-                      disabled={isWorking}
-                      className={`relative z-10 rounded-[16px] px-2.5 py-2 text-[11px] font-black tracking-[0.01em] transition ${
-                        selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                      }`}
-                      whileTap={isWorking ? undefined : { scale: 0.97 }}
+            <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform ${sessionExpanded ? 'rotate-180' : ''}`} />
+          </button>
+          <AnimatePresence initial={false}>
+            {sessionExpanded && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className="overflow-hidden border-t border-[var(--rf-border-subtle)]"
+              >
+                <div className="flex flex-col gap-3 px-3.5 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-[var(--rf-text-secondary)]">Output style</div>
+                      <div className="mt-0.5 text-[11px] text-[var(--rf-text-tertiary)]">
+                        {activeOutputProfile.blurb}
+                      </div>
+                    </div>
+                    <div
+                      className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
+                      title={`Workspace default: ${workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}`}
                     >
-                      {selected && (
-                        <motion.span
-                          layoutId="output-profile-slider"
-                          className="absolute inset-0 rounded-[16px] shadow-[0_10px_20px_-14px_rgba(31,64,53,0.95)]"
-                          style={{ background: option.accent }}
-                          transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-                        />
-                      )}
-                      <span className="relative z-10">{option.shortLabel}</span>
-                    </motion.button>
-                  );
-                })}
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-2 px-1">
-                <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">{activeOutputProfile.blurb}</span>
-                <span className="h-1.5 w-7 rounded-full shrink-0" style={{ background: activeOutputProfile.accent }} />
-              </div>
-            </div>
-            <div className="rounded-[18px] border border-[var(--rf-border)] bg-white/70">
-              <button
-                type="button"
-                onClick={() => setAdvancedExpanded((value) => !value)}
-                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-              >
-                <div>
-                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Advanced generation</div>
-                  <div className="mt-0.5 text-[12px] text-[var(--rf-text-secondary)]">
-                    Review checkpoint before requirements
+                      Default
+                    </div>
                   </div>
-                </div>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform ${advancedExpanded ? 'rotate-180' : ''}`} />
-              </button>
-              <AnimatePresence initial={false}>
-                {advancedExpanded && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                    className="overflow-hidden border-t border-[var(--rf-border-subtle)]"
+                  <div
+                    className={`rounded-[18px] border border-[var(--rf-border)] bg-white/85 p-1 shadow-[0_10px_24px_-16px_rgba(43,89,74,0.45)] transition ${
+                      isWorking ? 'opacity-60' : ''
+                    }`}
+                    title={`Run output style: ${outputProfileLabel}`}
                   >
-                    <div className="flex items-center justify-between gap-3 px-3 py-3">
+                    <div className="relative grid grid-cols-3 gap-1">
+                      {OUTPUT_PROFILE_OPTIONS.map((option) => {
+                        const selected = option.value === runOutputProfileOverride;
+                        return (
+                          <motion.button
+                            key={option.value}
+                            type="button"
+                            onClick={() => !isWorking && setRunOutputProfileOverride(option.value)}
+                            disabled={isWorking}
+                            className={`relative z-10 rounded-[14px] px-2 py-1.5 text-[11px] font-black tracking-[0.01em] transition ${
+                              selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                            }`}
+                            whileTap={isWorking ? undefined : { scale: 0.97 }}
+                          >
+                            {selected && (
+                              <motion.span
+                                layoutId="output-profile-slider"
+                                className="absolute inset-0 rounded-[14px] shadow-[0_10px_20px_-14px_rgba(31,64,53,0.95)]"
+                                style={{ background: option.accent }}
+                                transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                              />
+                            )}
+                            <span className="relative z-10">{option.shortLabel}</span>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-[16px] border border-[var(--rf-border)] bg-white/70">
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedExpanded((value) => !value)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+                    >
                       <div className="min-w-0">
-                        <div className="text-[12px] font-semibold text-[var(--rf-text-secondary)]">Pause before requirements</div>
+                        <div className="text-[12px] font-semibold text-[var(--rf-text-secondary)]">Review stop</div>
                         <div className="mt-0.5 text-[11px] text-[var(--rf-text-tertiary)]">
-                          Stop after features when you want a manual coverage check.
+                          Pause after features before requirements.
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => setReviewBeforeARs(!reviewBeforeARs)}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
-                          reviewBeforeARs ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-border-strong)]'
-                        }`}
-                        title={reviewBeforeARs ? 'Pause and review features before generating requirements (on)' : 'Continue automatically into requirements (off)'}
-                      >
-                        <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${reviewBeforeARs ? 'translate-x-4' : 'translate-x-0'}`} />
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
+                      <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform ${advancedExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {advancedExpanded && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                          className="overflow-hidden border-t border-[var(--rf-border-subtle)]"
+                        >
+                          <div className="flex items-center justify-between gap-3 px-3 py-3">
+                            <div className="min-w-0">
+                              <div className="text-[12px] font-semibold text-[var(--rf-text-secondary)]">Pause before requirements</div>
+                              <div className="mt-0.5 text-[11px] text-[var(--rf-text-tertiary)]">
+                                Stop after features when you want a manual coverage check.
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={isWorking}
+                              onClick={() => setReviewBeforeARs(!reviewBeforeARs)}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+                                reviewBeforeARs ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-border-strong)]'
+                              }`}
+                              title={reviewBeforeARs ? 'Pause and review features before generating requirements (on)' : 'Continue automatically into requirements (off)'}
+                            >
+                              <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${reviewBeforeARs ? 'translate-x-4' : 'translate-x-0'}`} />
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         {/* ── Attachment parse state / error ── */}

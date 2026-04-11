@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Menu, AlertCircle, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
+import { getDiscoveryDisplayComplexity } from './generation-progress-copy';
 
 const DISCOVERY_PAGE_SIZE = 8;
 
@@ -294,7 +295,11 @@ export function ClarifyQuestionsView({
                 const profile = contextMeta?.discoveryProfile;
                 const qPlan = contextMeta?.ambiguityAssessment?.questionPlan;
                 const advisoryTriage = contextMeta?.advisoryTriage;
-                const complexityKey = profile?.complexity ?? advisoryTriage?.discoveryForecast.complexity;
+                const complexityKey = getDiscoveryDisplayComplexity({
+                  discoveryProfile: profile,
+                  advisoryForecast: advisoryTriage?.discoveryForecast,
+                  plannedQuestions: profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount ?? qPlan?.target,
+                });
                 const ci = complexityKey ? (DISCOVERY_COMPLEXITY_MAP[complexityKey] ?? 2) : 2;
 
                 return (

@@ -717,6 +717,7 @@ test('generation progress copy summarizes coverage and discovery context in plai
     label: 'Coverage check found 1 area to review',
     tone: 'warning',
     details: ['Clarify how existing replies attach to open cases.'],
+    heading: 'Gap to review',
   });
   assert.equal(getDiscoveryProfileHeadline({
     scope: 'moderate',

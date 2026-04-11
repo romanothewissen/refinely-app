@@ -1179,7 +1179,7 @@ export function validateAndRepairInitialDiscovery(
   const calibratedProfile = calibrateDiscoveryProfile(profile, {
     requiredCategoryKeys: initialValidation.requiredCategoryKeys,
     repairApplied: false,
-    repairedQuestionCount: questions.length,
+    repairedQuestionCount: Math.max(profile.recommendedInitialCount, questions.length),
   });
   const finalizedQuestions = finalizeInitialDiscoveryQuestions(questions, calibratedProfile, input);
   const finalizedValidation = validateInitialDiscoveryQuestions(finalizedQuestions, calibratedProfile, input);
@@ -1188,14 +1188,11 @@ export function validateAndRepairInitialDiscovery(
   return {
     questions: finalizedValidation.valid ? finalizedQuestions : [],
     discoveryProfile: calibrateDiscoveryProfile(
-      {
-        ...calibratedProfile,
-        recommendedInitialCount: finalizedQuestions.length,
-      },
+      calibratedProfile,
       {
         requiredCategoryKeys: finalizedValidation.requiredCategoryKeys,
         repairApplied: false,
-        repairedQuestionCount: finalizedQuestions.length,
+        repairedQuestionCount: Math.max(calibratedProfile.recommendedInitialCount, finalizedQuestions.length),
       },
     ),
     repairApplied: initialRepairApplied,

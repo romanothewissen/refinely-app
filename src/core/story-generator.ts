@@ -61,6 +61,7 @@ import {
   buildRestructureSystemPrompt,
   buildCoverageCheckSystemPrompt,
   buildAddFeatureSystemPrompt,
+  buildAddRequirementsSystemPrompt,
   buildSingleFeatureRefineSystemPrompt,
   buildRefineSufficiencyPrompt,
 } from './prompts';
@@ -231,6 +232,7 @@ interface DiscoverySufficiencyEvaluation {
   questions?: ClarifyQuestion[];
   missingCategoryKeys: ClarifyCategoryKey[];
   reasonCodes: string[];
+  warning?: string;
   tokenUsage: TokenUsageSummary;
   durationMs: number;
 }
@@ -1671,9 +1673,6 @@ export async function assessRequirementWithLlmWithUsage(input: {
   }
 }
 
-const TRIAGE_SHAPE_ORDER: FeaturePlan['shape'][] = ['minimal', 'narrow', 'balanced', 'broad', 'epic'];
-const TRIAGE_COMPLEXITY_ORDER: FeaturePlan['complexity'][] = ['trivial', 'low', 'medium', 'high', 'very_high'];
-const SIZING_AR_DEPTH_ORDER: SizingAssessmentArDepth[] = ['minimal', 'lean', 'standard', 'thorough', 'comprehensive'];
 const MANUAL_PATH_TERMS = ['manual', 'manually', 'agent-assisted', 'user-entered', 'user initiated'];
 const AUTOMATED_PATH_TERMS = ['automated', 'automatically', 'automatic', 'system generated', 'system-generated', 'scheduled', 'batch', 'integration', 'api', 'event-driven'];
 const SEPARATE_EXCEPTION_WORKFLOW_TERMS = ['approval workflow', 'approval path', 'exception workflow', 'exception path', 'manual review', 'exception request', 'exemption request'];
@@ -1770,10 +1769,6 @@ function expectedAverageArLimit(depth: SizingAssessmentArDepth): number {
     case 'comprehensive': return 6;
     default: return 4;
   }
-}
-
-function cappedByOrder<T extends string>(value: T, cap: T, order: readonly T[]): T {
-  return order.indexOf(value) <= order.indexOf(cap) ? value : cap;
 }
 
 function featureNarrative(feature: Pick<Feature, 'summary' | 'description' | 'acceptanceRequirements'>): string {
@@ -2797,12 +2792,15 @@ export async function generateFeatures(opts: {
 
   if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
 
-  const defaultArPlan: ArPlan = {
+  const fallbackArPlan: ArPlan = {
     min: 0,
     max: 0,
     target: 0,
     depth: 'standard',
   };
+  const effectiveArPlan: ArPlan = advisoryTriage
+    ? triageToAssessment(advisoryTriage).arPlan
+    : fallbackArPlan;
 
   let pass1ResultUsage = { input: 0, output: 0 };
   let pass1Features: RawFeature[];
@@ -2886,9 +2884,17 @@ export async function generateFeatures(opts: {
       reviewMessage: 'Review the drafted feature structure before acceptance requirements are written.',
     });
 
+    const overlapWarnings = draftReview.coverageFindings?.overlapWarnings ?? [];
+    const duplicatedThemes = draftReview.coverageFindings?.duplicatedThemes ?? [];
     const shouldAutoTighten =
-      (draftReview.coverageFindings?.overlapWarnings?.length ?? 0) > 0
-      || (draftReview.coverageFindings?.duplicatedThemes?.length ?? 0) > 0;
+      overlapWarnings.length >= 2
+      && duplicatedThemes.length === 0
+      && !draftReview.openDecisions?.some((decision) => decision.blocking)
+      && (
+        !advisoryTriage
+        || advisoryTriage.deliveryForecast.shape === 'minimal'
+        || advisoryTriage.deliveryForecast.shape === 'narrow'
+      );
 
     if (shouldAutoTighten) {
       const tightened = await reviewDraftFeatureSet({
@@ -3001,7 +3007,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: defaultArPlan,
+      arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -3018,7 +3024,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: defaultArPlan,
+      arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -3036,7 +3042,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: defaultArPlan,
+      arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -3064,7 +3070,7 @@ export async function generateFeatures(opts: {
     }
     const pass2System = buildArSystemPrompt({
       domainContext: config.domainContext,
-      arPlan: defaultArPlan,
+      arPlan: effectiveArPlan,
     });
 
     const pass2ContextMessage = buildGenerationUserMessage({
@@ -3104,7 +3110,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: defaultArPlan,
+      arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -3121,7 +3127,7 @@ export async function generateFeatures(opts: {
       wiContextText,
       similarStoriesText,
       domainContext: config.domainContext,
-      arPlan: defaultArPlan,
+      arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
       providerOpts,
@@ -3434,7 +3440,10 @@ export async function generateClarifyingQuestions(opts: {
     {
       requiredCategoryKeys: repairedDiscovery.discoveryProfile.missingCategoryKeys,
       repairApplied: repairedDiscovery.repairApplied,
-      repairedQuestionCount: filteredQuestions.length,
+      repairedQuestionCount: Math.max(
+        repairedDiscovery.discoveryProfile.recommendedInitialCount,
+        filteredQuestions.length,
+      ),
     },
   );
   const totalInputTokens = discoveryPasses.reduce((sum, pass) => sum + pass.usage.input, 0);
@@ -3537,7 +3546,7 @@ export async function evaluateSufficiency(opts: {
 
   const runEvaluationPass = async (
     userMessage: string,
-    stageKey: 'clarifyEvaluate',
+    stageKey: 'clarifyEvaluate' | 'clarifyEvaluateRepair',
   ) => {
     const startedAt = Date.now();
     const result = await callLlmJsonWithUsage<Record<string, unknown>>({
@@ -3601,11 +3610,30 @@ export async function evaluateSufficiency(opts: {
   };
 
   const evaluationPasses = [await runEvaluationPass(baseUserMessage, 'clarifyEvaluate')];
-  const finalPass = evaluationPasses[0];
-  const finalQuestions = !finalPass.sufficient && !followupQuestionsLookWeak(finalPass.questions, groundingTerms)
+  if (!evaluationPasses[0].sufficient && followupQuestionsLookWeak(evaluationPasses[0].questions, groundingTerms)) {
+    const retryUserMessage = [
+      baseUserMessage,
+      'FOLLOW-UP QUESTION REPAIR: The previous follow-up questions were too generic or weak for the remaining business gaps.',
+      'Retry once and return only grounded delta questions tied to the unresolved business objects, rules, actors, routing, lifecycle, or exception paths already present in the evidence.',
+      'Do not silently mark the requirement sufficient just because the question wording is difficult. If discovery still appears incomplete, keep sufficient=false and emit the strongest grounded delta questions you can.',
+      `PREVIOUS JSON RESPONSE:\n${JSON.stringify({
+        sufficient: evaluationPasses[0].sufficient,
+        missingCategoryKeys: evaluationPasses[0].missingCategoryKeys,
+        reasonCodes: evaluationPasses[0].reasonCodes,
+        questions: evaluationPasses[0].questions,
+      }, null, 2)}`,
+    ].join('\n\n');
+    evaluationPasses.push(await runEvaluationPass(retryUserMessage, 'clarifyEvaluateRepair'));
+  }
+
+  const finalPass = evaluationPasses[evaluationPasses.length - 1];
+  const weakFollowupQuestions = !finalPass.sufficient && followupQuestionsLookWeak(finalPass.questions, groundingTerms);
+  const finalQuestions = !finalPass.sufficient && !weakFollowupQuestions
     ? finalPass.questions
     : [];
-  const effectiveSufficient = finalPass.sufficient || finalQuestions.length === 0;
+  const warning = weakFollowupQuestions
+    ? 'Discovery still has open decisions, but the follow-up questions were too weak to show. Continuing to generation with those gaps carried forward.'
+    : undefined;
   const totalDurationMs = evaluationPasses.reduce((sum, pass) => sum + pass.durationMs, 0);
   const totalInputTokens = evaluationPasses.reduce((sum, pass) => sum + pass.usage.input, 0);
   const totalOutputTokens = evaluationPasses.reduce((sum, pass) => sum + pass.usage.output, 0);
@@ -3621,10 +3649,11 @@ export async function evaluateSufficiency(opts: {
   );
 
   return {
-    sufficient: effectiveSufficient,
-    questions: effectiveSufficient ? undefined : finalQuestions,
-    missingCategoryKeys: effectiveSufficient ? [] : finalPass.missingCategoryKeys,
-    reasonCodes: effectiveSufficient ? [] : finalPass.reasonCodes,
+    sufficient: finalPass.sufficient,
+    questions: finalPass.sufficient ? undefined : finalQuestions,
+    missingCategoryKeys: finalPass.sufficient ? [] : finalPass.missingCategoryKeys,
+    reasonCodes: finalPass.sufficient ? [] : finalPass.reasonCodes,
+    warning,
     durationMs: totalDurationMs,
     tokenUsage: {
       input: totalInputTokens,
@@ -3979,6 +4008,149 @@ export async function addFeaturesFromFeedback(opts: {
   };
 }
 
+function acceptanceRequirementSignature(ar: AcceptanceRequirement): string {
+  return [
+    ar.given,
+    ar.when,
+    ar.then,
+  ].map((value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()).join(' | ');
+}
+
+function appendUniqueAcceptanceRequirements(
+  existing: AcceptanceRequirement[],
+  proposed: AcceptanceRequirement[],
+): AcceptanceRequirement[] {
+  const signatures = new Set(existing.map(acceptanceRequirementSignature));
+  const appended = proposed.filter((ar) => {
+    if (!ar.given?.trim() || !ar.when?.trim() || !ar.then?.trim()) return false;
+    const signature = acceptanceRequirementSignature(ar);
+    if (!signature || signatures.has(signature)) return false;
+    signatures.add(signature);
+    return true;
+  });
+  return [...existing, ...appended];
+}
+
+async function addRequirementsToFeature(opts: {
+  requirement: string;
+  feature: Feature;
+  feedback: string;
+  config: TenantConfig;
+}): Promise<{ feature: Feature; tokenUsage: TokenUsageSummary }> {
+  const { requirement, feature, feedback, config } = opts;
+  const featurePayload = {
+    summary: feature.summary,
+    description: feature.description,
+    acceptance_requirements: feature.acceptanceRequirements,
+    suggested_story_points: feature.storyPoints,
+    process_code: feature.processCode,
+  };
+
+  const system = buildAddRequirementsSystemPrompt({
+    domainContext: config.domainContext,
+    processTaxonomy: config.processTaxonomy,
+    processTaxonomyEnabled: config.processTaxonomyEnabled,
+  });
+
+  const userMessage = [
+    requirement ? `ORIGINAL REQUIREMENT:\n${requirement}` : '',
+    `FEATURE:\n${JSON.stringify(featurePayload, null, 2)}`,
+    `USER INSTRUCTION: ${feedback}`,
+  ].filter(Boolean).join('\n\n');
+
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(config.generatorConfig.refineModel, config.tier),
+    systemPrompt: system,
+    userMessage,
+    maxTokens: 3072,
+    reasoningEffort: 'low',
+    ...buildLlmProviderOpts(config),
+  });
+
+  const rawFeature = result.data.features?.[0];
+  const roleGrounding: RoleGroundingContext = {
+    requirement,
+    domainRoles: config.domainRoles,
+  };
+  const candidate = rawFeature
+    ? applyFeatureOutputGuardrails(normaliseFeature(rawFeature, roleGrounding), roleGrounding)
+    : feature;
+
+  return {
+    feature: {
+      ...feature,
+      acceptanceRequirements: appendUniqueAcceptanceRequirements(
+        feature.acceptanceRequirements,
+        candidate.acceptanceRequirements,
+      ),
+    },
+    tokenUsage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      total: result.usage.input + result.usage.output,
+      byStage: { add_requirements_single: toStageUsage(result.usage) },
+    },
+  };
+}
+
+export async function addRequirementsFromFeedback(opts: {
+  requirement: string;
+  features: Feature[];
+  feedback: string;
+  config: TenantConfig;
+  onProgress?: (message: string) => Promise<void> | void;
+}): Promise<{ features: Feature[]; tokenUsage: TokenUsageSummary }> {
+  const { requirement, features, feedback, config, onProgress } = opts;
+
+  if (!features.length) {
+    return {
+      features: [],
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        total: 0,
+        byStage: {},
+      },
+    };
+  }
+
+  const updatedFeatures: Feature[] = [];
+  let totalInput = 0;
+  let totalOutput = 0;
+  const byStage: Record<string, { input: number; output: number; total: number }> = {};
+  const results = await runOrderedConcurrentTasks({
+    tasks: features.map((feature) => () => addRequirementsToFeature({
+      requirement,
+      feature,
+      feedback,
+      config,
+    })),
+    concurrency: 3,
+    onProgress: (completed, total) => onProgress?.(`Extended acceptance coverage for ${completed} of ${total} features…`),
+  });
+
+  results.forEach((result, index) => {
+    updatedFeatures.push(result.feature);
+    totalInput += result.tokenUsage.input;
+    totalOutput += result.tokenUsage.output;
+    byStage[`add_requirements_${index + 1}`] = {
+      input: result.tokenUsage.input,
+      output: result.tokenUsage.output,
+      total: result.tokenUsage.total,
+    };
+  });
+
+  return {
+    features: updatedFeatures,
+    tokenUsage: {
+      input: totalInput,
+      output: totalOutput,
+      total: totalInput + totalOutput,
+      byStage,
+    },
+  };
+}
+
 // ─── Single Feature Refinement ────────────────────────────────────────────────
 
 export async function refineSingleFeature(opts: {
@@ -4092,10 +4264,9 @@ export async function runOrderedConcurrentTasks<T>(opts: {
   let completed = 0;
 
   const worker = async () => {
-    while (true) {
+    while (nextIndex < tasks.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      if (currentIndex >= tasks.length) return;
 
       results[currentIndex] = await tasks[currentIndex]();
       completed += 1;
@@ -4327,11 +4498,6 @@ const CROSS_CUTTING_FEATURE_TERMS = [
   'traceability', 'compliance', 'retention', 'cannot be deleted', 'must not be deleted',
   'non-deletion', 'immutable history', 'historical integrity',
 ];
-
-function includesAnyPhrase(text: string, terms: string[]): boolean {
-  const haystack = String(text ?? '').toLowerCase();
-  return terms.some((term) => haystack.includes(term.toLowerCase()));
-}
 
 function countMatchedPhrases(text: string, terms: string[]): number {
   const haystack = String(text ?? '').toLowerCase();

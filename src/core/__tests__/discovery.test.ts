@@ -13,6 +13,7 @@ import {
 import {
   buildArSystemPrompt,
   buildArPerFeatureUserMessage,
+  buildAddRequirementsSystemPrompt,
   buildClarifySystemPrompt,
   buildCoverageCheckSystemPrompt,
   buildCoverageRepairSystemPrompt,
@@ -47,6 +48,34 @@ test('normalizeDiscoveryProfile allows zero-question discovery', () => {
 
   assert.equal(profile.recommendedInitialCount, 0);
   assert.equal(profile.followupCap, 0);
+});
+
+test('validateAndRepairInitialDiscovery preserves the higher discovery depth signal after repair', () => {
+  const repaired = validateAndRepairInitialDiscovery(
+    [
+      {
+        categoryKey: 'business_rules',
+        category: 'Business Rules',
+        intent: 'decision_logic',
+        question: 'How should uncertain matches be handled?',
+        suggestions: [],
+      },
+    ],
+    {
+      scope: 'moderate',
+      complexity: 'high',
+      ambiguity: 'high',
+      missingCategoryKeys: ['business_rules', 'edge_cases_exceptions'],
+      recommendedInitialCount: 6,
+      followupCap: 4,
+    },
+    {
+      requirement: 'Handle incoming requests and route uncertain cases for review.',
+    },
+  );
+
+  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 6);
+  assert.deepEqual(repaired.discoveryProfile.missingCategoryKeys, ['context_trigger', 'user_personas', 'business_rules', 'edge_cases_exceptions']);
 });
 
 test('expandRawQuestionCandidate splits numbered grouped prompts into single-focus questions', () => {
@@ -579,8 +608,8 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /visible "question" field must be short and plain-language first/i);
   assert.match(clarifyPrompt, /optional "details" field/i);
   assert.match(clarifyPrompt, /Preserve requirement-native domain wording/i);
-  assert.match(clarifyPrompt, /Suggestions are optional/i);
-  assert.match(clarifyPrompt, /provide 1-3 short grounded options/i);
+  assert.match(clarifyPrompt, /Include suggestions for most questions/i);
+  assert.match(clarifyPrompt, /Provide up to 3 short, grounded options per question/i);
   assert.match(clarifyPrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
   assert.match(clarifyPrompt, /Never write discovery questions in first person/i);
   assert.match(clarifyPrompt, /normalize the question voice into third-person business language/i);
@@ -643,7 +672,7 @@ test('decomposition prompt treats feature counts as hints and keeps support beha
   assert.match(prompt, /independent business value/i);
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
   assert.match(prompt, /work instructions or operational guidance/i);
-  assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, or visibility aid/i);
+  assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, visibility aid, or manual-review path/i);
   assert.match(prompt, /Surface independently valuable feature slices without inventing micro-features/i);
   assert.match(prompt, /do not hide meaningful workflow branches inside one oversized feature/i);
   assert.doesNotMatch(prompt, /Output exactly/i);
@@ -770,4 +799,17 @@ test('coverage prompts require WI-backed workflow branches to be checked and rep
   assert.match(checkPrompt, /exception handling and fallback paths/i);
   assert.match(repairPrompt, /Prefer enriching the existing feature description and acceptance requirements/i);
   assert.match(repairPrompt, /Treat clarified answers and work instructions in the user message as obligations to cover/i);
+});
+
+test('add requirements prompt keeps canvas changes append-only and feature-local', () => {
+  const prompt = buildAddRequirementsSystemPrompt({
+    domainContext: 'Use context only for business scope.',
+    processTaxonomy: [],
+    processTaxonomyEnabled: false,
+  });
+
+  assert.match(prompt, /Return EXACTLY ONE feature in the features array/i);
+  assert.match(prompt, /Do not create a new feature/i);
+  assert.match(prompt, /Keep every existing acceptance requirement in the same relative order/i);
+  assert.match(prompt, /Append only the additional acceptance requirements needed/i);
 });

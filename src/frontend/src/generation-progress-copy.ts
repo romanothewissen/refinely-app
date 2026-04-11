@@ -1,4 +1,10 @@
-import type { ClarifyProgressPayload, CoverageReviewAdvice, GenerationSizingAssessment } from './types';
+import type {
+  AdvisoryDiscoveryForecast,
+  ClarifyProgressPayload,
+  CoverageReviewAdvice,
+  DiscoveryProfile,
+  GenerationSizingAssessment,
+} from './types';
 
 export function getGenerationFeatureTargetLabel(): string {
   return 'Triage estimate';
@@ -69,6 +75,64 @@ export function getDiscoveryProfileHeadline(
   const scope = scopeLabel[discoveryProfile.scope] ?? discoveryProfile.scope;
   const ambiguity = ambiguityLabel[discoveryProfile.ambiguity] ?? discoveryProfile.ambiguity;
   return `${scope} / ${ambiguity}`;
+}
+
+type DiscoveryDisplayComplexity = DiscoveryProfile['complexity'];
+
+const DISCOVERY_COMPLEXITY_ORDER: DiscoveryDisplayComplexity[] = ['low', 'medium', 'high', 'very_high'];
+
+function bumpDiscoveryComplexity(
+  value: DiscoveryDisplayComplexity,
+  steps = 1,
+): DiscoveryDisplayComplexity {
+  const index = DISCOVERY_COMPLEXITY_ORDER.indexOf(value);
+  if (index < 0) return value;
+  return DISCOVERY_COMPLEXITY_ORDER[Math.min(DISCOVERY_COMPLEXITY_ORDER.length - 1, index + steps)];
+}
+
+export function getDiscoveryDisplayComplexity(input: {
+  discoveryProfile?: Partial<DiscoveryProfile> | null;
+  advisoryForecast?: Partial<AdvisoryDiscoveryForecast> | null;
+  plannedQuestions?: number | null;
+}): DiscoveryDisplayComplexity | null {
+  const profile = input.discoveryProfile;
+  const advisory = input.advisoryForecast;
+  const base = profile?.complexity ?? advisory?.complexity ?? null;
+  if (!base) return null;
+
+  const ambiguity = profile?.ambiguity ?? advisory?.ambiguity ?? 'medium';
+  const scope = profile?.scope ?? advisory?.scope ?? 'moderate';
+  const plannedQuestions = typeof input.plannedQuestions === 'number'
+    ? input.plannedQuestions
+    : typeof profile?.recommendedInitialCount === 'number'
+      ? profile.recommendedInitialCount
+      : typeof advisory?.recommendedInitialCount === 'number'
+        ? advisory.recommendedInitialCount
+        : 0;
+  const followupCap = typeof profile?.followupCap === 'number'
+    ? profile.followupCap
+    : typeof advisory?.followupCap === 'number'
+      ? advisory.followupCap
+      : 0;
+
+  let displayComplexity = base;
+
+  if (ambiguity === 'high') {
+    const strongDiscoveryLoad = plannedQuestions >= 10 || followupCap >= 6;
+    const broadDiscoveryLoad = scope === 'broad' || scope === 'very_broad';
+
+    if (displayComplexity === 'medium' && (strongDiscoveryLoad || broadDiscoveryLoad)) {
+      displayComplexity = 'high';
+    } else if (displayComplexity === 'low' && strongDiscoveryLoad) {
+      displayComplexity = 'medium';
+    }
+  }
+
+  if (displayComplexity === 'high' && scope === 'very_broad' && plannedQuestions >= 14 && ambiguity !== 'low') {
+    displayComplexity = bumpDiscoveryComplexity(displayComplexity);
+  }
+
+  return displayComplexity;
 }
 
 export function getSourceContextChips(input?: {

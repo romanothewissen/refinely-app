@@ -143,8 +143,9 @@ ${isHighComplexity
   : `- This is a tightly scoped requirement. One or two strong features is often the right outcome, even if the planning hint is higher.`}
 - Apply the decomposition framework to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
 - A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context unless each requires distinct handling rules — in that case, the distinct handling IS the deliverable scope.
-- Do NOT split into trivial or UI-level features. Combine supporting concerns into a single feature.
-- If a list, notification, status definition, audit trail, exception diagnosis, or visibility aid only supports the core behavior, keep it inside the main feature unless explicitly requested as a separate deliverable.
+- Do NOT split into trivial or UI-level features. Combine only truly supporting concerns into a single feature.
+- If a list, notification, status definition, audit trail, exception diagnosis, visibility aid, or manual-review path changes ownership, workflow, decision logic, or independently testable outcomes, preserve it explicitly instead of hiding it inside the parent feature.
+- If a supporting concern only explains or exposes the core behavior and does not create a materially different handling path, keep it inside the main feature.
 `;
   }
 
@@ -161,7 +162,7 @@ ${isHighComplexity
 - This is a broad requirement covering multiple capabilities. Use the forecast to sanity-check your reasoning, not to force the count upward.
 - Work through the decomposition framework to find distinct workflows, role-specific behaviors, and independently testable capabilities. Do not collapse them to keep count low.
 - Each distinct workflow or role-specific behavior should be its own feature. Only consolidate when features are genuinely inseparable — not just closely related.
-- Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature unless it is explicitly requested as a separate deliverable.
+- Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature only when it does not introduce its own workflow, actor responsibility, decision path, or independently testable outcome.
 `;
 
     // balanced (default)
@@ -170,6 +171,7 @@ ${isHighComplexity
 - A feature should be backlog-worthy on its own: something a team would reasonably plan, estimate, and accept independently.
 - Do NOT split into trivial or UI-level sub-tasks.
 - If a list, notification, identification step, policy definition, or supporting visibility only exists to enable or explain the main behavior, keep it inside the parent feature and cover it in the description and acceptance requirements.
+- If the requirement implies materially different create, update, classify, route, resolve, exception, or manual-review paths, preserve those distinctions instead of flattening them into one generic parent feature.
 `;
   })();
 
@@ -1010,6 +1012,45 @@ ACCEPTANCE REQUIREMENT RULES:
 - Every returned feature MUST include at least one complete acceptance requirement
 - Cover the new missing behavior cleanly, including the most relevant rule or exception when appropriate
 - No solution language or implementation detail
+
+${taxonomySection}
+
+Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": ["GIVEN ... WHEN ... THEN ..."], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}}]}`;
+}
+
+export function buildAddRequirementsSystemPrompt(opts: {
+  domainContext: string;
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? processTaxonomyBlock(opts.processTaxonomy)
+    : '';
+
+  return `You are a principal business analyst expanding acceptance coverage for ONE existing Jira feature.
+${platformContextBlock(opts.domainContext)}
+YOUR JOB: Preserve the feature exactly as it exists today and append only the missing acceptance requirements needed to satisfy the user's instruction.
+
+STRUCTURE RULES:
+- Return EXACTLY ONE feature in the features array
+- Do not create a new feature
+- Do not split, merge, rename, or remove the feature
+- Preserve summary, description, suggested_story_points, and process_code exactly as provided unless a trivial typo fix is unavoidable
+
+ACCEPTANCE REQUIREMENT PRESERVATION RULES:
+- Keep every existing acceptance requirement in the same relative order
+- Do not delete, rewrite, merge, move, or weaken existing acceptance requirements
+- Append only the additional acceptance requirements needed for the requested missing coverage
+- If the feature already fully covers the request, return the feature unchanged
+- New acceptance requirements must stay feature-local. Do not add coverage that clearly belongs to another feature
+
+QUALITY RULES:
+- Every AR: GIVEN [precondition] WHEN [trigger] THEN [single verifiable outcome]
+- Never write ARs in first person
+- No solution language, system names, or implementation detail
+- Preserve business language and actor wording already established by the feature
+- Add missing rules, exceptions, routing, linkage, or manual-review coverage only when the user's instruction materially calls for it
+${opts.processTaxonomyEnabled ? '- Preserve process_code exactly as provided\n' : ''}
 
 ${taxonomySection}
 

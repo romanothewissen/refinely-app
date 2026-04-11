@@ -1,5 +1,5 @@
 import { CanvasEditIntent, Feature, RefineEvent, StructuralRestructureProposal } from '../types';
-import { addFeaturesFromFeedback, refineFeatures, restructureFeatures } from '../core/story-generator';
+import { addFeaturesFromFeedback, addRequirementsFromFeedback, refineFeatures, restructureFeatures } from '../core/story-generator';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
@@ -95,6 +95,21 @@ export async function handler(event: { body: RefineEvent }) {
       });
       tokenUsage = result.tokenUsage;
       resultFeatures = [...features, ...result.features];
+    } else if (operationType === 'add_requirements') {
+      const result = await addRequirementsFromFeedback({
+        requirement: maskedRequirement.text,
+        features: targetedFeatures,
+        feedback: maskedFeedback.text,
+        config,
+        onProgress: (message) => sendRefineProgress(sessionId, message, operationType, intent),
+      });
+      tokenUsage = result.tokenUsage;
+      if (selectedFeatureIds.length) {
+        const refinedById = new Map(result.features.map((feature) => [feature.id, feature]));
+        resultFeatures = features.map((feature) => refinedById.get(feature.id) ?? feature);
+      } else {
+        resultFeatures = result.features;
+      }
     } else {
       const result = await refineFeatures({
         requirement: maskedRequirement.text,

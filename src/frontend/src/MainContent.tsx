@@ -32,6 +32,7 @@ import {
   formatGenerationFeatureTarget,
   getApprovedDraftStructureNote,
   getCoverageReviewSummary,
+  getDiscoveryDisplayComplexity,
   getDiscoveryProfileHeadline,
   getDraftFeatureHeading,
   getDraftFeatureNote,
@@ -675,8 +676,12 @@ function DiscoveryScoreCard({
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
   const assessment = meta?.assessment ?? null;
   const sizingContract = meta?.sizingContract ?? context?.sizingContract;
-  const complexityKey = discoveryProfile?.complexity ?? advisoryTriage?.discoveryForecast.complexity ?? null;
   const plannedQuestions = discoveryProfile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount ?? ambiguityAssessment?.questionPlan?.target ?? assessment?.estimatedQuestions;
+  const complexityKey = getDiscoveryDisplayComplexity({
+    discoveryProfile,
+    advisoryForecast: advisoryTriage?.discoveryForecast,
+    plannedQuestions,
+  });
   const discoveryHeadline = getDiscoveryProfileHeadline(discoveryProfile);
   const sourceChips = getSourceContextChips(meta?.sources ?? context ?? null);
   const isFinalProfile = Boolean(discoveryProfile);
@@ -2747,7 +2752,7 @@ export function MainContent({
               </motion.div>
             )}
 
-            {coverageGaps.length > 0 && (
+            {coverageGaps.length > 0 && generationContext?.requiresUserDecision && (
               <div className="rounded-[20px] border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-4 py-4 shadow-[0_10px_30px_-20px_rgba(160,81,30,0.45)]">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
