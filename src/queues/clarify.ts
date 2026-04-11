@@ -10,7 +10,6 @@
 
 import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureDiagnostics, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
 import { assessRequirementWithLlm, buildClarifyFailureDiagnostics, ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
-import { extractDiscoverySignals } from '../core/discovery';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
@@ -37,9 +36,8 @@ const PROGRESS_HEARTBEAT_MS = 15000;
 function deriveRetrievalQuery(requirement: string, attachmentText: string): string {
   const requirementText = requirement?.trim() ?? '';
   const attachmentSnippet = (attachmentText?.trim() ?? '').slice(0, 600).replace(/\s+/g, ' ');
-  const signalContext = extractDiscoverySignals([requirementText, attachmentSnippet]).join(' ').slice(0, 250);
-  if (requirementText.length >= 30) return [requirementText, signalContext].filter(Boolean).join(' ').slice(0, 900).trim();
-  return [requirementText, signalContext, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
+  if (requirementText.length >= 30) return [requirementText, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
+  return [requirementText, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
 }
 export async function handler(event: { body: ClarifyEvent }) {
   const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys } = event.body;

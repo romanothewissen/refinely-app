@@ -70,9 +70,7 @@ import { detectFeatureOverlaps, validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import {
   allowsZeroQuestionDiscovery,
-  extractDiscoverySignals,
   expandRawQuestionCandidate,
-  calibrateDiscoveryProfile,
   finalizeFollowupDiscoveryQuestions,
   labelForCategoryKey,
   normalizeCategoryKey,
@@ -409,98 +407,6 @@ function trimPromptText(text: string, maxChars: number): string {
   if (!normalized) return '';
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars).trimEnd()}\n...[truncated for speed]`;
-}
-
-export function collectDiscoveryGroundingTerms(parts: string[]): Set<string> {
-  const terms = new Set<string>();
-  const rawSignals = extractDiscoverySignals(parts);
-
-  [...parts, ...rawSignals].forEach((part) => {
-    const matches = String(part ?? '').match(/\b[A-Za-z][A-Za-z0-9/-]{2,}\b/g) ?? [];
-    matches.forEach((token) => {
-      const normalized = token.toLowerCase().replace(/[^a-z0-9/-]/g, '').trim();
-      if (!normalized || normalized.length < 4 || FOLLOWUP_GROUNDING_STOPWORDS.has(normalized)) return;
-      terms.add(normalized);
-    });
-  });
-
-  return terms;
-}
-
-function countGroundingHits(text: string, groundingTerms: Set<string>): number {
-  const seen = new Set<string>();
-  let hits = 0;
-  const tokens = String(text ?? '').match(/\b[A-Za-z][A-Za-z0-9/-]{2,}\b/g) ?? [];
-
-  tokens.forEach((token) => {
-    const normalized = token.toLowerCase().replace(/[^a-z0-9/-]/g, '').trim();
-    if (!normalized || normalized.length < 4 || seen.has(normalized)) return;
-    seen.add(normalized);
-    if (groundingTerms.has(normalized)) hits += 1;
-  });
-
-  return hits;
-}
-
-type DiscoveryQuestionStrength = {
-  hits: number;
-  isBroadGenericPattern: boolean;
-  questionLooksGeneric: boolean;
-  weakForFollowup: boolean;
-  strongForInitial: boolean;
-};
-
-function assessDiscoveryQuestionStrength(
-  question: ClarifyQuestion,
-  groundingTerms: Set<string>,
-): DiscoveryQuestionStrength {
-  const normalizedQuestion = question.question.trim();
-  if (!normalizedQuestion) {
-    return {
-      hits: 0,
-      isBroadGenericPattern: false,
-      questionLooksGeneric: true,
-      weakForFollowup: true,
-      strongForInitial: false,
-    };
-  }
-
-  const isBroadGenericPattern = GENERIC_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(normalizedQuestion));
-  const hits = countGroundingHits(normalizedQuestion, groundingTerms);
-  const questionLooksGeneric = /\b(capability|process|system|workflow|handling|business outcome)\b/i.test(normalizedQuestion);
-
-  return {
-    hits,
-    isBroadGenericPattern,
-    questionLooksGeneric,
-    weakForFollowup: isBroadGenericPattern || hits === 0 || (questionLooksGeneric && hits < 2),
-    strongForInitial: hits >= 2 || (hits >= 1 && !questionLooksGeneric && !isBroadGenericPattern),
-  };
-}
-
-export function followupQuestionsLookWeak(
-  questions: ClarifyQuestion[],
-  groundingTerms: Set<string>,
-): boolean {
-  if (!questions.length) return true;
-
-  return questions.some((question) => assessDiscoveryQuestionStrength(question, groundingTerms).weakForFollowup);
-}
-
-export function initialQuestionsLookWeak(
-  questions: ClarifyQuestion[],
-  groundingTerms: Set<string>,
-): boolean {
-  if (!questions.length) return false;
-
-  const assessments = questions.map((question) => assessDiscoveryQuestionStrength(question, groundingTerms));
-  const groundedQuestionCount = assessments.filter((assessment) => assessment.hits > 0).length;
-  const strongQuestionCount = assessments.filter((assessment) => assessment.strongForInitial).length;
-  const allQuestionsWeak = assessments.every((assessment) => assessment.weakForFollowup);
-
-  return allQuestionsWeak
-    || groundedQuestionCount < Math.min(2, questions.length)
-    || strongQuestionCount === 0;
 }
 
 type DiscoveryCandidateSource = 'root_array' | 'questions' | 'features' | 'missing';
@@ -2653,7 +2559,6 @@ function determineInitialDiscoveryFailureReason(
     discoveryProfile: DiscoveryProfile;
     failureReasonCode: ClarifyFailureReasonCode | null;
   },
-  groundingTerms: Set<string>,
 ): ClarifyFailureReasonCode | null {
   if (parsed.source === 'missing') return 'question_array_missing';
   if (parsed.rawCandidateCount > 0 && parsed.stringQuestionCount === 0) return 'question_shape_invalid';
@@ -2664,23 +2569,14 @@ function determineInitialDiscoveryFailureReason(
   if (!repairedDiscovery.questions.length && !zeroQuestionDiscoveryAllowed) {
     return 'question_array_empty_when_discovery_required';
   }
-  if (repairedDiscovery.questions.length > 0 && initialQuestionsLookWeak(repairedDiscovery.questions, groundingTerms)) {
-    return 'question_set_generic';
-  }
   return null;
 }
 
 export function assessInitialDiscoveryResponse(opts: {
   rawData: unknown;
   requirement: string;
-  attachmentText?: string;
-  wiContextText?: string;
-  similarStoriesText?: string;
   profileFallback?: Partial<DiscoveryProfile> | null;
-  advisoryForecast?: AdvisoryTriageContract['discoveryForecast'];
-  domainSignals?: string[];
   domainRoles?: string[];
-  groundingTerms?: Set<string>;
 }): {
   questions: ClarifyQuestion[];
   discoveryProfile: DiscoveryProfile;
@@ -2691,25 +2587,9 @@ export function assessInitialDiscoveryResponse(opts: {
   const normalizedProfile = normalizeDiscoveryProfile(
     parseDiscoveryProfileCandidate(opts.rawData) ?? opts.profileFallback ?? null,
     parsed.questions.length || opts.profileFallback?.recommendedInitialCount || 0,
-    opts.advisoryForecast,
   );
-  const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfile, {
-    requirement: opts.requirement,
-    attachmentText: opts.attachmentText,
-    wiContextText: opts.wiContextText,
-    similarStoriesText: opts.similarStoriesText,
-    domainSignals: opts.domainSignals,
-    domainRoles: opts.domainRoles,
-  });
-  const groundingTerms = opts.groundingTerms ?? collectDiscoveryGroundingTerms([
-    opts.requirement,
-    opts.attachmentText ?? '',
-    opts.wiContextText ?? '',
-    opts.similarStoriesText ?? '',
-    ...(opts.domainSignals ?? []),
-    ...(opts.domainRoles ?? []),
-  ]);
-  const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery, groundingTerms);
+  const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfile);
+  const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery);
 
   return {
     questions: repairedDiscovery.questions,
@@ -2858,28 +2738,12 @@ export async function generateFeatures(opts: {
     const pass1System = buildDecompositionSystemPrompt({
       domainContext: config.domainContext,
       domainRoles: config.domainRoles,
-      outputProfile,
       processTaxonomy: config.processTaxonomy,
       processTaxonomyEnabled: config.processTaxonomyEnabled,
       clarifyAnswerCount: clarifyAnswers.length,
       reviewMode: true,
-      featurePlan: advisoryTriage
-        ? {
-            min: Math.max(1, advisoryTriage.deliveryForecast.featureMin ?? Math.max(1, advisoryTriage.deliveryForecast.featureTarget - 1)),
-            max: Math.max(
-              1,
-              advisoryTriage.deliveryForecast.featureMax
-              ?? (advisoryTriage.deliveryForecast.featureTarget + (
-                advisoryTriage.deliveryForecast.complexity === 'high' || advisoryTriage.deliveryForecast.complexity === 'very_high'
-                  ? Math.max(4, Math.ceil(advisoryTriage.deliveryForecast.featureTarget * 0.8))
-                  : Math.max(2, Math.ceil(advisoryTriage.deliveryForecast.featureTarget * 0.5))
-              )),
-            ),
-            target: Math.max(1, advisoryTriage.deliveryForecast.featureTarget),
-            shape: advisoryTriage.deliveryForecast.shape,
-            complexity: advisoryTriage.deliveryForecast.complexity,
-          }
-        : undefined,
+      backlogDepth: config.generationPreferences?.backlogDepth,
+      featureProfile: config.generationPreferences?.featureProfile,
     });
 
     const pass1Result = await runDecompositionPass({
@@ -3442,42 +3306,17 @@ export async function generateClarifyingQuestions(opts: {
   }
   const desiredQuestionCount = clarifyTriageResult?.discoveryForecast.recommendedInitialCount ?? 0;
   const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 8192), 6144);
-  const domainSignals = extractDiscoverySignals([
-    requirement,
-    attachmentText.slice(0, 2200),
-    wiContextText.slice(0, 6000),
-    similarStoriesText.slice(0, 5000),
-    ...(config.domainRoles ?? []),
-  ]);
-  const groundingTerms = collectDiscoveryGroundingTerms([
-    requirement,
-    attachmentText.slice(0, 2200),
-    wiContextText.slice(0, 6000),
-    similarStoriesText.slice(0, 5000),
-    ...(config.domainRoles ?? []),
-  ]);
-
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
   ];
-  if (clarifyTriageResult?.discoveryForecast) {
-    contextParts.push(
-      `DISCOVERY SIGNAL: earlier triage suggests ${clarifyTriageResult.discoveryForecast.scope} scope, ${clarifyTriageResult.discoveryForecast.complexity} complexity, ${clarifyTriageResult.discoveryForecast.ambiguity} ambiguity, about ${desiredQuestionCount} initial questions, and up to ${clarifyTriageResult.discoveryForecast.followupCap} follow-up questions. Treat that as advisory only — discovery must size itself from unresolved business ambiguity.`,
-    );
-  }
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 12000)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 6000)}`);
-  if (domainSignals.length) {
-    contextParts.push(`DOMAIN SIGNALS TO REUSE: ${domainSignals.join(', ')}`);
-  }
   const baseUserMessage = contextParts.join('\n\n');
 
   const system = buildClarifySystemPrompt({
     domainContext: config.domainContext,
     domainRoles: config.domainRoles,
-    domainSignals,
-    advisoryForecast: clarifyTriageResult?.discoveryForecast,
   });
 
   const runInitialDiscoveryPass = async (
@@ -3500,17 +3339,9 @@ export async function generateClarifyingQuestions(opts: {
       const normalizedProfileCandidate = normalizeDiscoveryProfile(
         parseDiscoveryProfileCandidate(raw.data),
         parsed.questions.length || desiredQuestionCount,
-        clarifyTriageResult?.discoveryForecast,
       );
-      const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfileCandidate, {
-        requirement,
-        attachmentText,
-        wiContextText,
-        similarStoriesText,
-        domainSignals,
-        domainRoles: config.domainRoles,
-      });
-      const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery, groundingTerms);
+      const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfileCandidate);
+      const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery);
 
       return {
         rawData: raw.data,
@@ -3587,20 +3418,7 @@ export async function generateClarifyingQuestions(opts: {
     });
   }
   const filteredQuestions = repairedDiscovery.questions;
-  const discoveryProfile: DiscoveryProfile = calibrateDiscoveryProfile(
-    {
-      ...repairedDiscovery.discoveryProfile,
-      recommendedInitialCount: repairedDiscovery.discoveryProfile.recommendedInitialCount,
-    },
-    {
-      requiredCategoryKeys: repairedDiscovery.discoveryProfile.missingCategoryKeys,
-      repairApplied: repairedDiscovery.repairApplied,
-      repairedQuestionCount: Math.max(
-        repairedDiscovery.discoveryProfile.recommendedInitialCount,
-        filteredQuestions.length,
-      ),
-    },
-  );
+  const discoveryProfile: DiscoveryProfile = repairedDiscovery.discoveryProfile;
   const totalInputTokens = discoveryPasses.reduce((sum, pass) => sum + pass.usage.input, 0);
   const totalOutputTokens = discoveryPasses.reduce((sum, pass) => sum + pass.usage.output, 0);
   const totalTokens = totalInputTokens + totalOutputTokens;
@@ -3670,20 +3488,6 @@ export async function evaluateSufficiency(opts: {
       };
     })
     .filter((entry) => entry.question);
-  const domainSignals = extractDiscoverySignals([
-    opts.requirement,
-    qaText,
-    ...askedQuestionDetails.map((entry) => entry.question),
-    ...(opts.config.domainRoles ?? []),
-  ]);
-
-  const groundingTerms = collectDiscoveryGroundingTerms([
-    opts.requirement,
-    qaText,
-    ...askedQuestionDetails.map((entry) => entry.question),
-    ...(opts.config.domainRoles ?? []),
-  ]);
-
   const baseUserMessage = [
     `REQUIREMENT: ${opts.requirement}`,
     askedQuestionDetails.length
@@ -3709,7 +3513,6 @@ export async function evaluateSufficiency(opts: {
       systemPrompt: buildEvaluateSystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
-        domainSignals,
         minQuestions: 0,
         maxQuestions: followupCap,
       }),
@@ -3744,12 +3547,6 @@ export async function evaluateSufficiency(opts: {
           missingCategoryKeys,
           followupCap: followupCap || parsedQuestions.length,
           initialQuestionCount,
-          fallbackInput: {
-            requirement: opts.requirement,
-            attachmentText: qaText,
-            domainSignals,
-            domainRoles: opts.config.domainRoles,
-          },
         })
       : [];
 
@@ -3765,30 +3562,10 @@ export async function evaluateSufficiency(opts: {
   };
 
   const evaluationPasses = [await runEvaluationPass(baseUserMessage, 'clarifyEvaluate')];
-  if (!evaluationPasses[0].sufficient && followupQuestionsLookWeak(evaluationPasses[0].questions, groundingTerms)) {
-    const retryUserMessage = [
-      baseUserMessage,
-      'FOLLOW-UP QUESTION REPAIR: The previous follow-up questions were too generic or weak for the remaining business gaps.',
-      'Retry once and return only grounded delta questions tied to the unresolved business objects, rules, actors, routing, lifecycle, or exception paths already present in the evidence.',
-      'Do not silently mark the requirement sufficient just because the question wording is difficult. If discovery still appears incomplete, keep sufficient=false and emit the strongest grounded delta questions you can.',
-      `PREVIOUS JSON RESPONSE:\n${JSON.stringify({
-        sufficient: evaluationPasses[0].sufficient,
-        missingCategoryKeys: evaluationPasses[0].missingCategoryKeys,
-        reasonCodes: evaluationPasses[0].reasonCodes,
-        questions: evaluationPasses[0].questions,
-      }, null, 2)}`,
-    ].join('\n\n');
-    evaluationPasses.push(await runEvaluationPass(retryUserMessage, 'clarifyEvaluateRepair'));
-  }
 
   const finalPass = evaluationPasses[evaluationPasses.length - 1];
-  const weakFollowupQuestions = !finalPass.sufficient && followupQuestionsLookWeak(finalPass.questions, groundingTerms);
-  const finalQuestions = !finalPass.sufficient && !weakFollowupQuestions
-    ? finalPass.questions
-    : [];
-  const warning = weakFollowupQuestions
-    ? 'Discovery still has open decisions, but the follow-up questions were too weak to show. Continuing to generation with those gaps carried forward.'
-    : undefined;
+  const finalQuestions = !finalPass.sufficient ? finalPass.questions : [];
+  const warning = undefined;
   const totalDurationMs = evaluationPasses.reduce((sum, pass) => sum + pass.durationMs, 0);
   const totalInputTokens = evaluationPasses.reduce((sum, pass) => sum + pass.usage.input, 0);
   const totalOutputTokens = evaluationPasses.reduce((sum, pass) => sum + pass.usage.output, 0);
@@ -4732,8 +4509,8 @@ function determineOpenDecisionCategory(text: string): ClarifyCategoryKey | 'gene
   if (/\b(who|permission|permissions|role|roles|owner|ownership|notify|notified)\b/.test(normalized)) return 'user_personas';
   if (/\b(when|trigger|receive|schedule|frequency|poll|event)\b/.test(normalized)) return 'context_trigger';
   if (/\b(state|history|lifecycle|swap|exchange|deinstall|removed|moved|owner change|remain)\b/.test(normalized)) return 'state_lifecycle';
-  if (/\b(duplicate|match|identifier|criteria|version list|picklist|target version)\b/.test(normalized)) return 'information_architecture';
-  if (/\b(error|failure|disconnect|drop|unreadable|missing|no match|fallback)\b/.test(normalized)) return 'edge_cases_exceptions';
+  if (/\b(duplicate|match|identifier|criteria|version list|picklist|target version|sequence|step|depends|order|branch|path)\b/.test(normalized)) return 'functional_flow';
+  if (/\b(error|failure|disconnect|drop|unreadable|missing|no match|fallback|exception|invalid|override)\b/.test(normalized)) return 'business_rules';
   if (/\b(should|how|policy|priority|rule|rules|validation|allowed)\b/.test(normalized)) return 'business_rules';
   return 'general';
 }
@@ -4823,7 +4600,7 @@ function buildArObligations(input: {
   ]);
   const confirmedExclusions = uniquePromptSummaries([
     ...input.clarifyAnswers
-      .filter((answer) => answer.categoryKey === 'edge_cases_exceptions')
+      .filter((answer) => answer.categoryKey === 'business_rules')
       .map(summarizeAnswerForObligation),
     ...String(input.wiContextText ?? '')
       .split(/\n+/)
@@ -4832,7 +4609,7 @@ function buildArObligations(input: {
   ]);
   const confirmedDataObligations = uniquePromptSummaries([
     ...input.clarifyAnswers
-      .filter((answer) => answer.categoryKey === 'information_architecture' || answer.categoryKey === 'context_trigger')
+      .filter((answer) => answer.categoryKey === 'functional_flow' || answer.categoryKey === 'context_trigger')
       .map(summarizeAnswerForObligation),
     ...String(input.wiContextText ?? '')
       .split(/\n+/)

@@ -8,7 +8,6 @@
  */
 
 import { AdvisoryTriageContract, ClarifyAnswer, DraftReviewMetadata, EffectiveSizingContract, Feature, GenerationContextMeta, GenerationEvent, GenerationStageDurationsMs, TokenUsageSummary } from '../types';
-import { extractDiscoverySignals } from '../core/discovery';
 import {
   AcceptanceRequirementsGenerationError,
   ArGenerationProgressSnapshot,
@@ -92,12 +91,10 @@ function deriveRetrievalQuery(
     .filter(Boolean)
     .join(' ')
     .slice(0, 500);
-  const signalContext = extractDiscoverySignals([requirementText, attachmentSnippet, answerContext]).join(' ').slice(0, 250);
-
   if (requirementText.length >= 30) {
-    return [requirementText, signalContext, answerContext].filter(Boolean).join(' ').slice(0, 900).trim();
+    return [requirementText, answerContext].filter(Boolean).join(' ').slice(0, 900).trim();
   }
-  return [requirementText, signalContext, answerContext, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
+  return [requirementText, answerContext, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
 }
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {

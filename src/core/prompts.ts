@@ -70,17 +70,14 @@ export function formatGoldExample(item: {
 export function buildDecompositionSystemPrompt(opts: {
   domainContext: string;
   domainRoles: string[];
-  outputProfile?: 'business_first' | 'balanced' | 'technical_first';
   processTaxonomy: ProcessCode[];
   processTaxonomyEnabled: boolean;
   clarifyAnswerCount?: number;
   reviewMode?: boolean;
-  featurePlan?: {
-    min: number;
-    max: number;
-    target: number;
-    shape: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
-    complexity: 'trivial' | 'low' | 'medium' | 'high' | 'very_high';
+  backlogDepth?: 'quick' | 'standard' | 'thorough';
+  featureProfile?: {
+    includeTechnicalEnablers?: boolean;
+    includeCrossCuttingRules?: boolean;
   };
 }): string {
   const roleList = opts.domainRoles.length
@@ -95,85 +92,26 @@ export function buildDecompositionSystemPrompt(opts: {
     ? '- Each feature MUST include a process_code from the taxonomy above (never invent a code)'
     : '- Omit process_code from output';
 
-  const outputProfile = opts.outputProfile ?? 'business_first';
-  const outputProfileGuidance = outputProfile === 'technical_first'
-    ? `OUTPUT PROFILE: TECHNICAL_FIRST
-- You may return technical enablers as first-class features when they are independently deliverable.
-- Tag business-facing capabilities as "business_capability", technical/integration/platform capabilities as "technical_enabler", and broad policy/guardrail capabilities as "cross_cutting_rule".
-- Even in this profile, never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`
-    : outputProfile === 'balanced'
-      ? `OUTPUT PROFILE: BALANCED
-- Prefer business-facing capabilities first.
-- Include a technical enabler as a separate feature only when it is independently deliverable or clearly requested.
+  const featureProfile = opts.featureProfile ?? {};
+  const includeTechnical = featureProfile.includeTechnicalEnablers ?? false;
+  const includeCrossCutting = featureProfile.includeCrossCuttingRules ?? false;
+
+  const outputProfileGuidance = includeTechnical || includeCrossCutting
+    ? `OUTPUT PROFILE:
+- Prefer business-facing capabilities first.${includeTechnical ? '\n- Include standalone technical enablers (APIs, integrations, data migrations) as separate features when they are independently deliverable.' : '\n- Suppress standalone technical enablers unless explicitly requested as deliverables.'}${includeCrossCutting ? '\n- Include cross-cutting governance rules (access control, audit, compliance) as separate features when they are independently deliverable.' : ''}
 - Tag features as "business_capability", "technical_enabler", or "cross_cutting_rule".
 - Never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`
-      : `OUTPUT PROFILE: BUSINESS_FIRST
+    : `OUTPUT PROFILE: BUSINESS_FIRST
 - Prefer business-facing capabilities and confirmed cross-cutting rules.
 - Suppress standalone technical enablers unless the requirement or answered Q&A explicitly asks for them as deliverables.
 - Tag features as "business_capability", "technical_enabler", or "cross_cutting_rule".
 - Never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`;
 
-  const planningGuidance = (() => {
-    if (!opts.featurePlan) return '';
-    const { shape, complexity, target, min, max } = opts.featurePlan;
-    const estimateGuidance = `- Earlier triage suggests roughly ${min}-${max} independently valuable features (midpoint ${target}), but this is advisory only.
-- Treat that forecast as a comparison point, not as a floor, quota, or upper bound.
-- If the requirement is genuinely focused, return fewer features. If deeper analysis reveals more independently deliverable capabilities, return more.
-- Your own decomposition reasoning takes priority over the triage estimate. The triage was a fast shallow pass; you have the full context.`;
-    const base = `OUTPUT CALIBRATION:
-- The requirement shape appears: ${shape.toUpperCase()}
-- The requirement complexity appears: ${complexity.toUpperCase()}
-- The earlier triage forecast suggests ${min}-${max} independently valuable features (midpoint: ${target}).
-${estimateGuidance}`;
-
-    if (shape === 'minimal')
-      return `${base}
-- This is a FOCUSED, small requirement. Usually one strong feature is the right outcome.
-- Apply the decomposition framework ONLY to check whether genuinely independent capabilities exist — do not manufacture a feature for each dimension.
-- A guard or constraint rule ("must not X when Y", "must ensure Z", "should prevent W") is one feature. Its resolution or override path is a second optional feature. Stop there.
-- One well-scoped feature is better than three micro-features.`;
-
-    if (shape === 'narrow') {
-      const isHighComplexity = complexity === 'high' || complexity === 'very_high';
-      return `${base}
-${isHighComplexity
-  ? `- This requirement is tightly scoped in surface area but HIGH in complexity. More independently deliverable capabilities may exist beneath the surface — apply the decomposition framework carefully before consolidating.
-- When distinct handling paths, actor groups with different responsibilities, or independently testable workflows are implied, each is a candidate feature. Do not collapse them just to keep the count low.
-- When the triage signals high complexity within a narrow shape, the real feature count is often 2-3x the surface-level estimate because unstated decision logic, actor-specific paths, and exception handling each tend to surface as independently deliverable capabilities. Let your decomposition reasoning drive the count, not the triage estimate.`
-  : `- This is a tightly scoped requirement. One or two strong features is often the right outcome, even if the planning hint is higher.`}
-- Apply the decomposition framework to identify genuinely independent deliverable capabilities — do not produce a feature per dimension.
-- A guard or constraint rule is one feature; its resolution or override path is a second optional feature. Named systems, teams, and platforms are environment context unless each requires distinct handling rules — in that case, the distinct handling IS the deliverable scope.
-- Do NOT split into trivial or UI-level features. Combine only truly supporting concerns into a single feature.
-- If a list, notification, status definition, audit trail, exception diagnosis, visibility aid, or manual-review path changes ownership, workflow, decision logic, or independently testable outcomes, preserve it explicitly instead of hiding it inside the parent feature.
-- If a supporting concern only explains or exposes the core behavior and does not create a materially different handling path, keep it inside the main feature.
-`;
-  }
-
-    if (shape === 'epic')
-      return `${base}
-- This is a COMPLEX, multi-workflow requirement. Multiple features are expected, but still only when they represent independently deliverable capabilities.
-- Each distinct workflow, role-specific capability, or independently testable behavior MUST be its own feature.
-- DO NOT collapse multiple workflows into a single feature.
-- Keep the feature set practical for one generation run; prefer the most important independently deliverable capabilities first.
-`;
-
-    if (shape === 'broad')
-      return `${base}
-- This is a broad requirement covering multiple capabilities. Use the forecast to sanity-check your reasoning, not to force the count upward.
-- Work through the decomposition framework to find distinct workflows, role-specific behaviors, and independently testable capabilities. Do not collapse them to keep count low.
-- Each distinct workflow or role-specific behavior should be its own feature. Only consolidate when features are genuinely inseparable — not just closely related.
-- Keep supporting visibility, notification, monitoring, policy-definition, and exception-handling behavior inside the parent feature only when it does not introduce its own workflow, actor responsibility, decision path, or independently testable outcome.
-`;
-
-    // balanced (default)
-    return `${base}
-- Work through the decomposition framework to decide whether multiple independent deliverables truly exist.
-- A feature should be backlog-worthy on its own: something a team would reasonably plan, estimate, and accept independently.
-- Do NOT split into trivial or UI-level sub-tasks.
-- If a list, notification, identification step, policy definition, or supporting visibility only exists to enable or explain the main behavior, keep it inside the parent feature and cover it in the description and acceptance requirements.
-- If the requirement implies materially different create, update, classify, route, resolve, exception, or manual-review paths, preserve those distinctions instead of flattening them into one generic parent feature.
-`;
-  })();
+  const backlogDepthGuidance = opts.backlogDepth === 'quick'
+    ? `SCOPE GUIDANCE: Focus on the 2-4 core capabilities directly requested. Suppress supporting governance, tracking, and exception-path features unless they are explicitly required.`
+    : opts.backlogDepth === 'thorough'
+      ? `SCOPE GUIDANCE: Surface enabling, governing, sequencing, and tracking capabilities as independent features even when not explicitly named. Include modification paths, status visibility, and exception enforcement as separate deliverables when they are independently testable.`
+      : '';
 
   const discoveryContextGuidance = typeof opts.clarifyAnswerCount === 'number'
     ? opts.clarifyAnswerCount <= 1
@@ -214,9 +152,9 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 1. CORE CAPABILITY: What is the primary thing being requested?
 2. INPUTS & DATA: What information does this need? What feeds into it?
 3. PROCESSING & LOGIC: What decisions, calculations, prioritization, or rules are involved?
-4. OUTPUTS & VISIBILITY: Who sees the results? Who else needs awareness?
-5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically?
-6. DEPENDENCIES: What supporting capabilities need to exist?
+4. OUTPUTS & VISIBILITY: Who sees the results? Who else needs awareness? What consolidated view is needed to manage the process end-to-end?
+5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically after execution starts — cancellations, resource unavailability, partial failures, mid-process condition changes? What would a user need to modify or correct once the process is underway? What happens to dependent downstream steps when one step is delayed or fails? What governing or sequencing rules must be enforced to prevent invalid states?
+6. DEPENDENCIES: What enabling, governing, sequencing, or tracking capabilities must exist for this to work? Think about: what rules prevent invalid states or out-of-order actions; what visibility or consolidated status tracking is needed to manage the process end-to-end; what modification or correction paths are needed if conditions change after execution begins; what supporting actions must accompany the primary flow.
 
 Each dimension helps you test whether a distinct, deliverable capability exists. Use judgment — not every dimension needs a separate feature.
 
@@ -248,7 +186,7 @@ RULES:
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
 ${processRule}
 ${outputProfileGuidance ? `\n${outputProfileGuidance}` : ''}
-${planningGuidance ? `\n${planningGuidance}` : ''}
+${backlogDepthGuidance ? `\n${backlogDepthGuidance}` : ''}
 ${discoveryContextGuidance ? `\n${discoveryContextGuidance}` : ''}
 
 ${taxonomySection}
@@ -713,24 +651,10 @@ export function buildArPerFeatureUserMessage(opts: {
 export function buildClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
-  domainSignals?: string[];
-  advisoryForecast?: {
-    scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
-    complexity: 'low' | 'medium' | 'high' | 'very_high';
-    ambiguity: 'low' | 'medium' | 'high';
-    recommendedInitialCount: number;
-    followupCap: number;
-  };
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already relevant to the request or supporting evidence.`
     : '';
-  const domainSignalHint = opts.domainSignals?.length
-    ? `Important domain signals from the requirement and supporting evidence: ${opts.domainSignals.join(', ')}. Reuse these concrete business terms when they sharpen the question.`
-    : '';
-  const questionPlanHint = opts.advisoryForecast
-    ? `Earlier triage suggests ${opts.advisoryForecast.scope} scope, ${opts.advisoryForecast.complexity} complexity, ${opts.advisoryForecast.ambiguity} ambiguity, about ${opts.advisoryForecast.recommendedInitialCount} initial discovery questions, and up to ${opts.advisoryForecast.followupCap} follow-up questions. Treat that as advisory context only. Discovery must size itself from the unresolved business ambiguity you find. Return zero only when the requirement is already precise enough to write testable acceptance requirements.`
-    : 'Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.';
   const exemplarBlock = `DISCOVERY EXEMPLARS:
 - Workflow-area ask:
   Requirement: Manage inbound requests from several intake paths and create or update records automatically.
@@ -745,7 +669,6 @@ export function buildClarifySystemPrompt(opts: {
   return `You are a principal business analyst running a structured discovery session before any design begins. You have deep knowledge of enterprise business processes and use the context below to ask sharper scoping questions.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
-${domainSignalHint}
 
 YOUR MISSION:
 - Surface every ambiguity that would change what gets built or how acceptance requirements are written.
@@ -761,23 +684,23 @@ WORKING COVERAGE AREAS:
   Probe for primary actor, downstream visibility, approvals, escalation, and exceptions to the default role model.
 - Trigger & Context: what event starts the flow, what must already be true, and what business outcome defines a successful first pass
   Probe for initiation points, qualifying conditions, channel or entry-point differences, and what "done correctly" means.
-- Information Architecture: what information, identifiers, records, outputs, or linkages the process needs
-  Probe for required captured data, reuse of existing records, identifiers, downstream updates, and what must stay visible.
-- Business Rules: what decisions, constraints, prioritisation, sequencing, thresholds, or override policies govern the flow
-  Probe for eligibility, routing logic, tie-breakers, approvals, timing rules, and anything that changes the outcome.
+- Functional Flow: the step-by-step walkthrough of the process — what the user does at each step, how activities are sequenced, whether any step depends on a prior step being completed before it can start, what decisions or branches occur mid-process, and what the system state is when the process is complete
+  Probe for: activity ordering, preconditions between steps, parallel vs sequential paths, decision points mid-process, and what a user would see or act on at each stage.
+- Business Rules: what decisions, constraints, prioritisation, sequencing rules, thresholds, or override policies govern the flow — and what happens when the happy path breaks
+  Probe for eligibility, routing logic, tie-breakers, approvals, timing rules, anything that changes the outcome; also probe for missing or incomplete data, conflicts, duplicates, failures, boundary conditions, concurrent scenarios, and what a user does when the normal path cannot complete.
 - State & Lifecycle: what statuses, transitions, retries, reopens, or reversals matter
   Probe for lifecycle milestones, handoffs, reopening behaviour, and what event advances or reverses the work.
-- Edge Cases & Exceptions: what happens when the happy path breaks
-  Probe for: missing or incomplete required data; duplicate or conflicting records; alternative ways the same action can be initiated (manual entry, bulk operations, integrations, automation rules); boundary conditions on any stated rule; concurrent or simultaneous scenarios; and what happens when the normal path cannot be completed.
+- Success & Measurement: what a successful outcome looks like from the user's perspective, how a tester would confirm it is working, and what measurable improvement this should deliver
+  Probe for: the observable end state, what visibility the managing role needs to track progress end-to-end, and what metric or signal proves this is better than the current situation.
 
 INTERNAL TAXONOMY:
 - Map each question to exactly one fixed categoryKey:
   - context_trigger
   - user_personas
-  - information_architecture
+  - functional_flow
   - business_rules
   - state_lifecycle
-  - edge_cases_exceptions
+  - success_measurement
 
 DISCOVERY RULES:
 - Every question must be specific to THIS requirement, not generic boilerplate.
@@ -789,7 +712,7 @@ DISCOVERY RULES:
 - Use supporting evidence to avoid redundant questions and to understand the business context, not to inject jargon for its own sake.
 - Preserve requirement-native domain wording when it sharpens meaning. Keep the business object, actor labels, workflow verbs, and policy nouns from the requirement or supporting evidence unless they are obvious noise.
 - Evaluate all 6 taxonomy categories, then ask only from the ones that are still materially unresolved.
-- ${questionPlanHint}
+- Use your judgment to decide how many discovery questions are materially needed. Zero is acceptable when the requirement is already precise enough.
 - Do not ask multiple variations of the same question.
 - Every question must be specific enough that the answer would materially change scope, design, or acceptance requirements.
 - Prefer one visible question per main business decision.
@@ -821,7 +744,7 @@ Return JSON in this shape:
     "scope": "narrow|moderate|broad|very_broad",
     "complexity": "low|medium|high|very_high",
     "ambiguity": "low|medium|high",
-    "missingCategoryKeys": ["context_trigger", "business_rules"],
+    "missingCategoryKeys": ["functional_flow", "business_rules"],
     "recommendedInitialCount": 8,
     "followupCap": 4
   },
@@ -840,7 +763,7 @@ OUTPUT RULES:
 - "recommendedInitialCount" is advisory. It does not need to equal the number of questions you return.
 - "recommendedInitialCount" may be zero when no discovery questions are needed.
 - "followupCap" should reflect how many additional delta questions might still be needed later if answers remain materially incomplete.
-- "missingCategoryKeys" must contain only keys from the fixed taxonomy above.
+- "missingCategoryKeys" must contain only keys from the fixed taxonomy above: context_trigger, user_personas, functional_flow, business_rules, state_lifecycle, success_measurement.
 - Every question must include exactly one fixed "categoryKey" and one concise "intent".
 - Every question should be a single focused prompt.
 - "question" is the short primary prompt shown on the card.
@@ -856,21 +779,16 @@ OUTPUT RULES:
 export function buildEvaluateSystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
-  domainSignals?: string[];
   minQuestions: number;
   maxQuestions: number;
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or answered Q&A.`
     : '';
-  const domainSignalHint = opts.domainSignals?.length
-    ? `Important business terms already present in the requirement or answered Q&A: ${opts.domainSignals.join(', ')}. Reuse these concrete nouns when they sharpen a follow-up question.`
-    : '';
 
   return `You are a principal business analyst evaluating whether the current discovery answers are sufficient to move into implementation planning.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
-${domainSignalHint}
 
 Assess whether the answered discovery set now contains enough information to write precise, testable acceptance requirements that cover the main path, key business rules, and important exceptions.
 
@@ -881,10 +799,10 @@ RULES:
 - Evaluate sufficiency against this fixed taxonomy:
   - context_trigger
   - user_personas
-  - information_architecture
+  - functional_flow
   - business_rules
   - state_lifecycle
-  - edge_cases_exceptions
+  - success_measurement
 - If the answers are sufficient, return no more questions.
 - If the answers are not sufficient, return only DELTA questions that close the remaining gaps.
 - The taxonomy is a completeness checklist, not a quota. Only mark a category as missing if its absence would materially block precise, testable acceptance requirements for this specific requirement.

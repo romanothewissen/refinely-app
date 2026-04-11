@@ -11,12 +11,9 @@ import {
   applySmallAskTriageGuardrails,
   assessSizingHeuristics,
   capDiscoveryProfileFloorForSmallAsk,
-  collectDiscoveryGroundingTerms,
   deriveSizingGuidance,
   feedbackRequestsStructuralRefinement,
   findFeaturesMissingCompleteAcceptanceRequirements,
-  followupQuestionsLookWeak,
-  initialQuestionsLookWeak,
   parseQuestionCandidates,
   repairAcceptanceRequirements,
   buildClarifyFailureDiagnostics,
@@ -403,58 +400,6 @@ test('applySmallAskTriageGuardrails leaves successful LLM advisory triage unchan
   assert.deepEqual(guarded, triage);
 });
 
-test('initialQuestionsLookWeak accepts a mixed but grounded initial discovery set', () => {
-  const requirement = 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.';
-  const groundingTerms = collectDiscoveryGroundingTerms([requirement]);
-  const questions = [
-    {
-      categoryKey: 'context_trigger' as const,
-      category: 'Context & Trigger',
-      intent: 'business_outcome',
-      question: 'What should automatic case handling across Phone, WhatsApp, Text, and Email improve first?',
-      suggestions: [],
-    },
-    {
-      categoryKey: 'context_trigger' as const,
-      category: 'Context & Trigger',
-      intent: 'trigger_event',
-      question: 'Which trigger policy should start case creation across Phone, WhatsApp, Text, and Email?',
-      suggestions: [],
-    },
-    {
-      categoryKey: 'business_rules' as const,
-      category: 'Business Rules',
-      intent: 'decision_logic',
-      question: 'How should the flow choose between a new case and an existing one?',
-      suggestions: [],
-    },
-    {
-      categoryKey: 'edge_cases_exceptions' as const,
-      category: 'Edge Cases & Exceptions',
-      intent: 'conflicts_duplicates',
-      question: 'What should happen when the incoming interaction appears to match an existing case and could create a duplicate?',
-      suggestions: [],
-    },
-  ];
-
-  assert.equal(initialQuestionsLookWeak(questions, groundingTerms), false);
-});
-
-test('followupQuestionsLookWeak still rejects a broad initial-style follow-up question', () => {
-  const requirement = 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.';
-  const groundingTerms = collectDiscoveryGroundingTerms([requirement]);
-  const questions = [
-    {
-      categoryKey: 'business_rules' as const,
-      category: 'Business Rules',
-      intent: 'decision_logic',
-      question: 'How should the flow choose between a new case and an existing one?',
-      suggestions: [],
-    },
-  ];
-
-  assert.equal(followupQuestionsLookWeak(questions, groundingTerms), true);
-});
 
 test('parseQuestionCandidates accepts valid discovery questions without suggestions', () => {
   const parsed = parseQuestionCandidates({

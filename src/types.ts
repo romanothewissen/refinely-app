@@ -153,6 +153,11 @@ export type FeatureActorSource = 'prompt' | 'clarify' | 'workspace_role' | 'fall
 
 export interface GenerationPreferences {
   outputProfile: OutputProfile;
+  backlogDepth?: 'quick' | 'standard' | 'thorough';
+  featureProfile?: {
+    includeTechnicalEnablers?: boolean;
+    includeCrossCuttingRules?: boolean;
+  };
 }
 
 export interface TenantConfig {
@@ -453,10 +458,10 @@ export interface ReferencedWiSection {
 export type ClarifyCategoryKey =
   | 'context_trigger'
   | 'user_personas'
-  | 'information_architecture'
+  | 'functional_flow'
   | 'business_rules'
   | 'state_lifecycle'
-  | 'edge_cases_exceptions';
+  | 'success_measurement';
 
 export type ClarifyDiscoveryStatus = 'needs_clarification' | 'ready_for_generation' | 'discovery_failed';
 export type ClarifyFailureReasonCode =

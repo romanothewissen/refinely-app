@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import {
   allowsZeroQuestionDiscovery,
-  calibrateDiscoveryProfile,
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
   finalizeInitialDiscoveryQuestions,
@@ -66,17 +65,14 @@ test('validateAndRepairInitialDiscovery preserves the higher discovery depth sig
       scope: 'moderate',
       complexity: 'high',
       ambiguity: 'high',
-      missingCategoryKeys: ['business_rules', 'edge_cases_exceptions'],
+      missingCategoryKeys: ['business_rules', 'functional_flow'],
       recommendedInitialCount: 6,
       followupCap: 4,
-    },
-    {
-      requirement: 'Handle incoming requests and route uncertain cases for review.',
     },
   );
 
   assert.equal(repaired.discoveryProfile.recommendedInitialCount, 6);
-  assert.deepEqual(repaired.discoveryProfile.missingCategoryKeys, ['context_trigger', 'user_personas', 'business_rules', 'edge_cases_exceptions']);
+  assert.deepEqual(repaired.discoveryProfile.missingCategoryKeys, ['business_rules', 'functional_flow']);
 });
 
 test('expandRawQuestionCandidate splits numbered grouped prompts into single-focus questions', () => {
@@ -137,7 +133,7 @@ test('expandRawQuestionCandidate splits numbered grouped prompts into single-foc
 test('finalizeInitialDiscoveryQuestions preserves the llm question set without padding', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'high',
-    missingCategoryKeys: ['user_personas', 'edge_cases_exceptions'],
+    missingCategoryKeys: ['user_personas', 'business_rules'],
     recommendedInitialCount: 6,
     followupCap: 4,
   });
@@ -150,9 +146,7 @@ test('finalizeInitialDiscoveryQuestions preserves the llm question set without p
       question: 'What exact event should start this automation?',
       suggestions: ['Incoming call', 'First message', 'Manual action', 'Status change'],
     },
-  ], profile, {
-    requirement: 'Automatically create a support case from calls and messages, while avoiding duplicates and handling missing caller details.',
-  });
+  ], profile);
 
   assert.equal(questions.length, 1);
   assert.equal(questions[0].categoryKey, 'context_trigger');
@@ -198,9 +192,7 @@ test('finalizeInitialDiscoveryQuestions moves scenario-heavy wording into detail
         'Require an explicit override approval for this scenario',
       ],
     },
-  ], profile, {
-    requirement: 'Clarify whether service cases and work orders remain valid when the product passes end of service.',
-  });
+  ], profile);
 
   assert.equal(questions.length, 1);
   assert.equal(questions[0].question, 'Is this permissible?');
@@ -217,9 +209,7 @@ test('finalizeInitialDiscoveryQuestions returns an empty set instead of synthesi
     followupCap: 4,
   });
 
-  const questions = finalizeInitialDiscoveryQuestions([], profile, {
-    requirement: 'Automatically assign service contract sales opportunities to the appropriate sales rep.',
-  });
+  const questions = finalizeInitialDiscoveryQuestions([], profile);
 
   assert.deepEqual(questions, []);
 });
@@ -234,82 +224,13 @@ test('validateAndRepairInitialDiscovery rejects an empty model output when disco
     followupCap: 4,
   });
 
-  const repaired = validateAndRepairInitialDiscovery([], profile, {
-    requirement: 'As a TSS, I need to manage various input channels and have cases created automatically.',
-  });
+  const repaired = validateAndRepairInitialDiscovery([], profile);
 
   assert.equal(repaired.failureReasonCode, 'question_array_empty_when_discovery_required');
   assert.deepEqual(repaired.questions, []);
 });
 
-test('calibrateDiscoveryProfile preserves the llm question count while raising scope metadata from taxonomy breadth', () => {
-  const calibrated = calibrateDiscoveryProfile(normalizeDiscoveryProfile({
-    scope: 'moderate',
-    complexity: 'medium',
-    ambiguity: 'medium',
-    missingCategoryKeys: [
-      'context_trigger',
-      'user_personas',
-      'information_architecture',
-      'business_rules',
-      'state_lifecycle',
-      'edge_cases_exceptions',
-    ],
-    recommendedInitialCount: 7,
-    followupCap: 4,
-  }), {
-    requiredCategoryKeys: [
-      'context_trigger',
-      'user_personas',
-      'information_architecture',
-      'business_rules',
-      'state_lifecycle',
-      'edge_cases_exceptions',
-    ],
-    repairApplied: true,
-    repairedQuestionCount: 10,
-  });
-
-  assert.equal(calibrated.scope, 'moderate');
-  assert.equal(calibrated.complexity, 'medium');
-  assert.equal(calibrated.ambiguity, 'medium');
-  assert.equal(calibrated.recommendedInitialCount, 10);
-});
-
-test('calibrateDiscoveryProfile does not inflate implementation complexity solely from discovery breadth', () => {
-  const calibrated = calibrateDiscoveryProfile(normalizeDiscoveryProfile({
-    scope: 'narrow',
-    complexity: 'medium',
-    ambiguity: 'medium',
-    missingCategoryKeys: [
-      'context_trigger',
-      'user_personas',
-      'information_architecture',
-      'business_rules',
-      'state_lifecycle',
-      'edge_cases_exceptions',
-    ],
-    recommendedInitialCount: 6,
-    followupCap: 4,
-  }), {
-    requiredCategoryKeys: [
-      'context_trigger',
-      'user_personas',
-      'information_architecture',
-      'business_rules',
-      'state_lifecycle',
-      'edge_cases_exceptions',
-    ],
-    repairApplied: false,
-    repairedQuestionCount: 6,
-  });
-
-  assert.equal(calibrated.scope, 'narrow');
-  assert.equal(calibrated.complexity, 'medium');
-  assert.equal(calibrated.ambiguity, 'medium');
-});
-
-test('broad multi-input automation asks still infer unresolved discovery categories without synthesizing questions', () => {
+test('broad multi-input automation asks with empty questions fail with required reason code', () => {
   const profile = normalizeDiscoveryProfile({
     scope: 'moderate',
     complexity: 'medium',
@@ -319,12 +240,9 @@ test('broad multi-input automation asks still infer unresolved discovery categor
     followupCap: 4,
   });
 
-  const repaired = validateAndRepairInitialDiscovery([], profile, {
-    requirement: 'As a TSS, I need to be able to manage my various input channels efficiently (phone, whatsapp, text, email) and have cases created from it automatically',
-  });
+  const repaired = validateAndRepairInitialDiscovery([], profile);
 
   assert.equal(repaired.failureReasonCode, 'question_array_empty_when_discovery_required');
-  assert.ok(repaired.discoveryProfile.missingCategoryKeys.length >= 5);
   assert.equal(repaired.discoveryProfile.scope, 'moderate');
   assert.equal(repaired.discoveryProfile.ambiguity, 'medium');
   assert.deepEqual(repaired.questions, []);
@@ -368,9 +286,7 @@ test('finalizeInitialDiscoveryQuestions preserves coherent model question and su
         'The generated schedule is fixed and cannot be changed by the FSE',
       ],
     },
-  ], profile, {
-    requirement: 'An FSE must be provided an optimal schedule for service based on criticality and due dates.',
-  });
+  ], profile);
 
   const target = questions.find((question) => question.question === 'How much can an FSE override the proposed work order sequence?');
   assert.ok(target);
@@ -385,15 +301,15 @@ test('finalizeInitialDiscoveryQuestions preserves coherent model question and su
 test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into distinct alternatives', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'medium',
-    missingCategoryKeys: ['information_architecture'],
+    missingCategoryKeys: ['functional_flow'],
     recommendedInitialCount: 4,
     followupCap: 4,
   });
 
   const questions = finalizeInitialDiscoveryQuestions([
     {
-      categoryKey: 'information_architecture',
-      category: 'Information Architecture',
+      categoryKey: 'functional_flow',
+      category: 'Functional Flow',
       intent: 'outputs_displays',
       question: 'What output, record, or display should this produce or update?',
       suggestions: [
@@ -403,9 +319,7 @@ test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into d
         'Notify the owning team as soon as the record is ready',
       ],
     },
-  ], profile, {
-    requirement: 'Create or update support cases from phone, WhatsApp, text, and email interactions.',
-  });
+  ], profile);
 
   const target = questions.find((question) => question.intent === 'outputs_displays');
   assert.ok(target);
@@ -436,9 +350,7 @@ test('finalizeInitialDiscoveryQuestions keeps aligned scheduling suggestions ins
         "At a fixed interval, such as daily, at the start of an FSE's shift, or hourly",
       ],
     },
-  ], profile, {
-    requirement: 'An FSE must be provided an optimal schedule for service based on the criticality of service and due dates.',
-  });
+  ], profile);
 
   const target = questions.find((question) => question.intent === 'trigger_event');
   assert.ok(target);
@@ -455,22 +367,20 @@ test('finalizeInitialDiscoveryQuestions keeps aligned scheduling suggestions ins
 test('finalizeInitialDiscoveryQuestions does not invent template suggestions for an otherwise valid question with no chips', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'medium',
-    missingCategoryKeys: ['information_architecture'],
+    missingCategoryKeys: ['functional_flow'],
     recommendedInitialCount: 4,
     followupCap: 4,
   });
 
   const questions = finalizeInitialDiscoveryQuestions([
     {
-      categoryKey: 'information_architecture',
-      category: 'Information Architecture',
+      categoryKey: 'functional_flow',
+      category: 'Functional Flow',
       intent: 'required_inputs',
       question: 'What minimum information is needed before the case can be created?',
       suggestions: [],
     },
-  ], profile, {
-    requirement: 'Create a case automatically from a phone or WhatsApp interaction.',
-  });
+  ], profile);
 
   const target = questions.find((question) => question.question === 'What minimum information is needed before the case can be created?');
   assert.ok(target);
@@ -487,8 +397,8 @@ test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total
       suggestions: ['Always reuse open case', 'Always create new case', 'Reuse by caller only', 'Route for review'],
     },
     {
-      categoryKey: 'edge_cases_exceptions',
-      category: 'Edge Cases & Exceptions',
+      categoryKey: 'business_rules',
+      category: 'Business Rules',
       intent: 'conflicts_duplicates',
       question: 'What should happen if this would create a duplicate case?',
       suggestions: ['Reuse existing case', 'Create new case', 'Queue for review', 'Block creation'],
@@ -502,7 +412,7 @@ test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total
     },
   ], {
     askedQuestions: ['What should happen if this would create a duplicate case?'],
-    missingCategoryKeys: ['business_rules', 'edge_cases_exceptions', 'state_lifecycle'],
+    missingCategoryKeys: ['business_rules', 'state_lifecycle'],
     followupCap: 8,
     initialQuestionCount: 18,
   });
@@ -513,7 +423,7 @@ test('finalizeFollowupDiscoveryQuestions stays delta-only and respects the total
     'expected already-asked questions to be filtered out',
   );
   assert.ok(
-    followups.every((question) => ['business_rules', 'edge_cases_exceptions', 'state_lifecycle'].includes(question.categoryKey)),
+    followups.every((question) => ['business_rules', 'state_lifecycle'].includes(question.categoryKey)),
   );
 });
 
@@ -531,9 +441,6 @@ test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when 
     missingCategoryKeys: ['business_rules'],
     followupCap: 1,
     initialQuestionCount: 18,
-    fallbackInput: {
-      requirement: 'Automatically create support cases from phone and WhatsApp interactions.',
-    },
   });
 
   assert.equal(followups.length, 1);
@@ -617,9 +524,6 @@ test('finalizeFollowupDiscoveryQuestions does not invent a generic fallback ques
     missingCategoryKeys: ['business_rules'],
     followupCap: 1,
     initialQuestionCount: 6,
-    fallbackInput: {
-      requirement: 'An FSE must be provided an optimal schedule for service based on criticality and due dates.',
-    },
   });
 
   assert.deepEqual(followups, []);
@@ -630,19 +534,10 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   const clarifyPrompt = buildClarifySystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
-    domainSignals: ['phone', 'WhatsApp', 'case creation'],
-    advisoryForecast: {
-      scope: 'moderate',
-      complexity: 'high',
-      ambiguity: 'high',
-      recommendedInitialCount: 5,
-      followupCap: 4,
-    },
   });
   const evaluatePrompt = buildEvaluateSystemPrompt({
     domainContext: 'Internal systems, teams, and roles may exist here but should not be injected into discovery.',
     domainRoles: ['TSS', 'Supervisor'],
-    domainSignals: ['phone', 'WhatsApp', 'case creation'],
     minQuestions: 1,
     maxQuestions: 4,
   });
@@ -650,10 +545,10 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.doesNotMatch(clarifyPrompt, /system-agnostic/i);
   assert.match(clarifyPrompt, /context_trigger/);
   assert.match(clarifyPrompt, /user_personas/);
-  assert.match(clarifyPrompt, /information_architecture/);
+  assert.match(clarifyPrompt, /functional_flow/);
   assert.match(clarifyPrompt, /business_rules/);
   assert.match(clarifyPrompt, /state_lifecycle/);
-  assert.match(clarifyPrompt, /edge_cases_exceptions/);
+  assert.match(clarifyPrompt, /success_measurement/);
   assert.match(clarifyPrompt, /categoryKey/);
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Prefer one visible question per main business decision/i);
@@ -670,12 +565,8 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /Keep the suggestions aligned to the actual question being asked/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
-  assert.match(clarifyPrompt, /Important domain signals from the requirement and supporting evidence/i);
-  assert.match(clarifyPrompt, /Reuse these concrete business terms/i);
-  assert.match(clarifyPrompt, /company-specific internal terms/i);
   assert.match(clarifyPrompt, /Discovery must size itself from the unresolved business ambiguity you find/i);
   assert.match(clarifyPrompt, /Simplify syntax, not business meaning/i);
-  assert.match(clarifyPrompt, /Earlier triage suggests moderate scope, high complexity, high ambiguity/i);
   assert.match(clarifyPrompt, /DISCOVERY EXEMPLARS/i);
   assert.match(clarifyPrompt, /Which rule should decide whether an incoming request updates an existing record or creates a new one/i);
   assert.doesNotMatch(clarifyPrompt, /profileReasoning/i);
@@ -705,27 +596,17 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.doesNotMatch(triagePrompt, /timesheets|payroll|support tickets|order status|billing details|customer onboarding/i);
 });
 
-test('decomposition prompt treats feature counts as hints and keeps support behavior inside the parent feature', () => {
+test('decomposition prompt treats features as independently valuable and keeps support behavior inside the parent feature', () => {
   const prompt = buildDecompositionSystemPrompt({
     domainContext: 'Use context only to understand the business space.',
     domainRoles: ['Manager'],
     processTaxonomy: [],
     processTaxonomyEnabled: false,
-    featurePlan: {
-      min: 1,
-      max: 4,
-      target: 2,
-      shape: 'narrow',
-      complexity: 'medium',
-    },
   });
 
-  assert.match(prompt, /advisory only/i);
-  assert.match(prompt, /comparison point, not as a floor, quota, or upper bound/i);
   assert.match(prompt, /independent business value/i);
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
   assert.match(prompt, /work instructions or operational guidance/i);
-  assert.match(prompt, /notification, status definition, audit trail, exception diagnosis, visibility aid, or manual-review path/i);
   assert.match(prompt, /Surface independently valuable feature slices without inventing micro-features/i);
   assert.match(prompt, /do not hide meaningful workflow branches inside one oversized feature/i);
   assert.doesNotMatch(prompt, /Output exactly/i);
@@ -794,13 +675,6 @@ test('decomposition prompt preserves workflow-defining scope when clarifying con
     processTaxonomy: [],
     processTaxonomyEnabled: false,
     clarifyAnswerCount: 0,
-    featurePlan: {
-      min: 1,
-      max: 4,
-      target: 2,
-      shape: 'narrow',
-      complexity: 'high',
-    },
   });
 
   assert.match(prompt, /Clarifying context is still THIN or incomplete/i);
