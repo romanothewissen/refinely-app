@@ -523,6 +523,12 @@ WHAT TO LOOK FOR WHEN REASONING:
 - Do not anchor to word count alone. Distinguish two kinds of brevity: (1) precise brevity — short because the trigger, actor, and outcome are stated clearly — complexity comes from what is stated, not from what is missing; (2) vague brevity — short because the requirement names a capability area without stating actors, rules, states, or edge cases. In case (2), most behaviour must be inferred from domain knowledge — rate it as high, not medium, because the unknown-unknowns dominate. This affects both estimatedQuestions (more questions needed to uncover the unstated scope) and arDepth (implied behaviour must be covered). A long requirement can still be narrow if it is repetitive or over-specified; a short one can be high complexity if any practitioner in that domain would immediately recognise it implies multiple sub-workflows.
 - If you cannot decide between two adjacent values, choose the one your reasoning step supports more strongly. Do not default to the lower value — that creates systematic under-sizing for complex asks.
 
+SCOPE CALIBRATION — apply before setting discoveryForecast.scope:
+- very_broad (11+) is reserved for requirements where the scope boundary itself is genuinely unknown — strategic initiatives, platform overhauls, or asks that do not specify which workflows are in or out.
+- When a requirement names multiple activity types or sub-processes within ONE capability area (e.g. multiple service types within service planning), that is typically broad (7-10), not very_broad. The activities are variations of one workflow, not 11+ independent capabilities.
+- Count independently deliverable capabilities, not enumerated variants of the same process. A requirement that names 5 service activity types handled through a single planning flow is one capability area with complexity — not 5+ independent scope items.
+- Broad (7-10) is appropriate for multi-step workflows with several named sub-processes, distinct actor groups, and unstated business rules across the flow.
+
 OUTPUT CONTRACT:
 - Return one advisory triage object, not a final decision for downstream stages.
 - Discovery owns the final discovery profile and question count after deeper reasoning.

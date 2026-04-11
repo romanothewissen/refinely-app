@@ -199,18 +199,9 @@ export function normalizeQuestionIntent(value: unknown, categoryKey: ClarifyCate
 export function splitGroupedQuestion(question: string): string[] {
   const normalized = ensureQuestionMark(question);
   if (!normalized) return [];
-  const numberedMatches = [...normalized.matchAll(/(?:^|[\s,;])(\d+)\.\s*([^?]+?)(?=(?:[\s,;]+(?:and\s+)?\d+\.\s)|\?$)/g)];
-  if (numberedMatches.length >= 2) {
-    const prefix = cleanText(normalized.slice(0, numberedMatches[0].index ?? 0).replace(/[:;,]\s*$/g, ''));
-    return numberedMatches
-      .map((match) => {
-        const fragment = cleanText(match[2]).replace(/^(and|or)\s+/i, '');
-        if (!fragment) return '';
-        const combined = prefix ? `${prefix} ${fragment}` : fragment;
-        return ensureQuestionMark(combined);
-      })
-      .filter(Boolean);
-  }
+  // The discovery prompt now forbids bundled questions, so splitting numbered
+  // patterns mostly creates weak fragments that inflate the question count.
+  // Return the question as-is and let any remaining bundles be handled as one card.
   return [normalized];
 }
 
