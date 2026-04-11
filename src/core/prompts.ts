@@ -397,6 +397,10 @@ RULES:
 - If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
 - When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
 - Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
+- Concise is good only when the business condition, trigger, and outcome remain concrete. Do not make an AR short by replacing real business meaning with generic wording.
+- Avoid vague placeholders such as "is processed", "is reviewed", "criteria are met", "specific key", "rules are applied", or "cannot be applied". Name the actual business condition, business trigger, and business outcome instead.
+- When the requirement or discovery names classification, routing, linkage, carryover, exclusion, fallback, or manual-review obligations, preserve them in business language instead of flattening them into generic processing steps.
+- If ambiguity remains in the supplied evidence, describe the explicit business fallback or manual-review outcome when it is supported. Do not invent product-specific rules to make the AR sound complete.
 - CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
 - Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
@@ -421,6 +425,31 @@ OUTPUT FORMAT (strict):
 - Write as many acceptance_requirements as needed for the requested depth and no more. One focused feature may need only a few. A broad or risky feature may need many.
 
 Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
+}
+
+export function buildArRepairSystemPrompt(opts: {
+  domainContext: string;
+}): string {
+  return `You are a principal QA lead and business analyst repairing weak or incomplete acceptance requirements for a single Jira backlog feature.
+${platformContextBlock(opts.domainContext)}
+Your job is to preserve valid current meaning while rewriting only the acceptance requirements that are vague, malformed, incomplete, duplicated, or too shallow to test confidently.
+
+RULES:
+- Return EXACTLY ONE feature in the features array.
+- Preserve the feature summary, description, suggested_story_points, and process_code unless a trivial typo fix is unavoidable.
+- Preserve feature ownership and scope. Do not move rules to sibling features and do not invent new feature boundaries.
+- Keep valid existing intent, but expand weak AR wording into concrete business conditions, triggers, and outcomes.
+- If the evidence supports ambiguity handling, manual review, fallback, exclusions, routing, linkage, or carryover obligations, express those in business language rather than generic processing wording.
+- Do not invent domain-specific logic, product-specific categories, or internal implementation mechanisms that are not supported by the requirement, discovery answers, work instructions, or current valid AR meaning.
+- Remove duplicate or near-duplicate ARs by folding them into the strongest single valid AR.
+- Every AR MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
+- Never write ARs in first person.
+- No solution language, no system names, and no implementation detail.
+- Avoid vague placeholders such as "is processed", "is reviewed", "criteria are met", "specific key", or "rules are applied".
+- Concise ARs are acceptable only when they still contain a concrete business state, trigger, and outcome.
+
+Output JSON only:
+{"features":[{"summary":"...","description":"As a ...","acceptance_requirements":["GIVEN ... WHEN ... THEN ..."],"suggested_story_points":N}]}`;
 }
 
 export function buildSizingAssessmentSystemPrompt(): string {
@@ -609,6 +638,14 @@ export function buildArPerFeatureUserMessage(opts: {
   similarStoriesText?: string;
   feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string; feature_class?: string; confidence?: string; actor_source?: string };
   siblingFeatures?: { summary: string; description: string }[];
+  arObligations?: {
+    confirmedOutcomes?: string[];
+    confirmedExclusions?: string[];
+    confirmedDataObligations?: string[];
+    unresolvedDecisions?: string[];
+  };
+  currentAcceptanceRequirements?: string[];
+  repairReasons?: string[];
 }): string {
   const reqText = (opts.requirement || '').trim().slice(0, 2000);
   const parts = [`REQUIREMENT:\n${reqText}`];
@@ -650,6 +687,18 @@ export function buildArPerFeatureUserMessage(opts: {
       .map((f, i) => `${i + 1}. ${f.summary}: ${f.description}`)
       .join('\n');
     parts.push(`OTHER FEATURES IN THIS BACKLOG (do not duplicate their acceptance requirements):\n${siblingList}`);
+  }
+
+  if (opts.arObligations) {
+    parts.push(`AR OBLIGATIONS:\n${JSON.stringify(opts.arObligations, null, 2)}`);
+  }
+
+  if (opts.currentAcceptanceRequirements && opts.currentAcceptanceRequirements.length > 0) {
+    parts.push(`CURRENT ACCEPTANCE REQUIREMENTS:\n${opts.currentAcceptanceRequirements.join('\n')}`);
+  }
+
+  if (opts.repairReasons && opts.repairReasons.length > 0) {
+    parts.push(`REPAIR FOCUS:\n${opts.repairReasons.map((reason, index) => `${index + 1}. ${reason}`).join('\n')}`);
   }
 
   parts.push(

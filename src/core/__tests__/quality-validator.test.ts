@@ -125,18 +125,23 @@ test('validateFeatures flags implementation-flavored AR wording that should stay
   assert.ok(hit, `expected implementation-flavored wording violation, got: ${JSON.stringify(violations)}`);
 });
 
-test('validateFeatures flags business-labeled features with technical/system actors', () => {
+test('validateFeatures does not hard-fail structurally complete but semantically thin AR wording', () => {
   const features: Feature[] = [
     makeFeature({
       id: 'feat-1',
-      description: 'As an integration service, I need to parse uploaded records so that structured fields are extracted.',
-      featureClass: 'business_capability',
+      acceptanceRequirements: [
+        {
+          given: 'an inbound request is ready',
+          when: 'the request is processed',
+          then: 'the case is created',
+        },
+      ],
     }),
   ];
 
   const violations = validateFeatures(features, baseConfig);
-  const hit = violations.find(v => /technical\/system actor/i.test(v.message));
-  assert.ok(hit, `expected technical actor / business class violation, got: ${JSON.stringify(violations)}`);
+  const hit = violations.find(v => /processed|unresolved decision|role wording|fallback|technical\/system actor/i.test(v.message));
+  assert.equal(hit, undefined, `did not expect semantic-thinness hard failure, got: ${JSON.stringify(violations)}`);
 });
 
 test('detectFeatureOverlaps flags pairs that share most content tokens', () => {

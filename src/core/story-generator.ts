@@ -54,6 +54,7 @@ import {
   buildDraftDescriptionRepairSystemPrompt,
   buildDraftReviewSystemPrompt,
   buildArSystemPrompt,
+  buildArRepairSystemPrompt,
   buildArPerFeatureUserMessage,
   buildTriageSystemPrompt,
   buildClarifySystemPrompt,
@@ -237,6 +238,20 @@ interface DiscoverySufficiencyEvaluation {
   durationMs: number;
 }
 
+interface ArObligations {
+  confirmedOutcomes: string[];
+  confirmedExclusions: string[];
+  confirmedDataObligations: string[];
+  unresolvedDecisions: string[];
+}
+
+interface FeatureArRepairResult {
+  feature: Feature;
+  reasons: string[];
+  trigger: 'structural' | 'weak_signal';
+  usage: { input: number; output: number };
+}
+
 const AR_GENERATION_ATTEMPTS = 2;
 const AR_RETRY_DELAY_MS = 600;
 
@@ -285,6 +300,18 @@ function trimForPrompt(text: string, maxChars: number): string {
   const trimmed = String(text ?? '').trim();
   if (trimmed.length <= maxChars) return trimmed;
   return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function summarizeAnswerForObligation(answer: ClarifyAnswer): string {
+  return trimForPrompt([
+    answer.question,
+    answer.answer,
+    ...(answer.selectedSuggestions ?? []),
+  ].filter(Boolean).join(' | '), 220);
+}
+
+function uniquePromptSummaries(values: string[]): string[] {
+  return uniqueNonEmptyStrings(values).map((value) => trimForPrompt(value, 220));
 }
 
 export class GenerationCancelledError extends Error {
@@ -1175,6 +1202,7 @@ async function runParallelArPass(input: {
   similarStoriesText?: string;
   domainContext: string;
   arPlan: ArPlan;
+  arObligations?: ArObligations;
   generatorConfig: TenantConfig['generatorConfig'];
   tier: TenantConfig['tier'];
   providerOpts: {
@@ -1220,6 +1248,7 @@ async function runParallelArPass(input: {
       siblingFeatures: input.features
         .filter(f => f.id !== feature.id)
         .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
+      arObligations: input.arObligations,
     }),
   }));
 
@@ -1299,6 +1328,7 @@ async function backfillMissingAcceptanceRequirements(input: {
   similarStoriesText?: string;
   domainContext: string;
   arPlan: ArPlan;
+  arObligations?: ArObligations;
   generatorConfig: TenantConfig['generatorConfig'];
   tier: TenantConfig['tier'];
   providerOpts: {
@@ -1372,6 +1402,7 @@ async function backfillMissingAcceptanceRequirements(input: {
           siblingFeatures: input.features
             .filter(f => f.id !== feature.id)
             .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
+          arObligations: input.arObligations,
         }),
         model,
         maxTokens: 3072,
@@ -2807,6 +2838,12 @@ export async function generateFeatures(opts: {
   let pass1DraftFeatures: Feature[];
   let openDecisions: OpenDecision[] = precomputedDraftReview?.openDecisions ?? [];
   const autoRepairedIssues: string[] = [];
+  let arObligations: ArObligations = buildArObligations({
+    requirement,
+    clarifyAnswers,
+    wiContextText,
+    openDecisions,
+  });
   if (!precomputedDraftFeatures?.length) {
     const pass1StartedAt = Date.now();
     const pass1UserMessage = buildGenerationUserMessage({
@@ -2872,6 +2909,12 @@ export async function generateFeatures(opts: {
       pass1Result.reviewMeta.openDecisions,
       synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
     );
+    arObligations = buildArObligations({
+      requirement,
+      clarifyAnswers,
+      wiContextText,
+      openDecisions,
+    });
     pass1ResultUsage = {
       input: pass1Result.usage.input + descriptionRepair.usage.input,
       output: pass1Result.usage.output + descriptionRepair.usage.output,
@@ -2917,6 +2960,12 @@ export async function generateFeatures(opts: {
         tightened.reviewMeta.openDecisions ?? [],
         synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
       );
+      arObligations = buildArObligations({
+        requirement,
+        clarifyAnswers,
+        wiContextText,
+        openDecisions,
+      });
       draftReview = {
         ...tightened.reviewMeta,
         openDecisions,
@@ -2963,6 +3012,12 @@ export async function generateFeatures(opts: {
       reviewResult.reviewMeta.openDecisions ?? [],
       synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
     );
+    arObligations = buildArObligations({
+      requirement,
+      clarifyAnswers,
+      wiContextText,
+      openDecisions,
+    });
     pass1ResultUsage = reviewResult.usage;
     stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - reviewStartedAt);
 
@@ -2987,6 +3042,12 @@ export async function generateFeatures(opts: {
       precomputedDraftReview?.openDecisions ?? [],
       synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
     );
+    arObligations = buildArObligations({
+      requirement,
+      clarifyAnswers,
+      wiContextText,
+      openDecisions,
+    });
   }
 
   // ── Pass 2: Acceptance Requirements ──
@@ -3006,6 +3067,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText,
       similarStoriesText,
+      arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
       generatorConfig,
@@ -3023,6 +3085,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText,
       similarStoriesText,
+      arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
       generatorConfig,
@@ -3041,6 +3104,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText,
       similarStoriesText,
+      arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
       generatorConfig,
@@ -3082,7 +3146,11 @@ export async function generateFeatures(opts: {
       limits: PASS2_CONTEXT_LIMITS,
     });
 
-    const pass2UserMessage = `${pass2ContextMessage}\n\n---\n\nFEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`;
+    const pass2UserMessage = [
+      pass2ContextMessage,
+      `AR OBLIGATIONS:\n${JSON.stringify(arObligations, null, 2)}`,
+      `FEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`,
+    ].join('\n\n---\n\n');
 
     const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 4096);
 
@@ -3109,6 +3177,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText,
       similarStoriesText,
+      arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
       generatorConfig,
@@ -3126,6 +3195,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText,
       similarStoriesText,
+      arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
       generatorConfig,
@@ -3158,6 +3228,89 @@ export async function generateFeatures(opts: {
   }
 
   let features = rawFeatures.map((feature) => normaliseFeature(feature, roleGrounding));
+  const repairCandidates = features
+    .map((feature, index) => {
+      const weakReasons = collectWeakArReasons(feature);
+      const hasStructuralIssue = findFeaturesMissingCompleteAcceptanceRequirements([feature]).length > 0;
+      const reasons = hasStructuralIssue
+        ? uniqueNonEmptyStrings([
+            'Acceptance requirements must contain complete GIVEN, WHEN, and THEN clauses.',
+            ...weakReasons,
+          ])
+        : weakReasons;
+      if (!reasons.length) return null;
+      return {
+        index,
+        feature,
+        reasons,
+        trigger: hasStructuralIssue ? 'structural' as const : 'weak_signal' as const,
+      };
+    })
+    .filter((candidate): candidate is {
+      index: number;
+      feature: Feature;
+      reasons: string[];
+      trigger: 'structural' | 'weak_signal';
+    } => Boolean(candidate));
+
+  const repairedAcceptanceRequirementFeatureIds: string[] = [];
+  const repairedAcceptanceRequirementTriggers: Array<{
+    featureId: string;
+    trigger: 'structural' | 'weak_signal';
+    reasons: string[];
+  }> = [];
+  if (repairCandidates.length > 0) {
+    const repairStartedAt = Date.now();
+    const repairResults = await runOrderedConcurrentTasks<FeatureArRepairResult>({
+      tasks: repairCandidates.map((candidate) => async () => repairFeatureAcceptanceRequirements({
+        feature: candidate.feature,
+        siblingFeatures: features.filter((feature, index) => index !== candidate.index),
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        wiContextText,
+        similarStoriesText,
+        arObligations,
+        trigger: candidate.trigger,
+        reasons: candidate.reasons,
+        generatorConfig,
+        tier: config.tier,
+        providerOpts,
+        domainContext: config.domainContext,
+        roleGrounding,
+      })),
+      concurrency: 3,
+    });
+    stageDurationsMs.repair = (stageDurationsMs.repair ?? 0) + (Date.now() - repairStartedAt);
+    const repairUsage = repairResults.reduce(
+      (sum, result) => ({
+        input: sum.input + result.usage.input,
+        output: sum.output + result.usage.output,
+      }),
+      { input: 0, output: 0 },
+    );
+    pass2Usage = {
+      input: pass2Usage.input + repairUsage.input,
+      output: pass2Usage.output + repairUsage.output,
+    };
+    repairResults.forEach((result) => {
+      const featureIndex = features.findIndex((feature) => feature.id === result.feature.id);
+      if (featureIndex >= 0) features[featureIndex] = result.feature;
+      repairedAcceptanceRequirementFeatureIds.push(result.feature.id);
+      repairedAcceptanceRequirementTriggers.push({
+        featureId: result.feature.id,
+        trigger: result.trigger,
+        reasons: result.reasons,
+      });
+    });
+    if (repairResults.length > 0) {
+      autoRepairedIssues.push(
+        repairResults.length === 1
+          ? `Strengthened acceptance requirements for ${repairResults[0].feature.summary}.`
+          : `Strengthened acceptance requirements for ${repairResults.length} features before final review.`,
+      );
+    }
+  }
   const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   const failedFeatureIds = new Set(
     failedFeatureIndexes
@@ -3232,6 +3385,8 @@ export async function generateFeatures(opts: {
       autoRepairedIssues: uniqueNonEmptyStrings(autoRepairedIssues),
       remainingBlockingIssues,
       requiresUserDecision,
+      repairedAcceptanceRequirementFeatureIds,
+      repairedAcceptanceRequirementTriggers,
       failedFeatureIds: [...failedFeatureIds],
       partialSuccess: failedFeatureIds.size > 0,
       partialSuccessMessage: failedFeatureIds.size > 0
@@ -4443,49 +4598,11 @@ export async function askQuestion(opts: {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const ROLE_BEHAVIOR_VERB_PATTERN = '(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|tries|works|manages|uses|belongs)';
-const CLAUSE_ROLE_PATTERN = new RegExp(`\\b(a|an|the)\\s+([A-Za-z][A-Za-z\\s/-]{1,60}?)(?=\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b)`, 'gi');
-const ROLE_LABEL_HINTS = new Set([
-  ...GENERIC_ROLE_WORDS,
-  'admin',
-  'administrator',
-  'manager',
-  'owner',
-  'requester',
-  'reviewer',
-  'approver',
-  'dispatcher',
-  'planner',
-  'coordinator',
-  'lead',
-  'director',
-  'supervisor',
-  'customer',
-  'caller',
-  'sender',
-  'recipient',
-  'analyst',
-  'developer',
-]);
-
 interface RoleGroundingContext {
   requirement?: string;
   clarifyAnswers?: ClarifyAnswer[];
   domainRoles?: string[];
 }
-
-const NON_SPECIFIC_ROLE_PATTERNS = [
-  /^authorized user$/i,
-  /^user$/i,
-  /^users$/i,
-  /^specific .* role$/i,
-  /^administrative user role$/i,
-  /^specific administrative user role$/i,
-  /^specific integration monitoring team$/i,
-  /^integration monitoring team$/i,
-];
-
-const CAPITALIZED_ROLE_PATTERN = /\b([A-Z]{2,}(?:\/[A-Z]{2,})+|[A-Z]{2,5}|(?:[A-Z][a-z]+|[A-Z]{2,})(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,})){1,4})\b/g;
 
 const TECHNICAL_FEATURE_TERMS = [
   'integration', 'ingest', 'ingestion', 'parse', 'parsing', 'sync', 'synchronization', 'transmission',
@@ -4509,72 +4626,6 @@ function looksLikeTechnicalActor(role: string): boolean {
   if (!normalized) return false;
   return /\b(integration|service|system|platform|pipeline|processor)\b/.test(normalized)
     && !/\b(field service|technical support|support specialist|service quality|administrator)\b/.test(normalized);
-}
-
-function isNonSpecificRoleCandidate(role: string): boolean {
-  return NON_SPECIFIC_ROLE_PATTERNS.some((pattern) => pattern.test(role.trim()));
-}
-
-function roleCandidateLooksConcrete(role: string): boolean {
-  const candidate = role.trim();
-  if (!candidate || isNonSpecificRoleCandidate(candidate)) return false;
-  const tokens = tokenizeRole(candidate);
-  if (!tokens.length) return false;
-  if (/^[A-Z]{2,5}(?:\/[A-Z]{2,5})*$/.test(candidate)) return true;
-  return tokens.some((token) => ROLE_LABEL_HINTS.has(token));
-}
-
-function extractCapitalizedRoleCandidates(text: string): string[] {
-  const matches: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = CAPITALIZED_ROLE_PATTERN.exec(text)) !== null) {
-    const candidate = String(match[1] ?? '').trim();
-    if (!roleCandidateLooksConcrete(candidate)) continue;
-    matches.push(candidate);
-  }
-  CAPITALIZED_ROLE_PATTERN.lastIndex = 0;
-  return uniqueNonEmptyStrings(matches);
-}
-
-function findMentionedDomainRoles(domainRoles: string[] = [], text: string): string[] {
-  const haystack = String(text ?? '').toLowerCase();
-  return uniqueNonEmptyStrings(
-    domainRoles.filter((role) => {
-      const normalized = String(role ?? '').trim().toLowerCase();
-      return normalized && haystack.includes(normalized);
-    }),
-  );
-}
-
-function resolvePreferredRole(roleGrounding?: RoleGroundingContext): string | undefined {
-  if (!roleGrounding) return undefined;
-  const requirementActor = extractRoleFromDescription(String(roleGrounding.requirement ?? ''));
-  if (requirementActor && roleCandidateLooksConcrete(requirementActor)) return requirementActor;
-
-  const domainRoleMentions = findMentionedDomainRoles(
-    roleGrounding.domainRoles ?? [],
-    (roleGrounding.clarifyAnswers ?? [])
-      .flatMap((answer) => [answer.question, answer.answer, answer.customAnswer, ...(answer.selectedSuggestions ?? [])])
-      .filter(Boolean)
-      .join('\n'),
-  ).filter(roleCandidateLooksConcrete);
-  if (domainRoleMentions.length === 1) return domainRoleMentions[0];
-
-  const clarifyCandidates = uniqueNonEmptyStrings(
-    (roleGrounding.clarifyAnswers ?? [])
-      .flatMap((answer) => extractCapitalizedRoleCandidates([
-        answer.question,
-        answer.answer,
-        answer.customAnswer,
-        ...(answer.selectedSuggestions ?? []),
-      ].filter(Boolean).join('\n'))),
-  ).filter(roleCandidateLooksConcrete);
-
-  return clarifyCandidates.length === 1 ? clarifyCandidates[0] : undefined;
-}
-
-function replaceFeatureRole(description: string, role: string): string {
-  return description.replace(/^As an?\s+[^,]+,/i, `As ${articleForRole(role)} ${role},`);
 }
 
 function normalizeFeatureClass(value: unknown): FeatureClass | undefined {
@@ -4748,6 +4799,183 @@ function mergeOpenDecisions(primary: OpenDecision[], secondary: OpenDecision[]):
   return merged;
 }
 
+function extractClassificationOutcomes(text: string): string[] {
+  const normalized = String(text ?? '').trim();
+  if (!normalized) return [];
+  const betweenMatch = normalized.match(/\bdistinguish between\s+(.+?)\s+and\s+(.+?)(?:[.?!]|$)/i);
+  if (betweenMatch) {
+    return uniquePromptSummaries([betweenMatch[1], betweenMatch[2]]);
+  }
+  return [];
+}
+
+function buildArObligations(input: {
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  wiContextText?: string;
+  openDecisions?: OpenDecision[];
+}): ArObligations {
+  const confirmedOutcomes = uniquePromptSummaries([
+    ...extractClassificationOutcomes(input.requirement),
+    ...input.clarifyAnswers
+      .filter((answer) => answer.categoryKey === 'business_rules' || answer.categoryKey === 'state_lifecycle')
+      .map(summarizeAnswerForObligation),
+  ]);
+  const confirmedExclusions = uniquePromptSummaries([
+    ...input.clarifyAnswers
+      .filter((answer) => answer.categoryKey === 'edge_cases_exceptions')
+      .map(summarizeAnswerForObligation),
+    ...String(input.wiContextText ?? '')
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => /\b(if|when)\b/i.test(line) && /\b(manual review|fallback|exception|exclude|ignore|missing|ambiguous|duplicate|unwanted|failed?)\b/i.test(line)),
+  ]);
+  const confirmedDataObligations = uniquePromptSummaries([
+    ...input.clarifyAnswers
+      .filter((answer) => answer.categoryKey === 'information_architecture' || answer.categoryKey === 'context_trigger')
+      .map(summarizeAnswerForObligation),
+    ...String(input.wiContextText ?? '')
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => /\b(attachment|attachments|subject|body|description|link|linked|include|capture|field|data|identifier|history|record)\b/i.test(line)),
+  ]);
+  const unresolvedDecisions = uniquePromptSummaries(
+    (input.openDecisions ?? [])
+      .filter((decision) => decision.blocking)
+      .map((decision) => `${decision.title}: ${decision.detail}`),
+  );
+
+  return {
+    confirmedOutcomes,
+    confirmedExclusions,
+    confirmedDataObligations,
+    unresolvedDecisions,
+  };
+}
+
+function buildCurrentArStrings(feature: Feature): string[] {
+  return (feature.acceptanceRequirements ?? []).map((ar) => `GIVEN ${ar.given} WHEN ${ar.when} THEN ${ar.then}`);
+}
+
+function looksLikeOpenDecisionText(text: string): boolean {
+  const normalized = String(text ?? '').trim();
+  if (!normalized) return false;
+  return [
+    /^\s*(what|how|who|when|should|do we|does it|is it|can it)\b/i,
+    /\bopen question\b/i,
+    /\bto be decided\b/i,
+    /\bdefine duplication criteria\b/i,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function collectWeakArReasons(feature: Feature): string[] {
+  const reasons = new Set<string>();
+  for (const ar of feature.acceptanceRequirements ?? []) {
+    const given = String(ar.given ?? '').trim();
+    const when = String(ar.when ?? '').trim();
+    const then = String(ar.then ?? '').trim();
+    const combined = `${given} ${when} ${then}`;
+    if (!given || !when || !then) reasons.add('Acceptance requirement is incomplete and needs a full GIVEN/WHEN/THEN rewrite.');
+    if (looksLikeOpenDecisionText(combined)) reasons.add('Acceptance requirement includes unresolved-decision wording instead of a confirmed rule.');
+    if (/\b(is processed|is reviewed|is handled|process completes|processing completes|is automatically processed)\b/i.test(combined)) {
+      reasons.add('Acceptance requirement uses generic processing wording instead of a concrete business trigger or outcome.');
+    }
+    if (/\b(specific key|criteria are met|rules are applied|cannot be applied|appropriate classification|relevant criteria)\b/i.test(combined)) {
+      reasons.add('Acceptance requirement relies on placeholder business logic wording rather than a concrete business condition.');
+    }
+    if (then && /^(it|the case|the record|the request)\s+is\s+(created|updated|classified|processed|reviewed)\.?$/i.test(then)) {
+      reasons.add('Acceptance requirement outcome is too shallow and should name the concrete business result.');
+    }
+  }
+  return [...reasons];
+}
+
+async function repairFeatureAcceptanceRequirements(input: {
+  requirement: string;
+  feature: Feature;
+  clarifyAnswers: ClarifyAnswer[];
+  attachmentText: string;
+  wiContextText: string;
+  similarStoriesText: string;
+  siblingFeatures: Feature[];
+  arObligations: ArObligations;
+  trigger: 'structural' | 'weak_signal';
+  reasons: string[];
+  generatorConfig: TenantConfig['generatorConfig'];
+  tier: TenantConfig['tier'];
+  providerOpts: ReturnType<typeof buildLlmProviderOpts>;
+  domainContext: string;
+  roleGrounding: RoleGroundingContext;
+}): Promise<FeatureArRepairResult> {
+  const userMessage = buildArPerFeatureUserMessage({
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers.map((a) => ({
+      question: a.question,
+      answer: a.answer,
+      selectedSuggestions: a.selectedSuggestions,
+      categoryKey: a.categoryKey,
+      intent: a.intent,
+    })),
+    attachmentText: input.attachmentText,
+    wiContextText: input.wiContextText,
+    similarStoriesText: input.similarStoriesText,
+    feature: {
+      summary: input.feature.summary,
+      description: input.feature.description,
+      suggested_story_points: input.feature.storyPoints,
+      process_code: input.feature.processCode,
+      feature_class: input.feature.featureClass,
+      confidence: input.feature.confidence,
+      actor_source: input.feature.actorSource,
+    },
+    siblingFeatures: input.siblingFeatures.map((feature) => ({
+      summary: feature.summary,
+      description: feature.description,
+    })),
+    arObligations: input.arObligations,
+    currentAcceptanceRequirements: buildCurrentArStrings(input.feature),
+    repairReasons: input.reasons,
+  });
+
+  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
+    model: getTierModel(input.generatorConfig.arModel, input.tier),
+    systemPrompt: buildArRepairSystemPrompt({ domainContext: input.domainContext }),
+    userMessage,
+    maxTokens: 3072,
+    reasoningEffort: 'medium',
+    ...input.providerOpts,
+  });
+
+  const repairedRaw = result.data.features?.[0];
+  const repairedFeature = repairedRaw
+    ? applyFeatureOutputGuardrails(normaliseFeature({
+      ...repairedRaw,
+      summary: repairedRaw.summary ?? input.feature.summary,
+      description: repairedRaw.description ?? input.feature.description,
+      suggested_story_points: repairedRaw.suggested_story_points ?? input.feature.storyPoints,
+      process_code: repairedRaw.process_code ?? input.feature.processCode,
+    }, input.roleGrounding), input.roleGrounding)
+    : input.feature;
+
+  return {
+    feature: {
+      ...input.feature,
+      ...repairedFeature,
+      id: input.feature.id,
+      summary: repairedFeature.summary || input.feature.summary,
+      description: repairedFeature.description || input.feature.description,
+      storyPoints: repairedFeature.storyPoints ?? input.feature.storyPoints,
+      processCode: repairedFeature.processCode ?? input.feature.processCode,
+      featureClass: repairedFeature.featureClass ?? input.feature.featureClass,
+      confidence: repairedFeature.confidence ?? input.feature.confidence,
+      actorSource: repairedFeature.actorSource ?? input.feature.actorSource,
+    },
+    reasons: input.reasons,
+    trigger: input.trigger,
+    usage: result.usage,
+  };
+}
+
 function collectRemainingBlockingIssues(
   violations: ValidationViolation[],
   openDecisions: OpenDecision[],
@@ -4755,7 +4983,7 @@ function collectRemainingBlockingIssues(
 ): string[] {
   const blockingViolations = violations
     .filter((violation) =>
-      /truncated|generic role wording|fallback|overlaps with|unresolved decision wording|description must follow|business-facing even though/i.test(violation.message),
+      /truncated|overlaps with|description must follow|AR missing GIVEN, WHEN, or THEN clause|implementation-flavored wording|solution language/i.test(violation.message),
     )
     .map((violation) => violation.message);
 
@@ -4771,12 +4999,6 @@ function collectRemainingBlockingIssues(
   ]);
 }
 
-function looksLikeRoleLabel(text: string): boolean {
-  const tokens = tokenizeRole(text);
-  if (!tokens.length) return false;
-  return tokens.some((token) => ROLE_LABEL_HINTS.has(token) || token.endsWith('users') || token.endsWith('user'));
-}
-
 function uniqueNonEmptyStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -4789,55 +5011,6 @@ function uniqueNonEmptyStrings(values: string[]): string[] {
     result.push(trimmed);
   });
   return result;
-}
-
-function extractRoleCandidatesFromClause(clause: string): string[] {
-  const matches: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = CLAUSE_ROLE_PATTERN.exec(clause)) !== null) {
-    const candidate = String(match[2] ?? '').trim();
-    if (!candidate || !looksLikeRoleLabel(candidate)) continue;
-    matches.push(candidate);
-  }
-  CLAUSE_ROLE_PATTERN.lastIndex = 0;
-  return uniqueNonEmptyStrings(matches);
-}
-
-function trimVerboseSegment(value: string, maxWords: number): string {
-  let trimmed = sanitizeArClause(value)
-    .replace(/\bfor example\b[\s\S]*$/i, '')
-    .replace(/\bsuch as\b[\s\S]*$/i, '')
-    .replace(/\bincluding\b[\s\S]*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const sentenceBreak = trimmed.search(/[.;!?]\s/);
-  if (sentenceBreak >= 0) {
-    trimmed = trimmed.slice(0, sentenceBreak).trim();
-  }
-
-  const clauseMarkers = [', so that ', ' so that ', ' which ', ' allowing ', ' in order to ', ', with ', ' while '];
-  for (const marker of clauseMarkers) {
-    if (trimmed.split(/\s+/).length <= maxWords) break;
-    const markerIndex = trimmed.toLowerCase().indexOf(marker);
-    if (markerIndex > 0) {
-      trimmed = trimmed.slice(0, markerIndex).trim();
-    }
-  }
-
-  // Do NOT hard-slice at the word boundary — that truncates mid-sentence and corrupts meaning.
-  // If the segment is still verbose after the clause-marker pass, leave it intact. Verbosity is
-  // controlled at the prompt layer; this function is a backstop for trailing filler only.
-  return trimmed.replace(/[,:;.\s]+$/g, '').trim();
-}
-
-function normalizeClauseGrammar(clause: string): string {
-  return clause
-    .replace(/^they views\b/i, 'they view')
-    .replace(/^they reviews\b/i, 'they review')
-    .replace(/^they accesses\b/i, 'they access')
-    .replace(/^they confirms\b/i, 'they confirm')
-    .replace(/^they validates\b/i, 'they validate');
 }
 
 function deduplicateDescription(description: string): string {
@@ -4863,34 +5036,15 @@ function deduplicateDescription(description: string): string {
   return description;
 }
 
-function normalizeAcceptanceRequirementVerbosity(ar: AcceptanceRequirement): AcceptanceRequirement {
-  return {
-    given: trimVerboseSegment(ar.given, 22),
-    when: trimVerboseSegment(ar.when, 22),
-    then: trimVerboseSegment(ar.then, 18),
-  };
-}
-
 export function applyFeatureOutputGuardrails(
   feature: Feature,
   _roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
 ): Feature {
-  const normalizedAcceptanceRequirements = (feature.acceptanceRequirements || []).map(normalizeAcceptanceRequirementVerbosity);
-  let description = normalizeDraftDescriptionText(feature.description);
-  const preferredRole = resolvePreferredRole(_roleGrounding);
-  const currentRole = extractRoleFromDescription(description);
-  if (preferredRole && currentRole && currentRole.trim().toLowerCase() === 'authorized user') {
-    description = replaceFeatureRole(description, preferredRole);
-  }
-  return harmonizeFeatureRoleLanguage({
+  return {
     ...feature,
-    description,
-    acceptanceRequirements: normalizedAcceptanceRequirements.map((ar) => ({
-      given: normalizeClauseGrammar(ar.given),
-      when: normalizeClauseGrammar(ar.when),
-      then: normalizeClauseGrammar(ar.then),
-    })),
-  });
+    description: normalizeDraftDescriptionText(feature.description),
+    acceptanceRequirements: [...(feature.acceptanceRequirements || [])],
+  };
 }
 
 function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext): Feature {
@@ -5052,107 +5206,6 @@ export function repairAcceptanceRequirements(
 function extractRoleFromDescription(description: string): string | null {
   const match = description.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+/i);
   return match?.[1]?.trim() || null;
-}
-
-function tokenizeRole(text: string): string[] {
-  return (text || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-function roleOverlapScore(left: string, right: string): number {
-  const leftTokens = new Set(tokenizeRole(left));
-  const rightTokens = new Set(tokenizeRole(right));
-  if (!leftTokens.size || !rightTokens.size) return 0;
-  let overlap = 0;
-  for (const token of leftTokens) {
-    if (rightTokens.has(token)) overlap += 1;
-  }
-  return overlap / Math.max(leftTokens.size, rightTokens.size);
-}
-
-function shouldAlignRolePhrase(candidateRole: string, featureRole: string): boolean {
-  const candidate = candidateRole.trim();
-  const target = featureRole.trim();
-  if (!candidate || !target) return false;
-
-  const normalizedCandidate = candidate.toLowerCase();
-  const normalizedTarget = target.toLowerCase();
-  if (normalizedCandidate === normalizedTarget) return false;
-  if (normalizedCandidate.includes(normalizedTarget) || normalizedTarget.includes(normalizedCandidate)) return true;
-
-  const candidateTokens = tokenizeRole(candidate);
-  const targetTokens = tokenizeRole(target);
-  const overlap = roleOverlapScore(candidate, target);
-  const candidateIsGeneric = candidateTokens.every(token => GENERIC_ROLE_WORDS.has(token) || targetTokens.includes(token));
-
-  return overlap >= 0.34 || (candidateIsGeneric && overlap >= 0.2);
-}
-
-function articleForRole(role: string): 'a' | 'an' {
-  return /^[aeiou]/i.test(role.trim()) ? 'an' : 'a';
-}
-
-function alignRoleInClause(clause: string, featureRole: string): string {
-  if (!clause || !featureRole) return clause;
-
-  return clause.replace(CLAUSE_ROLE_PATTERN, (match, article, rolePhrase) => {
-    if (!shouldAlignRolePhrase(rolePhrase, featureRole)) return match;
-    const nextArticle = String(article).toLowerCase() === 'the' ? 'the' : articleForRole(featureRole);
-    return `${nextArticle} ${featureRole}`;
-  });
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function countDistinctClauseRoleCandidates(clause: string): number {
-  return extractRoleCandidatesFromClause(clause).length;
-}
-
-function canNeutralizeWhenClause(clause: string, featureRole: string): boolean {
-  const leadingRolePattern = new RegExp(`^(?:(?:a|an|the)\\s+)?${escapeRegex(featureRole)}\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b`, 'i');
-  if (!leadingRolePattern.test(clause)) return false;
-  return countDistinctClauseRoleCandidates(clause) <= 1;
-}
-
-function neutralizeWhenClauseRole(clause: string, featureRole: string): string {
-  if (!canNeutralizeWhenClause(clause, featureRole)) return clause;
-  const leadingRolePattern = new RegExp(`^(?:(?:a|an|the)\\s+)?${escapeRegex(featureRole)}\\s+`, 'i');
-  return clause
-    .replace(leadingRolePattern, 'they ')
-    .replace(/^they attempts\b/i, 'they attempt')
-    .replace(/^they tries\b/i, 'they try')
-    .replace(/^they has\b/i, 'they have')
-    .replace(/^they is\b/i, 'they are')
-    .replace(/^they does\b/i, 'they do');
-}
-
-function harmonizeFeatureRoleLanguage(feature: Feature): Feature {
-  const featureRole = extractRoleFromDescription(feature.description);
-  if (!featureRole) return feature;
-
-  let explicitWhenRoleSeen = false;
-  return {
-    ...feature,
-    acceptanceRequirements: (feature.acceptanceRequirements || []).map((ar) => {
-      const given = alignRoleInClause(ar.given, featureRole);
-      const whenAligned = alignRoleInClause(ar.when, featureRole);
-      const when = explicitWhenRoleSeen ? neutralizeWhenClauseRole(whenAligned, featureRole) : whenAligned;
-      if (new RegExp(`^(?:(?:a|an|the)\\s+)?${escapeRegex(featureRole)}\\s+${ROLE_BEHAVIOR_VERB_PATTERN}\\b`, 'i').test(whenAligned)) {
-        explicitWhenRoleSeen = true;
-      }
-      return {
-        ...ar,
-        given,
-        when,
-        then: alignRoleInClause(ar.then, featureRole),
-      };
-    }),
-  };
 }
 
 /** Parse GIVEN/WHEN/THEN; supports multiline clauses (models often wrap lines). */

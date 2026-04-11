@@ -56,69 +56,6 @@ export interface FeatureOverlap {
   reason: 'token_jaccard' | 'token_overlap_coefficient' | 'summary_subset';
 }
 
-const GIVEN_CONFIG_ANTI_PATTERNS = [
-  /configured for/i,
-  /activation type/i,
-  /trigger event/i,
-  /configured mode/i,
-  /system (is|has been) (set|configured)/i,
-];
-
-const ROLE_HINT_WORDS = new Set([
-  'user',
-  'person',
-  'individual',
-  'professional',
-  'worker',
-  'staff',
-  'member',
-  'associate',
-  'resource',
-  'agent',
-  'operator',
-  'representative',
-  'specialist',
-  'technician',
-  'engineer',
-  'manager',
-  'administrator',
-  'admin',
-  'dispatcher',
-  'planner',
-]);
-
-const OPEN_DECISION_LEAKAGE_PATTERNS = [
-  /^\s*(what|how|who|when|should|do we|does it|is it|can it)\b/i,
-  /\bopen question\b/i,
-  /\bto be decided\b/i,
-  /\bdefine duplication criteria\b/i,
-];
-
-function looksLikeOpenDecisionText(text: string): boolean {
-  const normalized = String(text ?? '').trim();
-  if (!normalized) return false;
-  return OPEN_DECISION_LEAKAGE_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function extractRoleFromDescription(description: string): string | null {
-  const match = description.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+/i);
-  return match?.[1]?.trim() || null;
-}
-
-function normalizeRole(text: string): string {
-  return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function extractLeadingRolePhrase(clause: string): string | null {
-  const match = clause.match(/\b(?:a|an|the)\s+([A-Za-z][A-Za-z\s/-]{1,60}?)(?=\s+(?:has|have|is|are|was|were|needs|need|can|cannot|must|should|views|receives|creates|updates|submits|opens|reviews|approves|rejects|selects|starts|attempts|works|manages|uses|belongs)\b)/i);
-  return match?.[1]?.trim() || null;
-}
-
-function looksLikeRolePhrase(text: string): boolean {
-  const tokens = normalizeRole(text).split(' ').filter(Boolean);
-  return tokens.some(token => ROLE_HINT_WORDS.has(token));
-}
-
 function countSoThatOccurrences(text: string): number {
   const matches = text.match(/\bso that\b/gi);
   return matches ? matches.length : 0;
@@ -281,11 +218,6 @@ export function featureOverlapsToViolations(overlaps: FeatureOverlap[]): Validat
 
 export function validateFeatures(features: Feature[], config: TenantConfig): ValidationViolation[] {
   const violations: ValidationViolation[] = [];
-  const featureRoles = features
-    .map((feature) => extractRoleFromDescription(feature.description))
-    .filter((role): role is string => Boolean(role));
-  const hasSpecificRoleElsewhere = featureRoles.some((role) => normalizeRole(role) !== 'authorized user');
-  const configuredRoles = new Set((config.domainRoles ?? []).map((role) => normalizeRole(role)).filter(Boolean));
 
   for (const feature of features) {
     // Check description format
@@ -314,14 +246,6 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
       });
     }
 
-    if (looksLikeOpenDecisionText(feature.summary) || looksLikeOpenDecisionText(feature.description)) {
-      violations.push({
-        featureId: feature.id,
-        field: 'description',
-        message: 'Feature appears to include unresolved decision wording instead of a confirmed requirement',
-      });
-    }
-
     // Check for solution language in description
     const descLower = feature.description.toLowerCase();
     for (const term of SOLUTION_TERMS) {
@@ -347,39 +271,6 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
       }
     }
 
-    // Check ARs
-    const featureRole = extractRoleFromDescription(feature.description);
-    if (
-      feature.featureClass === 'business_capability'
-      && featureRole
-      && /\b(integration|service|system|platform|pipeline|processor)\b/i.test(featureRole)
-      && !/\b(field service|technical support|service quality|administrator|manager)\b/i.test(featureRole)
-    ) {
-      violations.push({
-        featureId: feature.id,
-        field: 'featureClass',
-        message: 'Feature is labeled business-facing even though the actor reads as a technical/system actor',
-      });
-    }
-    if (
-      featureRole
-      && normalizeRole(featureRole) === 'authorized user'
-      && (hasSpecificRoleElsewhere || configuredRoles.size > 0)
-    ) {
-      violations.push({
-        featureId: feature.id,
-        field: 'description',
-        message: 'Feature uses generic role wording even though more specific roles are available',
-      });
-    }
-    if (feature.actorSource === 'fallback' && feature.confidence === 'confirmed') {
-      violations.push({
-        featureId: feature.id,
-        field: 'description',
-        message: 'Feature is marked confirmed even though the actor source is fallback',
-      });
-    }
-
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {
         violations.push({
@@ -400,18 +291,6 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
           field: 'acceptanceRequirements',
           message: `AR clause appears truncated (${truncatedClauses.join(', ')})`,
         });
-      }
-
-      // Check for config-state anti-patterns in GIVEN
-      for (const pattern of GIVEN_CONFIG_ANTI_PATTERNS) {
-        if (pattern.test(ar.given)) {
-          violations.push({
-            featureId: feature.id,
-            field: 'acceptanceRequirements',
-            message: `GIVEN clause uses configuration/system-state language: "${ar.given.slice(0, 60)}"`,
-          });
-          break;
-        }
       }
 
       // Check for solution language in ARs
@@ -438,35 +317,6 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         }
       }
 
-      if (featureRole) {
-        const leadingRole = extractLeadingRolePhrase(ar.given);
-        if (leadingRole && looksLikeRolePhrase(leadingRole) && normalizeRole(leadingRole) !== normalizeRole(featureRole)) {
-          violations.push({
-            featureId: feature.id,
-            field: 'acceptanceRequirements',
-            message: `AR role wording differs from feature role "${featureRole}": "${leadingRole}"`,
-          });
-        }
-      }
-
-      if (looksLikeOpenDecisionText(`${ar.given} ${ar.when} ${ar.then}`)) {
-        violations.push({
-          featureId: feature.id,
-          field: 'acceptanceRequirements',
-          message: 'AR appears to include unresolved decision wording instead of a testable rule',
-        });
-      }
-
-      if (feature.actorSource === 'fallback') {
-        const arRole = extractLeadingRolePhrase(ar.given) || extractLeadingRolePhrase(ar.when) || extractLeadingRolePhrase(ar.then);
-        if (arRole && normalizeRole(arRole) !== normalizeRole(featureRole ?? '')) {
-          violations.push({
-            featureId: feature.id,
-            field: 'acceptanceRequirements',
-            message: `AR introduces role wording "${arRole}" even though the feature actor source is fallback`,
-          });
-        }
-      }
     }
 
     // Check for near-duplicate ARs within the feature

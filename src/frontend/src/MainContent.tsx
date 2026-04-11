@@ -11,7 +11,6 @@ import type {
   CanvasEditScope,
   ClarifyContextMeta,
   ClarifyProgressPayload,
-  CoverageGap,
   DraftReviewDecision,
   DraftReviewMetadata,
   EffectiveSizingContract,
@@ -27,11 +26,10 @@ import type {
 } from './types';
 import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
-import { detectCoverageGaps, getCanvasIntentLabel, getPendingChangeLabel, routeCanvasEditInstruction } from './canvasChange';
+import { getCanvasIntentLabel, getPendingChangeLabel, routeCanvasEditInstruction } from './canvasChange';
 import {
   formatGenerationFeatureTarget,
   getApprovedDraftStructureNote,
-  getCoverageReviewSummary,
   getDiscoveryDisplayComplexity,
   getDiscoveryProfileHeadline,
   getDraftFeatureHeading,
@@ -1619,7 +1617,6 @@ export function MainContent({
     generationContext?.draftReviewDecision === 'continue'
       ? getApprovedDraftStructureNote()
       : getSizingRunContextNote(generationContext?.sizingAssessment);
-  const coverageReviewSummary = getCoverageReviewSummary(generationContext?.coverageReview);
   const [runContextExpanded, setRunContextExpanded] = useState(false);
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
@@ -1658,16 +1655,10 @@ export function MainContent({
   }, [features]);
 
   useEffect(() => {
-    const hasWarnings = coverageReviewSummary?.tone === 'warning'
-      || (generationContext?.remainingBlockingIssues?.length ?? 0) > 0;
-    setRunContextExpanded(hasWarnings);
-  }, [coverageReviewSummary?.tone, generationContext?.remainingBlockingIssues?.length]);
-
-  const coverageGaps = React.useMemo<CoverageGap[]>(() => detectCoverageGaps({
-    requirement,
-    features,
-    existingMissingCoverage: generationContext?.coverageReview?.missingCoverage,
-  }), [features, generationContext?.coverageReview?.missingCoverage, requirement]);
+    const hasHighlights = (generationContext?.autoRepairedIssues?.length ?? 0) > 0
+      || Boolean(generationContext?.partialSuccess);
+    setRunContextExpanded(hasHighlights);
+  }, [generationContext?.autoRepairedIssues?.length, generationContext?.partialSuccess]);
 
   const routingDecision = React.useMemo(
     () => routeCanvasEditInstruction(changeInstruction),
@@ -2673,9 +2664,6 @@ export function MainContent({
                       <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
                         {generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}
                       </span>
-                      {(coverageReviewSummary?.tone === 'warning' || (generationContext.remainingBlockingIssues?.length ?? 0) > 0) && (
-                        <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-warning)] shrink-0" />
-                      )}
                     </div>
                     <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] shrink-0 transition-transform duration-200 ${runContextExpanded ? 'rotate-180' : ''}`} />
                   </button>
@@ -2714,140 +2702,21 @@ export function MainContent({
                             {sizingRunContextNote}
                           </span>
                         )}
-                        {coverageReviewSummary && (
-                          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[12px] font-semibold ${
-                            coverageReviewSummary.tone === 'success'
-                              ? 'border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
-                              : 'border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] text-[var(--rf-warning)]'
-                          }`}>
-                            {coverageReviewSummary.label}
-                          </span>
-                        )}
                       </div>
-                      {coverageReviewSummary?.details.length ? (
-                        <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3">
-                          {coverageReviewSummary.heading && (
-                            <div className="mb-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
-                              {coverageReviewSummary.heading}
-                            </div>
-                          )}
-                          {coverageReviewSummary.details.map((detail, index) => (
-                            <div key={`${detail}-${index}`} className={`flex items-start gap-2 text-[13px] text-[var(--rf-text-secondary)]${index > 0 ? ' mt-1.5' : ''}`}>
-                              <span className="mt-0.5 shrink-0 text-[var(--rf-warning)]">•</span>
-                              <span>{normalizeDisplayText(detail)}</span>
+                      {(generationContext.autoRepairedIssues?.length ?? 0) > 0 ? (
+                        <div className="rounded-xl border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                          <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Resolved automatically</div>
+                          {(generationContext.autoRepairedIssues ?? []).map((item, index) => (
+                            <div key={`auto-repair-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
+                              {normalizeDisplayText(item)}
                             </div>
                           ))}
-                        </div>
-                      ) : null}
-                      {(generationContext.autoRepairedIssues?.length || generationContext.remainingBlockingIssues?.length) ? (
-                        <div className="grid gap-3 md:grid-cols-2">
-                          {(generationContext.autoRepairedIssues?.length ?? 0) > 0 && (
-                            <div className="rounded-xl border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
-                              <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Resolved automatically</div>
-                              {(generationContext.autoRepairedIssues ?? []).map((item, index) => (
-                                <div key={`auto-repair-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
-                                  {normalizeDisplayText(item)}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {(generationContext.remainingBlockingIssues?.length ?? 0) > 0 && (
-                            <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
-                              <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
-                                {generationContext.requiresUserDecision ? 'Needs input' : 'Remaining blockers'}
-                              </div>
-                              {(generationContext.remainingBlockingIssues ?? []).map((item, index) => (
-                                <div key={`blocking-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
-                                  {normalizeDisplayText(item)}
-                                </div>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       ) : null}
                     </div>
                   )}
                 </div>
               </motion.div>
-            )}
-
-            {coverageGaps.length > 0 && generationContext?.requiresUserDecision && (
-              <div className="rounded-[20px] border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-4 py-4 shadow-[0_10px_30px_-20px_rgba(160,81,30,0.45)]">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--rf-warning)]">Missing something?</div>
-                    <div className="mt-1 text-[14px] font-semibold text-[var(--rf-text)]">
-                      The canvas may still have a few gaps worth checking before export.
-                    </div>
-                    <div className="mt-1 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
-                      You can add missing detail here without needing to decide between a small refine and a full restructure first.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => openChangeCanvas({ scope: 'all' })}
-                    className="inline-flex items-center gap-2 rounded-xl border border-[rgba(179,94,48,0.22)] bg-white/80 px-3 py-2 text-[12px] font-bold text-[var(--rf-warning)] transition hover:bg-white"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Review in change flow
-                  </button>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {coverageGaps.map((gap) => (
-                    <div key={gap.id} className="rounded-2xl border border-[rgba(179,94,48,0.14)] bg-white/82 px-3.5 py-3 shadow-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-[13px] font-semibold text-[var(--rf-text)]">{gap.label}</div>
-                        <span className="rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
-                          {gap.confidence}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">{gap.why}</div>
-                      {gap.question ? (
-                        <div className="mt-2 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] text-[var(--rf-text-secondary)]">
-                          {gap.question}
-                        </div>
-                      ) : null}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openChangeCanvas({
-                            intent: gap.suggestedIntent ?? 'add_requirements',
-                            scope: gap.targetFeatureId ? 'current' : 'all',
-                            targetFeatureId: gap.targetFeatureId ?? null,
-                            instruction: `Add the missing coverage for ${gap.label.toLowerCase()}. ${gap.question ? gap.question : ''}`.trim(),
-                          })}
-                          className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:text-[var(--rf-brand)]"
-                        >
-                          {gap.targetFeatureId ? 'Add to this feature' : 'Add in place'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openChangeCanvas({
-                            intent: 'add_feature',
-                            scope: 'all',
-                            instruction: `Add a new feature to cover ${gap.label.toLowerCase()}. ${gap.question ? gap.question : ''}`.trim(),
-                          })}
-                          className="rounded-lg border border-[rgba(46,125,86,0.18)] bg-[var(--rf-success-subtle)] px-3 py-1.5 text-[11px] font-bold text-[var(--rf-success)] transition hover:brightness-[0.98]"
-                        >
-                          Add as new feature
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openChangeCanvas({
-                            intent: gap.suggestedIntent ?? 'add_requirements',
-                            scope: gap.targetFeatureId ? 'current' : 'all',
-                            targetFeatureId: gap.targetFeatureId ?? null,
-                            instruction: gap.question ?? `Ask one focused follow-up about ${gap.label.toLowerCase()}.`,
-                          })}
-                          className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-1.5 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:text-[var(--rf-brand)]"
-                        >
-                          Ask 1 follow-up
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             )}
 
             {restructureMode && (

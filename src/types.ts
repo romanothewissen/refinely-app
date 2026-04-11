@@ -704,6 +704,12 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   autoRepairedIssues?: string[];
   remainingBlockingIssues?: string[];
   requiresUserDecision?: boolean;
+  repairedAcceptanceRequirementFeatureIds?: string[];
+  repairedAcceptanceRequirementTriggers?: Array<{
+    featureId: string;
+    trigger: 'structural' | 'weak_signal';
+    reasons: string[];
+  }>;
   failedFeatureIds?: string[];
   partialSuccess?: boolean;
   partialSuccessMessage?: string;

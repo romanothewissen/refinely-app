@@ -894,101 +894,19 @@ test('applyFeatureOutputGuardrails preserves a valid but detailed feature descri
         then: 'the creation is prevented and the system explains why the request is blocked and what should happen next',
       },
     ],
-  }, {
-    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
-    domainRoles: ['Operations Coordinator', 'Operations Specialist'],
   });
 
   assert.equal(
     guarded.description,
     'As an Operations Coordinator, I need to be prevented from creating primary or linked records when the related item has reached its designated eligibility deadline so that unsupported requests are blocked and users receive clear feedback about the policy.',
   );
-  assert.equal(guarded.acceptanceRequirements[0].when.includes('for example'), false);
-});
-
-test('applyFeatureOutputGuardrails promotes a generic feature role when the requirement states one clear actor', () => {
-  const guarded = applyFeatureOutputGuardrails({
-    id: 'feature-1',
-    summary: 'Block unsupported record creation',
-    description: 'As an authorized user, I need to create supported records so that unsupported products are not processed.',
-    acceptanceRequirements: [
-      {
-        given: 'an item has passed its eligibility date',
-        when: 'an Operations Specialist attempts to create the record',
-        then: 'the record is not created',
-      },
-      {
-        given: 'an item has passed its eligibility date',
-        when: 'an Operations Specialist attempts to create the record with a linked record',
-        then: 'the linked record is not created',
-      },
-    ],
-  }, {
-    requirement: 'As an Operations Specialist, I need to prevent creation of records for ineligible items.',
-    domainRoles: ['Operations Specialist', 'Supervisor'],
-  });
-
-  assert.match(guarded.description, /^As an Operations Specialist, I need to /);
-  assert.match(guarded.acceptanceRequirements[0].when, /^an Operations Specialist attempts to create the record$/i);
-});
-
-test('applyFeatureOutputGuardrails keeps repeated WHEN role labels after grounding the feature role from the requirement', () => {
-  const guarded = applyFeatureOutputGuardrails({
-    id: 'feature-1',
-    summary: 'Block unsupported record creation',
-    description: 'As an authorized user, I need to create supported records so that unsupported products are not processed.',
-    acceptanceRequirements: [
-      {
-        given: 'an item has passed its eligibility date',
-        when: 'an Operations Specialist attempts to create the record',
-        then: 'the record is not created',
-      },
-      {
-        given: 'an item has passed its eligibility date',
-        when: 'the Operations Specialist attempts to create the linked record',
-        then: 'the linked record is not created',
-      },
-    ],
-  }, {
-    requirement: 'As an Operations Specialist, I need to prevent creation of records for ineligible items.',
-    domainRoles: ['Operations Specialist'],
-  });
-
-  assert.match(guarded.description, /^As an Operations Specialist, I need to /);
-  assert.match(guarded.acceptanceRequirements[0].when, /^an Operations Specialist attempts to create the record$/i);
-  assert.match(guarded.acceptanceRequirements[1].when, /^they attempt to create the linked record$/i);
-});
-
-test('applyFeatureOutputGuardrails does not promote a generic feature role when multiple AR roles are present', () => {
-  const guarded = applyFeatureOutputGuardrails({
-    id: 'feature-1',
-    summary: 'Coordinate unsupported record handling',
-    description: 'As an authorized user, I need to handle unsupported records so that the right follow-up occurs.',
-    acceptanceRequirements: [
-      {
-        given: 'an item has passed its eligibility date',
-        when: 'an Operations Specialist attempts to create the record',
-        then: 'the record is blocked',
-      },
-      {
-        given: 'the block requires approval',
-        when: 'a Supervisor reviews the request',
-        then: 'the request is routed for a decision',
-      },
-    ],
-  }, {
-    requirement: 'Unsupported record handling must block creation and route exceptions for review when needed.',
-    domainRoles: ['Operations Specialist', 'Supervisor'],
-  });
-
-  assert.match(guarded.description, /^As an authorized user, I need to /);
+  assert.equal(
+    guarded.acceptanceRequirements[0].when,
+    'an Operations Coordinator attempts to create a primary or linked record for that item, with an explanatory error message shown for example to clarify the exact date and the policy reason',
+  );
 });
 
 test('applyFeatureOutputGuardrails is idempotent — a second pass does not duplicate the "so that" clause', () => {
-  // Regression for the triple "so that" bug: LLM emits "I need" (no "to"), so the strict regex in
-  // replaceFeatureRole fails and the fallback used to append a boilerplate "so that" even though
-  // the description already had one. Running the pipeline twice (Pass 1 + post-Pass-2) would then
-  // append twice, producing "... so that X. so that the requested outcome is achieved. so that the requested outcome is achieved."
   const raw = {
     id: 'feature-1',
     summary: 'Automatic Record Classification',
@@ -1002,28 +920,20 @@ test('applyFeatureOutputGuardrails is idempotent — a second pass does not dupl
     ],
   };
 
-  const roleGrounding = {
-    requirement: 'The intake team needs request-to-record capability for the Operations Specialist to distinguish between request types.',
-    domainRoles: ['Operations Specialist'],
-  };
-
-  const firstPass = applyFeatureOutputGuardrails(raw, roleGrounding);
-  const secondPass = applyFeatureOutputGuardrails(firstPass, roleGrounding);
+  const firstPass = applyFeatureOutputGuardrails(raw);
+  const secondPass = applyFeatureOutputGuardrails(firstPass);
 
   // Exactly one "so that" in both passes
   const firstSoThatCount = (firstPass.description.match(/\bso that\b/gi) || []).length;
   const secondSoThatCount = (secondPass.description.match(/\bso that\b/gi) || []).length;
   assert.equal(firstSoThatCount, 1, `first pass description has ${firstSoThatCount} "so that" clauses: ${firstPass.description}`);
   assert.equal(secondSoThatCount, 1, `second pass description has ${secondSoThatCount} "so that" clauses: ${secondPass.description}`);
-  // No boilerplate fallback
   assert.doesNotMatch(firstPass.description, /so that the requested outcome is achieved/);
-  // Second pass is identical to first pass (idempotent)
+  assert.deepEqual(secondPass.acceptanceRequirements, firstPass.acceptanceRequirements);
   assert.equal(secondPass.description, firstPass.description);
 });
 
-test('applyFeatureOutputGuardrails does not slice AR clauses mid-sentence on long compound conditions', () => {
-  // Regression for the trimVerboseSegment mid-sentence slicing bug: a 22-word compound "AND" condition
-  // used to be clipped at word 22, leaving a trailing stop-word like "indicates" or "exactly".
+test('applyFeatureOutputGuardrails leaves AR clause wording intact', () => {
   const guarded = applyFeatureOutputGuardrails({
     id: 'feature-1',
     summary: 'Automatic Record Creation from Approved Intake Sources',
@@ -1035,17 +945,15 @@ test('applyFeatureOutputGuardrails does not slice AR clauses mid-sentence on lon
         then: 'a new record is automatically created and classified',
       },
     ],
-  }, {
-    requirement: 'Request-to-record capability for the Operations Specialist.',
-    domainRoles: ['Operations Specialist'],
   });
 
   const given = guarded.acceptanceRequirements[0].given;
-  // The GIVEN must contain the full original phrase — no mid-sentence truncation.
   assert.ok(
     given.includes('clearly indicates a category'),
     `GIVEN clause was truncated mid-sentence: "${given}"`,
   );
-  // And it must NOT end on a truncation-indicating stop-word.
-  assert.doesNotMatch(given, /\b(indicates|that|for|and|or|with|the|a|an|exactly|matches|does|is)\s*$/i);
+  assert.equal(
+    guarded.acceptanceRequirements[0].when,
+    'the system processes the request',
+  );
 });

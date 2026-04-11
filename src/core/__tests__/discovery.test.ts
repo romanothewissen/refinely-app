@@ -12,6 +12,7 @@ import {
 } from '../discovery';
 import {
   buildArSystemPrompt,
+  buildArRepairSystemPrompt,
   buildArPerFeatureUserMessage,
   buildAddRequirementsSystemPrompt,
   buildClarifySystemPrompt,
@@ -537,6 +538,58 @@ test('finalizeFollowupDiscoveryQuestions allows a single precise follow-up when 
 
   assert.equal(followups.length, 1);
   assert.match(followups[0].question, /phone|whatsapp|case/i);
+});
+
+test('buildArSystemPrompt explicitly pushes concrete business clauses over vague placeholders', () => {
+  const prompt = buildArSystemPrompt({
+    domainContext: 'Keep output business-facing.',
+    arPlan: {
+      min: 2,
+      max: 5,
+      target: 3,
+      depth: 'standard',
+    },
+  });
+
+  assert.match(prompt, /avoid vague placeholders such as "is processed"/i);
+  assert.match(prompt, /preserve them in business language/i);
+  assert.match(prompt, /concise is good only when the business condition, trigger, and outcome remain concrete/i);
+});
+
+test('buildArRepairSystemPrompt keeps AR repair scoped and meaning-preserving', () => {
+  const prompt = buildArRepairSystemPrompt({
+    domainContext: 'Stay product agnostic.',
+  });
+
+  assert.match(prompt, /Preserve the feature summary, description, suggested_story_points, and process_code unless a trivial typo fix is unavoidable/i);
+  assert.match(prompt, /expand weak AR wording into concrete business conditions, triggers, and outcomes/i);
+  assert.match(prompt, /Do not invent domain-specific logic, product-specific categories, or internal implementation mechanisms/i);
+});
+
+test('buildArPerFeatureUserMessage includes AR obligations and repair focus when provided', () => {
+  const message = buildArPerFeatureUserMessage({
+    requirement: 'Create cases automatically from inbound support emails.',
+    feature: {
+      summary: 'Automatically create new cases from incoming emails',
+      description: 'As a Technical Support Specialist, I need new cases created from qualifying inbound emails so that intake work is not manual.',
+    },
+    arObligations: {
+      confirmedOutcomes: ['Classify each created case as either a product issue or a general inquiry.'],
+      confirmedExclusions: ['Do not create a case from unwanted automated email.'],
+      confirmedDataObligations: ['Carry the inbound message content into the created case.'],
+      unresolvedDecisions: ['If classification remains ambiguous, do not invent a new category.'],
+    },
+    currentAcceptanceRequirements: [
+      'GIVEN an inbound email qualifies WHEN it is received THEN a case is created',
+    ],
+    repairReasons: [
+      'Avoid vague wording like "is processed".',
+    ],
+  });
+
+  assert.match(message, /AR OBLIGATIONS:/);
+  assert.match(message, /CURRENT ACCEPTANCE REQUIREMENTS:/);
+  assert.match(message, /REPAIR FOCUS:/);
 });
 
 test('finalizeFollowupDiscoveryQuestions drops obviously truncated follow-up questions', () => {
