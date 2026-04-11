@@ -146,7 +146,7 @@ export function Sidebar({
     : 'Global Workspace';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
-  const [sessionExpanded, setSessionExpanded] = React.useState(true);
+  const [sessionExpanded, setSessionExpanded] = React.useState(false);
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
     contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
   );
@@ -516,7 +516,7 @@ export function Sidebar({
 
         {/* ── Input card ── */}
         <motion.div
-          className="rf-sidebar-card flex-[1.25] flex flex-col min-h-[320px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
+          className="rf-sidebar-card flex-[1] flex flex-col min-h-[180px] max-h-[340px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
@@ -606,7 +606,7 @@ export function Sidebar({
         </motion.div>
 
         <motion.div
-          className="rf-sidebar-card overflow-hidden"
+          className="rf-sidebar-card overflow-hidden shrink-0"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
