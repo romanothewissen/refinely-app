@@ -403,6 +403,7 @@ function LegacyApp({
   const [workflowRunId, setWorkflowRunId] = useState(0);
   const [isWorking, setIsWorking] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [retryingFeatureId, setRetryingFeatureId] = useState<string | null>(null);
   const [generationWarning, setGenerationWarning] = useState<string | null>(null);
   const [lastAiChange, setLastAiChange] = useState<UndoableAiChange | null>(null);
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
@@ -457,6 +458,7 @@ function LegacyApp({
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
+  const [reviewBeforeARs, setReviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
@@ -739,6 +741,7 @@ function LegacyApp({
       setGenerationWarning(payload.generationContext?.partialSuccessMessage ?? null);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
+      setRetryingFeatureId(null);
       setIsWorking(false);
       setWorkflowStage('idle');
       loadHistory();
@@ -748,6 +751,7 @@ function LegacyApp({
     ({ payload }) => {
       setGenerationProgressMeta(payload ?? null);
       setPendingSessionId(null);
+      setRetryingFeatureId(null);
       setIsWorking(false);
       setWorkflowStage('generation_review');
     },
@@ -755,6 +759,7 @@ function LegacyApp({
       setGenerationError(errMsg);
       setGenerationProgressMeta(null);
       setPendingSessionId(null);
+      setRetryingFeatureId(null);
       setIsWorking(false);
       setWorkflowStage('blocked');
     }
@@ -762,6 +767,7 @@ function LegacyApp({
     () => {
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
+      setRetryingFeatureId(null);
       setIsWorking(false);
       setWorkflowStage('idle');
     }
@@ -884,12 +890,15 @@ function LegacyApp({
   }, [workflowStage]);
 
   const isCanvasLoading = Boolean(
-    pendingClarifySessionId
-    || pendingSessionId
-    || isClarifying
-    || isGenerating
-    || workflowStage === 'sufficiency_check'
-    || workflowStage === 'generation',
+    !retryingFeatureId
+    && (
+      pendingClarifySessionId
+      || pendingSessionId
+      || isClarifying
+      || isGenerating
+      || workflowStage === 'sufficiency_check'
+      || workflowStage === 'generation'
+    ),
   );
 
   const loadingTitle = workflowStage === 'sufficiency_check'
@@ -1241,6 +1250,7 @@ function LegacyApp({
         clarifyAnswers,
         attachmentText,
         outputProfileOverride: runOutputProfileOverride,
+        pauseForDraftReview: reviewBeforeARs || undefined,
         projectKey,
         projectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
@@ -1299,12 +1309,11 @@ function LegacyApp({
 
   const retryFailedFeatureGeneration = async (featureId: string) => {
     const sid = sessionIdRef.current;
-    setIsWorking(true);
+    setRetryingFeatureId(featureId);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
     setGenerationWarning(null);
     setPendingClarifySessionId(null);
-    setWorkflowStage('generation');
 
     setFeatures((prev) => prev.map((feature) => (
       feature.id === featureId
@@ -1325,14 +1334,12 @@ function LegacyApp({
       if (!res?.success) {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setPendingSessionId(null);
-        setIsWorking(false);
-        setWorkflowStage('blocked');
+        setRetryingFeatureId(null);
       }
     } catch (err: any) {
       setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
       setPendingSessionId(null);
-      setIsWorking(false);
-      setWorkflowStage('blocked');
+      setRetryingFeatureId(null);
     }
   };
 
@@ -1536,6 +1543,8 @@ function LegacyApp({
               workspaceOutputProfile={workspaceOutputProfile}
               runOutputProfileOverride={runOutputProfileOverride}
               setRunOutputProfileOverride={setRunOutputProfileOverride}
+              reviewBeforeARs={reviewBeforeARs}
+              setReviewBeforeARs={setReviewBeforeARs}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
               projectKeys={projectKeys}
@@ -1685,6 +1694,7 @@ function LegacyApp({
                   onOpenSettings={openSettings}
                   onDraftReviewDecision={resumeGenerationFromDraftReview}
                   onRetryFailedFeature={retryFailedFeatureGeneration}
+                  retryingFeatureId={retryingFeatureId}
                   onUndoLastAiChange={handleUndoLastAiChange}
                   undoActionLabel={lastAiChange?.label || null}
                   onWorkflowTokenUsage={(usageDelta) => {

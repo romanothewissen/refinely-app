@@ -80,6 +80,7 @@ export interface GeneratorConfig {
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
   modelCatalogs?: LlmModelCatalogByVendor;
+  pauseForDraftReview?: boolean;
 }
 
 export interface ProcessCode {
@@ -966,6 +967,8 @@ export interface GenerationEvent {
   retryFeatureId?: string;
   retryFeature?: Feature;
   retryBaseFeatures?: Feature[];
+  /** When true, always pause after pass-1 feature decomposition for user review, regardless of quality issues. */
+  pauseForDraftReview?: boolean;
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

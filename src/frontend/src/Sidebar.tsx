@@ -24,6 +24,8 @@ interface SidebarProps {
   workspaceOutputProfile: OutputProfile;
   runOutputProfileOverride: OutputProfile;
   setRunOutputProfileOverride: (value: OutputProfile) => void;
+  reviewBeforeARs: boolean;
+  setReviewBeforeARs: (value: boolean) => void;
   width?: number;
   originIssueKey?: string | null;
   projectKeys: string[];
@@ -102,6 +104,8 @@ export function Sidebar({
   workspaceOutputProfile,
   runOutputProfileOverride,
   setRunOutputProfileOverride,
+  reviewBeforeARs,
+  setReviewBeforeARs,
   width,
   originIssueKey,
   projectKeys,
@@ -652,27 +656,25 @@ export function Sidebar({
                   );
                 })}
               </div>
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={activeOutputProfile.value}
-                  className="mt-2.5 rounded-[16px] border border-[var(--rf-border-subtle)] bg-[rgba(247,249,247,0.92)] px-3 py-2.5"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              {/* Active profile label + review toggle */}
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">{activeOutputProfile.label}</span>
+                <span className="h-1.5 w-7 rounded-full shrink-0" style={{ background: activeOutputProfile.accent }} />
+              </div>
+              <div className="mt-2 pt-2 border-t border-[var(--rf-border-subtle)] flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">Review features before ARs</span>
+                <button
+                  type="button"
+                  disabled={isWorking}
+                  onClick={() => setReviewBeforeARs(!reviewBeforeARs)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+                    reviewBeforeARs ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-border-strong)]'
+                  }`}
+                  title={reviewBeforeARs ? 'Pause and review features before generating ARs (on)' : 'Auto-proceed to AR generation (off)'}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] font-black text-[var(--rf-text)]">{activeOutputProfile.label}</span>
-                    <span
-                      className="h-2.5 w-10 rounded-full"
-                      style={{ background: activeOutputProfile.accent }}
-                    />
-                  </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-[var(--rf-text-secondary)]">
-                    {activeOutputProfile.blurb}
-                  </div>
-                </motion.div>
-              </AnimatePresence>
+                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${reviewBeforeARs ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </div>
             </div>
           </div>
         </motion.div>

@@ -2746,6 +2746,7 @@ export async function generateFeatures(opts: {
   draftReviewSelectedFeatureIds?: string[];
   allowPartialArFailure?: boolean;
   priorStageDurationsMs?: GenerationStageDurationsMs;
+  pauseForDraftReview?: boolean;
   onPass1Complete?: (draftFeatures: Feature[], draftReview: DraftReviewMetadata, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
   onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
@@ -2765,6 +2766,7 @@ export async function generateFeatures(opts: {
     draftReviewSelectedFeatureIds,
     allowPartialArFailure,
     priorStageDurationsMs,
+    pauseForDraftReview,
     onPass1Complete,
     onArProgress,
     shouldCancel,
@@ -2926,7 +2928,7 @@ export async function generateFeatures(opts: {
       || Boolean(draftReview.coverageFindings?.overlapWarnings?.length)
       || Boolean(draftReview.coverageFindings?.duplicatedThemes?.length);
 
-    if (requiresUserDecision) {
+    if (requiresUserDecision || pauseForDraftReview) {
       if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, draftReview, stageDurationsMs);
       if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
       throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, draftReview, stageDurationsMs);
@@ -2966,7 +2968,7 @@ export async function generateFeatures(opts: {
       || Boolean(updatedReviewMeta.coverageFindings?.overlapWarnings?.length)
       || Boolean(updatedReviewMeta.coverageFindings?.duplicatedThemes?.length);
 
-    if (requiresUserDecision) {
+    if (requiresUserDecision || pauseForDraftReview) {
       if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, updatedReviewMeta, stageDurationsMs);
       if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
       throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, updatedReviewMeta, stageDurationsMs);

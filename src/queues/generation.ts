@@ -256,6 +256,7 @@ export async function handler(event: { body: GenerationEvent }) {
     retryFeatureId,
     retryFeature,
     retryBaseFeatures,
+    pauseForDraftReview,
   } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
@@ -383,6 +384,7 @@ export async function handler(event: { body: GenerationEvent }) {
       draftReviewDecision: retryFeatureId ? undefined : reviewedDraftDecision,
       draftReviewSelectedFeatureIds: reviewedDraftSelectedFeatureIds,
       allowPartialArFailure: Boolean(retryFeatureId && retryBaseFeatures?.length),
+      pauseForDraftReview: retryFeatureId ? false : (pauseForDraftReview ?? config.generatorConfig.pauseForDraftReview ?? false),
       priorStageDurationsMs,
       shouldCancel: () => isWorkflowCancelled(sessionId),
       onPass1Complete: async (draftFeatures, draftReview, stageDurationsMs) => {

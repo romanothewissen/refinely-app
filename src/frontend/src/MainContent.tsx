@@ -272,9 +272,11 @@ function ContextChipList({ chips }: { chips: string[] }) {
 function TriageScoreCard({
   advisoryTriage,
   sizingContract,
+  phase = 'discovery',
 }: {
   advisoryTriage?: GenerationProgressMeta['advisoryTriage'];
   sizingContract?: GenerationProgressMeta['sizingContract'];
+  phase?: 'discovery' | 'generation';
 }) {
   const forecast = advisoryTriage?.deliveryForecast ?? (sizingContract
     ? {
@@ -290,7 +292,7 @@ function TriageScoreCard({
     return (
       <div>
         <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advisory triage</span>
+          <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Delivery forecast</span>
           <span className="text-[12px] text-[var(--rf-text-tertiary)] animate-pulse">Assessing…</span>
         </div>
         <div className="flex gap-1 mb-1">
@@ -317,7 +319,7 @@ function TriageScoreCard({
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advisory triage</span>
+        <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Delivery forecast</span>
         <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{complexityLabel}</span>
       </div>
       <ComplexityBar current={forecast.complexity} />
@@ -338,10 +340,12 @@ function TriageScoreCard({
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{getGenerationFeatureTargetLabel()}</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">{formatGenerationFeatureTarget(forecast.featureTarget)}</div>
         </div>
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Discovery forecast</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof forecastedQuestions === 'number' ? `~${forecastedQuestions} questions` : 'LLM-led'}</div>
-        </div>
+        {phase !== 'generation' && (
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Est. discovery questions</div>
+            <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof forecastedQuestions === 'number' ? `~${forecastedQuestions} questions` : 'LLM-led'}</div>
+          </div>
+        )}
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">ARs / feature</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">
@@ -599,44 +603,56 @@ function DraftReviewCard({
           })}
         </div>
 
-        <div className="flex flex-wrap gap-3 pt-1">
-          <button
-            type="button"
-            onClick={() => onDecision('continue')}
-            className="brainstorm-shimmer px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
-          >
-            Continue With This Structure
-          </button>
-          <button
-            type="button"
-            onClick={() => onDecision('broaden')}
-            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
-          >
-            Broaden Breakdown
-          </button>
-          <button
-            type="button"
-            onClick={() => onDecision('tighten')}
-            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
-          >
-            Tighten Grouping
-          </button>
-          <button
-            type="button"
-            onClick={() => onDecision('merge_selected', selectedIds)}
-            disabled={selectedIds.length < 2}
-            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Merge Selected
-          </button>
-          <button
-            type="button"
-            onClick={() => onDecision('split_selected', selectedIds)}
-            disabled={selectedIds.length < 1}
-            className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Split Selected
-          </button>
+        <div className="pt-1">
+          <p className="mb-3 text-[13px] text-[var(--rf-text-secondary)]">
+            Review the features below. Select any to merge or split before acceptance requirements are written.
+          </p>
+          {selectedIds.length > 0 && (
+            <p className="mb-3 text-[12px] font-semibold text-[var(--rf-brand)]">
+              {selectedIds.length} feature{selectedIds.length === 1 ? '' : 's'} selected — use Merge or Split below
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => onDecision('continue')}
+              className="brainstorm-shimmer px-5 py-2.5 rounded-[18px] text-sm font-bold text-white bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.04] transition shadow-sm shadow-[var(--rf-brand)]/20"
+            >
+              Looks good — generate ARs
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecision('broaden')}
+              className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
+            >
+              Broaden Breakdown
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecision('tighten')}
+              className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition"
+            >
+              Tighten Grouping
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecision('merge_selected', selectedIds)}
+              disabled={selectedIds.length < 2}
+              title="Select 2 or more features to merge them into one"
+              className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Merge Selected
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecision('split_selected', selectedIds)}
+              disabled={selectedIds.length < 1}
+              title="Select one or more features to split into smaller ones"
+              className="px-4 py-2.5 rounded-[18px] text-sm font-bold border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/55 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Split Selected
+            </button>
+          </div>
         </div>
       </div>
     </motion.div>
@@ -985,15 +1001,58 @@ function GeneratingPipeline({
           </div>
         </div>
 
+        {/* Features list — shown first during AR stage */}
+        {draftFeatures.length > 0 && meta?.stage === 'acceptance_requirements' && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-1.5"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                Writing acceptance requirements
+              </div>
+              {draftFeatureNote && (
+                <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                  {draftFeatureNote}
+                </div>
+              )}
+            </div>
+            {draftFeatures.slice(0, 10).map((f, i) => {
+              const status = featureProgressById.get(f.id) || (i === 0 ? 'active' : 'pending');
+              return (
+                <div key={f.id} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2.5 flex items-center gap-2.5 backdrop-blur-sm">
+                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
+                    status === 'active' ? 'bg-[var(--rf-brand)] animate-pulse'
+                    : status === 'retrying' ? 'bg-[var(--rf-warning)] animate-pulse'
+                    : status === 'failed' ? 'bg-[var(--rf-danger)]'
+                    : status === 'complete' ? 'bg-[var(--rf-success)]'
+                    : 'bg-[var(--rf-border-strong)]'
+                  }`} />
+                  <span className="text-[13px] font-medium text-[var(--rf-text)] truncate flex-1">{f.summary}</span>
+                  {status === 'complete' && <CheckCircle2 className="w-3.5 h-3.5 text-[var(--rf-success)] shrink-0" />}
+                  {status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-danger)] shrink-0" />}
+                  {status === 'active' && (
+                    <div className="w-10 h-1 bg-[rgba(0,0,0,0.05)] rounded-full overflow-hidden shrink-0">
+                      <div className="h-full w-3/5 bg-[var(--rf-brand)] animate-pulse rounded-full" />
+                    </div>
+                  )}
+                  {status === 'retrying' && (
+                    <div className="w-10 h-1 bg-[rgba(0,0,0,0.05)] rounded-full overflow-hidden shrink-0">
+                      <div className="h-full w-3/5 bg-[var(--rf-warning)] animate-pulse rounded-full" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </motion.div>
+        )}
+
         {/* Triage scores + Context */}
         <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
-          <TriageScoreCard advisoryTriage={meta?.advisoryTriage} sizingContract={triage} />
+          <TriageScoreCard advisoryTriage={meta?.advisoryTriage} sizingContract={triage} phase="generation" />
           {typeof meta?.draftFeatureCount === 'number' && meta.stage !== 'triage' && (
-            <div className="mt-3 pt-3 border-t border-[var(--rf-border)] grid grid-cols-2 gap-x-4 gap-y-2">
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Triage estimate</div>
-                <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof (meta?.advisoryTriage?.deliveryForecast.featureTarget ?? triage?.featureTarget) === 'number' ? `Forecast ${meta?.advisoryTriage?.deliveryForecast.featureTarget ?? triage?.featureTarget}` : 'Assessing'}</div>
-              </div>
+            <div className="mt-3 pt-3 border-t border-[var(--rf-border)] flex items-center gap-4">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>
                 <div className="text-[14px] font-black text-[var(--rf-text)]">{meta.draftFeatureCount}</div>
@@ -1002,8 +1061,8 @@ function GeneratingPipeline({
           )}
         </div>
 
-        {/* Features list (once sketched) */}
-        {draftFeatures.length > 0 && (
+        {/* Features list — shown below triage card in non-AR stages */}
+        {draftFeatures.length > 0 && meta?.stage !== 'acceptance_requirements' && (
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1496,6 +1555,7 @@ interface MainContentProps {
   onOpenSettings?: () => void;
   onDraftReviewDecision?: (decision: DraftReviewDecision, selectedFeatureIds?: string[]) => void;
   onRetryFailedFeature?: (featureId: string) => void;
+  retryingFeatureId?: string | null;
   onUndoLastAiChange?: () => void;
   undoActionLabel?: string | null;
 }
@@ -1505,7 +1565,7 @@ export function MainContent({
   features, setFeatures, onSetLastAiChange, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  isAdmin, onOpenSettings, onDraftReviewDecision, onRetryFailedFeature, onUndoLastAiChange, undoActionLabel
+  isAdmin, onOpenSettings, onDraftReviewDecision, onRetryFailedFeature, retryingFeatureId, onUndoLastAiChange, undoActionLabel
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1530,6 +1590,7 @@ export function MainContent({
       ? getApprovedDraftStructureNote()
       : getSizingRunContextNote(generationContext?.sizingAssessment);
   const coverageReviewSummary = getCoverageReviewSummary(generationContext?.coverageReview);
+  const [runContextExpanded, setRunContextExpanded] = useState(false);
   const [showBulkRefine, setShowBulkRefine] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [isBulkRefining, setIsBulkRefining] = useState(false);
@@ -1544,6 +1605,7 @@ export function MainContent({
   const restructurePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restructureStartedAtRef = useRef<number>(0);
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<Set<string>>(new Set());
+  const [restructureMode, setRestructureMode] = useState(false);
 
   useEffect(() => {
     setSelectedFeatureIds((previous) => {
@@ -1555,6 +1617,12 @@ export function MainContent({
       return next;
     });
   }, [features]);
+
+  useEffect(() => {
+    const hasWarnings = coverageReviewSummary?.tone === 'warning'
+      || (generationContext?.remainingBlockingIssues?.length ?? 0) > 0;
+    setRunContextExpanded(hasWarnings);
+  }, [generationContext]);
 
   const persistConversationFeatures = React.useCallback((
     nextFeatures: Feature[],
@@ -2057,6 +2125,8 @@ export function MainContent({
             return annotated;
           });
           setShowRestructure(false);
+          setRestructureMode(false);
+          setSelectedFeatureIds(new Set());
           setRestructureInput('');
           setRestructureProgress('');
           setIsRestructuring(false);
@@ -2260,18 +2330,30 @@ export function MainContent({
                 <Download className="w-3.5 h-3.5" />
                 Export
               </motion.button>
-              <motion.button
-                onClick={() => {
-                  setRestructureScope(selectedFeatureIds.size > 0 ? 'selected' : 'all');
-                  setShowRestructure(true);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
-                whileTap={{ scale: 0.97 }}
-                title={selectedFeatureIds.size > 0 ? `Restructure selected features (${selectedFeatureIds.size}) or the whole canvas` : 'Restructure the feature set'}
-              >
-                <RefreshCcw className="w-3.5 h-3.5" />
-                {selectedFeatureIds.size > 0 ? `Restructure Selected (${selectedFeatureIds.size})` : 'Restructure'}
-              </motion.button>
+              {restructureMode ? (
+                <motion.button
+                  onClick={() => {
+                    setRestructureScope(selectedFeatureIds.size > 0 ? 'selected' : 'all');
+                    setShowRestructure(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand)] transition hover:bg-white/90"
+                  whileTap={{ scale: 0.97 }}
+                  title={selectedFeatureIds.size > 0 ? `Restructure selected features (${selectedFeatureIds.size})` : 'Restructure the whole canvas'}
+                >
+                  <RefreshCcw className="w-3.5 h-3.5" />
+                  {selectedFeatureIds.size > 0 ? `Restructure (${selectedFeatureIds.size} selected)` : 'Restructure all'}
+                </motion.button>
+              ) : (
+                <motion.button
+                  onClick={() => setRestructureMode(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
+                  whileTap={{ scale: 0.97 }}
+                  title="Select features to merge or split, or restructure the whole canvas"
+                >
+                  <RefreshCcw className="w-3.5 h-3.5" />
+                  Restructure
+                </motion.button>
+              )}
               <motion.button
                 onClick={() => setShowBulkRefine(true)}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/70"
@@ -2288,13 +2370,13 @@ export function MainContent({
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         <AnimatePresence mode="wait">
-          {isGenerating ? (
+          {isGenerating && !retryingFeatureId ? (
             workflowStage === 'generation' ? (
-              <GeneratingPipeline 
-                meta={generationProgressMeta || null} 
-                progress={progress} 
-                title={loadingTitle} 
-                onCancel={onCancelLoading} 
+              <GeneratingPipeline
+                meta={generationProgressMeta || null}
+                progress={progress}
+                title={loadingTitle}
+                onCancel={onCancelLoading}
                 canCancel={canCancelLoading}
                 projectKey={projectKey}
               />
@@ -2345,97 +2427,131 @@ export function MainContent({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="rounded-xl border border-[var(--rf-border)] bg-white/65 px-4 py-3 backdrop-blur-sm">
-                  <div className="flex flex-wrap items-center gap-3">
+                <div className="rounded-xl border border-[var(--rf-border)] bg-white/65 backdrop-blur-sm overflow-hidden">
+                  {/* Collapsed header — always visible */}
+                  <button
+                    type="button"
+                    onClick={() => setRunContextExpanded(v => !v)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/40 transition-colors"
+                  >
                     <span className="text-[13px] font-bold uppercase tracking-[0.18em] text-[var(--rf-brand)] shrink-0">Run context</span>
-                    <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-                    <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      {generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}
-                    </span>
-                    {(generationContext.wiDocsCount ?? 0) > 0 && (
-                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.wiDocsCount} work instruction{generationContext.wiDocsCount === 1 ? '' : 's'}
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                        {generationContext.projectKey === '*' ? 'Global' : generationContext.projectKey}
                       </span>
-                    )}
-                    {generationContext.domainContextApplied && (
-                      <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
-                        Guidance on
-                      </span>
-                    )}
-                    {generationContext.outputProfile && (
-                      <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
-                        {formatOutputProfileLabel(generationContext.outputProfile)}
-                      </span>
-                    )}
-                    {generationContext.attachmentIncluded && (
-                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        Attachment included
-                      </span>
-                    )}
-                    {generationContext.tokenUsage && (
-                      <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                        {generationContext.tokenUsage.total.toLocaleString()} tokens
-                      </span>
-                    )}
-                    {sizingRunContextNote && (
-                      <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[13px] font-semibold text-[var(--rf-brand)]">
-                        {sizingRunContextNote}
-                      </span>
-                    )}
-                    {coverageReviewSummary && (
-                      <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[13px] font-semibold ${
-                        coverageReviewSummary.tone === 'success'
-                          ? 'border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
-                          : 'border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] text-[var(--rf-warning)]'
-                      }`}>
-                        {coverageReviewSummary.label}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                  {coverageReviewSummary?.details.length ? (
-                    <div className="mt-3 rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3">
-                      {coverageReviewSummary.heading && (
-                        <div className="mb-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
-                          {coverageReviewSummary.heading}
-                        </div>
+                      {(coverageReviewSummary?.tone === 'warning' || (generationContext.remainingBlockingIssues?.length ?? 0) > 0) && (
+                        <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-warning)] shrink-0" />
                       )}
-                      {coverageReviewSummary.details.map((detail, index) => (
-                        <div key={`${detail}-${index}`} className={`flex items-start gap-2 text-[13px] text-[var(--rf-text-secondary)]${index > 0 ? ' mt-1.5' : ''}`}>
-                          <span className="mt-0.5 shrink-0 text-[var(--rf-warning)]">•</span>
-                          <span>{normalizeDisplayText(detail)}</span>
-                        </div>
-                      ))}
                     </div>
-                  ) : null}
-                  {(generationContext.autoRepairedIssues?.length || generationContext.remainingBlockingIssues?.length) ? (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {(generationContext.autoRepairedIssues?.length ?? 0) > 0 && (
-                        <div className="rounded-xl border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
-                          <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Resolved automatically</div>
-                          {(generationContext.autoRepairedIssues ?? []).map((item, index) => (
-                            <div key={`auto-repair-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
-                              {normalizeDisplayText(item)}
+                    <ChevronDown className={`w-4 h-4 text-[var(--rf-text-tertiary)] shrink-0 transition-transform duration-200 ${runContextExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Expanded content */}
+                  {runContextExpanded && (
+                    <div className="px-4 pb-3 space-y-3 border-t border-[var(--rf-border-subtle)]">
+                      <div className="flex flex-wrap items-center gap-1.5 pt-3">
+                        {(generationContext.wiDocsCount ?? 0) > 0 && (
+                          <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                            {generationContext.wiDocsCount} work instruction{generationContext.wiDocsCount === 1 ? '' : 's'}
+                          </span>
+                        )}
+                        {generationContext.domainContextApplied && (
+                          <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
+                            Guidance on
+                          </span>
+                        )}
+                        {generationContext.outputProfile && (
+                          <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
+                            {formatOutputProfileLabel(generationContext.outputProfile)}
+                          </span>
+                        )}
+                        {generationContext.attachmentIncluded && (
+                          <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                            Attachment included
+                          </span>
+                        )}
+                        {generationContext.tokenUsage && (
+                          <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                            {generationContext.tokenUsage.total.toLocaleString()} tokens
+                          </span>
+                        )}
+                        {sizingRunContextNote && (
+                          <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
+                            {sizingRunContextNote}
+                          </span>
+                        )}
+                        {coverageReviewSummary && (
+                          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[12px] font-semibold ${
+                            coverageReviewSummary.tone === 'success'
+                              ? 'border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
+                              : 'border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] text-[var(--rf-warning)]'
+                          }`}>
+                            {coverageReviewSummary.label}
+                          </span>
+                        )}
+                      </div>
+                      {coverageReviewSummary?.details.length ? (
+                        <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3">
+                          {coverageReviewSummary.heading && (
+                            <div className="mb-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
+                              {coverageReviewSummary.heading}
+                            </div>
+                          )}
+                          {coverageReviewSummary.details.map((detail, index) => (
+                            <div key={`${detail}-${index}`} className={`flex items-start gap-2 text-[13px] text-[var(--rf-text-secondary)]${index > 0 ? ' mt-1.5' : ''}`}>
+                              <span className="mt-0.5 shrink-0 text-[var(--rf-warning)]">•</span>
+                              <span>{normalizeDisplayText(detail)}</span>
                             </div>
                           ))}
                         </div>
-                      )}
-                      {(generationContext.remainingBlockingIssues?.length ?? 0) > 0 && (
-                        <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
-                          <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
-                            {generationContext.requiresUserDecision ? 'Needs input' : 'Remaining blockers'}
-                          </div>
-                          {(generationContext.remainingBlockingIssues ?? []).map((item, index) => (
-                            <div key={`blocking-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
-                              {normalizeDisplayText(item)}
+                      ) : null}
+                      {(generationContext.autoRepairedIssues?.length || generationContext.remainingBlockingIssues?.length) ? (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {(generationContext.autoRepairedIssues?.length ?? 0) > 0 && (
+                            <div className="rounded-xl border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                              <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Resolved automatically</div>
+                              {(generationContext.autoRepairedIssues ?? []).map((item, index) => (
+                                <div key={`auto-repair-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
+                                  {normalizeDisplayText(item)}
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          )}
+                          {(generationContext.remainingBlockingIssues?.length ?? 0) > 0 && (
+                            <div className="rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.06)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                              <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">
+                                {generationContext.requiresUserDecision ? 'Needs input' : 'Remaining blockers'}
+                              </div>
+                              {(generationContext.remainingBlockingIssues ?? []).map((item, index) => (
+                                <div key={`blocking-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
+                                  {normalizeDisplayText(item)}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ) : null}
                     </div>
-                  ) : null}
+                  )}
                 </div>
               </motion.div>
+            )}
+
+            {restructureMode && (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] px-4 py-2.5">
+                <span className="text-[13px] font-semibold text-[var(--rf-brand)]">
+                  {selectedFeatureIds.size > 0
+                    ? `${selectedFeatureIds.size} feature${selectedFeatureIds.size === 1 ? '' : 's'} selected — click Restructure in the toolbar`
+                    : 'Select features to merge or split, then click Restructure in the toolbar'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setRestructureMode(false); setSelectedFeatureIds(new Set()); }}
+                  className="text-[12px] font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] transition shrink-0"
+                >
+                  Cancel
+                </button>
+              </div>
             )}
 
             {features.map((feature, idx) => {
@@ -2443,6 +2559,7 @@ export function MainContent({
               const draft = editDraft;
               const featureNeedsArRetry = feature.arGenerationStatus === 'failed';
               const featureRetrying = feature.arGenerationStatus === 'retrying';
+              const isThisFeatureRetrying = retryingFeatureId === feature.id;
 
               return (
                 <motion.div
@@ -2496,26 +2613,28 @@ export function MainContent({
                           />
                         ) : (
                           <div className="flex flex-1 min-w-0 items-start gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setSelectedFeatureIds((previous) => {
-                                  const next = new Set(previous);
-                                  if (next.has(feature.id)) next.delete(feature.id);
-                                  else next.add(feature.id);
-                                  return next;
-                                });
-                              }}
-                              className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border transition ${
-                                selectedFeatureIds.has(feature.id)
-                                  ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                                  : 'border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)]'
-                              }`}
-                              title={selectedFeatureIds.has(feature.id) ? 'Deselect for restructure' : 'Select for restructure'}
-                            >
-                              {selectedFeatureIds.has(feature.id) ? <Check className="h-3.5 w-3.5" /> : <span className="h-2.5 w-2.5 rounded-sm border border-current/40" />}
-                            </button>
+                            {restructureMode && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedFeatureIds((previous) => {
+                                    const next = new Set(previous);
+                                    if (next.has(feature.id)) next.delete(feature.id);
+                                    else next.add(feature.id);
+                                    return next;
+                                  });
+                                }}
+                                className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition ${
+                                  selectedFeatureIds.has(feature.id)
+                                    ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                                    : 'border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)]'
+                                }`}
+                                title={selectedFeatureIds.has(feature.id) ? 'Deselect for restructure' : 'Select for restructure'}
+                              >
+                                {selectedFeatureIds.has(feature.id) ? <Check className="h-3.5 w-3.5" /> : <span className="h-2.5 w-2.5 rounded-sm border border-current/40" />}
+                              </button>
+                            )}
                             <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
@@ -2625,7 +2744,20 @@ export function MainContent({
                         </div>
                       )}
 
-                      {featureNeedsArRetry && (
+                      {isThisFeatureRetrying && (
+                        <div className="mb-4 p-4 rounded-xl bg-[var(--rf-brand-muted)] border border-[var(--rf-brand-subtle)] flex items-center gap-3">
+                          <div className="h-4 w-4 rounded-full border-2 border-[var(--rf-brand)]/30 border-t-[var(--rf-brand)] animate-spin shrink-0" />
+                          <div className="text-[13px] font-semibold text-[var(--rf-brand)]">
+                            Retrying acceptance requirements…
+                            {generationProgressMeta?.arProgress && (
+                              <span className="ml-2 text-[12px] font-normal text-[var(--rf-text-tertiary)]">
+                                {generationProgressMeta.arProgress.completed} of {generationProgressMeta.arProgress.total} complete
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {featureNeedsArRetry && !isThisFeatureRetrying && (
                         <div className="mb-4 p-4 rounded-xl bg-[var(--rf-warning-subtle)] border border-[rgba(160,81,30,0.12)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="flex items-start gap-2 text-[var(--rf-warning)] font-bold text-sm">
                             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -2907,7 +3039,7 @@ export function MainContent({
           <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
             <motion.div
               className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
-              onClick={!isRestructuring ? () => setShowRestructure(false) : undefined}
+              onClick={!isRestructuring ? () => { setShowRestructure(false); setRestructureMode(false); setSelectedFeatureIds(new Set()); } : undefined}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2926,7 +3058,7 @@ export function MainContent({
                     <span className="text-sm font-bold text-[var(--rf-text)]">Restructure features</span>
                   </div>
                   {!isRestructuring && (
-                    <button onClick={() => setShowRestructure(false)} className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]">
+                    <button onClick={() => { setShowRestructure(false); setRestructureMode(false); setSelectedFeatureIds(new Set()); }} className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]">
                       <X className="h-4 w-4" />
                     </button>
                   )}

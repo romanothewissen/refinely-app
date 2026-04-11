@@ -24,6 +24,7 @@ export const api = {
     clarifyAnswers?: unknown[];
     attachmentText?: string;
     outputProfileOverride?: OutputProfile;
+    pauseForDraftReview?: boolean;
     projectKey?: string;
     projectKeys?: string[];
     clarifyDiscoveryProfile?: unknown;

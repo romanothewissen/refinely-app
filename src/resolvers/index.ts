@@ -494,6 +494,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     config,
     license: context?.license,
     outputProfileOverride: payload?.outputProfileOverride,
+    pauseForDraftReview: payload?.pauseForDraftReview ?? undefined,
     goldExamples: '',   // fetched inside queue consumer
     wiContext: '',      // fetched inside queue consumer
     projectKey: authorizedProjects.projectKey,
