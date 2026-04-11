@@ -607,7 +607,7 @@ test('decomposition prompt treats features as independently valuable and keeps s
   assert.match(prompt, /independent business value/i);
   assert.match(prompt, /similar stories, work instructions, or domain context/i);
   assert.match(prompt, /work instructions or operational guidance/i);
-  assert.match(prompt, /Surface independently valuable feature slices without inventing micro-features/i);
+  assert.match(prompt, /Surface independently valuable business capabilities without inventing micro-features/i);
   assert.match(prompt, /do not hide meaningful workflow branches inside one oversized feature/i);
   assert.doesNotMatch(prompt, /Output exactly/i);
 });

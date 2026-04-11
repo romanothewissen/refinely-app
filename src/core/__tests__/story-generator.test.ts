@@ -681,7 +681,7 @@ test('generation progress copy summarizes coverage and discovery context in plai
   }), ['2 projects', 'Guidance on', 'Attachment included', '3 work instructions', '1 similar story']);
 });
 
-test('shouldPauseForDraftReview pauses when pass-1 draft materially exceeds the triage forecast', () => {
+test('shouldPauseForDraftReview always returns false (deprecated — pipeline auto-repairs internally)', () => {
   assert.equal(shouldPauseForDraftReview({
     draftFeatureCount: 7,
     triageFeatureTarget: 4,
@@ -700,32 +700,8 @@ test('shouldPauseForDraftReview pauses when pass-1 draft materially exceeds the 
       reasonCodes: [],
       reasons: [],
     },
-  }), true);
-});
-
-test('shouldPauseForDraftReview does not pause for normal pass-1 variance', () => {
-  assert.equal(shouldPauseForDraftReview({
-    draftFeatureCount: 5,
-    triageFeatureTarget: 4,
-    sizingAssessment: {
-      stage: 'decomposition',
-      archetype: 'workflow_area',
-      verdict: 'ok',
-      confidence: 'medium',
-      preferredFeatureRange: { min: 3, max: 6 },
-      preferredArDepth: 'standard',
-      minimumPreservedFeatureCount: 3,
-      explicitSplitSignals: [],
-      featureCount: 5,
-      acceptanceRequirementCount: 0,
-      averageAcceptanceRequirementsPerFeature: 0,
-      reasonCodes: [],
-      reasons: [],
-    },
   }), false);
-});
 
-test('shouldPauseForDraftReview pauses when sizing assessment confidently marks the draft oversized', () => {
   assert.equal(shouldPauseForDraftReview({
     draftFeatureCount: 6,
     triageFeatureTarget: 6,
@@ -744,7 +720,7 @@ test('shouldPauseForDraftReview pauses when sizing assessment confidently marks 
       reasonCodes: ['too_many_features'],
       reasons: [{ code: 'too_many_features', detail: 'The draft contains more features than the preferred sizing range.' }],
     },
-  }), true);
+  }), false);
 });
 
 test('generation progress copy no longer surfaces automatic consolidation notes', () => {

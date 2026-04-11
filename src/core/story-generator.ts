@@ -265,6 +265,7 @@ export class AcceptanceRequirementsGenerationError extends Error {
   }
 }
 
+/** @deprecated Draft review pause has been removed — pipeline flows straight through. */
 export class Pass1DraftReviewRequiredError extends Error {
   draftFeatures: Feature[];
   draftReview: DraftReviewMetadata;
@@ -591,6 +592,21 @@ function pushPromptSection(parts: string[], heading: string, text: string, maxCh
   const trimmed = trimPromptText(text, maxChars);
   if (!trimmed) return;
   parts.push(`${heading}:\n${trimmed}`);
+}
+
+function extractDiscoveredRoles(answers?: ClarifyAnswer[]): string[] {
+  if (!answers?.length) return [];
+  const roles = new Set<string>();
+  for (const a of answers) {
+    if (a.categoryKey !== 'user_personas') continue;
+    const text = (a.answer || a.customAnswer || '').trim();
+    if (text) roles.add(text);
+    for (const s of a.selectedSuggestions ?? []) {
+      const trimmed = s.trim();
+      if (trimmed) roles.add(trimmed);
+    }
+  }
+  return [...roles];
 }
 
 function formatClarifyAnswersForPrompt(answers: ClarifyAnswer[]): string {
@@ -1124,6 +1140,7 @@ async function runParallelArPass(input: {
     piiMaskingEnabled?: boolean;
   };
   onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
+  discoveredRoles?: string[];
 }): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
   const systemPrompt = buildArSystemPrompt({
     domainContext: input.domainContext,
@@ -1131,7 +1148,7 @@ async function runParallelArPass(input: {
   });
 
   const model = getTierModel(input.generatorConfig.arModel, input.tier);
-  const maxTokens = 3072;
+  const maxTokens = 4096;
 
   // Build per-feature tasks
   const tasks = input.features.map((feature) => ({
@@ -1154,6 +1171,7 @@ async function runParallelArPass(input: {
       siblingFeatures: input.features
         .filter(f => f.id !== feature.id)
         .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
+      discoveredRoles: input.discoveredRoles,
       arObligations: input.arObligations,
     }),
   }));
@@ -1237,6 +1255,7 @@ async function backfillMissingAcceptanceRequirements(input: {
   arObligations?: ArObligations;
   generatorConfig: TenantConfig['generatorConfig'];
   tier: TenantConfig['tier'];
+  discoveredRoles?: string[];
   providerOpts: {
     provider: TenantConfig['generatorConfig']['provider'];
     geminiApiKey?: string;
@@ -1308,10 +1327,11 @@ async function backfillMissingAcceptanceRequirements(input: {
           siblingFeatures: input.features
             .filter(f => f.id !== feature.id)
             .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
+          discoveredRoles: input.discoveredRoles,
           arObligations: input.arObligations,
         }),
         model,
-        maxTokens: 3072,
+        maxTokens: 4096,
         providerOpts: input.providerOpts,
       }).then(async (result) => {
         const featureId = feature.id;
@@ -2064,23 +2084,14 @@ export function capDiscoveryProfileFloorForSmallAsk(input: {
   return input.triage;
 }
 
-export function shouldPauseForDraftReview(input: {
+/** @deprecated Draft review pause has been removed — pipeline auto-repairs internally. */
+export function shouldPauseForDraftReview(_input: {
   draftFeatureCount: number;
   triageFeatureTarget?: number;
   sizingAssessment: SizingAssessmentSnapshot;
   overlapCount?: number;
 }): boolean {
-  const triageTarget = Math.max(1, Math.round(input.triageFeatureTarget ?? 0));
-  const exceedsForecast = triageTarget > 0 && input.draftFeatureCount > Math.ceil(triageTarget * 1.5);
-  const assessmentSignalsInflation =
-    input.sizingAssessment.verdict === 'oversized'
-    && (input.sizingAssessment.confidence === 'high' || input.sizingAssessment.confidence === 'medium')
-    && input.sizingAssessment.featureCount > input.sizingAssessment.preferredFeatureRange.max;
-  // Any detected feature-level overlap is grounds for a draft review — we don't want Pass 2 to burn
-  // LLM calls on overlapping features since the ARs will unavoidably duplicate.
-  const hasOverlaps = (input.overlapCount ?? 0) > 0;
-
-  return exceedsForecast || assessmentSignalsInflation || hasOverlaps;
+  return false;
 }
 
 function toRawFeature(feature: Feature): RawFeature {
@@ -2648,12 +2659,17 @@ export async function generateFeatures(opts: {
   outputProfileOverride?: OutputProfile;
   advisoryTriage?: AdvisoryTriageContract;
   precomputedDraftFeatures?: Feature[];
+  /** @deprecated No longer used — pipeline flows straight through without review pause. */
   precomputedDraftReview?: DraftReviewMetadata;
+  /** @deprecated No longer used — pipeline flows straight through without review pause. */
   draftReviewDecision?: DraftReviewDecision;
+  /** @deprecated No longer used — pipeline flows straight through without review pause. */
   draftReviewSelectedFeatureIds?: string[];
   allowPartialArFailure?: boolean;
   priorStageDurationsMs?: GenerationStageDurationsMs;
+  /** @deprecated No longer used — pipeline flows straight through without review pause. */
   pauseForDraftReview?: boolean;
+  /** @deprecated No longer used — pipeline flows straight through without review pause. */
   onPass1Complete?: (draftFeatures: Feature[], draftReview: DraftReviewMetadata, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
   onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
@@ -2668,13 +2684,8 @@ export async function generateFeatures(opts: {
     outputProfileOverride,
     advisoryTriage,
     precomputedDraftFeatures,
-    precomputedDraftReview,
-    draftReviewDecision,
-    draftReviewSelectedFeatureIds,
     allowPartialArFailure,
     priorStageDurationsMs,
-    pauseForDraftReview,
-    onPass1Complete,
     onArProgress,
     shouldCancel,
   } = opts;
@@ -2716,7 +2727,7 @@ export async function generateFeatures(opts: {
   let pass1ResultUsage = { input: 0, output: 0 };
   let pass1Features: RawFeature[];
   let pass1DraftFeatures: Feature[];
-  let openDecisions: OpenDecision[] = precomputedDraftReview?.openDecisions ?? [];
+  let openDecisions: OpenDecision[] = [];
   const autoRepairedIssues: string[] = [];
   let arObligations: ArObligations = buildArObligations({
     requirement,
@@ -2841,77 +2852,51 @@ export async function generateFeatures(opts: {
       autoRepairedIssues.push('Tightened overlapping draft features before acceptance requirements were written.');
     }
 
+    // Auto-broaden: run an LLM coverage audit to add missing business capability dimensions
+    const hasCoverageGaps =
+      !draftReview.openDecisions?.some((decision) => decision.blocking)
+      && pass1DraftFeatures.length >= 2;
+    if (hasCoverageGaps) {
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+      const broadened = await reviewDraftFeatureSet({
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        similarStoriesText,
+        wiContextText,
+        features: pass1DraftFeatures,
+        action: 'broaden',
+        currentReviewMeta: draftReview,
+        outputProfile,
+        config,
+        providerOpts,
+        shouldCancel,
+      });
+      if (broadened.features.length > pass1DraftFeatures.length) {
+        pass1DraftFeatures = broadened.features;
+        pass1Features = pass1DraftFeatures.map(toRawFeature);
+        openDecisions = mergeOpenDecisions(
+          broadened.reviewMeta.openDecisions ?? [],
+          synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+        );
+        arObligations = buildArObligations({
+          requirement,
+          clarifyAnswers,
+          wiContextText,
+          openDecisions,
+        });
+        pass1ResultUsage = {
+          input: pass1ResultUsage.input + broadened.usage.input,
+          output: pass1ResultUsage.output + broadened.usage.output,
+        };
+        autoRepairedIssues.push('Broadened draft features to cover missing business capability dimensions.');
+      }
+    }
+
     stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
-
-    const requiresUserDecision =
-      Boolean(draftReview.openDecisions?.some((decision) => decision.blocking))
-      || Boolean(draftReview.coverageFindings?.overlapWarnings?.length)
-      || Boolean(draftReview.coverageFindings?.duplicatedThemes?.length);
-
-    if (requiresUserDecision || pauseForDraftReview) {
-      if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, draftReview, stageDurationsMs);
-      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-      throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, draftReview, stageDurationsMs);
-    }
-  } else if (draftReviewDecision && draftReviewDecision !== 'continue') {
-    const reviewStartedAt = Date.now();
-    const reviewResult = await reviewDraftFeatureSet({
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      similarStoriesText,
-      wiContextText,
-      features: precomputedDraftFeatures,
-      action: draftReviewDecision,
-      selectedFeatureIds: draftReviewSelectedFeatureIds,
-      currentReviewMeta: precomputedDraftReview,
-      outputProfile,
-      config,
-      providerOpts,
-      shouldCancel,
-    });
-    pass1DraftFeatures = reviewResult.features;
-    pass1Features = pass1DraftFeatures.map(toRawFeature);
-    openDecisions = mergeOpenDecisions(
-      reviewResult.reviewMeta.openDecisions ?? [],
-      synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
-    );
-    arObligations = buildArObligations({
-      requirement,
-      clarifyAnswers,
-      wiContextText,
-      openDecisions,
-    });
-    pass1ResultUsage = reviewResult.usage;
-    stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - reviewStartedAt);
-
-    const updatedReviewMeta = {
-      ...reviewResult.reviewMeta,
-      openDecisions,
-    };
-    const requiresUserDecision =
-      Boolean(updatedReviewMeta.openDecisions?.some((decision) => decision.blocking))
-      || Boolean(updatedReviewMeta.coverageFindings?.overlapWarnings?.length)
-      || Boolean(updatedReviewMeta.coverageFindings?.duplicatedThemes?.length);
-
-    if (requiresUserDecision || pauseForDraftReview) {
-      if (onPass1Complete) await onPass1Complete(pass1DraftFeatures, updatedReviewMeta, stageDurationsMs);
-      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-      throw new Pass1DraftReviewRequiredError(pass1DraftFeatures, updatedReviewMeta, stageDurationsMs);
-    }
   } else {
     pass1DraftFeatures = precomputedDraftFeatures;
     pass1Features = precomputedDraftFeatures.map(toRawFeature);
-    openDecisions = mergeOpenDecisions(
-      precomputedDraftReview?.openDecisions ?? [],
-      synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
-    );
-    arObligations = buildArObligations({
-      requirement,
-      clarifyAnswers,
-      wiContextText,
-      openDecisions,
-    });
   }
 
   // ── Pass 2: Acceptance Requirements ──
@@ -2938,6 +2923,7 @@ export async function generateFeatures(opts: {
       tier: config.tier,
       providerOpts,
       onArProgress,
+      discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
     stageDurationsMs.acceptanceRequirements = (stageDurationsMs.acceptanceRequirements ?? 0) + (Date.now() - arStartedAt);
@@ -2954,6 +2940,7 @@ export async function generateFeatures(opts: {
       arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
+      discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
       providerOpts,
       onArProgress,
     });
@@ -2973,6 +2960,7 @@ export async function generateFeatures(opts: {
       arPlan: effectiveArPlan,
       generatorConfig,
       tier: config.tier,
+      discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
       providerOpts,
       onArProgress,
     });

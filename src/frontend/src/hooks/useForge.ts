@@ -24,18 +24,12 @@ export const api = {
     clarifyAnswers?: unknown[];
     attachmentText?: string;
     outputProfileOverride?: OutputProfile;
-    pauseForDraftReview?: boolean;
     projectKey?: string;
     projectKeys?: string[];
     clarifyDiscoveryProfile?: unknown;
     clarifySizingContract?: unknown;
     clarifyAdvisoryTriage?: unknown;
   }) => invoke('startGeneration', payload),
-  resumeGeneration: (payload: {
-    sessionId: string;
-    decision: 'continue' | 'broaden' | 'tighten' | 'merge_selected' | 'split_selected';
-    selectedFeatureIds?: string[];
-  }) => invoke('resumeGeneration', payload),
   retryFailedFeatureGeneration: (payload: {
     sessionId: string;
     featureId: string;

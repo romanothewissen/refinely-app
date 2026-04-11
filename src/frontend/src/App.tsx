@@ -78,7 +78,6 @@ type WorkflowStage =
   | 'sufficiency_check'
   | 'clarify_round_2'
   | 'generation'
-  | 'generation_review'
   | 'blocked';
 
 function normalizeProjectKeys(projectKeys: string[]): string[] {
@@ -462,7 +461,7 @@ function LegacyApp({
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
-  const [reviewBeforeARs, setReviewBeforeARs] = useState(false);
+  const [reviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
@@ -759,12 +758,8 @@ function LegacyApp({
       window.setTimeout(() => { void loadHistory(); }, 1500);
       loadUsage();
     },
-    ({ payload }) => {
-      setGenerationProgressMeta(payload ?? null);
-      setPendingSessionId(null);
-      setRetryingFeatureId(null);
-      setIsWorking(false);
-      setWorkflowStage('generation_review');
+    () => {
+      // Draft review pause removed — pipeline flows straight through
     },
     (errMsg) => {
       setGenerationError(errMsg);
@@ -790,7 +785,7 @@ function LegacyApp({
       return;
     }
 
-    if (workflowStage !== 'generation_review') {
+    if (workflowStage === 'idle') {
       setGenerationProgressMeta(null);
     }
   }, [liveGenerationPayload, workflowStage]);
@@ -1261,7 +1256,6 @@ function LegacyApp({
         clarifyAnswers,
         attachmentText,
         outputProfileOverride: runOutputProfileOverride,
-        pauseForDraftReview: reviewBeforeARs || undefined,
         projectKey,
         projectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
@@ -1283,37 +1277,6 @@ function LegacyApp({
       setIsWorking(false);
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
-      setWorkflowStage('blocked');
-    }
-  };
-
-  const resumeGenerationFromDraftReview = async (decision: DraftReviewDecision, selectedFeatureIds?: string[]) => {
-    const sid = sessionIdRef.current;
-    setIsWorking(true);
-    setWorkflowRunId(prev => prev + 1);
-    setGenerationError(null);
-    setPendingClarifySessionId(null);
-    setWorkflowStage('generation');
-
-    try {
-      setPendingSessionId(sid);
-      const res = await api.resumeGeneration({
-        sessionId: sid,
-        decision,
-        selectedFeatureIds,
-      }) as any;
-      if (!res?.success) {
-        setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
-        setIsWorking(false);
-        setPendingSessionId(null);
-        setWorkflowStage('blocked');
-        return;
-      }
-      setGenerationWarning(res?.warning || null);
-    } catch (err: any) {
-      setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
-      setIsWorking(false);
-      setPendingSessionId(null);
       setWorkflowStage('blocked');
     }
   };
@@ -1551,11 +1514,7 @@ function LegacyApp({
               usage={usage}
               limits={limits}
               brandingLogoUrl={brandingLogoUrl}
-              workspaceOutputProfile={workspaceOutputProfile}
-              runOutputProfileOverride={runOutputProfileOverride}
-              setRunOutputProfileOverride={setRunOutputProfileOverride}
               reviewBeforeARs={reviewBeforeARs}
-              setReviewBeforeARs={setReviewBeforeARs}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
               projectKeys={projectKeys}
@@ -1703,11 +1662,17 @@ function LegacyApp({
                   workflowTokenUsage={workflowTokenUsage}
                   isAdmin={isAdmin}
                   onOpenSettings={openSettings}
-                  onDraftReviewDecision={resumeGenerationFromDraftReview}
                   onRetryFailedFeature={retryFailedFeatureGeneration}
                   retryingFeatureId={retryingFeatureId}
                   onUndoLastAiChange={handleUndoLastAiChange}
                   undoActionLabel={lastAiChange?.label || null}
+                  onRegenerate={(feedback) => {
+                    const augmented = requirement?.trim()
+                      ? `${requirement.trim()}\n\nADDITIONAL FEEDBACK FOR REGENERATION:\n${feedback}`
+                      : feedback;
+                    setRequirement(augmented);
+                    requestAnimationFrame(() => handleStartBrainstorm());
+                  }}
                   onWorkflowTokenUsage={(usageDelta) => {
                     setWorkflowTokenUsage(prev => {
                       const base = prev || { input: 0, output: 0, total: 0 };

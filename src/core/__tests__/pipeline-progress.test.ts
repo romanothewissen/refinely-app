@@ -29,25 +29,8 @@ test('runOrderedConcurrentTasks preserves result order while respecting the conc
   assert.equal(progressTicks.at(-1), '4/4');
 });
 
-test('buildGenerationStartProgressUpdate seeds reviewed draft features into live generation progress', () => {
-  const reviewedDraftFeatures = [
-    {
-      id: 'feature-1',
-      summary: 'Manage incoming customer replies',
-      description: 'As a Support Specialist, I need customer replies linked to the right case so that the case history stays complete.',
-      acceptanceRequirements: [],
-      storyPoints: 3,
-    },
-  ];
-
+test('buildGenerationStartProgressUpdate produces decomposition stage for fresh generation', () => {
   const update = buildGenerationStartProgressUpdate({
-    reviewedDraftFeatures,
-    reviewedDraftReview: {
-      unresolvedAmbiguities: [],
-      featureNotes: [],
-      reviewMessage: 'Looks good.',
-    },
-    reviewedDraftDecision: 'continue',
     advisorySizingContract: {
       shape: 'narrow',
       complexity: 'medium',
@@ -63,15 +46,6 @@ test('buildGenerationStartProgressUpdate seeds reviewed draft features into live
     },
   });
 
-  assert.equal(update.message, 'Continuing with the reviewed draft structure…');
-  assert.equal(update.payload.stage, 'acceptance_requirements');
-  assert.equal(update.payload.draftFeatureCount, 1);
-  assert.deepEqual(update.payload.draftFeatures, [
-    {
-      id: 'feature-1',
-      summary: 'Manage incoming customer replies',
-      description: 'As a Support Specialist, I need customer replies linked to the right case so that the case history stays complete.',
-      storyPoints: 3,
-    },
-  ]);
+  assert.equal(update.message, 'Planning feature structure from gathered context…');
+  assert.equal(update.payload.stage, 'decomposition');
 });

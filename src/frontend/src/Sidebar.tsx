@@ -21,11 +21,13 @@ interface SidebarProps {
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
   brandingLogoUrl?: string | null;
-  workspaceOutputProfile: OutputProfile;
-  runOutputProfileOverride: OutputProfile;
-  setRunOutputProfileOverride: (value: OutputProfile) => void;
-  reviewBeforeARs: boolean;
-  setReviewBeforeARs: (value: boolean) => void;
+  /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
+  workspaceOutputProfile?: OutputProfile;
+  /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
+  runOutputProfileOverride?: OutputProfile;
+  /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
+  setRunOutputProfileOverride?: (value: OutputProfile) => void;
+  reviewBeforeARs?: boolean;
   width?: number;
   originIssueKey?: string | null;
   projectKeys: string[];
@@ -53,35 +55,8 @@ const fadeUp = {
   }),
 };
 
-const OUTPUT_PROFILE_OPTIONS: Array<{
-  value: OutputProfile;
-  label: string;
-  shortLabel: string;
-  accent: string;
-  blurb: string;
-}> = [
-  {
-    value: 'business_first',
-    label: 'Business-first',
-    shortLabel: 'Business',
-    accent: 'linear-gradient(135deg, rgba(31,64,53,0.9), rgba(58,112,98,0.9))',
-    blurb: 'Clear business framing and outcome-led scope.',
-  },
-  {
-    value: 'balanced',
-    label: 'Balanced',
-    shortLabel: 'Balanced',
-    accent: 'linear-gradient(135deg, rgba(122,92,41,0.92), rgba(185,145,71,0.88))',
-    blurb: 'Mix business language with implementation signal.',
-  },
-  {
-    value: 'technical_first',
-    label: 'Technical-first',
-    shortLabel: 'Technical',
-    accent: 'linear-gradient(135deg, rgba(22,52,92,0.92), rgba(55,108,173,0.88))',
-    blurb: 'Sharper implementation detail and system specificity.',
-  },
-];
+/** @deprecated Output profile removed — capability-based decomposition handles style automatically */
+const _OUTPUT_PROFILE_OPTIONS = null; void _OUTPUT_PROFILE_OPTIONS;
 
 export function Sidebar({
   viewMode,
@@ -101,11 +76,10 @@ export function Sidebar({
   usage,
   limits,
   brandingLogoUrl,
-  workspaceOutputProfile,
-  runOutputProfileOverride,
-  setRunOutputProfileOverride,
+  workspaceOutputProfile: _workspaceOutputProfile,
+  runOutputProfileOverride: _runOutputProfileOverride,
+  setRunOutputProfileOverride: _setRunOutputProfileOverride,
   reviewBeforeARs,
-  setReviewBeforeARs,
   width,
   originIssueKey,
   projectKeys,
@@ -146,7 +120,6 @@ export function Sidebar({
     : 'Global Workspace';
   const runAttachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false);
-  const [sessionExpanded, setSessionExpanded] = React.useState(false);
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
     contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
   );
@@ -158,12 +131,6 @@ export function Sidebar({
     .map((project) => ({ key: project.key, count: cacheCountsByProject[project.key] ?? 0 }))
     .filter((entry) => entry.key);
   const totalCachedStories = cacheBreakdown.reduce((sum, entry) => sum + entry.count, 0);
-  const outputProfileLabel = runOutputProfileOverride === 'technical_first'
-    ? 'Technical-first'
-    : runOutputProfileOverride === 'balanced'
-      ? 'Balanced'
-      : 'Business-first';
-  const activeOutputProfile = OUTPUT_PROFILE_OPTIONS.find((option) => option.value === runOutputProfileOverride) ?? OUTPUT_PROFILE_OPTIONS[0];
   const usageCurrent = usage?.currentMonth ?? 0;
   const usageLimit = limits?.generationsPerMonth ?? 0;
   const usagePercentage = !usage || !limits || hasUnlimitedUsage || usageLimit <= 0
@@ -605,150 +572,7 @@ export function Sidebar({
           </div>
         </motion.div>
 
-        <motion.div
-          className="rf-sidebar-card overflow-hidden shrink-0"
-          variants={fadeUp}
-          initial="hidden"
-          animate="visible"
-          custom={2.7}
-        >
-          <button
-            type="button"
-            onClick={() => setSessionExpanded((value) => !value)}
-            className="flex w-full items-start justify-between gap-3 px-3.5 py-3 text-left"
-          >
-            <div className="min-w-0">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Session</div>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/72 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
-                  {activeOutputProfile.shortLabel}
-                </span>
-                <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/72 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
-                  {reviewBeforeARs ? 'Review first' : 'Auto continue'}
-                </span>
-              </div>
-            </div>
-            <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform ${sessionExpanded ? 'rotate-180' : ''}`} />
-          </button>
-          <AnimatePresence initial={false}>
-            {sessionExpanded && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="overflow-hidden border-t border-[var(--rf-border-subtle)]"
-              >
-                <div className="flex flex-col gap-3 px-3.5 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Output style</div>
-                      <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
-                        {activeOutputProfile.label} for this run
-                      </div>
-                    </div>
-                    <div
-                      className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
-                      title={`Workspace default: ${workspaceOutputProfile === 'technical_first' ? 'Technical-first' : workspaceOutputProfile === 'balanced' ? 'Balanced' : 'Business-first'}`}
-                    >
-                      Workspace default
-                    </div>
-                  </div>
-                  <div
-                    className={`rounded-[20px] border border-[var(--rf-border)] bg-white/85 p-1.5 shadow-[0_10px_24px_-16px_rgba(43,89,74,0.45)] transition ${
-                      isWorking ? 'opacity-60' : ''
-                    }`}
-                    title={`Run output style: ${outputProfileLabel}`}
-                  >
-                    <div className="relative grid grid-cols-3 gap-1">
-                      {OUTPUT_PROFILE_OPTIONS.map((option) => {
-                        const selected = option.value === runOutputProfileOverride;
-                        return (
-                          <motion.button
-                            key={option.value}
-                            type="button"
-                            onClick={() => !isWorking && setRunOutputProfileOverride(option.value)}
-                            disabled={isWorking}
-                            className={`relative z-10 rounded-[16px] px-2.5 py-2 text-[11px] font-black tracking-[0.01em] transition ${
-                              selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                            }`}
-                            whileTap={isWorking ? undefined : { scale: 0.97 }}
-                          >
-                            {selected && (
-                              <motion.span
-                                layoutId="output-profile-slider"
-                                className="absolute inset-0 rounded-[16px] shadow-[0_10px_20px_-14px_rgba(31,64,53,0.95)]"
-                                style={{ background: option.accent }}
-                                transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-                              />
-                            )}
-                            <span className="relative z-10">{option.shortLabel}</span>
-                          </motion.button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2 px-1">
-                      <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)]">{activeOutputProfile.blurb}</span>
-                      <span className="h-1.5 w-7 rounded-full shrink-0" style={{ background: activeOutputProfile.accent }} />
-                    </div>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Readiness review</div>
-                      <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
-                        Stop after features when you want a manual coverage check.
-                      </div>
-                    </div>
-                    <span className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
-                      {reviewBeforeARs ? 'Manual stop' : 'Continuous'}
-                    </span>
-                  </div>
-                  <div
-                    className={`rounded-[20px] border border-[var(--rf-border)] bg-white/85 p-1.5 shadow-[0_10px_24px_-16px_rgba(43,89,74,0.35)] transition ${
-                      isWorking ? 'opacity-60' : ''
-                    }`}
-                  >
-                    <div className="relative grid grid-cols-2 gap-1">
-                      {[
-                        { value: false, label: 'Auto continue' },
-                        { value: true, label: 'Review first' },
-                      ].map((option) => {
-                        const selected = reviewBeforeARs === option.value;
-                        return (
-                          <motion.button
-                            key={option.label}
-                            type="button"
-                            onClick={() => !isWorking && setReviewBeforeARs(option.value)}
-                            disabled={isWorking}
-                            className={`relative z-10 rounded-[16px] px-2.5 py-2 text-[11px] font-black tracking-[0.01em] transition ${
-                              selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                            }`}
-                            whileTap={isWorking ? undefined : { scale: 0.97 }}
-                            title={option.value ? 'Pause and review features before generating requirements' : 'Continue directly into acceptance requirements'}
-                          >
-                            {selected && (
-                              <motion.span
-                                layoutId="review-mode-slider"
-                                className="absolute inset-0 rounded-[16px] shadow-[0_10px_20px_-14px_rgba(31,64,53,0.75)]"
-                                style={{
-                                  background: option.value
-                                    ? 'linear-gradient(135deg, rgba(122,92,41,0.92), rgba(185,145,71,0.88))'
-                                    : 'linear-gradient(135deg, rgba(31,64,53,0.9), rgba(58,112,98,0.9))',
-                                }}
-                                transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-                              />
-                            )}
-                            <span className="relative z-10">{option.label}</span>
-                          </motion.button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
+        {/* Output profile session card removed — capability-based decomposition handles output style automatically */}
 
         {/* ── Attachment parse state / error ── */}
         {(runAttachmentParseState || runAttachmentError) && (

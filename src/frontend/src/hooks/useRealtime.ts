@@ -12,7 +12,7 @@ export interface GenerationProgress {
 }
 
 export interface GenerationProgressPayload {
-  stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
+  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
@@ -42,7 +42,6 @@ const GENERATION_STAGE_ORDER: Array<NonNullable<GenerationProgressPayload['stage
   'context',
   'triage',
   'decomposition',
-  'draft_review',
   'acceptance_requirements',
 ];
 
@@ -292,7 +291,8 @@ export function useGenerationRealtime(
   sessionId: string | null,
   runId: number,
   onComplete: (payload: unknown) => void,
-  onReview: (payload: { message?: string; payload?: GenerationProgressPayload }) => void,
+  /** @deprecated Draft review pause removed — this callback is never invoked. */
+  _onReview: (payload: { message?: string; payload?: GenerationProgressPayload }) => void,
   onError: (message: string) => void,
   onCancel?: (message: string) => void,
 ) {
@@ -307,8 +307,6 @@ export function useGenerationRealtime(
   // Keep callbacks in refs so the polling interval always calls the latest version
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  const onReviewRef = useRef(onReview);
-  onReviewRef.current = onReview;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const onCancelRef = useRef(onCancel);
@@ -406,16 +404,6 @@ export function useGenerationRealtime(
             previous,
             (event.payload as GenerationProgressPayload | undefined) ?? null,
           ));
-        } else if (event.type === 'review') {
-          clearInterval(timerRef.current!);
-          timerRef.current = null;
-          setIsGenerating(false);
-          clearPendingProgressTimer();
-          visibleProgressRef.current = '';
-          setProgress('');
-          const reviewPayload = (event.payload as GenerationProgressPayload | undefined) ?? undefined;
-          setProgressPayload(reviewPayload ?? null);
-          onReviewRef.current({ message: event.message, payload: reviewPayload });
         } else if (event.type === 'cancelled') {
           clearInterval(timerRef.current!);
           timerRef.current = null;

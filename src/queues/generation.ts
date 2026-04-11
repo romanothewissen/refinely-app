@@ -14,7 +14,6 @@ import {
   GenerationCancelledError,
   generateFeatures,
   generateSessionTitle,
-  Pass1DraftReviewRequiredError,
 } from '../core/story-generator';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
@@ -34,7 +33,7 @@ import {
 } from '../services/project-selection';
 
 interface RealtimeEvent {
-  type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
+  type: 'progress' | 'complete' | 'error' | 'cancelled';
   sessionId: string;
   message?: string;
   pass?: 1 | 2;
@@ -42,7 +41,7 @@ interface RealtimeEvent {
 }
 
 interface GenerationProgressPayload {
-  stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
+  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
   outputProfile?: GenerationContextMeta['outputProfile'];
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
@@ -54,20 +53,6 @@ interface GenerationProgressPayload {
   failedFeatureIds?: string[];
   draftReview?: DraftReviewMetadata;
   stageDurationsMs?: GenerationStageDurationsMs;
-  resumeContext?: {
-    requirement: string;
-    clarifyAnswers: ClarifyAnswer[];
-    attachmentText: string;
-    projectKey: string;
-    projectKeys: string[];
-    outputProfileOverride?: GenerationContextMeta['outputProfile'];
-    draftFeatures: Feature[];
-    draftReview?: DraftReviewMetadata;
-    draftReviewIterations?: number;
-    sizingContract?: EffectiveSizingContract;
-    advisoryTriage?: AdvisoryTriageContract;
-    priorStageDurationsMs?: GenerationStageDurationsMs;
-  };
   sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
 }
 
@@ -166,9 +151,6 @@ function mapDraftFeatures(features: Feature[]): Array<Pick<Feature, 'id' | 'summ
 export function buildGenerationStartProgressUpdate(opts: {
   retryFeatureId?: string;
   retryFeature?: Feature;
-  reviewedDraftFeatures?: Feature[];
-  reviewedDraftReview?: DraftReviewMetadata;
-  reviewedDraftDecision?: GenerationEvent['reviewedDraftDecision'];
   outputProfile?: GenerationContextMeta['outputProfile'];
   advisorySizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
@@ -177,9 +159,6 @@ export function buildGenerationStartProgressUpdate(opts: {
   const {
     retryFeatureId,
     retryFeature,
-    reviewedDraftFeatures,
-    reviewedDraftReview,
-    reviewedDraftDecision,
     outputProfile,
     advisorySizingContract,
     advisoryTriage,
@@ -188,25 +167,15 @@ export function buildGenerationStartProgressUpdate(opts: {
 
   const seededDraftFeatures = retryFeature
     ? mapDraftFeatures([retryFeature])
-    : reviewedDraftFeatures?.length
-      ? mapDraftFeatures(reviewedDraftFeatures)
-      : [];
+    : [];
 
   const stage: GenerationProgressPayload['stage'] = retryFeatureId
     ? 'acceptance_requirements'
-    : reviewedDraftFeatures?.length && reviewedDraftDecision === 'continue'
-      ? 'acceptance_requirements'
-      : reviewedDraftFeatures?.length
-        ? 'draft_review'
-        : 'decomposition';
+    : 'decomposition';
 
   const message = retryFeatureId
     ? 'Retrying acceptance requirements for the selected feature…'
-    : reviewedDraftFeatures?.length && reviewedDraftDecision && reviewedDraftDecision !== 'continue'
-      ? 'Revising the draft structure from your review…'
-      : reviewedDraftFeatures?.length
-        ? 'Continuing with the reviewed draft structure…'
-        : 'Planning feature structure from gathered context…';
+    : 'Planning feature structure from gathered context…';
 
   return {
     message,
@@ -220,7 +189,6 @@ export function buildGenerationStartProgressUpdate(opts: {
         ? {
             draftFeatures: seededDraftFeatures,
             draftFeatureCount: seededDraftFeatures.length,
-            draftReview: reviewedDraftReview,
           }
         : {}),
       sources,
@@ -241,19 +209,11 @@ export async function handler(event: { body: GenerationEvent }) {
     projectKeys,
     clarifySizingContract,
     clarifyAdvisoryTriage,
-    reviewedDraftFeatures,
-    reviewedDraftReview,
-    reviewedDraftDecision,
-    reviewedDraftSelectedFeatureIds,
-    reviewedDraftReviewIterations,
-    reviewedTriageSizingContract,
-    reviewedAdvisoryTriage,
     priorStageDurationsMs,
     outputProfileOverride,
     retryFeatureId,
     retryFeature,
     retryBaseFeatures,
-    pauseForDraftReview,
   } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
@@ -300,8 +260,8 @@ export async function handler(event: { body: GenerationEvent }) {
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
     };
-    const advisorySizingContract = reviewedTriageSizingContract ?? clarifySizingContract;
-    const advisoryTriage = reviewedAdvisoryTriage ?? clarifyAdvisoryTriage;
+    const advisorySizingContract = clarifySizingContract;
+    const advisoryTriage = clarifyAdvisoryTriage;
     const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(
@@ -351,9 +311,6 @@ export async function handler(event: { body: GenerationEvent }) {
     const startProgress = buildGenerationStartProgressUpdate({
       retryFeatureId,
       retryFeature,
-      reviewedDraftFeatures,
-      reviewedDraftReview,
-      reviewedDraftDecision,
       outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
       advisorySizingContract,
       advisoryTriage,
@@ -364,8 +321,6 @@ export async function handler(event: { body: GenerationEvent }) {
 
     let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> =
       startProgress.payload.draftFeatures ?? [];
-    let liveDraftReview: DraftReviewMetadata | undefined = reviewedDraftReview;
-    let liveDraftReviewIterations = reviewedDraftReviewIterations ?? 0;
 
     const result = await generateFeatures({
       requirement,
@@ -376,51 +331,10 @@ export async function handler(event: { body: GenerationEvent }) {
       config,
       outputProfileOverride,
       advisoryTriage,
-      precomputedDraftFeatures: retryFeature ? [retryFeature] : reviewedDraftFeatures,
-      precomputedDraftReview: reviewedDraftReview,
-      draftReviewDecision: retryFeatureId ? undefined : reviewedDraftDecision,
-      draftReviewSelectedFeatureIds: reviewedDraftSelectedFeatureIds,
+      precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
       allowPartialArFailure: Boolean(retryFeatureId && retryBaseFeatures?.length),
-      pauseForDraftReview: retryFeatureId ? false : (pauseForDraftReview ?? config.generatorConfig.pauseForDraftReview ?? false),
       priorStageDurationsMs,
       shouldCancel: () => isWorkflowCancelled(sessionId),
-      onPass1Complete: async (draftFeatures, draftReview, stageDurationsMs) => {
-        liveDraftFeatures = mapDraftFeatures(draftFeatures);
-        liveDraftReview = draftReview;
-        liveDraftReviewIterations = (reviewedDraftReviewIterations ?? 0) + 1;
-        await updateProgress(
-          reviewedDraftFeatures?.length && reviewedDraftDecision && reviewedDraftDecision !== 'continue'
-            ? 'Draft structure revised. Review it again before acceptance requirements are written.'
-            : 'Review the drafted feature structure before acceptance requirements are written.',
-          1,
-          {
-            stage: 'draft_review',
-            outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-            triage: advisorySizingContract,
-            sizingContract: advisorySizingContract,
-            advisoryTriage,
-            draftFeatures: liveDraftFeatures,
-            draftFeatureCount: draftFeatures.length,
-            draftReview,
-            stageDurationsMs,
-            resumeContext: {
-              requirement,
-              clarifyAnswers: maskedAnswers.answers,
-              attachmentText: maskedAttachment.text,
-              projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-              projectKeys: selectedProjectKeys,
-              outputProfileOverride,
-              draftFeatures,
-              draftReview,
-              draftReviewIterations: liveDraftReviewIterations,
-              sizingContract: advisorySizingContract,
-              advisoryTriage,
-              priorStageDurationsMs: stageDurationsMs,
-            },
-            sources: progressSources,
-          },
-        );
-      },
       onArProgress: async (snapshot) => {
         const completed = snapshot.completedFeatureIds.length;
         const retrying = snapshot.backfillFeatureIds.length;
@@ -436,7 +350,6 @@ export async function handler(event: { body: GenerationEvent }) {
           advisoryTriage,
           draftFeatures: liveDraftFeatures,
           draftFeatureCount: liveDraftFeatures.length,
-          draftReview: liveDraftReview,
           featureProgress: buildFeatureProgressState(liveDraftFeatures, snapshot),
           arProgress: { completed, total, phase: snapshot.phase },
           failedFeatureIds: snapshot.failedFeatureIds,
@@ -485,9 +398,6 @@ export async function handler(event: { body: GenerationEvent }) {
       sizingContract: advisorySizingContract,
       advisoryTriage,
       pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
-      draftReviewTriggered: Boolean(reviewedDraftFeatures?.length || reviewedDraftReviewIterations),
-      draftReviewDecision: reviewedDraftDecision,
-      draftReviewIterations: reviewedDraftFeatures?.length ? (reviewedDraftReviewIterations ?? 1) : undefined,
       coverageReview: result.generationContext?.coverageReview,
       failedFeatureIds: result.generationContext?.failedFeatureIds ?? [],
       partialSuccess: result.generationContext?.partialSuccess,
@@ -597,41 +507,6 @@ export async function handler(event: { body: GenerationEvent }) {
       await markCancelled(sessionId);
       return;
     }
-      if (err instanceof Pass1DraftReviewRequiredError) {
-        const advisorySizingContract = reviewedTriageSizingContract ?? clarifySizingContract;
-        const advisoryTriage = reviewedAdvisoryTriage ?? clarifyAdvisoryTriage;
-        await entitySet(KEYS.generationProgress(sessionId), {
-        type: 'review',
-        sessionId,
-        message: 'Review drafted features before continuing.',
-          payload: {
-            stage: 'draft_review',
-            outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-            triage: advisorySizingContract,
-            sizingContract: advisorySizingContract,
-            advisoryTriage,
-            draftFeatures: mapDraftFeatures(err.draftFeatures),
-          draftFeatureCount: err.draftFeatures.length,
-          draftReview: err.draftReview,
-          stageDurationsMs: err.stageDurationsMs,
-          resumeContext: {
-            requirement,
-            clarifyAnswers: maskedAnswers.answers,
-            attachmentText: maskedAttachment.text,
-            projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-            projectKeys: selectedProjectKeys,
-            outputProfileOverride,
-            draftFeatures: err.draftFeatures,
-            draftReview: err.draftReview,
-            draftReviewIterations: (reviewedDraftReviewIterations ?? 0) + 1,
-            priorStageDurationsMs: err.stageDurationsMs,
-          },
-          sources: progressSourcesSnapshot,
-        } as GenerationProgressPayload,
-        updatedAt: Date.now(),
-      } as RealtimeEvent);
-      return;
-    }
     if (err instanceof AcceptanceRequirementsGenerationError) {
       const arError = err as AcceptanceRequirementsGenerationError;
       const failedFeatureIds = arError.failedFeatureIndexes
@@ -640,9 +515,9 @@ export async function handler(event: { body: GenerationEvent }) {
       const arFailurePayload: GenerationProgressPayload = {
         stage: 'acceptance_requirements',
         outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-        triage: reviewedTriageSizingContract ?? clarifySizingContract,
-        sizingContract: reviewedTriageSizingContract ?? clarifySizingContract,
-        advisoryTriage: reviewedAdvisoryTriage ?? clarifyAdvisoryTriage,
+        triage: clarifySizingContract,
+        sizingContract: clarifySizingContract,
+        advisoryTriage: clarifyAdvisoryTriage,
         draftFeatures: mapDraftFeatures(arError.draftFeatures),
         featureProgress: arError.draftFeatures.map((feature) => ({
           id: feature.id,

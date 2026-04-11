@@ -360,7 +360,8 @@ function TriageScoreCard({
   );
 }
 
-function DraftReviewCard({
+/** @deprecated Draft review pause has been removed. */
+function _DraftReviewCard_REMOVED({
   meta,
   onDecision,
 }: {
@@ -1575,17 +1576,17 @@ interface MainContentProps {
   generationProgressMeta?: GenerationProgressMeta | null;
   clarifyContext?: ClarifyContextMeta | null;
   clarifyProgressMeta?: DiscoveryProgressMeta | null;
-  workflowStage?: 'idle' | 'clarify_round_1' | 'sufficiency_check' | 'clarify_round_2' | 'generation' | 'generation_review' | 'blocked';
+  workflowStage?: 'idle' | 'clarify_round_1' | 'sufficiency_check' | 'clarify_round_2' | 'generation' | 'blocked';
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
   isAdmin?: boolean;
   onOpenSettings?: () => void;
-  onDraftReviewDecision?: (decision: DraftReviewDecision, selectedFeatureIds?: string[]) => void;
   onRetryFailedFeature?: (featureId: string) => void;
   retryingFeatureId?: string | null;
   onUndoLastAiChange?: () => void;
   undoActionLabel?: string | null;
+  onRegenerate?: (feedback: string) => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -1593,7 +1594,7 @@ export function MainContent({
   features, setFeatures, onSetLastAiChange, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  isAdmin, onOpenSettings, onDraftReviewDecision, onRetryFailedFeature, retryingFeatureId, onUndoLastAiChange, undoActionLabel
+  isAdmin, onOpenSettings, onRetryFailedFeature, retryingFeatureId, onUndoLastAiChange, undoActionLabel, onRegenerate
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1639,6 +1640,7 @@ export function MainContent({
   const [changeScope, setChangeScope] = useState<CanvasEditScope>('all');
   const [changeTargetFeatureId, setChangeTargetFeatureId] = useState<string | null>(null);
   const [isChangingCanvas, setIsChangingCanvas] = useState(false);
+  const refineBarRef = useRef<HTMLTextAreaElement>(null);
   const [changeProgress, setChangeProgress] = useState('');
   const changePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const changeStartedAtRef = useRef<number>(0);
@@ -1689,12 +1691,13 @@ export function MainContent({
   }) => {
     setChangeInstruction(options?.instruction ?? '');
     setChangeIntentOverride(options?.intent ?? null);
-    setChangeScope(options?.scope ?? 'all');
+    setChangeScope(options?.scope ?? (options?.targetFeatureId ? 'current' : 'all'));
     setChangeTargetFeatureId(options?.targetFeatureId ?? null);
     if (options?.scope === 'current' && options?.targetFeatureId) {
       setSelectedFeatureIds(new Set([options.targetFeatureId]));
     }
-    setShowChangeCanvas(true);
+    setShowChangeCanvas(false);
+    requestAnimationFrame(() => refineBarRef.current?.focus());
   }, []);
 
   const getSelectedIdsForScope = React.useCallback((scope: CanvasEditScope) => {
@@ -2516,10 +2519,10 @@ export function MainContent({
         </div>
       </motion.header>
 
-      {/* Canvas toolbar — stats + actions, only when features exist */}
+      {/* Canvas toolbar — compact stats + utility actions */}
       {hasFeatures && !isGenerating && (
-        <div className="shrink-0 border-b border-[var(--rf-border-subtle)] bg-white/55 px-5 py-3 backdrop-blur-md">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="shrink-0 border-b border-[var(--rf-border-subtle)] bg-white/55 px-5 py-2.5 backdrop-blur-md">
+          <div className="flex items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               {[
                 { label: 'Features', value: features.length },
@@ -2537,15 +2540,7 @@ export function MainContent({
 
             <div className="flex flex-wrap items-center gap-2">
               {undoActionLabel && onUndoLastAiChange && (
-                <motion.button
-                  onClick={onUndoLastAiChange}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
-                  whileTap={{ scale: 0.97 }}
-                  title={undoActionLabel}
-                >
-                  <RefreshCcw className="w-3.5 h-3.5" />
-                  Undo
-                </motion.button>
+                <motion.button onClick={onUndoLastAiChange} className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90" whileTap={{ scale: 0.97 }} title={undoActionLabel}><RefreshCcw className="w-3.5 h-3.5" /> Undo</motion.button>
               )}
               {features.some(f => f.pendingRefinement || f.pendingRemoval || f.pendingAddition) && (
                 <>
@@ -2553,40 +2548,7 @@ export function MainContent({
                   <motion.button onClick={acceptAllProposed} className="rounded-xl border border-[var(--rf-success-subtle)] bg-[var(--rf-success-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-success)] transition hover:brightness-[0.96]" whileTap={{ scale: 0.97 }}>Accept All</motion.button>
                 </>
               )}
-              <motion.button
-                onClick={exportFeaturesToExcel}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90"
-                whileTap={{ scale: 0.97 }}
-                title="Export to Excel"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Export
-              </motion.button>
-              <motion.button
-                onClick={() => setRestructureMode((value) => !value)}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[12px] font-bold transition backdrop-blur-sm ${
-                  restructureMode
-                    ? 'border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'
-                    : 'border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90'
-                }`}
-                whileTap={{ scale: 0.97 }}
-                title="Select one or more features for a scoped canvas change"
-              >
-                <RefreshCcw className="w-3.5 h-3.5" />
-                {restructureMode ? `Selecting (${selectedFeatureIds.size})` : 'Select features'}
-              </motion.button>
-              <motion.button
-                onClick={() => openChangeCanvas({
-                  scope: selectedFeatureIds.size > 0 ? 'selected' : 'all',
-                  targetFeatureId: selectedFeatureIds.size === 1 ? [...selectedFeatureIds][0] : null,
-                })}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-3 py-2 text-[12px] font-bold text-[var(--rf-brand)] transition hover:border-[var(--rf-border-strong)] hover:bg-white/70"
-                whileTap={{ scale: 0.97 }}
-                title="Refine wording, add missing requirements, add a feature, or reorganize features from one place"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Change canvas
-              </motion.button>
+              <motion.button onClick={exportFeaturesToExcel} className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-3 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition backdrop-blur-sm hover:border-[var(--rf-border-strong)] hover:text-[var(--rf-brand)] hover:bg-white/90" whileTap={{ scale: 0.97 }} title="Export to Excel"><Download className="w-3.5 h-3.5" /> Export</motion.button>
             </div>
           </div>
         </div>
@@ -2617,11 +2579,6 @@ export function MainContent({
                 projectKey={projectKey}
               />
             )
-          ) : workflowStage === 'generation_review' && generationProgressMeta ? (
-            <DraftReviewCard
-              meta={generationProgressMeta || null}
-              onDecision={(decision, selectedFeatureIds) => onDraftReviewDecision?.(decision, selectedFeatureIds)}
-            />
           ) : !hasFeatures ? (
             <motion.div
               key="empty-state"
@@ -2719,19 +2676,17 @@ export function MainContent({
               </motion.div>
             )}
 
-            {restructureMode && (
+            {selectedFeatureIds.size > 0 && !isGenerating && (
               <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] px-4 py-2.5">
                 <span className="text-[13px] font-semibold text-[var(--rf-brand)]">
-                  {selectedFeatureIds.size > 0
-                    ? `${selectedFeatureIds.size} feature${selectedFeatureIds.size === 1 ? '' : 's'} selected — open Change canvas to run a scoped update`
-                    : 'Select features you want to target, then open Change canvas'}
+                  {selectedFeatureIds.size} feature{selectedFeatureIds.size === 1 ? '' : 's'} selected — use the refine bar below to consolidate, split, or change them
                 </span>
                 <button
                   type="button"
-                  onClick={() => { setRestructureMode(false); setSelectedFeatureIds(new Set()); }}
+                  onClick={() => { setSelectedFeatureIds(new Set()); setRestructureMode(false); setChangeTargetFeatureId(null); setChangeScope('all'); }}
                   className="text-[12px] font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-danger)] transition shrink-0"
                 >
-                  Cancel
+                  Clear
                 </button>
               </div>
             )}
@@ -2795,7 +2750,6 @@ export function MainContent({
                           />
                         ) : (
                           <div className="flex flex-1 min-w-0 items-start gap-3 cursor-pointer" onClick={() => toggleExpand(idx)}>
-                            {restructureMode && (
                               <button
                                 type="button"
                                 onClick={(event) => {
@@ -2810,13 +2764,12 @@ export function MainContent({
                                 className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition ${
                                   selectedFeatureIds.has(feature.id)
                                     ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                                    : 'border-[var(--rf-border)] bg-white text-[var(--rf-text-tertiary)]'
+                                    : 'border-[var(--rf-border)] bg-white/60 text-transparent hover:border-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-tertiary)]'
                                 }`}
-                                title={selectedFeatureIds.has(feature.id) ? 'Deselect for scoped changes' : 'Select for scoped changes'}
+                                title={selectedFeatureIds.has(feature.id) ? 'Deselect' : 'Select for scoped changes'}
                               >
-                                {selectedFeatureIds.has(feature.id) ? <Check className="h-3.5 w-3.5" /> : <span className="h-2.5 w-2.5 rounded-sm border border-current/40" />}
+                                {selectedFeatureIds.has(feature.id) ? <Check className="h-3.5 w-3.5" /> : <span className="h-2 w-2" />}
                               </button>
-                            )}
                             <h3 className="min-w-0 flex-1 text-lg font-bold leading-snug text-[var(--rf-text)] tracking-tight">
                               {feature.title || feature.summary || 'Untitled Feature'}
                             </h3>
@@ -2849,15 +2802,17 @@ export function MainContent({
                             <>
                               <motion.button onClick={() => startEditing(idx)} className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-text-tertiary)] hover:bg-white/70 hover:text-[var(--rf-text)] rounded-xl transition flex items-center gap-1.5" whileTap={{ scale: 0.97 }}><Edit2 className="w-3.5 h-3.5" /> Edit</motion.button>
                               <motion.button
-                                onClick={() => openChangeCanvas({
-                                  scope: 'current',
-                                  targetFeatureId: feature.id,
-                                  intent: null,
-                                })}
+                                onClick={() => {
+                                  setChangeTargetFeatureId(feature.id);
+                                  setChangeScope('current');
+                                  setSelectedFeatureIds(new Set([feature.id]));
+                                  setChangeIntentOverride(null);
+                                  requestAnimationFrame(() => refineBarRef.current?.focus());
+                                }}
                                 className="px-2.5 py-1.5 text-[13px] font-semibold text-[var(--rf-brand)] hover:bg-[var(--rf-brand-subtle)] rounded-xl transition flex items-center gap-1.5"
                                 whileTap={{ scale: 0.97 }}
                               >
-                                <Sparkles className="w-3.5 h-3.5" /> Change
+                                <Sparkles className="w-3.5 h-3.5" /> Refine
                               </motion.button>
                               {featureNeedsArRetry ? (
                                 <motion.button
@@ -3154,55 +3109,77 @@ export function MainContent({
         </AnimatePresence>
       </div>
 
-      <AnimatePresence>
-        {showChangeCanvas && (
-          <div className="fixed inset-0 z-[85] flex items-end justify-center p-4 sm:items-center">
-            <motion.div
-              className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
-              onClick={!isChangingCanvas ? () => {
-                setShowChangeCanvas(false);
-                setChangeIntentOverride(null);
-                setChangeTargetFeatureId(null);
-              } : undefined}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            />
-            <motion.div
-              className="relative rf-glass-card w-full max-w-2xl overflow-hidden"
-              initial={{ opacity: 0, y: 18, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 18, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="border-b border-[var(--rf-border-subtle)] bg-white/40 px-5 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
-                    <span className="text-sm font-bold text-[var(--rf-text)]">Change canvas</span>
-                  </div>
-                  {!isChangingCanvas && (
-                    <button
-                      onClick={() => {
-                        setShowChangeCanvas(false);
-                        setChangeIntentOverride(null);
-                        setChangeTargetFeatureId(null);
-                      }}
-                      className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
-                  Describe the missing detail or change you want. The app will detect whether this should be a light refine, stronger requirements, a new feature, or a reorganization preview.
-                </p>
-              </div>
+      {/* ── Inline refine bar ── */}
+      {hasFeatures && !isGenerating && (
+        <div className="shrink-0 border-t border-[var(--rf-border-subtle)] bg-white/70 backdrop-blur-xl">
+          <div className="px-5 pt-3 pb-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {([
+                { intent: 'add_feature' as CanvasEditIntent, label: 'Add feature', icon: <Plus className="w-3 h-3" />, scope: 'all' as CanvasEditScope },
+                { intent: 'add_requirements' as CanvasEditIntent, label: 'Add requirements', icon: <Plus className="w-3 h-3" />, scope: (changeTargetFeatureId ? 'current' : selectedFeatureIds.size > 0 ? 'selected' : 'all') as CanvasEditScope },
+                { intent: 'reorganize' as CanvasEditIntent, label: selectedFeatureIds.size >= 2 ? `Consolidate ${selectedFeatureIds.size} features` : 'Consolidate', icon: <RefreshCcw className="w-3 h-3" />, scope: (selectedFeatureIds.size >= 2 ? 'selected' : 'all') as CanvasEditScope, hint: 'merge or consolidate' },
+                { intent: 'reorganize' as CanvasEditIntent, label: selectedFeatureIds.size === 1 ? 'Split feature' : 'Split', icon: <Sparkles className="w-3 h-3" />, scope: (selectedFeatureIds.size === 1 ? 'selected' : 'all') as CanvasEditScope, hint: 'split into smaller features' },
+              ] as Array<{ intent: CanvasEditIntent; label: string; icon: React.ReactNode; scope: CanvasEditScope; hint?: string }>).map((chip) => (
+                <motion.button
+                  key={chip.label}
+                  type="button"
+                  onClick={() => {
+                    setChangeIntentOverride(chip.intent);
+                    setChangeScope(chip.scope);
+                    if (chip.hint && !changeInstruction.trim()) setChangeInstruction(chip.hint);
+                    requestAnimationFrame(() => refineBarRef.current?.focus());
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition ${
+                    effectiveChangeIntent === chip.intent && changeIntentOverride === chip.intent
+                      ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                      : 'border-[var(--rf-border)] bg-white/80 text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
+                  }`}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  {chip.icon}
+                  {chip.label}
+                </motion.button>
+              ))}
+              {onRegenerate && (
+                <motion.button
+                  type="button"
+                  onClick={() => {
+                    const feedback = changeInstruction.trim() || undefined;
+                    if (feedback) {
+                      onRegenerate(feedback);
+                    } else {
+                      setChangeInstruction('');
+                      setChangeIntentOverride(null);
+                      requestAnimationFrame(() => refineBarRef.current?.focus());
+                      refineBarRef.current?.setAttribute('placeholder', 'Describe what to change before regenerating, then click Regenerate again…');
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:border-[rgba(179,94,48,0.35)] hover:text-[rgba(179,94,48,0.9)]"
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <RefreshCcw className="w-3 h-3" />
+                  Regenerate
+                </motion.button>
+              )}
+              {selectedFeatureIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedFeatureIds(new Set()); setRestructureMode(false); setChangeTargetFeatureId(null); setChangeScope('all'); }}
+                  className="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 text-[11px] font-bold text-[var(--rf-text-tertiary)] transition hover:text-[var(--rf-text-secondary)]"
+                >
+                  <X className="w-3 h-3" />
+                  Clear selection ({selectedFeatureIds.size})
+                </button>
+              )}
+            </div>
+          </div>
 
-              <div className="space-y-4 px-5 py-5">
+          <div className="px-5 pb-4 pt-2">
+            <div className="flex items-end gap-2">
+              <div className="flex-1 relative">
                 <textarea
-                  autoFocus
-                  placeholder="For example: add coverage for identifying a referenced item and linking it to the case."
+                  ref={refineBarRef}
+                  placeholder={changeTargetFeatureId ? 'Describe a change for this feature…' : selectedFeatureIds.size > 0 ? `Describe a change for the ${selectedFeatureIds.size} selected feature${selectedFeatureIds.size > 1 ? 's' : ''}…` : 'Describe a change — add a feature, strengthen requirements, consolidate, split…'}
                   value={changeInstruction}
                   onChange={(e) => {
                     setChangeInstruction(e.target.value);
@@ -3210,304 +3187,52 @@ export function MainContent({
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleChangeCanvas();
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                      e.preventDefault();
                       handleChangeCanvas();
                     }
                   }}
-                  className="min-h-[140px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                  rows={1}
+                  className="w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 pl-4 pr-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                  style={{ minHeight: '44px', maxHeight: '120px', fieldSizing: 'content' } as React.CSSProperties}
                 />
-
-                <div className="rounded-xl border border-[var(--rf-border)] bg-white/70 px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Detected intent</span>
-                    <span className="rounded-full border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-3 py-1 text-[12px] font-bold text-[var(--rf-brand)]">
-                      {getCanvasIntentLabel(routingDecision.intent)}
-                    </span>
-                    <span className="rounded-full border border-[var(--rf-border)] bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
-                      {routingDecision.confidence}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-[13px] text-[var(--rf-text-secondary)]">{routingDecision.reason}</div>
-                  {routingDecision.followupQuestion ? (
-                    <div className="mt-3 rounded-xl border border-[rgba(179,94,48,0.18)] bg-[rgba(245,164,76,0.08)] px-3 py-3">
-                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-warning)]">Focused follow-up</div>
-                      <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{routingDecision.followupQuestion}</div>
-                      <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)]">
-                        {routingDecision.followupWhy} {routingDecision.followupUnlocks ? ` ${routingDecision.followupUnlocks}` : ''}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div>
-                  <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Intent override</div>
-                  <div className="flex flex-wrap gap-2">
-                    {(['light_refine', 'add_requirements', 'add_feature', 'reorganize'] as CanvasEditIntent[]).map((intent) => {
-                      const selected = effectiveChangeIntent === intent;
-                      return (
-                        <button
-                          key={intent}
-                          type="button"
-                          onClick={() => setChangeIntentOverride(intent)}
-                          className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition ${
-                            selected
-                              ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                              : 'border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                          }`}
-                        >
-                          {getCanvasIntentLabel(intent)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Scope</div>
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      { value: 'current', label: 'Current feature', disabled: !changeTargetFeatureId },
-                      { value: 'selected', label: `Selected features${selectedFeatureIds.size ? ` (${selectedFeatureIds.size})` : ''}`, disabled: selectedFeatureIds.size === 0 },
-                      { value: 'all', label: 'Whole canvas', disabled: false },
-                    ] as Array<{ value: CanvasEditScope; label: string; disabled: boolean }>).map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        disabled={option.disabled}
-                        onClick={() => setChangeScope(option.value)}
-                        className={`rounded-full border px-3 py-1.5 text-[12px] font-bold transition disabled:opacity-45 ${
-                          changeScope === option.value
-                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                            : 'border-[var(--rf-border)] bg-white/70 text-[var(--rf-text-secondary)]'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                  {changeScope === 'selected' && selectedFeatureIds.size > 0 ? (
-                    <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
-                      Scoped to the feature selections already marked on the canvas.
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
-                    {isChangingCanvas ? (changeProgress || 'Preparing canvas change…') : 'Cmd/Ctrl + Enter to prepare a preview'}
-                  </span>
-                  <motion.button
-                    onClick={handleChangeCanvas}
-                    disabled={!changeInstruction.trim() || isChangingCanvas}
-                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    {isChangingCanvas ? (
-                      <>
-                        <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                        Preparing...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-3.5 w-3.5" />
-                        Prepare preview
-                      </>
-                    )}
-                  </motion.button>
-                </div>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showBulkRefine && (
-          <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
-            <motion.div
-              className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
-              onClick={!isBulkRefining ? () => setShowBulkRefine(false) : undefined}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            />
-            <motion.div
-              className="relative rf-glass-card w-full max-w-lg overflow-hidden"
-              initial={{ opacity: 0, y: 18, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 18, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="border-b border-[var(--rf-border-subtle)] bg-white/40 px-5 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-[var(--rf-brand)]" />
-                    <span className="text-sm font-bold text-[var(--rf-text)]">Refine all features</span>
-                  </div>
-                  {!isBulkRefining && (
-                    <button onClick={() => setShowBulkRefine(false)} className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]">
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
-                  Apply one instruction across every feature in this canvas. Use this for wording, clarity, scope, or rule updates that should be applied feature by feature.
-                </p>
-              </div>
-
-              <div className="space-y-4 px-5 py-5">
-                <textarea
-                  autoFocus
-                  placeholder="For example: make the language less technical, add regulatory guardrails, or tighten scope for implementation teams."
-                  value={bulkInput}
-                  onChange={(e) => setBulkInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      handleBulkRefine();
-                    }
-                  }}
-                  className="min-h-[132px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
-                />
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
-                    {isBulkRefining ? (bulkRefineProgress || 'Refining all features…') : 'Cmd/Ctrl + Enter to apply'}
-                  </span>
-                  <motion.button
-                    onClick={handleBulkRefine}
-                    disabled={!bulkInput.trim() || isBulkRefining}
-                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    {isBulkRefining ? (
-                      <>
-                        <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                        Refining...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-3.5 w-3.5" />
-                        Apply to all
-                      </>
-                    )}
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showRestructure && (
-          <div className="fixed inset-0 z-[80] flex items-end justify-center p-4 sm:items-center">
-            <motion.div
-              className="absolute inset-0 bg-[var(--rf-text)]/30 backdrop-blur-sm"
-              onClick={!isRestructuring ? () => { setShowRestructure(false); setRestructureMode(false); setSelectedFeatureIds(new Set()); } : undefined}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            />
-            <motion.div
-              className="relative rf-glass-card w-full max-w-2xl overflow-hidden"
-              initial={{ opacity: 0, y: 18, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 18, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="border-b border-[var(--rf-border-subtle)] bg-white/40 px-5 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <RefreshCcw className="h-4 w-4 text-[var(--rf-brand)]" />
-                    <span className="text-sm font-bold text-[var(--rf-text)]">Restructure features</span>
-                  </div>
-                  {!isRestructuring && (
-                    <button onClick={() => { setShowRestructure(false); setRestructureMode(false); setSelectedFeatureIds(new Set()); }} className="rounded-lg p-1.5 text-[var(--rf-text-tertiary)] transition hover:bg-[var(--rf-surface-soft)]">
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                <p className="mt-2 text-[13px] text-[var(--rf-text-tertiary)]">
-                  Use restructure for safe merges, splits, or consolidation after features already exist. The result comes back as a preview so you can review every proposed change before accepting it.
-                </p>
-              </div>
-
-              <div className="space-y-4 px-5 py-5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRestructureScope('all')}
-                    className={`rounded-full px-3 py-1.5 text-[12px] font-bold transition ${
-                      restructureScope === 'all'
-                        ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-subtle)]'
-                        : 'bg-white/70 text-[var(--rf-text-secondary)] border border-[var(--rf-border)]'
-                    }`}
-                  >
-                    Whole canvas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => selectedFeatureIds.size > 0 && setRestructureScope('selected')}
-                    disabled={selectedFeatureIds.size === 0}
-                    className={`rounded-full px-3 py-1.5 text-[12px] font-bold transition disabled:opacity-45 ${
-                      restructureScope === 'selected'
-                        ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border border-[var(--rf-brand-subtle)]'
-                        : 'bg-white/70 text-[var(--rf-text-secondary)] border border-[var(--rf-border)]'
-                    }`}
-                  >
-                    Selected features ({selectedFeatureIds.size})
-                  </button>
-                </div>
-
-                {restructureScope === 'selected' && selectedFeatureIds.size > 0 && (
-                  <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-[12px] text-[var(--rf-text-secondary)]">
-                    {features
-                      .filter((feature) => selectedFeatureIds.has(feature.id))
-                      .map((feature) => feature.title || feature.summary)
-                      .join(' • ')}
-                  </div>
+              <motion.button
+                onClick={handleChangeCanvas}
+                disabled={!changeInstruction.trim() || isChangingCanvas}
+                className="shrink-0 inline-flex items-center justify-center rounded-xl bg-[var(--rf-brand)] p-3 text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
+                whileTap={{ scale: 0.95 }}
+                title="Send (Enter)"
+              >
+                {isChangingCanvas ? (
+                  <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
                 )}
-
-                <textarea
-                  autoFocus
-                  placeholder="For example: consolidate the intake-view and response features into clearer boundaries, or split case initiation away from contact linking."
-                  value={restructureInput}
-                  onChange={(e) => setRestructureInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      handleRestructure();
-                    }
-                  }}
-                  className="min-h-[148px] w-full resize-none rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 text-sm text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
-                />
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
-                    {isRestructuring ? (restructureProgress || 'Preparing restructure preview…') : 'Cmd/Ctrl + Enter to prepare a restructure preview'}
-                  </span>
-                  <motion.button
-                    onClick={handleRestructure}
-                    disabled={!restructureInput.trim() || isRestructuring || (restructureScope === 'selected' && selectedFeatureIds.size === 0)}
-                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--rf-brand)] px-5 py-2 text-[13px] font-bold text-white shadow-sm shadow-[var(--rf-brand)]/20 transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-40"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    {isRestructuring ? (
-                      <>
-                        <div className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                        Restructuring...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-3.5 w-3.5" />
-                        Prepare Preview
-                      </>
-                    )}
-                  </motion.button>
-                </div>
+              </motion.button>
+            </div>
+            {isChangingCanvas && (
+              <div className="mt-2 text-[12px] font-medium text-[var(--rf-text-tertiary)] animate-pulse">
+                {changeProgress || 'Preparing canvas change…'}
               </div>
-            </motion.div>
+            )}
+            {changeTargetFeatureId && (
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="text-[11px] font-bold text-[var(--rf-text-tertiary)]">Scoped to:</span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[11px] font-bold text-[var(--rf-brand)]">
+                  {features.find(f => f.id === changeTargetFeatureId)?.summary?.slice(0, 50) || 'Selected feature'}
+                  <button type="button" onClick={() => { setChangeTargetFeatureId(null); setChangeScope('all'); }} className="ml-0.5 hover:text-[var(--rf-text)]"><X className="w-3 h-3" /></button>
+                </span>
+              </div>
+            )}
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
+
+      {/* Bulk refine and restructure modals removed — all refinement now flows through the inline refine bar */}
 
       {/* AI Refine Popup */}
       {refinePopupIdx !== null && (

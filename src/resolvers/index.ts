@@ -496,7 +496,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     config,
     license: context?.license,
     outputProfileOverride: payload?.outputProfileOverride,
-    pauseForDraftReview: payload?.pauseForDraftReview ?? undefined,
+    pauseForDraftReview: undefined,
     goldExamples: '',   // fetched inside queue consumer
     wiContext: '',      // fetched inside queue consumer
     projectKey: authorizedProjects.projectKey,
@@ -519,79 +519,9 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   return { success: true, sessionId: payload.sessionId, warning: check.reason };
 });
 
-resolver.define('resumeGeneration', async ({ payload, context }) => {
-  const progress = await entityGet(KEYS.generationProgress(payload.sessionId)) as {
-    type?: string;
-    payload?: {
-      resumeContext?: {
-        requirement: string;
-        clarifyAnswers: ClarifyAnswer[];
-        attachmentText: string;
-        projectKey: string;
-        projectKeys: string[];
-        outputProfileOverride?: import('../types').OutputProfile;
-        draftFeatures: Feature[];
-        draftReview?: import('../types').DraftReviewMetadata;
-        draftReviewIterations?: number;
-        priorStageDurationsMs?: GenerationStageDurationsMs;
-      };
-    };
-  } | null;
-
-  const resumeContext = progress?.payload?.resumeContext;
-  const reviewDecision = payload?.decision;
-  const selectedFeatureIds = Array.isArray(payload?.selectedFeatureIds)
-    ? payload.selectedFeatureIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
-    : undefined;
-  if (progress?.type !== 'review' || !resumeContext) {
-    return { success: false, error: 'No paused draft review is available for this session.' };
-  }
-  if (!['continue', 'broaden', 'tighten', 'merge_selected', 'split_selected'].includes(reviewDecision)) {
-    return { success: false, error: 'A valid draft review decision is required to resume generation.' };
-  }
-
-  const config = await getConfig();
-  const check = await checkGenerationAllowed(config, context);
-  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
-    projectKey: resumeContext.projectKey,
-    projectKeys: resumeContext.projectKeys,
-  });
-  const event: GenerationEvent = {
-    sessionId: payload.sessionId,
-    accountId,
-    requirement: resumeContext.requirement,
-    clarifyAnswers: resumeContext.clarifyAnswers,
-    attachmentText: resumeContext.attachmentText,
-    config,
-    license: context?.license,
-    outputProfileOverride: resumeContext.outputProfileOverride,
-    goldExamples: '',
-    wiContext: '',
-    projectKey: authorizedProjects.projectKey,
-    projectKeys: authorizedProjects.projectKeys,
-    reviewedDraftFeatures: resumeContext.draftFeatures,
-    reviewedDraftReview: resumeContext.draftReview,
-    reviewedDraftDecision: reviewDecision,
-    reviewedDraftSelectedFeatureIds: selectedFeatureIds,
-    reviewedDraftReviewIterations: resumeContext.draftReviewIterations,
-    reviewedTriageSizingContract: resumeContext.sizingContract,
-    reviewedAdvisoryTriage: resumeContext.advisoryTriage,
-    priorStageDurationsMs: resumeContext.priorStageDurationsMs,
-  };
-
-  await entitySet(KEYS.generationProgress(payload.sessionId), {
-    type: 'progress',
-    sessionId: payload.sessionId,
-    message: reviewDecision === 'continue'
-      ? 'Continuing with the reviewed draft structure…'
-      : 'Revising the draft structure from your review…',
-    updatedAt: Date.now(),
-  });
-
-  const generationQueue = new Queue({ key: 'generation-queue' });
-  await generationQueue.push({ body: event });
-  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+/** @deprecated Draft review pause has been removed — pipeline flows straight through. */
+resolver.define('resumeGeneration', async () => {
+  return { success: false, error: 'Draft review pause has been removed. The pipeline now flows straight through to completion.' };
 });
 
 resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => {

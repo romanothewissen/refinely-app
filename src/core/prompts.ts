@@ -146,17 +146,32 @@ export function buildDecompositionSystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
 
-YOUR JOB: Given a requirement, reason deeply about what actually has to be delivered. Surface independently valuable feature slices without inventing micro-features, but do not hide meaningful workflow branches inside one oversized feature.
+YOUR JOB: Given a requirement, reason deeply about what actually has to be delivered. Surface independently valuable business capabilities without inventing micro-features, but do not hide meaningful workflow branches inside one oversized feature.
 
 DECOMPOSITION FRAMEWORK — reason through each dimension:
-1. CORE CAPABILITY: What is the primary thing being requested?
-2. INPUTS & DATA: What information does this need? What feeds into it?
-3. PROCESSING & LOGIC: What decisions, calculations, prioritization, or rules are involved?
-4. OUTPUTS & VISIBILITY: Who sees the results? Who else needs awareness? What consolidated view is needed to manage the process end-to-end?
-5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically after execution starts — cancellations, resource unavailability, partial failures, mid-process condition changes? What would a user need to modify or correct once the process is underway? What happens to dependent downstream steps when one step is delayed or fails? What governing or sequencing rules must be enforced to prevent invalid states?
-6. DEPENDENCIES: What enabling, governing, sequencing, or tracking capabilities must exist for this to work? Think about: what rules prevent invalid states or out-of-order actions; what visibility or consolidated status tracking is needed to manage the process end-to-end; what modification or correction paths are needed if conditions change after execution begins; what supporting actions must accompany the primary flow.
+1. CORE CAPABILITY: What is the primary thing being requested? What does the user create, initiate, or manage? What distinct resources, participants, or details must be captured per activity or item?
+2. SYSTEM ENFORCEMENT: What dependencies, sequencing rules, or constraints must the system enforce to prevent invalid states? (e.g., activity B cannot start until activity A completes; items cannot ship until payment is authorized.) This is a separate feature when the enforcement logic is independently testable and has its own failure modes.
+3. VALIDATION & SAFEGUARDS: What logical errors, invalid sequences, or business rule violations must the system detect and warn about? (e.g., scheduling installation before deinstallation.) Separate only when the validation has distinct user-facing behavior.
+4. FINANCIAL & CONTRACTUAL: What quoting, billing, authorization, or contractual adjustment flows are triggered? Separate when they involve a distinct actor (e.g., billing specialist) or distinct business process.
+5. DOWNSTREAM EXECUTION: What follow-on transactions, work orders, shipments, or records must be created when the plan/request is approved? Prefer ONE feature that covers all downstream initiation, with ARs for each variant — unless the business behavior genuinely diverges by type.
+6. CONSOLIDATED VISIBILITY: Who needs to see the end-to-end status of the process? What consolidated view enables a different role to track progress without reviewing individual sub-records? Separate when visibility serves a different actor with different information needs.
+7. ADAPTATION & MODIFICATION: What happens when conditions change after execution begins? How does the user modify, add, or remove items from an active plan? What financial or authorization consequences follow from mid-execution changes?
 
-Each dimension helps you test whether a distinct, deliverable capability exists. Use judgment — not every dimension needs a separate feature.
+Each dimension helps you test whether a distinct, deliverable BUSINESS CAPABILITY exists. Key judgment rule: variants of the same capability (e.g., initiate loaners vs initiate installation vs initiate deinstallation) belong in ONE feature with scenario-level ARs — NOT separate features with identical structure.
+
+ANTI-PATTERNS TO AVOID:
+- NOUN-SPLITTING: Do NOT create a separate feature for each noun the requirement names. If the requirement says "loaners, deinstallations, installations" and these are all initiated from the same plan through a similar process, they are ONE downstream execution capability with ARs covering each scenario. Only split when the business behavior genuinely diverges (e.g., loaners have return logistics, in-house service has transport logistics).
+- LIFECYCLE PADDING: Do NOT create thin lifecycle features (cancel, track status, submit for approval) unless they have independently complex business rules. Simple status transitions and cancellation guards belong as ARs on the parent workflow feature.
+- SINGLE-ACTOR DOMINANCE: If the requirement or discovery answers name multiple roles (e.g., support specialist, billing specialist, service manager), distribute feature ownership across them. The actor in the "As a [role]" description should be the person who OWNS that business outcome.
+- PATTERN CLONING: If you realize you are writing features with identical structure where only one noun changes, stop and consolidate them into one feature.
+
+COVERAGE MAPPING — verify before finalizing:
+After listing features, check that each dimension above is either represented in a feature or explicitly not applicable. Specifically verify:
+- Does this decomposition cover system enforcement or dependencies (if the requirement involves multi-step or sequenced activities)?
+- Does it cover consolidated visibility for a management or coordination role (if the requirement involves tracking multiple concurrent activities)?
+- Does it cover modification or adaptation after execution begins (if the requirement involves a plan or workflow that could change)?
+- Does it cover financial or contractual flows (if the requirement mentions quoting, billing, or customer authorization)?
+If a dimension is missing and applicable, add the feature. Do not assume AR generation will catch it.
 
 RULES:
 - A feature must represent independent business value, not just a supporting mechanism, side effect, analysis step, or operational convenience.
@@ -173,13 +188,11 @@ RULES:
 - No system-specific terms: no product names, module names, or object names
 - Do not import adjacent capabilities from similar stories, work instructions, or domain context unless the requirement or clarifying answers explicitly require them.
 - If work instructions or operational guidance in the user message define relevant business rules, decision logic, handling paths, state transitions, actor responsibilities, or exception behavior, preserve that scope explicitly rather than generalizing it away.
-- Supporting visibility, notifications, exception identification, policy definition, and status interpretation usually belong inside the main feature unless they are explicitly requested as separate deliverables.
 - Preserve meaningful workflow boundaries when actor responsibilities, decision paths, lifecycle branches, or exception handling would materially change what gets built or tested.
 - Do NOT split a trigger from its immediate behavior when the behaviors are inseparable parts of the same deliverable. If one event causes creation and first-pass classification of the same object, keep them together unless:
-  (a) the requirement explicitly names each classification outcome as a distinct concern with its own handling, routing, or ownership — in that case classification is a separately deliverable business rule, not merely the immediate effect of the trigger; or
-  (b) the requirement names distinct downstream paths (different queues, assignees, next-step workflows, or SLA treatment) that diverge per outcome — routing divergence is independently testable and often independently releasable.
-  When either exception applies, the record creation capability and the classification/routing capability may be separate features. Judgment call: if classification appears as a single incidental clause with no distinct handling described, keep it together; if the requirement gives named, differentiated treatment to each outcome, split.
-- DO NOT promote configuration or settings screens ("define intake sources", "manage classification rules", "configure X") into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable. Admin configuration is a property of the parent capability — fold it into the feature whose behavior it controls.
+  (a) the requirement explicitly names each classification outcome as a distinct concern with its own handling, routing, or ownership; or
+  (b) the requirement names distinct downstream paths that diverge per outcome.
+- DO NOT promote configuration or settings screens into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable.
 - Before finalizing, check whether any pair of features is truly duplicative. Merge only when they represent the same primary capability and outcome, not merely adjacent parts of the same workflow area.
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty arrays
@@ -203,7 +216,7 @@ export function buildDraftReviewSystemPrompt(opts: {
   const actionInstruction = (() => {
     switch (opts.action) {
       case 'broaden':
-        return 'Expand the draft where it is hiding independently valuable workflow slices, actor-specific handling, or exception paths inside overly broad features.';
+        return 'Audit the draft for MISSING business capabilities. Do NOT split existing features into sub-features by noun. Instead check: (1) Are system enforcement rules or dependencies represented? (2) Is consolidated visibility for a different role represented? (3) Is plan modification or adaptation represented? (4) Are there financial or contractual workflows that need a distinct feature? Add missing capabilities as new features.';
       case 'tighten':
         return 'Tighten the draft where sibling features are too thin or meaningfully overlap, but do not erase real workflow boundaries.';
       case 'merge_selected':
@@ -343,6 +356,18 @@ RULES:
 - Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
 - Treat any unresolved decisions from discovery as explicitly out of scope for AR generation. Do not invent rules that were left open.
+
+SCENARIO DEPTH — go beyond status gates:
+- Do NOT default to the pattern: happy path + "not in right status" guard + "not included" guard. This produces structurally identical ARs across features and misses real business logic.
+- For each feature, ask: What would a REAL TESTER verify beyond the obvious status checks? What compound scenarios involve multiple preconditions? What cross-feature or cross-activity interactions create interesting test cases?
+- Probe for: compound preconditions (e.g., "GIVEN a plan includes both billable and covered items AND customer authorization has been recorded"), financial consequences of actions, downstream impacts on related records, behavior when dependencies are partially met.
+- When a feature covers multiple activity types or variants, write ARs that name the specific scenario (e.g., "GIVEN a plan requires parts at one location AND equipment at another") rather than generic ARs about "activities."
+- When a feature involves sequencing or dependencies, write ARs that test the dependency enforcement (e.g., "GIVEN a preceding activity has not been completed WHEN the subsequent activity is scheduled THEN scheduling is prevented").
+
+ACTOR ASSIGNMENT:
+- Use the actor from the feature description as the default. Do NOT override it with a generic role.
+- When the feature description names a specialized role (Billing Specialist, Service Manager, etc.), keep all ARs for that feature anchored to that role's perspective.
+- When writing ARs that involve a DIFFERENT actor's action (e.g., customer acceptance, manager approval), name that actor explicitly in the WHEN clause.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN an agreement is linked to an item that has already been received"
@@ -582,6 +607,7 @@ export function buildArPerFeatureUserMessage(opts: {
   similarStoriesText?: string;
   feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string; feature_class?: string; confidence?: string; actor_source?: string };
   siblingFeatures?: { summary: string; description: string }[];
+  discoveredRoles?: string[];
   arObligations?: {
     confirmedOutcomes?: string[];
     confirmedExclusions?: string[];
@@ -631,6 +657,10 @@ export function buildArPerFeatureUserMessage(opts: {
       .map((f, i) => `${i + 1}. ${f.summary}: ${f.description}`)
       .join('\n');
     parts.push(`OTHER FEATURES IN THIS BACKLOG (do not duplicate their acceptance requirements):\n${siblingList}`);
+  }
+
+  if (opts.discoveredRoles && opts.discoveredRoles.length > 0) {
+    parts.push(`DISCOVERED ROLES (use the most appropriate role as the actor for this feature's ARs):\n${opts.discoveredRoles.join(', ')}`);
   }
 
   if (opts.arObligations) {
