@@ -383,6 +383,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
   const [piiMaskingEnabled, setPiiMaskingEnabled] = useState(false);
   const [auditTrailEnabled, setAuditTrailEnabled] = useState(false);
+  const [pipelineAuditEnabled, setPipelineAuditEnabled] = useState(false);
   const [complianceEvents, setComplianceEvents] = useState<ComplianceAuditEvent[]>([]);
   const [transparencyReports, setTransparencyReports] = useState<TransparencyReportRow[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
@@ -589,6 +590,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         setTransparencyEnabled(Boolean(existingConfig.compliance?.transparencyReportsEnabled));
         setPiiMaskingEnabled(Boolean(existingConfig.compliance?.piiMaskingEnabled));
         setAuditTrailEnabled(Boolean(existingConfig.compliance?.auditTrailEnabled));
+        setPipelineAuditEnabled(Boolean(existingConfig.developerTools?.pipelineAuditEnabled));
         if (existingConfig.wiConfig?.enabled !== undefined) setWiEnabled(existingConfig.wiConfig.enabled);
         if (existingConfig.defaultProjectKey) setDefaultProjectKey(existingConfig.defaultProjectKey);
         if (existingConfig.arMappings) setArMappings(existingConfig.arMappings.map((mapping: any) => normalizeProjectArMapping(mapping)));
@@ -872,6 +874,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           transparencyReportsEnabled: transparencyEnabled,
           piiMaskingEnabled,
           auditTrailEnabled,
+        },
+        developerTools: {
+          pipelineAuditEnabled,
         },
         branding: {
           logoUrl: brandingLogoUrl.trim() || null,
@@ -1414,6 +1419,24 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     )}
                   </div>
                 </div>
+
+                {isAdmin && (
+                  <div className="rf-card p-5 space-y-3">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Developer tools</div>
+                    <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
+                      When enabled, users can optionally record a full prompt and LLM trace for one end-to-end run (discovery through generation) and export JSON for external review. Uses Forge storage; use only for prompt QA.
+                    </p>
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pipelineAuditEnabled}
+                        onChange={(e) => setPipelineAuditEnabled(e.target.checked)}
+                        className="mt-0.5 rounded border-[var(--rf-border)]"
+                      />
+                      <span className="text-[13px] font-semibold text-[var(--rf-text)]">Allow pipeline audit recording</span>
+                    </label>
+                  </div>
+                )}
               </motion.div>
             )}
 

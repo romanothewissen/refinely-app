@@ -193,6 +193,10 @@ export interface TenantConfig {
   domainContexts: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+  /** Internal QA / prompt iteration — gate pipeline audit recording and export. */
+  developerTools?: {
+    pipelineAuditEnabled?: boolean;
+  };
 }
 
 export interface UserPreferences {
@@ -276,6 +280,9 @@ export const DEFAULT_CONFIG: TenantConfig = {
   ],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
+  developerTools: {
+    pipelineAuditEnabled: false,
+  },
 };
 
 // ─── Feature / Story Types ────────────────────────────────────────────────────
@@ -921,6 +928,87 @@ export interface TransparencyReport {
   createdAt: string;
 }
 
+/** On-demand full-run capture for external pipeline / prompt review (developerTools.pipelineAuditEnabled). */
+export type PipelineAuditPhase = 'clarify' | 'sufficiency' | 'generation';
+
+export interface PipelineAuditLlmCallRecord {
+  seq: number;
+  phase: string;
+  model: string;
+  provider?: LlmProvider;
+  durationMs?: number;
+  usage?: { input: number; output: number };
+  systemPrompt: string;
+  userMessage: string;
+  responseText: string;
+  parseOutcome?: 'n/a' | 'ok' | 'parse_failed' | 'parse_failed_after_retry';
+  piiMasking?: PiiMaskingStats;
+}
+
+export interface PipelineAuditBundle {
+  schemaVersion: 1;
+  sessionId: string;
+  auditRunId: string;
+  accountId?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedPhases: PipelineAuditPhase[];
+  reviewerPrompt?: string;
+  reviewerOutputSchema?: string;
+  header: {
+    primaryProjectKey?: string;
+    projectKeys?: string[];
+    generatorModels?: {
+      triageModel?: string;
+      clarifyModel?: string;
+      evaluateModel?: string;
+      decompositionModel?: string;
+      arModel?: string;
+    };
+    piiMaskingEnabled?: boolean;
+    piiMaskingStats?: PiiMaskingStats;
+  };
+  userInputs?: {
+    requirement?: string;
+    attachmentText?: string;
+    outputProfile?: OutputProfile;
+    clarifyDiscoveryProfile?: unknown;
+    clarifySizingContract?: unknown;
+    clarifyAdvisoryTriage?: unknown;
+  };
+  discoveryContext?: {
+    clarify?: {
+      wiContextText?: string;
+      similarStoriesText?: string;
+      domainContext?: string;
+      domainRoles?: string[];
+    };
+    generation?: {
+      wiContextText?: string;
+      similarStoriesText?: string;
+      domainContext?: string;
+      domainRoles?: string[];
+      goldExamplesText?: string;
+    };
+  };
+  llmCalls: PipelineAuditLlmCallRecord[];
+  clarify?: {
+    questions?: ClarifyQuestion[];
+    contextMeta?: ClarifyContextMeta;
+    completedAt?: string;
+  };
+  sufficiency?: {
+    evaluation?: Record<string, unknown>;
+    completedAt?: string;
+  };
+  generation?: {
+    clarifyAnswers?: ClarifyAnswer[];
+    features?: Feature[];
+    generationContext?: GenerationContextMeta;
+    completedAt?: string;
+  };
+}
+
 export interface ComplianceAuditEvent {
   eventId: string;
   timestamp: string;
@@ -975,6 +1063,9 @@ export interface ClarifyEvent {
   projectKeys?: string[];
   round?: 1 | 2;
   priorAnswers?: ClarifyAnswer[];
+  /** When set with config.developerTools.pipelineAuditEnabled, persist full audit bundle. */
+  pipelineAudit?: boolean;
+  auditRunId?: string;
 }
 
 // ─── Generation Queue Event ───────────────────────────────────────────────────
@@ -1013,6 +1104,9 @@ export interface GenerationEvent {
   retryBaseFeatures?: Feature[];
   /** When true, always pause after pass-1 feature decomposition for user review, regardless of quality issues. */
   pauseForDraftReview?: boolean;
+  /** When set with config.developerTools.pipelineAuditEnabled, persist full audit bundle. */
+  pipelineAudit?: boolean;
+  auditRunId?: string;
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

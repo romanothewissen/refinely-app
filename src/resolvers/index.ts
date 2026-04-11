@@ -64,7 +64,6 @@ import {
   ClarifyAnswer,
   Feature,
   GenerationEvent,
-  GenerationStageDurationsMs,
   ClarifyEvent,
   QuickRefineDraft,
   QuickRefineSession,
@@ -72,6 +71,12 @@ import {
   RefineEvent,
 } from '../types';
 import { handleInferProjectPersonaRoles } from './project-persona-role-inference';
+import {
+  getPipelineAuditWriter,
+  isPipelineAuditRequested,
+  runWithPipelineAuditContext,
+} from '../services/pipeline-audit-context';
+import { deletePipelineAuditBundle, loadPipelineAuditBundle } from '../services/pipeline-audit-store';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -504,6 +509,8 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
     clarifySizingContract: payload.clarifySizingContract ?? undefined,
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage ?? undefined,
+    pipelineAudit: payload.pipelineAudit,
+    auditRunId: payload.auditRunId,
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
@@ -600,7 +607,16 @@ async function cancelWorkflowProgress(
 }
 
 async function enqueueClarifyWorkflow(
-  payload: { sessionId: string; requirement: string; attachmentText?: string; projectKey?: string; projectKeys?: string[]; inputSignature?: string },
+  payload: {
+    sessionId: string;
+    requirement: string;
+    attachmentText?: string;
+    projectKey?: string;
+    projectKeys?: string[];
+    inputSignature?: string;
+    pipelineAudit?: boolean;
+    auditRunId?: string;
+  },
   context: any,
 ) {
   const config = await getConfig();
@@ -620,6 +636,8 @@ async function enqueueClarifyWorkflow(
     projectKeys: selectedProjectKeys,
     round: 1,
     priorAnswers: [],
+    pipelineAudit: payload.pipelineAudit,
+    auditRunId: payload.auditRunId,
   };
 
   await entitySet(KEYS.clarifyProgress(payload.sessionId), {
@@ -693,6 +711,7 @@ resolver.define('cancelClarify', async ({ payload }: { payload: { sessionId: str
 resolver.define('evaluateSufficiency', async ({ payload, context }) => {
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const input = {
     requirement: payload.requirement,
     answers: payload.answers as ClarifyAnswer[],
@@ -733,22 +752,102 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
         });
     });
 
-  try {
-    return await withResolverBudget(evaluateSufficiency(input), 20000);
-  } catch (firstErr) {
-    console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
-    const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
-    const isBudgetFailure = /resolver budget/i.test(firstMessage);
-    if (isBudgetFailure) {
-      return failOpen;
-    }
+  const auditMeta =
+    payload?.sessionId
+    && typeof payload?.auditRunId === 'string'
+    && payload.auditRunId.trim()
+    && isPipelineAuditRequested(config, payload.pipelineAudit, payload.auditRunId)
+      ? { sessionId: payload.sessionId as string, auditRunId: payload.auditRunId as string, accountId }
+      : null;
+
+  const runSufficiency = async () => {
+    getPipelineAuditWriter()?.setPhase('clarify.sufficiency');
+    let result: typeof failOpen | Awaited<ReturnType<typeof evaluateSufficiency>>;
     try {
-      return await withResolverBudget(evaluateSufficiency(input), 10000);
-    } catch (retryErr) {
-      console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
-      return failOpen;
+      result = await withResolverBudget(evaluateSufficiency(input), 20000);
+    } catch (firstErr) {
+      console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
+      const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      const isBudgetFailure = /resolver budget/i.test(firstMessage);
+      if (isBudgetFailure) {
+        result = failOpen;
+      } else {
+        try {
+          result = await withResolverBudget(evaluateSufficiency(input), 10000);
+        } catch (retryErr) {
+          console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
+          result = failOpen;
+        }
+      }
     }
+
+    const w = getPipelineAuditWriter();
+    if (w) {
+      try {
+        await w.flushMerge({
+          accountId,
+          sufficiency: {
+            evaluation: result as unknown as Record<string, unknown>,
+            completedAt: new Date().toISOString(),
+          },
+          completePhase: 'sufficiency',
+        });
+      } catch (auditErr) {
+        console.warn('[evaluateSufficiency] pipeline audit merge failed:', auditErr);
+      }
+    }
+    return result;
+  };
+
+  if (auditMeta) {
+    return runWithPipelineAuditContext(auditMeta, runSufficiency);
   }
+  return runSufficiency();
+});
+
+resolver.define('getPipelineAudit', async ({ payload, context }) => {
+  const cfg = await getConfig();
+  if (!cfg.developerTools?.pipelineAuditEnabled) {
+    return { success: false, error: 'Pipeline audit is not enabled for this workspace.' };
+  }
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const sessionId = String(payload?.sessionId ?? '');
+  const auditRunId = String(payload?.auditRunId ?? '');
+  if (!sessionId || !auditRunId) {
+    return { success: false, error: 'sessionId and auditRunId are required.' };
+  }
+  const bundle = await loadPipelineAuditBundle(sessionId, auditRunId);
+  if (!bundle) {
+    return { success: false, error: 'Audit bundle not found.' };
+  }
+  const isAdmin = await checkAdmin(context);
+  if (bundle.accountId && bundle.accountId !== accountId && !isAdmin) {
+    return { success: false, error: 'Unauthorized.' };
+  }
+  return { success: true, bundle };
+});
+
+resolver.define('deletePipelineAudit', async ({ payload, context }) => {
+  const cfg = await getConfig();
+  if (!cfg.developerTools?.pipelineAuditEnabled) {
+    return { success: false, error: 'Pipeline audit is not enabled for this workspace.' };
+  }
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const sessionId = String(payload?.sessionId ?? '');
+  const auditRunId = String(payload?.auditRunId ?? '');
+  if (!sessionId || !auditRunId) {
+    return { success: false, error: 'sessionId and auditRunId are required.' };
+  }
+  const bundle = await loadPipelineAuditBundle(sessionId, auditRunId);
+  if (!bundle) {
+    return { success: false, error: 'Audit bundle not found.' };
+  }
+  const isAdmin = await checkAdmin(context);
+  if (bundle.accountId && bundle.accountId !== accountId && !isAdmin) {
+    return { success: false, error: 'Unauthorized.' };
+  }
+  await deletePipelineAuditBundle(sessionId, auditRunId);
+  return { success: true };
 });
 
 // ─── Refine ───────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
+import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -49,6 +50,11 @@ export async function handler(event: { body: ClarifyEvent }) {
     domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
+  const auditMeta = isPipelineAuditRequested(config, event.body.pipelineAudit, event.body.auditRunId)
+    ? { sessionId, auditRunId: event.body.auditRunId!, accountId }
+    : null;
+
+  const exec = async () => {
   let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
   let stopHeartbeat: (() => void) | null = null;
 
@@ -74,6 +80,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       },
     });
     stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
+    getPipelineAuditWriter()?.setPhase('clarify.triage');
     const triagePromise = assessRequirementWithLlm({
       requirement: maskedRequirement.text,
       generatorConfig: config.generatorConfig,
@@ -88,6 +95,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
         azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
         modelCatalogs: config.generatorConfig.modelCatalogs,
+        piiMaskingEnabled: piiEnabled,
       },
     });
 
@@ -124,6 +132,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       },
     });
     const clarifyStartedAt = Date.now();
+    getPipelineAuditWriter()?.setPhase('clarify.questions');
     const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, advisoryTriage, sizingContract } = await generateClarifyingQuestions({
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
@@ -283,6 +292,44 @@ export async function handler(event: { body: ClarifyEvent }) {
       model: config.generatorConfig.clarifyModel,
     });
 
+    const auditWriter = getPipelineAuditWriter();
+    if (auditWriter) {
+      const similarStoriesText = formatSimilarStoriesText(similarStories, 8);
+      try {
+        await auditWriter.flushMerge({
+          accountId,
+          mergeHeader: {
+            primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+            projectKeys: selectedProjectKeys,
+            generatorModels: {
+              triageModel: config.generatorConfig.triageModel,
+              clarifyModel: config.generatorConfig.clarifyModel,
+            },
+            piiMaskingEnabled: piiEnabled,
+            piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats),
+          },
+          userInputs: {
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+          },
+          discoveryContextClarify: {
+            wiContextText: wiContext.text,
+            similarStoriesText,
+            domainContext: config.domainContext,
+            domainRoles: config.domainRoles,
+          },
+          clarify: {
+            questions,
+            contextMeta: clarifyContext,
+            completedAt: new Date().toISOString(),
+          },
+          completePhase: 'clarify',
+        });
+      } catch (auditErr) {
+        console.warn('[clarify-queue] pipeline audit merge failed:', auditErr);
+      }
+    }
+
     await entitySet(KEYS.clarifyProgress(sessionId), {
       type: 'complete',
       questions,
@@ -291,6 +338,20 @@ export async function handler(event: { body: ClarifyEvent }) {
       updatedAt: Date.now(),
     });
   } catch (err) {
+    const auditWriterErr = getPipelineAuditWriter();
+    if (auditWriterErr) {
+      try {
+        await auditWriterErr.flushMerge({
+          accountId,
+          mergeHeader: {
+            primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+            projectKeys: selectedProjectKeys,
+          },
+        });
+      } catch (auditErr) {
+        console.warn('[clarify-queue] pipeline audit merge (error path) failed:', auditErr);
+      }
+    }
     console.error('[clarify-queue] Error:', err);
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId, inputSignature);
@@ -324,6 +385,12 @@ export async function handler(event: { body: ClarifyEvent }) {
   } finally {
     stopHeartbeat?.();
   }
+  };
+
+  if (auditMeta) {
+    return runWithPipelineAuditContext(auditMeta, exec);
+  }
+  return exec();
 }
 
 async function sendClarifyProgress(

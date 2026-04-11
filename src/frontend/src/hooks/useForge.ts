@@ -29,6 +29,8 @@ export const api = {
     clarifyDiscoveryProfile?: unknown;
     clarifySizingContract?: unknown;
     clarifyAdvisoryTriage?: unknown;
+    pipelineAudit?: boolean;
+    auditRunId?: string;
   }) => invoke('startGeneration', payload),
   retryFailedFeatureGeneration: (payload: {
     sessionId: string;
@@ -36,32 +38,44 @@ export const api = {
   }) => invoke('retryFailedFeatureGeneration', payload),
 
   // Clarify (async queue)
-  startClarify: (
-    sessionId: string,
-    requirement: string,
-    attachmentText?: string,
-    projectKey?: string,
-    projectKeys?: string[],
-    inputSignature?: string,
-  ) => invoke('startClarify', { sessionId, requirement, attachmentText, projectKey, projectKeys, inputSignature }),
-  retryClarify: (
-    sessionId: string,
-    requirement: string,
-    attachmentText?: string,
-    projectKey?: string,
-    projectKeys?: string[],
-    inputSignature?: string,
-  ) => invoke('retryClarify', { sessionId, requirement, attachmentText, projectKey, projectKeys, inputSignature }),
+  startClarify: (payload: {
+    sessionId: string;
+    requirement: string;
+    attachmentText?: string;
+    projectKey?: string;
+    projectKeys?: string[];
+    inputSignature?: string;
+    pipelineAudit?: boolean;
+    auditRunId?: string;
+  }) => invoke('startClarify', payload),
+  retryClarify: (payload: {
+    sessionId: string;
+    requirement: string;
+    attachmentText?: string;
+    projectKey?: string;
+    projectKeys?: string[];
+    inputSignature?: string;
+    pipelineAudit?: boolean;
+    auditRunId?: string;
+  }) => invoke('retryClarify', payload),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
   evaluateSufficiency: (payload: {
+    sessionId?: string;
     requirement: string;
     answers: unknown[];
     askedQuestions?: unknown[];
     followupCap?: number;
     initialQuestionCount?: number;
     totalQuestionBudget?: number;
+    pipelineAudit?: boolean;
+    auditRunId?: string;
   }) => invoke('evaluateSufficiency', payload),
+
+  getPipelineAudit: (payload: { sessionId: string; auditRunId: string }) =>
+    invoke('getPipelineAudit', payload),
+  deletePipelineAudit: (payload: { sessionId: string; auditRunId: string }) =>
+    invoke('deletePipelineAudit', payload),
 
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>

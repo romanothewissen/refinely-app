@@ -418,6 +418,11 @@ function LegacyApp({
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tier, setTier] = useState('standard');
+  const [workspacePipelineAuditEnabled, setWorkspacePipelineAuditEnabled] = useState(false);
+  const [recordPipelineAuditForRun, setRecordPipelineAuditForRun] = useState(false);
+  const pipelineAuditRunIdRef = useRef<string | null>(null);
+  const pipelineAuditActiveRef = useRef(false);
+  const [pipelineAuditBanner, setPipelineAuditBanner] = useState<{ sessionId: string; auditRunId: string } | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => getDefaultSidebarWidth());
   const isResizing = useRef(false);
   const resolvedSidebarWidth = Number.isFinite(sidebarWidth) && sidebarWidth >= 300
@@ -589,6 +594,7 @@ function LegacyApp({
         const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
         setWorkspaceOutputProfile(normalizedProfile);
         setRunOutputProfileOverride(normalizedProfile);
+        setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
       })
       .catch(() => {});
   }, []); // eslint-disable-line
@@ -708,6 +714,7 @@ function LegacyApp({
       setWorkspaceOutputProfile(normalizedProfile);
       setRunOutputProfileOverride(normalizedProfile);
       setSavedDefaultProjectKey(typeof res.defaultProjectKey === 'string' ? res.defaultProjectKey : null);
+      setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
     }).catch(e => console.error('Config fetch failed', e));
     loadUsage();
     // Initial bootstrap only; later project selection changes are user-driven.
@@ -754,6 +761,12 @@ function LegacyApp({
       setRetryingFeatureId(null);
       setIsWorking(false);
       setWorkflowStage('idle');
+      if (pipelineAuditActiveRef.current && pipelineAuditRunIdRef.current) {
+        setPipelineAuditBanner({
+          sessionId: sessionIdRef.current,
+          auditRunId: pipelineAuditRunIdRef.current,
+        });
+      }
       loadHistory();
       window.setTimeout(() => { void loadHistory(); }, 1500);
       loadUsage();
@@ -994,6 +1007,7 @@ function LegacyApp({
     setWorkflowStage('sufficiency_check');
     try {
       const evaluation = await api.evaluateSufficiency({
+        sessionId: sessionIdRef.current,
         requirement,
         answers: mergedAnswers,
         askedQuestions: clarifyQuestions.map((question) => ({
@@ -1003,6 +1017,8 @@ function LegacyApp({
         })),
         followupCap: clarifyContext?.discoveryProfile?.followupCap,
         initialQuestionCount: clarifyContext?.initialQuestionCount ?? clarifyQuestions.length,
+        pipelineAudit: pipelineAuditActiveRef.current,
+        auditRunId: pipelineAuditRunIdRef.current ?? undefined,
       }) as any;
 
       setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation?.tokenUsage ?? null));
@@ -1074,6 +1090,9 @@ function LegacyApp({
     if (generationActive) {
       await cancelGeneration();
     }
+    pipelineAuditRunIdRef.current = null;
+    pipelineAuditActiveRef.current = false;
+    setPipelineAuditBanner(null);
   };
 
   const resolveDiscoverySessionId = async () => {
@@ -1120,16 +1139,27 @@ function LegacyApp({
     setIsEvaluatingDiscovery(false);
     setWorkflowStage('clarify_round_1');
 
+    if (recordPipelineAuditForRun && workspacePipelineAuditEnabled) {
+      pipelineAuditRunIdRef.current = crypto.randomUUID();
+      pipelineAuditActiveRef.current = true;
+    } else {
+      pipelineAuditRunIdRef.current = null;
+      pipelineAuditActiveRef.current = false;
+    }
+    setPipelineAuditBanner(null);
+
     try {
       const clarifySessionId = await resolveDiscoverySessionId();
-      const res = await api.startClarify(
-        clarifySessionId,
+      const res = await api.startClarify({
+        sessionId: clarifySessionId,
         requirement,
         attachmentText,
         projectKey,
         projectKeys,
-        discoveryInputSignature,
-      ) as any;
+        inputSignature: discoveryInputSignature,
+        pipelineAudit: pipelineAuditActiveRef.current,
+        auditRunId: pipelineAuditRunIdRef.current ?? undefined,
+      }) as any;
       if (res.success) {
         setPendingClarifySessionId(clarifySessionId);
       } else {
@@ -1177,17 +1207,28 @@ function LegacyApp({
     setClarifyAnswers([]);
     setWorkflowStage('clarify_round_1');
 
+    if (recordPipelineAuditForRun && workspacePipelineAuditEnabled) {
+      pipelineAuditRunIdRef.current = crypto.randomUUID();
+      pipelineAuditActiveRef.current = true;
+    } else {
+      pipelineAuditRunIdRef.current = null;
+      pipelineAuditActiveRef.current = false;
+    }
+    setPipelineAuditBanner(null);
+
     try {
       const clarifySessionId = await resolveDiscoverySessionId();
       setPendingClarifySessionId(clarifySessionId);
-      const res = await api.retryClarify(
-        clarifySessionId,
+      const res = await api.retryClarify({
+        sessionId: clarifySessionId,
         requirement,
         attachmentText,
         projectKey,
         projectKeys,
-        discoveryInputSignature,
-      ) as any;
+        inputSignature: discoveryInputSignature,
+        pipelineAudit: pipelineAuditActiveRef.current,
+        auditRunId: pipelineAuditRunIdRef.current ?? undefined,
+      }) as any;
       if (!res?.success) {
         setPendingClarifySessionId(null);
         setIsWorking(false);
@@ -1261,6 +1302,8 @@ function LegacyApp({
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
         clarifySizingContract: clarifyContext?.sizingContract ?? undefined,
         clarifyAdvisoryTriage: clarifyContext?.advisoryTriage ?? undefined,
+        pipelineAudit: pipelineAuditActiveRef.current,
+        auditRunId: pipelineAuditRunIdRef.current ?? undefined,
       }) as any;
 
       if (res?.success) {
@@ -1438,6 +1481,29 @@ function LegacyApp({
     setRunAttachmentError(null);
   };
 
+  const downloadPipelineAuditJson = async () => {
+    if (!pipelineAuditBanner) return;
+    try {
+      const res = (await api.getPipelineAudit({
+        sessionId: pipelineAuditBanner.sessionId,
+        auditRunId: pipelineAuditBanner.auditRunId,
+      })) as any;
+      if (!res?.success || !res.bundle) {
+        alert(res?.error || 'Could not load audit bundle.');
+        return;
+      }
+      const blob = new Blob([JSON.stringify(res.bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pipeline-audit-${pipelineAuditBanner.sessionId.slice(0, 8)}-${pipelineAuditBanner.auditRunId.slice(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(e?.message || 'Download failed');
+    }
+  };
+
   // Open settings: always collapse sidebar to give full screen
   const openSettings = () => {
     setViewMode('settings');
@@ -1476,7 +1542,10 @@ function LegacyApp({
               onNewSession={() => {
                 let newSid: string;
                 newSid = createSessionId();
-                
+                pipelineAuditRunIdRef.current = null;
+                pipelineAuditActiveRef.current = false;
+                setPipelineAuditBanner(null);
+
                 setSessionSignatures(null, null);
                 setRequirement('');
                 setFeatures([]);
@@ -1531,6 +1600,9 @@ function LegacyApp({
               runAttachmentError={runAttachmentError}
               onAddRunAttachments={handleAddRunAttachments}
               onRemoveRunAttachment={handleRemoveRunAttachment}
+              workspacePipelineAuditEnabled={workspacePipelineAuditEnabled}
+              recordPipelineAuditForRun={recordPipelineAuditForRun}
+              setRecordPipelineAuditForRun={setRecordPipelineAuditForRun}
             />
               {/* Resize Handle */}
               {sidebarOpen && (
@@ -1567,6 +1639,7 @@ function LegacyApp({
                 const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
                 setWorkspaceOutputProfile(normalizedProfile);
                 setRunOutputProfileOverride(normalizedProfile);
+                setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
               })
               .catch(() => {});
           }}
@@ -1576,6 +1649,35 @@ function LegacyApp({
       ) : (
         <div className="rf-main-shell rf-pane-seam flex-1 flex flex-col h-full relative overflow-hidden">
           <AnimatePresence>
+            {pipelineAuditBanner && (
+              <motion.div
+                key="pipeline-audit-banner"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="absolute top-3 left-1/2 z-50 -translate-x-1/2 max-w-[min(640px,calc(100%-2rem))] w-full px-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3 shadow-lg">
+                  <span className="text-[13px] font-semibold text-[var(--rf-text)]">Pipeline audit ready — export JSON for external review.</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { void downloadPipelineAuditJson(); }}
+                      className="rounded-lg bg-[var(--rf-brand)] px-3 py-1.5 text-[12px] font-bold text-white"
+                    >
+                      Download JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPipelineAuditBanner(null)}
+                      className="rounded-lg border border-[var(--rf-border)] px-3 py-1.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
             {generationError && (
               <motion.div
                 className="w-full bg-[var(--rf-danger-subtle)]/80 backdrop-blur-md text-[var(--rf-danger)] border-b border-[var(--rf-danger-subtle)] px-6 py-3 text-sm font-bold flex items-start gap-3 z-50"

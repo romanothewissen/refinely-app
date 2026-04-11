@@ -391,17 +391,6 @@ const PASS2_CONTEXT_LIMITS = {
 const MAX_CLARIFY_QUESTION_CHARS = 250;
 const MAX_CLARIFY_DETAILS_CHARS = 280;
 const MAX_CLARIFY_SUGGESTION_CHARS = 130;
-const FOLLOWUP_GROUNDING_STOPWORDS = new Set([
-  'a', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'by', 'can', 'do', 'does', 'first', 'for',
-  'from', 'handling', 'how', 'if', 'improve', 'in', 'into', 'is', 'it', 'its', 'of', 'on', 'or',
-  'process', 'request', 'requests', 'should', 'system', 'team', 'that', 'the', 'their', 'this',
-  'those', 'to', 'what', 'when', 'which', 'who', 'workflow',
-]);
-const GENERIC_FOLLOWUP_PATTERNS = [
-  /\bwhat should automatic .* handling improve first\?/i,
-  /\bwhat business outcome should .* improve first\?/i,
-  /\bwhat should count as a successful .* outcome\?/i,
-];
 
 function trimPromptText(text: string, maxChars: number): string {
   const normalized = (text || '').trim();
@@ -2085,12 +2074,13 @@ export function capDiscoveryProfileFloorForSmallAsk(input: {
 }
 
 /** @deprecated Draft review pause has been removed — pipeline auto-repairs internally. */
-export function shouldPauseForDraftReview(_input: {
+export function shouldPauseForDraftReview(input: {
   draftFeatureCount: number;
   triageFeatureTarget?: number;
   sizingAssessment: SizingAssessmentSnapshot;
   overlapCount?: number;
 }): boolean {
+  void input;
   return false;
 }
 
@@ -3870,7 +3860,7 @@ export async function addFeaturesFromFeedback(opts: {
 
   const existingSummaries = new Set(features.map((feature) => feature.summary.trim().toLowerCase()).filter(Boolean));
   const addedFeatures = (result.data.features ?? [])
-    .map((raw) => applyFeatureOutputGuardrails(normaliseFeature(raw, roleGrounding), roleGrounding))
+    .map((raw) => applyFeatureOutputGuardrails(normaliseFeature(raw, roleGrounding)))
     .filter((feature) => feature.acceptanceRequirements.length > 0)
     .filter((feature) => {
       const summaryKey = feature.summary.trim().toLowerCase();
@@ -3955,7 +3945,7 @@ async function addRequirementsToFeature(opts: {
     domainRoles: config.domainRoles,
   };
   const candidate = rawFeature
-    ? applyFeatureOutputGuardrails(normaliseFeature(rawFeature, roleGrounding), roleGrounding)
+    ? applyFeatureOutputGuardrails(normaliseFeature(rawFeature, roleGrounding))
     : feature;
 
   return {
@@ -4110,10 +4100,10 @@ export async function refineSingleFeature(opts: {
         storyPoints: candidate.storyPoints ?? feature.storyPoints,
         processCode: candidate.processCode ?? feature.processCode,
       };
-      return applyFeatureOutputGuardrails(stableResult, roleGrounding);
+      return applyFeatureOutputGuardrails(stableResult);
     }
     // Additional split features get fresh ids (already assigned by normaliseFeature).
-    return applyFeatureOutputGuardrails(candidate, roleGrounding);
+    return applyFeatureOutputGuardrails(candidate);
   });
 
   // If the LLM returned nothing, fall back to the original feature unchanged.
@@ -4681,7 +4671,7 @@ async function repairFeatureAcceptanceRequirements(input: {
       description: repairedRaw.description ?? input.feature.description,
       suggested_story_points: repairedRaw.suggested_story_points ?? input.feature.storyPoints,
       process_code: repairedRaw.process_code ?? input.feature.processCode,
-    }, input.roleGrounding), input.roleGrounding)
+    }, input.roleGrounding))
     : input.feature;
 
   return {
@@ -4763,10 +4753,7 @@ function deduplicateDescription(description: string): string {
   return description;
 }
 
-export function applyFeatureOutputGuardrails(
-  feature: Feature,
-  _roleGrounding?: { requirement?: string; clarifyAnswers?: ClarifyAnswer[]; domainRoles?: string[] },
-): Feature {
+export function applyFeatureOutputGuardrails(feature: Feature): Feature {
   return {
     ...feature,
     description: normalizeDraftDescriptionText(feature.description),
@@ -4783,7 +4770,7 @@ function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext)
     storyPoints: raw.suggested_story_points,
     processCode: raw.process_code,
   };
-  const guarded = applyFeatureOutputGuardrails(draft, roleGrounding);
+  const guarded = applyFeatureOutputGuardrails(draft);
   guarded.featureClass = determineFeatureClass({ ...raw, description: guarded.description });
   guarded.actorSource = determineActorSource(guarded.description, roleGrounding, raw);
   guarded.confidence = determineFeatureConfidence({ description: guarded.description, actorSource: guarded.actorSource, raw });

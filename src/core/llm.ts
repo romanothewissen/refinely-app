@@ -12,6 +12,7 @@ import type {
   PiiMaskingStats,
 } from '../types';
 import { maskPiiText } from '../services/compliance';
+import { getPipelineAuditWriter } from '../services/pipeline-audit-context';
 import { extractJson } from './json';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
@@ -165,24 +166,39 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     effectiveOpts.modelCatalog ?? (effectiveOpts.provider ? effectiveOpts.modelCatalogs?.[effectiveOpts.provider] : undefined),
   );
 
+  const startedAt = Date.now();
+  let result: LlmResponse;
+
   if (opts.provider === 'gemini') {
-    const result = await callGemini({ ...effectiveOpts, model: resolvedModel });
-    return { ...result, piiMasking };
-  }
-  if (opts.provider === 'anthropic') {
-    const result = await callAnthropic({ ...effectiveOpts, model: resolvedModel });
-    return { ...result, piiMasking };
-  }
-  if (opts.provider === 'openai') {
-    const result = await callOpenAI({ ...effectiveOpts, model: resolvedModel });
-    return { ...result, piiMasking };
-  }
-  if (opts.provider === 'azure_openai') {
-    const result = await callAzureOpenAI({ ...effectiveOpts, model: resolvedModel });
-    return { ...result, piiMasking };
+    result = await callGemini({ ...effectiveOpts, model: resolvedModel });
+  } else if (opts.provider === 'anthropic') {
+    result = await callAnthropic({ ...effectiveOpts, model: resolvedModel });
+  } else if (opts.provider === 'openai') {
+    result = await callOpenAI({ ...effectiveOpts, model: resolvedModel });
+  } else if (opts.provider === 'azure_openai') {
+    result = await callAzureOpenAI({ ...effectiveOpts, model: resolvedModel });
+  } else {
+    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, or Azure OpenAI before calling callLlm.');
   }
 
-  throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, or Azure OpenAI before calling callLlm.');
+  const audit = getPipelineAuditWriter();
+  if (audit) {
+    audit.appendLlmCall({
+      model: resolvedModel,
+      provider: opts.provider,
+      systemPrompt: effectiveOpts.systemPrompt,
+      userMessage: effectiveOpts.userMessage,
+      responseText: result.text,
+      durationMs: Date.now() - startedAt,
+      usage: {
+        input: result.inputTokens ?? 0,
+        output: result.outputTokens ?? 0,
+      },
+      piiMasking: result.piiMasking ?? piiMasking,
+    });
+  }
+
+  return { ...result, piiMasking };
 }
 
 export function isLatestModelSelector(model: string): model is LatestModelSelector {
@@ -833,8 +849,10 @@ export async function callLlmJsonWithUsage<T>(opts: {
       });
     }
     try {
+      const data = extractJson<T>(res.text);
+      getPipelineAuditWriter()?.annotateLastJsonParse('ok');
       return {
-        data: extractJson<T>(res.text),
+        data,
         usage: { input: totalInput, output: totalOutput },
         piiMasking: piiMaskingTotals,
       };
@@ -842,6 +860,10 @@ export async function callLlmJsonWithUsage<T>(opts: {
       lastError = err as Error;
       const parseShape = summarizeJsonParseInput(res.text);
       lastParseShape = JSON.stringify(parseShape);
+      const audit = getPipelineAuditWriter();
+      if (audit) {
+        audit.annotateLastJsonParse(attempt === 0 ? 'parse_failed' : 'parse_failed_after_retry');
+      }
       if (attempt === 0) {
         console.warn('[llm-json] Failed to parse model response as JSON; retrying with stricter instruction.', {
           provider,

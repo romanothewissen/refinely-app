@@ -187,6 +187,9 @@ export interface TenantConfig {
   domainContexts?: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+  developerTools?: {
+    pipelineAuditEnabled?: boolean;
+  };
 }
 
 export interface UserPreferences {
@@ -270,6 +273,9 @@ export const DEFAULT_CONFIG: TenantConfig = {
   ],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
+  developerTools: {
+    pipelineAuditEnabled: false,
+  },
 };
 
 // ─── Feature / Story Types ────────────────────────────────────────────────────
@@ -959,6 +965,8 @@ export interface ClarifyEvent {
   projectKeys?: string[];
   round?: 1 | 2;
   priorAnswers?: ClarifyAnswer[];
+  pipelineAudit?: boolean;
+  auditRunId?: string;
 }
 
 // ─── Generation Queue Event ───────────────────────────────────────────────────
@@ -989,6 +997,8 @@ export interface GenerationEvent {
   retryFeatureId?: string;
   retryFeature?: Feature;
   retryBaseFeatures?: Feature[];
+  pipelineAudit?: boolean;
+  auditRunId?: string;
 }
 
 // ─── Tier Limits ─────────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@ import { formatSimilarStoriesText } from '../core/similar-stories';
 import { maskPiiText, maskPiiInAnswers, mergePiiMaskingStats, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
+import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -209,11 +210,14 @@ export async function handler(event: { body: GenerationEvent }) {
     projectKeys,
     clarifySizingContract,
     clarifyAdvisoryTriage,
+    clarifyDiscoveryProfile,
     priorStageDurationsMs,
     outputProfileOverride,
     retryFeatureId,
     retryFeature,
     retryBaseFeatures,
+    pipelineAudit,
+    auditRunId,
   } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
@@ -223,6 +227,11 @@ export async function handler(event: { body: GenerationEvent }) {
     domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
+  const auditMeta = isPipelineAuditRequested(config, pipelineAudit, auditRunId)
+    ? { sessionId, auditRunId: auditRunId!, accountId }
+    : null;
+
+  const exec = async () => {
   let stopHeartbeat: (() => void) | null = null;
   let progressSourcesSnapshot: GenerationProgressPayload['sources'] | undefined;
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
@@ -319,9 +328,10 @@ export async function handler(event: { body: GenerationEvent }) {
 
     await updateProgress(startProgress.message, 1, startProgress.payload);
 
-    let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> =
+    const liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> =
       startProgress.payload.draftFeatures ?? [];
 
+    getPipelineAuditWriter()?.setPhase('generate.pipeline');
     const result = await generateFeatures({
       requirement,
       clarifyAnswers: maskedAnswers.answers,
@@ -486,6 +496,48 @@ export async function handler(event: { body: GenerationEvent }) {
       return;
     }
 
+    const genAuditWriter = getPipelineAuditWriter();
+    if (genAuditWriter) {
+      try {
+        await genAuditWriter.flushMerge({
+          accountId,
+          mergeHeader: {
+            primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+            projectKeys: selectedProjectKeys,
+            generatorModels: {
+              decompositionModel: config.generatorConfig.decompositionModel,
+              arModel: config.generatorConfig.arModel,
+            },
+            piiMaskingEnabled: piiEnabled,
+            piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedAnswers.stats),
+          },
+          userInputs: {
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+            clarifyDiscoveryProfile,
+            clarifySizingContract,
+            clarifyAdvisoryTriage,
+          },
+          discoveryContextGeneration: {
+            wiContextText: wiContext.text,
+            similarStoriesText,
+            domainContext: config.domainContext,
+            domainRoles: config.domainRoles,
+          },
+          generation: {
+            clarifyAnswers: maskedAnswers.answers,
+            features: result.features,
+            generationContext: result.generationContext,
+            completedAt: new Date().toISOString(),
+          },
+          completePhase: 'generation',
+        });
+      } catch (auditErr) {
+        console.warn('[generation-queue] pipeline audit merge failed:', auditErr);
+      }
+    }
+
     await entitySet(KEYS.generationProgress(sessionId), {
       type: 'complete',
       sessionId,
@@ -493,16 +545,32 @@ export async function handler(event: { body: GenerationEvent }) {
       updatedAt: Date.now(),
     } as RealtimeEvent);
 
-    void generateSessionTitle(maskedRequirement.text, config)
-      .then(async (title) => {
-        await updateConversationTitle(sessionId, accountId, title);
-      })
-      .catch(async (titleErr) => {
-        console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
-        await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
-      });
+    setImmediate(() => {
+      void generateSessionTitle(maskedRequirement.text, config)
+        .then(async (title) => {
+          await updateConversationTitle(sessionId, accountId, title);
+        })
+        .catch(async (titleErr) => {
+          console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
+          await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
+        });
+    });
 
   } catch (err) {
+    const genAuditErr = getPipelineAuditWriter();
+    if (genAuditErr) {
+      try {
+        await genAuditErr.flushMerge({
+          accountId,
+          mergeHeader: {
+            primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+            projectKeys: selectedProjectKeys,
+          },
+        });
+      } catch (auditErr) {
+        console.warn('[generation-queue] pipeline audit merge (error path) failed:', auditErr);
+      }
+    }
     if (await isWorkflowCancelled(sessionId) || err instanceof GenerationCancelledError || String((err as { name?: string })?.name ?? '') === 'GenerationCancelledError') {
       await markCancelled(sessionId);
       return;
@@ -549,6 +617,12 @@ export async function handler(event: { body: GenerationEvent }) {
   } finally {
     stopHeartbeat?.();
   }
+  };
+
+  if (auditMeta) {
+    return runWithPipelineAuditContext(auditMeta, exec);
+  }
+  return exec();
 }
 
 async function isWorkflowCancelled(sessionId: string): Promise<boolean> {

@@ -44,6 +44,9 @@ interface SidebarProps {
   runAttachmentError: string | null;
   onAddRunAttachments: (files: File[]) => void | Promise<void>;
   onRemoveRunAttachment: (attachmentId: string) => void;
+  workspacePipelineAuditEnabled?: boolean;
+  recordPipelineAuditForRun?: boolean;
+  setRecordPipelineAuditForRun?: (value: boolean) => void;
 }
 
 const fadeUp = {
@@ -96,6 +99,9 @@ export function Sidebar({
   runAttachmentError,
   onAddRunAttachments,
   onRemoveRunAttachment,
+  workspacePipelineAuditEnabled = false,
+  recordPipelineAuditForRun = false,
+  setRecordPipelineAuditForRun,
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
@@ -608,6 +614,19 @@ export function Sidebar({
           animate="visible"
           custom={3}
         >
+          {workspacePipelineAuditEnabled && setRecordPipelineAuditForRun && (
+            <label className="flex items-start gap-2.5 px-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={recordPipelineAuditForRun}
+                onChange={(e) => setRecordPipelineAuditForRun(e.target.checked)}
+                className="mt-0.5 rounded border-[var(--rf-border)]"
+              />
+              <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)] leading-snug">
+                Record pipeline audit for this run (export prompts &amp; trace after generation)
+              </span>
+            </label>
+          )}
           {/* Primary CTA */}
           <motion.button
             onClick={onStartBrainstorm}
