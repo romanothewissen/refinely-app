@@ -258,6 +258,14 @@ interface FeatureArRepairResult {
 
 const AR_GENERATION_ATTEMPTS = 2;
 const AR_RETRY_DELAY_MS = 600;
+/** Caps parallel AR LLM calls so providers (especially Gemini) do not throttle or queue excessively — often improves wall-clock vs unbounded fan-out. */
+const AR_PARALLEL_CONCURRENCY = 5;
+
+/**
+ * Triage + initial discovery must stay fast: Gemini 2.x maps "medium" reasoning to a large thinking budget (~8192),
+ * which routinely pushes a single call past several minutes. Use no extended thinking here; quality stays in prompts + WI context.
+ */
+const CLARIFY_PIPELINE_REASONING_EFFORT = 'none' as const;
 
 export class AcceptanceRequirementsGenerationError extends Error {
   draftFeatures: Feature[];
@@ -1128,6 +1136,7 @@ async function runParallelArPass(input: {
   attachmentText?: string;
   wiContextText?: string;
   similarStoriesText?: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   domainContext: string;
   arPlan: ArPlan;
   arObligations?: ArObligations;
@@ -1156,6 +1165,10 @@ async function runParallelArPass(input: {
   const model = getTierModel(input.generatorConfig.arModel, input.tier);
   const maxTokens = 4096;
 
+  const wiInsightsText = input.wiInsightsArtifact
+    ? formatWorkInstructionInsightsForPrompt(input.wiInsightsArtifact, 5).trim()
+    : '';
+
   // Build per-feature tasks
   const tasks = input.features.map((feature) => ({
       feature,
@@ -1170,6 +1183,7 @@ async function runParallelArPass(input: {
           intent: a.intent,
         })),
         attachmentText: input.attachmentText,
+        ...(wiInsightsText ? { wiInsightsText } : {}),
         wiContextText: input.wiContextText,
         similarStoriesText: input.similarStoriesText,
         feature: {
@@ -1202,10 +1216,10 @@ async function runParallelArPass(input: {
     });
   }
 
-  // Run all features in parallel — no artificial concurrency cap
-  const allResults = await Promise.allSettled(
-    tasks.map(async (task) => {
-      const result = await generateAcceptanceRequirementsForFeature({
+  const runOne = async (task: (typeof tasks)[number]) => {
+    let result: { feature: RawFeature; usage: { input: number; output: number } };
+    try {
+      result = await generateAcceptanceRequirementsForFeature({
         feature: task.feature,
         systemPrompt,
         userMessage: task.userMessage,
@@ -1213,44 +1227,45 @@ async function runParallelArPass(input: {
         maxTokens,
         providerOpts: input.providerOpts,
       });
-      const featureId = task.feature.id;
+    } catch {
+      result = { feature: task.feature, usage: { input: 0, output: 0 } };
+    }
+    const featureId = task.feature.id;
+    if (featureId) {
+      activeFeatureIds.delete(featureId);
+    }
+    if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
       if (featureId) {
-        activeFeatureIds.delete(featureId);
+        completedFeatureIds.add(featureId);
+        failedFeatureIds.delete(featureId);
       }
-      if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
-        if (featureId) {
-          completedFeatureIds.add(featureId);
-          failedFeatureIds.delete(featureId);
-        }
-      } else if (featureId) {
-        failedFeatureIds.add(featureId);
-      }
-      if (input.onArProgress) {
-        await input.onArProgress({
-          total,
-          completedFeatureIds: [...completedFeatureIds],
-          activeFeatureIds: [...activeFeatureIds],
-          backfillFeatureIds: [],
-          failedFeatureIds: [...failedFeatureIds],
-          phase: 'initial',
-        });
-      }
-      return result;
-    }),
-  );
+    } else if (featureId) {
+      failedFeatureIds.add(featureId);
+    }
+    if (input.onArProgress) {
+      await input.onArProgress({
+        total,
+        completedFeatureIds: [...completedFeatureIds],
+        activeFeatureIds: [...activeFeatureIds],
+        backfillFeatureIds: [],
+        failedFeatureIds: [...failedFeatureIds],
+        phase: 'initial',
+      });
+    }
+    return result;
+  };
 
-  const results: { feature: RawFeature; usage: { input: number; output: number } }[] = allResults.map(
-    (settled, i) => settled.status === 'fulfilled'
-      ? { feature: settled.value.feature, usage: settled.value.usage }
-      : { feature: tasks[i].feature, usage: { input: 0, output: 0 } },
-  );
+  const allResults = await runOrderedConcurrentTasks({
+    tasks: tasks.map((task) => () => runOne(task)),
+    concurrency: AR_PARALLEL_CONCURRENCY,
+  });
 
-  const totalUsage = results.reduce(
+  const totalUsage = allResults.reduce(
     (acc, r) => ({ input: acc.input + r.usage.input, output: acc.output + r.usage.output }),
     { input: 0, output: 0 },
   );
 
-  return { features: results.map(r => r.feature), usage: totalUsage };
+  return { features: allResults.map((r) => r.feature), usage: totalUsage };
 }
 
 async function backfillMissingAcceptanceRequirements(input: {
@@ -1260,6 +1275,7 @@ async function backfillMissingAcceptanceRequirements(input: {
   attachmentText?: string;
   wiContextText?: string;
   similarStoriesText?: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   domainContext: string;
   arPlan: ArPlan;
   arObligations?: ArObligations;
@@ -1314,75 +1330,86 @@ async function backfillMissingAcceptanceRequirements(input: {
     });
   }
 
-  const backfillResults = await Promise.allSettled(
-    missingIndexes.map(({ feature, index }) =>
-      generateAcceptanceRequirementsForFeature({
+  const wiInsightsText = input.wiInsightsArtifact
+    ? formatWorkInstructionInsightsForPrompt(input.wiInsightsArtifact, 5).trim()
+    : '';
+
+  const buildUserMessage = (feature: RawFeature) => buildArPerFeatureUserMessage({
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers?.map((a) => ({
+      question: a.question,
+      answer: a.answer,
+      customAnswer: a.customAnswer,
+      selectedSuggestions: a.selectedSuggestions,
+      categoryKey: a.categoryKey,
+      intent: a.intent,
+    })),
+    attachmentText: input.attachmentText,
+    ...(wiInsightsText ? { wiInsightsText } : {}),
+    wiContextText: input.wiContextText,
+    similarStoriesText: input.similarStoriesText,
+    feature: {
+      summary: feature.summary ?? '',
+      description: feature.description ?? '',
+      suggested_story_points: feature.suggested_story_points,
+      process_code: feature.process_code,
+    },
+    siblingFeatures: input.features
+      .filter(f => f.id !== feature.id)
+      .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
+    discoveredRoles: input.discoveredRoles,
+    arObligations: input.arObligations,
+  });
+
+  const runBackfillOne = async ({ feature, index }: { feature: RawFeature; index: number }) => {
+    let result: { feature: RawFeature; usage: { input: number; output: number } };
+    try {
+      result = await generateAcceptanceRequirementsForFeature({
         feature,
         systemPrompt,
-        userMessage: buildArPerFeatureUserMessage({
-          requirement: input.requirement,
-          clarifyAnswers: input.clarifyAnswers?.map((a) => ({
-            question: a.question,
-            answer: a.answer,
-            customAnswer: a.customAnswer,
-            selectedSuggestions: a.selectedSuggestions,
-            categoryKey: a.categoryKey,
-            intent: a.intent,
-          })),
-          attachmentText: input.attachmentText,
-          wiContextText: input.wiContextText,
-          similarStoriesText: input.similarStoriesText,
-          feature: {
-            summary: feature.summary ?? '',
-            description: feature.description ?? '',
-            suggested_story_points: feature.suggested_story_points,
-            process_code: feature.process_code,
-          },
-          siblingFeatures: input.features
-            .filter(f => f.id !== feature.id)
-            .map(f => ({ summary: f.summary ?? '', description: f.description ?? '' })),
-          discoveredRoles: input.discoveredRoles,
-          arObligations: input.arObligations,
-        }),
+        userMessage: buildUserMessage(feature),
         model,
         maxTokens: 4096,
         providerOpts: input.providerOpts,
-      }).then(async (result) => {
-        const featureId = feature.id;
-        if (featureId) {
-          retryingFeatureIds.delete(featureId);
-        }
-        if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
-          if (featureId) {
-            completedFeatureIds.add(featureId);
-            failedFeatureIds.delete(featureId);
-          }
-        } else if (featureId) {
-          failedFeatureIds.add(featureId);
-        }
-        if (input.onArProgress) {
-          await input.onArProgress({
-            total,
-            completedFeatureIds: [...completedFeatureIds],
-            activeFeatureIds: [],
-            backfillFeatureIds: [...retryingFeatureIds],
-            failedFeatureIds: [...failedFeatureIds],
-            phase: 'backfill',
-          });
-        }
-        return { result, index };
-      }),
-    ),
-  );
+      });
+    } catch {
+      result = { feature, usage: { input: 0, output: 0 } };
+    }
+    const featureId = feature.id;
+    if (featureId) {
+      retryingFeatureIds.delete(featureId);
+    }
+    if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
+      if (featureId) {
+        completedFeatureIds.add(featureId);
+        failedFeatureIds.delete(featureId);
+      }
+    } else if (featureId) {
+      failedFeatureIds.add(featureId);
+    }
+    if (input.onArProgress) {
+      await input.onArProgress({
+        total,
+        completedFeatureIds: [...completedFeatureIds],
+        activeFeatureIds: [],
+        backfillFeatureIds: [...retryingFeatureIds],
+        failedFeatureIds: [...failedFeatureIds],
+        phase: 'backfill',
+      });
+    }
+    return { result, index };
+  };
+
+  const backfillResults = await runOrderedConcurrentTasks({
+    tasks: missingIndexes.map((entry) => () => runBackfillOne(entry)),
+    concurrency: AR_PARALLEL_CONCURRENCY,
+  });
 
   let usage = { input: 0, output: 0 };
-  for (const settled of backfillResults) {
-    if (settled.status === 'fulfilled') {
-      const { result, index } = settled.value;
-      usage = { input: usage.input + result.usage.input, output: usage.output + result.usage.output };
-      if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
-        nextFeatures[index] = result.feature;
-      }
+  for (const { result, index } of backfillResults) {
+    usage = { input: usage.input + result.usage.input, output: usage.output + result.usage.output };
+    if (rawFeatureHasCompleteAcceptanceRequirements(result.feature)) {
+      nextFeatures[index] = result.feature;
     }
   }
 
@@ -1629,7 +1656,7 @@ export async function assessRequirementWithLlmWithUsage(input: {
       model: getTierModel(input.generatorConfig.triageModel, input.tier),
       systemPrompt: buildTriageSystemPrompt(),
       userMessage,
-      reasoningEffort: 'medium',
+      reasoningEffort: CLARIFY_PIPELINE_REASONING_EFFORT,
       ...input.providerOpts,
     });
     return {
@@ -2959,6 +2986,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText: wiForPass2Ar,
       similarStoriesText: similarForPass2Ar,
+      wiInsightsArtifact,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -2978,6 +3006,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText: wiForPass2Ar,
       similarStoriesText: similarForPass2Ar,
+      wiInsightsArtifact,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -2998,6 +3027,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText: wiForPass2Ar,
       similarStoriesText: similarForPass2Ar,
+      wiInsightsArtifact,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -3073,6 +3103,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText: wiForPass2Ar,
       similarStoriesText: similarForPass2Ar,
+      wiInsightsArtifact,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -3091,6 +3122,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       wiContextText: wiForPass2Ar,
       similarStoriesText: similarForPass2Ar,
+      wiInsightsArtifact,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -3355,14 +3387,14 @@ export async function generateClarifyingQuestions(opts: {
     });
   }
   const desiredQuestionCount = clarifyTriageResult?.discoveryForecast.recommendedInitialCount ?? 0;
-  const clarifyMaxTokens = Math.max(Math.min(config.generatorConfig.maxTokens, 8192), 6144);
+  const clarifyMaxTokens = Math.min(4096, Math.max(2048, Math.min(config.generatorConfig.maxTokens ?? 4096, 8192)));
   const contextParts: string[] = [
     `REQUIREMENT: ${requirement}`,
   ];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
   if (wiInsightsArtifact) contextParts.push(`WORK INSTRUCTION INSIGHTS:\n${formatWorkInstructionInsightsForPrompt(wiInsightsArtifact)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, wiCap)}`);
-  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 8000)}`);
+  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 6000)}`);
   const baseUserMessage = contextParts.join('\n\n');
 
   const system = buildClarifySystemPrompt({
@@ -3381,7 +3413,7 @@ export async function generateClarifyingQuestions(opts: {
         systemPrompt: system,
         userMessage,
         maxTokens: clarifyMaxTokens,
-        reasoningEffort: 'medium',
+        reasoningEffort: CLARIFY_PIPELINE_REASONING_EFFORT,
         ...buildLlmProviderOpts(config),
       });
       const durationMs = Date.now() - startedAt;
@@ -3391,7 +3423,11 @@ export async function generateClarifyingQuestions(opts: {
         parseDiscoveryProfileCandidate(raw.data),
         parsed.questions.length || desiredQuestionCount,
       );
-      const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfileCandidate);
+      const repairedDiscovery = validateAndRepairInitialDiscovery(
+        parsed.questions,
+        normalizedProfileCandidate,
+        clarifyTriageResult?.discoveryForecast?.recommendedInitialCount ?? null,
+      );
       const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery);
 
       return {
@@ -3569,7 +3605,7 @@ export async function evaluateSufficiency(opts: {
       }),
       userMessage,
       maxTokens: 900,
-      reasoningEffort: 'low',
+      reasoningEffort: CLARIFY_PIPELINE_REASONING_EFFORT,
       ...buildLlmProviderOpts(opts.config),
     });
     const durationMs = Date.now() - startedAt;

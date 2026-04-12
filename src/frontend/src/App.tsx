@@ -90,6 +90,11 @@ function buildProjectSelectionSignature(projectKeys: string[]): string[] {
   return normalizeProjectKeys(projectKeys);
 }
 
+function inferProjectKeyFromIssueKey(issueKey?: string | null): string[] {
+  const projectKey = String(issueKey ?? '').trim().split('-')[0] ?? '';
+  return projectKey ? [projectKey] : [];
+}
+
 /** Recursively extract plain text from an Atlassian Document Format node */
 function extractAdfText(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
@@ -501,6 +506,12 @@ function LegacyApp({
     ),
     [launchProjectKey, savedDefaultProjectKey],
   );
+  const effectiveProjectKeys = useMemo(() => {
+    if (projectKeys.length > 0) return projectKeys;
+    if (preferredProjectKeys.length > 0) return preferredProjectKeys;
+    return normalizeProjectKeys(inferProjectKeyFromIssueKey(originIssueKey));
+  }, [originIssueKey, preferredProjectKeys, projectKeys]);
+  const effectiveProjectKey = effectiveProjectKeys[0] ?? '*';
   const setSelectedProjectKeys = useCallback((
     nextKeys: string[],
     options?: { collapseWorkspace?: boolean; nextContextMode?: 'undecided' | 'project' | 'global' },
@@ -649,12 +660,12 @@ function LegacyApp({
   const discoveryInputSignature = useMemo(
     () => buildDiscoveryInputSignature({
       requirement,
-      projectKey,
-      projectKeys,
-      contextMode,
+      projectKey: effectiveProjectKey,
+      projectKeys: effectiveProjectKeys,
+      contextMode: effectiveProjectKeys.length ? 'project' : contextMode,
       attachments: runAttachments,
     }),
-    [requirement, projectKey, projectKeys, contextMode, runAttachments],
+    [requirement, effectiveProjectKey, effectiveProjectKeys, contextMode, runAttachments],
   );
 
   const hydrateConversationState = (conversation: any) => {
@@ -907,7 +918,7 @@ function LegacyApp({
       setClarifyContext(
         (contextMeta as ClarifyContextMeta | undefined)
         ?? {
-          projectKey,
+          projectKey: effectiveProjectKey,
           domainRolesUsed: [],
           discoveryStatus: 'discovery_failed',
           failureReasonCode: reasonCode,
@@ -1182,8 +1193,8 @@ function LegacyApp({
         sessionId: clarifySessionId,
         requirement,
         attachmentText,
-        projectKey,
-        projectKeys,
+        projectKey: effectiveProjectKey,
+        projectKeys: effectiveProjectKeys,
         inputSignature: discoveryInputSignature,
         pipelineAudit: pipelineAuditActiveRef.current,
         auditRunId: pipelineAuditRunIdRef.current ?? undefined,
@@ -1194,7 +1205,7 @@ function LegacyApp({
         setIsWorking(false);
         setWorkflowStage('blocked');
         setClarifyContext({
-          projectKey,
+          projectKey: effectiveProjectKey,
           domainRolesUsed: [],
           discoveryStatus: 'discovery_failed',
           failureReasonCode: 'queue_error',
@@ -1208,7 +1219,7 @@ function LegacyApp({
       setIsWorking(false);
       setWorkflowStage('blocked');
       setClarifyContext({
-        projectKey,
+        projectKey: effectiveProjectKey,
         domainRolesUsed: [],
         discoveryStatus: 'discovery_failed',
         failureReasonCode: 'queue_error',
@@ -1251,8 +1262,8 @@ function LegacyApp({
         sessionId: clarifySessionId,
         requirement,
         attachmentText,
-        projectKey,
-        projectKeys,
+        projectKey: effectiveProjectKey,
+        projectKeys: effectiveProjectKeys,
         inputSignature: discoveryInputSignature,
         pipelineAudit: pipelineAuditActiveRef.current,
         auditRunId: pipelineAuditRunIdRef.current ?? undefined,
@@ -1262,7 +1273,7 @@ function LegacyApp({
         setIsWorking(false);
         setWorkflowStage('blocked');
         setClarifyContext({
-          projectKey,
+          projectKey: effectiveProjectKey,
           domainRolesUsed: [],
           discoveryStatus: 'discovery_failed',
           failureReasonCode: 'queue_error',
@@ -1277,7 +1288,7 @@ function LegacyApp({
       setIsWorking(false);
       setWorkflowStage('blocked');
       setClarifyContext({
-        projectKey,
+        projectKey: effectiveProjectKey,
         domainRolesUsed: [],
         discoveryStatus: 'discovery_failed',
         failureReasonCode: 'queue_error',
@@ -1325,8 +1336,8 @@ function LegacyApp({
         clarifyAnswers,
         attachmentText,
         outputProfileOverride: runOutputProfileOverride,
-        projectKey,
-        projectKeys,
+        projectKey: effectiveProjectKey,
+        projectKeys: effectiveProjectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
         clarifySizingContract: clarifyContext?.sizingContract ?? undefined,
         clarifyAdvisoryTriage: clarifyContext?.advisoryTriage ?? undefined,

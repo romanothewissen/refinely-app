@@ -1,6 +1,6 @@
 import { ClarifyAnswer, ProjectPersonaRole, ReferencedSimilarStory, ReferencedWiSection, SimilarStory, TenantConfig, WiDoc, WiChunk } from '../types';
 import { findSimilarStories } from '../core/similar-stories';
-import { listDocs, retrieveWiContext } from '../core/wi-ingestion';
+import { retrieveWiContextMultiProject } from '../core/wi-ingestion';
 
 export interface RetrievedWiContext {
   text: string;
@@ -53,29 +53,12 @@ export async function retrieveScopedWiContext(
   maxChars: number,
   projectKeys: string[],
 ): Promise<RetrievedWiContext> {
-  const keys = projectKeys.length ? projectKeys : ['*'];
-  const [results, linkedDocGroups] = await Promise.all([
-    Promise.all(keys.map((projectKey) => retrieveWiContext(query, topK, maxChars, projectKey))),
-    Promise.all(keys.map((projectKey) => listDocs(projectKey))),
-  ]);
-  const docs = new Map<string, WiDoc>();
-  const chunks = new Map<string, WiChunk>();
-  const linkedDocs = new Map<string, WiDoc>();
-  const texts: string[] = [];
-
-  results.forEach((result) => {
-    result.docs.forEach((doc) => docs.set(doc.docId, doc));
-    result.chunks.forEach((chunk) => chunks.set(`${chunk.docId}:${chunk.chunkIndex}`, chunk));
-    if (result.text.trim()) texts.push(result.text.trim());
-  });
-  linkedDocGroups.flat().forEach((doc) => linkedDocs.set(doc.docId, doc));
-
-  const text = texts.join('\n\n---\n\n').slice(0, maxChars);
+  const result = await retrieveWiContextMultiProject(query, topK, maxChars, projectKeys);
   return {
-    text,
-    docs: [...docs.values()],
-    linkedDocs: [...linkedDocs.values()],
-    chunks: [...chunks.values()].sort((left, right) => {
+    text: result.text,
+    docs: result.docs,
+    linkedDocs: result.linkedDocs,
+    chunks: [...result.chunks].sort((left, right) => {
       if (left.filename !== right.filename) return left.filename.localeCompare(right.filename);
       return left.chunkIndex - right.chunkIndex;
     }),

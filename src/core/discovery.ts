@@ -283,6 +283,67 @@ function questionComparator(left: ClarifyQuestion, right: ClarifyQuestion): numb
   return left.question.localeCompare(right.question);
 }
 
+/** Budget for the first discovery screen: triage hint wins when present; always capped at MAX_INITIAL_DISCOVERY_QUESTIONS. */
+export function computeInitialQuestionBudget(
+  profile: DiscoveryProfile,
+  triageRecommendedInitial?: number | null,
+): number {
+  const cap = MAX_INITIAL_DISCOVERY_QUESTIONS;
+  if (typeof triageRecommendedInitial === 'number' && triageRecommendedInitial > 0) {
+    return Math.min(cap, Math.round(triageRecommendedInitial));
+  }
+  const fromProfile = Math.round(profile.recommendedInitialCount || 0);
+  return Math.min(cap, Math.max(1, fromProfile || cap));
+}
+
+/**
+ * When the model emits more questions than the budget, keep breadth across taxonomy first (round-robin by category),
+ * then fill remaining slots in category order so discovery does not feel like 25+ sequential cards.
+ */
+export function selectDiverseInitialQuestions(questions: ClarifyQuestion[], budget: number): ClarifyQuestion[] {
+  if (questions.length <= budget || budget <= 0) return questions.slice(0, Math.max(0, budget));
+
+  const sorted = [...questions].sort(questionComparator);
+  const byCat = new Map<ClarifyCategoryKey, ClarifyQuestion[]>();
+  for (const q of sorted) {
+    const list = byCat.get(q.categoryKey) ?? [];
+    list.push(q);
+    byCat.set(q.categoryKey, list);
+  }
+
+  const picked: ClarifyQuestion[] = [];
+  const pickedKeys = new Set<string>();
+  let round = 0;
+  let madeProgress = true;
+  while (picked.length < budget && madeProgress) {
+    madeProgress = false;
+    for (const cat of CLARIFY_CATEGORY_ORDER) {
+      if (picked.length >= budget) break;
+      const bucket = byCat.get(cat);
+      const next = bucket?.[round];
+      if (!next) continue;
+      const key = normalizeKey(`${next.question} ${next.details ?? ''}`);
+      if (pickedKeys.has(key)) continue;
+      pickedKeys.add(key);
+      picked.push(next);
+      madeProgress = true;
+    }
+    round += 1;
+  }
+
+  if (picked.length < budget) {
+    for (const q of sorted) {
+      if (picked.length >= budget) break;
+      const key = normalizeKey(`${q.question} ${q.details ?? ''}`);
+      if (pickedKeys.has(key)) continue;
+      pickedKeys.add(key);
+      picked.push(q);
+    }
+  }
+
+  return picked.sort(questionComparator);
+}
+
 // ─── Discovery Profile Parsing ────────────────────────────────────────────────
 
 export function normalizeDiscoveryProfile(
@@ -323,6 +384,7 @@ export function normalizeDiscoveryProfile(
 export function validateAndRepairInitialDiscovery(
   questions: ClarifyQuestion[],
   profile: DiscoveryProfile,
+  triageRecommendedInitial?: number | null,
 ): {
   questions: ClarifyQuestion[];
   discoveryProfile: DiscoveryProfile;
@@ -348,8 +410,13 @@ export function validateAndRepairInitialDiscovery(
     };
   }
 
-  const finalizedQuestions = finalizeInitialDiscoveryQuestions(questions, profile);
-  const repairApplied = questions.length !== finalizedQuestions.length;
+  let finalizedQuestions = finalizeInitialDiscoveryQuestions(questions, profile);
+  const budget = computeInitialQuestionBudget(profile, triageRecommendedInitial);
+  const beforeCap = finalizedQuestions.length;
+  if (finalizedQuestions.length > budget) {
+    finalizedQuestions = selectDiverseInitialQuestions(finalizedQuestions, budget);
+  }
+  const repairApplied = questions.length !== finalizedQuestions.length || beforeCap !== finalizedQuestions.length;
   const failureReasonCode = finalizedQuestions.length === 0
     ? 'question_array_empty_when_discovery_required'
     : null;

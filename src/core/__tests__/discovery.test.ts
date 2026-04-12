@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   allowsZeroQuestionDiscovery,
+  computeInitialQuestionBudget,
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
   finalizeInitialDiscoveryQuestions,
+  MAX_INITIAL_DISCOVERY_QUESTIONS,
   normalizeDiscoveryProfile,
   validateAndRepairInitialDiscovery,
 } from '../discovery';
@@ -48,6 +50,33 @@ test('normalizeDiscoveryProfile allows zero-question discovery', () => {
 
   assert.equal(profile.recommendedInitialCount, 0);
   assert.equal(profile.followupCap, 0);
+});
+
+test('computeInitialQuestionBudget respects triage and hard cap', () => {
+  const profile = normalizeDiscoveryProfile({ recommendedInitialCount: 30, followupCap: 6 });
+  assert.equal(computeInitialQuestionBudget(profile, 10), 10);
+  assert.equal(computeInitialQuestionBudget(profile, null), MAX_INITIAL_DISCOVERY_QUESTIONS);
+});
+
+test('validateAndRepairInitialDiscovery caps oversized question sets with category spread', () => {
+  const many = Array.from({ length: 24 }, (_, i) => ({
+    categoryKey: 'context_trigger' as const,
+    category: 'Context & Trigger',
+    intent: `intent_${i}`,
+    question: `Question ${i + 1} for trigger context?`,
+    suggestions: [] as string[],
+  }));
+  const profile = normalizeDiscoveryProfile({
+    scope: 'broad',
+    complexity: 'high',
+    ambiguity: 'high',
+    missingCategoryKeys: [],
+    recommendedInitialCount: 24,
+    followupCap: 6,
+  });
+  const repaired = validateAndRepairInitialDiscovery(many, profile, 10);
+  assert.equal(repaired.questions.length, 10);
+  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 10);
 });
 
 test('validateAndRepairInitialDiscovery uses actual finalized count not aspirational plan', () => {

@@ -6,6 +6,7 @@
  * Stores in Forge Object Store.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { v4 as uuidv4 } from 'uuid';
 import { WiChunk, WiDoc, WiFacet } from '../types';
 import { objectRead, objectWrite, objectDelete, entityGet, entitySet, KEYS } from '../services/cache';
@@ -14,6 +15,14 @@ import { extractDocumentText } from './document-parser';
 interface WiCache {
   docs: WiDoc[];
   chunks: StoredWiChunk[];
+}
+
+/** One loaded WI corpus per queue/resolver invocation — avoids re-reading every doc from object storage on each BM25 pass. */
+type WiRetrievalScope = { cache?: WiCache };
+const wiRetrievalAls = new AsyncLocalStorage<WiRetrievalScope>();
+
+export function runWithWiRetrievalCacheScope<T>(fn: () => Promise<T>): Promise<T> {
+  return wiRetrievalAls.run({}, fn);
 }
 
 interface LegacyWiCache {
@@ -96,6 +105,54 @@ export async function ingestPdf(opts: {
 
 // ─── Retrieval ────────────────────────────────────────────────────────────────
 
+/** BM25 over the union of chunks from all matching projects in one pass (deduped chunks). */
+function pickWiContextForProjectKeys(
+  cache: WiCache,
+  query: string,
+  topK: number,
+  maxChars: number,
+  projectKeys: string[],
+): WiContextResult & { linkedDocs: WiDoc[] } {
+  const linkedDocs = cache.docs.filter((doc) => (
+    !projectKeys.length || projectKeys.some((key) => docMatchesProject(doc, key))
+  ));
+
+  if (!cache.chunks.length) {
+    return { text: '', docs: [], chunks: [], linkedDocs };
+  }
+
+  const allowedDocIds = new Set(linkedDocs.map((doc) => doc.docId));
+  const scopedChunks = cache.chunks.filter((chunk) => allowedDocIds.has(chunk.docId));
+  if (!scopedChunks.length) {
+    return { text: '', docs: [], chunks: [], linkedDocs };
+  }
+
+  const docsById = new Map(cache.docs.map((doc) => [doc.docId, doc]));
+  const scored = bm25Score(query, scopedChunks);
+  const topScore = scored[0]?.score ?? 0;
+  const minScore = topScore * 0.2;
+  const top = scored.filter((s) => s.score >= minScore).slice(0, topK).map((s) => s.chunk);
+  const parts = top.map((c) => c.text);
+  const referencedDocIds = new Set(top.map((c) => c.docId));
+  const docs = cache.docs.filter((doc) => referencedDocIds.has(doc.docId) && allowedDocIds.has(doc.docId));
+  const chunks = top.map((chunk) => hydrateChunk(chunk, docsById));
+
+  let result = parts.join('\n\n---\n\n');
+  if (result.length > maxChars) result = result.slice(0, maxChars);
+  return { text: result, docs, chunks, linkedDocs };
+}
+
+/** Scoped retrieval for one or more Jira projects, or the full tenant corpus when `projectKeys` is empty. */
+export async function retrieveWiContextMultiProject(
+  query: string,
+  topK: number,
+  maxChars: number,
+  projectKeys: string[],
+): Promise<WiContextResult & { linkedDocs: WiDoc[] }> {
+  const cache = await loadCache();
+  return pickWiContextForProjectKeys(cache, query, topK, maxChars, projectKeys);
+}
+
 export async function retrieveWiContext(
   query: string,
   topK = 8,
@@ -103,29 +160,8 @@ export async function retrieveWiContext(
   projectKey: string = '*',
 ): Promise<WiContextResult> {
   const cache = await loadCache();
-  if (!cache.chunks.length) return { text: '', docs: [], chunks: [] };
-  const docsById = new Map(cache.docs.map(doc => [doc.docId, doc]));
-
-  const allowedDocIds = new Set(
-    cache.docs
-      .filter(doc => docMatchesProject(doc, projectKey))
-      .map(doc => doc.docId),
-  );
-  const scopedChunks = cache.chunks.filter(chunk => allowedDocIds.has(chunk.docId));
-  if (!scopedChunks.length) return { text: '', docs: [], chunks: [] };
-
-  const scored = bm25Score(query, scopedChunks);
-  const topScore = scored[0]?.score ?? 0;
-  const minScore = topScore * 0.2;
-  const top = scored.filter(s => s.score >= minScore).slice(0, topK).map(s => s.chunk);
-  const parts = top.map(c => c.text);
-  const referencedDocIds = new Set(top.map(c => c.docId));
-  const docs = cache.docs.filter(doc => referencedDocIds.has(doc.docId) && docMatchesProject(doc, projectKey));
-  const chunks = top.map(chunk => hydrateChunk(chunk, docsById));
-
-  let result = parts.join('\n\n---\n\n');
-  if (result.length > maxChars) result = result.slice(0, maxChars);
-  return { text: result, docs, chunks };
+  const picked = pickWiContextForProjectKeys(cache, query, topK, maxChars, [projectKey]);
+  return { text: picked.text, docs: picked.docs, chunks: picked.chunks };
 }
 
 // ─── Document management ──────────────────────────────────────────────────────
@@ -242,11 +278,19 @@ function countDocsWithTerm(term: string, chunks: StoredWiChunk[]): number {
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 
-async function loadCache(): Promise<WiCache> {
+async function loadWiCacheCold(): Promise<WiCache> {
   const docs = await loadDocs();
   if (!docs.length) return { docs: [], chunks: [] };
   const chunks = await loadChunksForDocs(docs);
   return { docs, chunks };
+}
+
+async function loadCache(): Promise<WiCache> {
+  const store = wiRetrievalAls.getStore();
+  if (store?.cache) return store.cache;
+  const cache = await loadWiCacheCold();
+  if (store) store.cache = cache;
+  return cache;
 }
 
 async function loadDocs(): Promise<WiDoc[]> {
@@ -269,15 +313,15 @@ async function saveDocMetadata(docs: WiDoc[]): Promise<void> {
 }
 
 async function loadChunksForDocs(docs: WiDoc[]): Promise<StoredWiChunk[]> {
-  const allChunks: StoredWiChunk[] = [];
-
-  for (const doc of docs) {
-    const stored = await objectRead<StoredWiChunk[] | { chunks?: Array<StoredWiChunk | WiChunk> }>(KEYS.wiChunksForDoc(doc.docId));
-    const chunks = normalizeStoredChunks(stored);
-    allChunks.push(...chunks);
-  }
-
-  return allChunks;
+  const batches = await Promise.all(
+    docs.map(async (doc) => {
+      const stored = await objectRead<StoredWiChunk[] | { chunks?: Array<StoredWiChunk | WiChunk> }>(
+        KEYS.wiChunksForDoc(doc.docId),
+      );
+      return normalizeStoredChunks(stored);
+    }),
+  );
+  return batches.flat();
 }
 
 async function saveDocChunks(docId: string, chunks: StoredWiChunk[]): Promise<void> {

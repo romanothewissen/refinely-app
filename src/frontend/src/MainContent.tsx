@@ -295,7 +295,7 @@ function ContextChipList({ chips }: { chips: SourceContextChip[] }) {
   if (!chips.length) return null;
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="mb-3 flex flex-wrap gap-2">
       {chips.map((chip) => {
         const Icon = SOURCE_CHIP_ICONS[chip.id];
         return (
@@ -739,7 +739,6 @@ function DiscoveryScoreCard({
           <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
           <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{discoveryHeadline}</span>
         </div>
-        <ContextChipList chips={sourceChips} />
         <div className="flex gap-1 mb-1">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="flex-1 h-2 rounded-sm shimmer" style={{ animationDelay: `${i * 0.12}s` }} />
@@ -754,6 +753,12 @@ function DiscoveryScoreCard({
             </div>
           ))}
         </div>
+        {sourceChips.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-[rgba(0,0,0,0.05)]">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Sources in this run</div>
+            <ContextChipList chips={sourceChips} />
+          </div>
+        )}
       </div>
     );
   }

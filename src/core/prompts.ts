@@ -600,6 +600,8 @@ export function buildArPerFeatureUserMessage(opts: {
     intent?: string;
   }[];
   attachmentText?: string;
+  /** Compact structured WI signals (from chunk analysis). When set, verbatim WI excerpt below is capped smaller to save tokens without losing rules. */
+  wiInsightsText?: string;
   wiContextText?: string;
   similarStoriesText?: string;
   feature: { summary: string; description: string; suggested_story_points?: number; process_code?: string; feature_class?: string; confidence?: string; actor_source?: string };
@@ -642,9 +644,17 @@ export function buildArPerFeatureUserMessage(opts: {
     parts.push(`ATTACHMENT CONTEXT:\n${attachmentText.slice(0, 2500)}`);
   }
 
+  const wiInsightsText = (opts.wiInsightsText || '').trim();
+  if (wiInsightsText) {
+    parts.push(
+      `STRUCTURED WORK-INSTRUCTION SIGNALS (authoritative — reflect in ARs when relevant to this feature):\n${wiInsightsText.slice(0, 1600)}`,
+    );
+  }
+
   const wiContextText = (opts.wiContextText || '').trim();
   if (wiContextText) {
-    parts.push(`WORK INSTRUCTIONS / OPERATIONAL GUIDANCE:\nTreat this as high-authority business guidance when it is relevant to the requested capability.\n${wiContextText.slice(0, 4000)}`);
+    const wiVerbatimCap = wiInsightsText ? 2400 : 4000;
+    parts.push(`WORK INSTRUCTIONS / OPERATIONAL GUIDANCE:\nTreat this as high-authority business guidance when it is relevant to the requested capability.\n${wiContextText.slice(0, wiVerbatimCap)}`);
   }
 
   const similarStoriesText = (opts.similarStoriesText || '').trim();
@@ -701,7 +711,9 @@ ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
 YOUR MISSION:
-Work through each of the six discovery areas below IN ORDER. For each area, ask every question that is genuinely ambiguous for THIS requirement. Skip a question in an area only if the requirement text already makes the answer unambiguous. Asking a few extra clarifying questions now prevents hours of rework later.
+Work through each of the six discovery areas below IN ORDER. For each area, ask the highest-value questions that are genuinely ambiguous for THIS requirement — prefer fewer sharp questions over long checklists. Skip an area or a probe when the requirement, attachment, or work-instruction context already makes the answer clear.
+
+INITIAL ROUND SIZE: The first discovery screen is intentionally small (typically within the advisory question budget from triage). Add at most one focused question per taxonomy category before adding a second question in any category. Put additional depth into follow-ups: set discoveryProfile.recommendedInitialCount to the number of questions you actually return in "questions", and use followupCap for how many more rounds may add after answers. Do not emit large question sets "just in case" — the pipeline can ask follow-ups when answers reveal new gaps.
 
 Reuse concrete nouns from the requirement and supporting evidence when they make a question sharper. Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
 
@@ -798,6 +810,7 @@ Return JSON in this shape:
 
 OUTPUT RULES:
 - Every question must include exactly one fixed categoryKey and one concise intent.
+- Prefer one visible question per main business decision; use the optional details field when extra context is needed to preserve meaning.
 - question is the short primary prompt shown on the card.
 - details is optional — include only when extra business context is needed to avoid losing meaning.
 - suggestions should be included for most questions (up to 3 grounded options).

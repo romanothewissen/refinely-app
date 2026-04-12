@@ -33,8 +33,10 @@ import {
   summarizeReferencedWiSections,
 } from '../services/project-selection';
 import { buildTriageEnrichedWiQuery, deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
+import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
+const CLARIFY_FOCUSED_WI_INTENT_LIMIT = 1;
 
 export async function handler(event: { body: ClarifyEvent }) {
   const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys, priorAnswers } = event.body;
@@ -115,7 +117,7 @@ export async function handler(event: { body: ClarifyEvent }) {
             clarifyAnswers: retrievalAnswers,
             config,
             projectKeys: selectedProjectKeys,
-            maxResults: 8,
+            maxResults: 6,
           })
         : Promise.resolve([]),
       triagePromise,
@@ -124,46 +126,42 @@ export async function handler(event: { body: ClarifyEvent }) {
     let wiContext = wiBroad;
     if (config.wiConfig.enabled && precomputedTriage) {
       const narrowQuery = buildTriageEnrichedWiQuery(precomputedTriage);
+      const retrievalIntents = buildWorkInstructionRetrievalIntents(
+        maskedRequirement.text,
+        precomputedTriage.reasoning,
+      ).slice(0, CLARIFY_FOCUSED_WI_INTENT_LIMIT);
+
+      const extraTasks: Promise<Awaited<ReturnType<typeof retrieveScopedWiContext>>>[] = [];
       if (narrowQuery.trim()) {
-        try {
-          const narrowWi = await retrieveScopedWiContext(
+        extraTasks.push(
+          retrieveScopedWiContext(
             narrowQuery,
             Math.min(4, Math.max(2, config.wiConfig.topKChunks)),
             Math.min(12000, config.wiConfig.maxChars),
             selectedProjectKeys,
-          );
-          if (narrowWi.text.trim()) {
-            wiContext = mergeWiContextResults(
-              wiContext,
-              narrowWi,
-              Math.min(20000, config.wiConfig.maxChars),
-            );
-          }
-        } catch {
-          // keep broad WI only
-        }
+          ).catch(() => ({ text: '', docs: [], chunks: [], linkedDocs: [] })),
+        );
       }
-      const retrievalIntents = buildWorkInstructionRetrievalIntents(
-        maskedRequirement.text,
-        precomputedTriage.reasoning,
-      );
       for (const intent of retrievalIntents) {
-        try {
-          const focusedWi = await retrieveScopedWiContext(
+        extraTasks.push(
+          retrieveScopedWiContext(
             intent,
             Math.min(2, Math.max(1, config.wiConfig.topKChunks)),
             Math.min(2500, config.wiConfig.maxChars),
             selectedProjectKeys,
-          );
-          if (focusedWi.chunks.length > 0) {
+          ).catch(() => ({ text: '', docs: [], chunks: [], linkedDocs: [] })),
+        );
+      }
+      if (extraTasks.length) {
+        const extras = await Promise.all(extraTasks);
+        for (const extra of extras) {
+          if (extra.text.trim() || extra.chunks.length > 0) {
             wiContext = mergeWiContextResults(
               wiContext,
-              focusedWi,
+              extra,
               Math.min(20000, config.wiConfig.maxChars),
             );
           }
-        } catch {
-          // keep the merged WI context gathered so far
         }
       }
     }
@@ -200,9 +198,9 @@ export async function handler(event: { body: ClarifyEvent }) {
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
       wiInsightsArtifact: wiInsights,
-      similarStoriesText: formatSimilarStoriesText(similarStories, 8),
+      similarStoriesText: formatSimilarStoriesText(similarStories, 6),
       config,
-      wiPromptSliceMaxChars: Math.min(20000, config.wiConfig.maxChars),
+      wiPromptSliceMaxChars: Math.min(12000, config.wiConfig.maxChars),
       precomputedTriage,
       onTriageComplete: async (assessment) => {
         const questionText = typeof assessment.discoveryForecast?.recommendedInitialCount === 'number'
@@ -374,7 +372,7 @@ export async function handler(event: { body: ClarifyEvent }) {
 
     const auditWriter = getPipelineAuditWriter();
     if (auditWriter) {
-      const similarStoriesText = formatSimilarStoriesText(similarStories, 8);
+      const similarStoriesText = formatSimilarStoriesText(similarStories, 6);
       try {
         await auditWriter.flushMerge({
           accountId,
@@ -469,10 +467,11 @@ export async function handler(event: { body: ClarifyEvent }) {
   }
   };
 
+  const runScoped = () => runWithWiRetrievalCacheScope(exec);
   if (auditMeta) {
-    return runWithPipelineAuditContext(auditMeta, exec);
+    return runWithPipelineAuditContext(auditMeta, runScoped);
   }
-  return exec();
+  return runScoped();
 }
 
 async function sendClarifyProgress(

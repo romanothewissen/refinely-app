@@ -38,6 +38,7 @@ import {
   summarizeReferencedWiSections,
 } from '../services/project-selection';
 import { deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
+import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -660,10 +661,11 @@ export async function handler(event: { body: GenerationEvent }) {
   }
   };
 
+  const runScoped = () => runWithWiRetrievalCacheScope(exec);
   if (auditMeta) {
-    return runWithPipelineAuditContext(auditMeta, exec);
+    return runWithPipelineAuditContext(auditMeta, runScoped);
   }
-  return exec();
+  return runScoped();
 }
 
 async function isWorkflowCancelled(sessionId: string): Promise<boolean> {
