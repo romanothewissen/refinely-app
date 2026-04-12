@@ -672,13 +672,18 @@ test('generation progress copy summarizes coverage and discovery context in plai
     followupCap: 2,
     missingCategoryKeys: [],
   }), 'Moderate scope / High ambiguity');
-  assert.deepEqual(getSourceContextChips({
-    projectCount: 2,
-    domainContextApplied: true,
-    attachmentIncluded: true,
-    wiDocsCount: 3,
-    similarStoriesCount: 1,
-  }), ['2 projects', 'Guidance on', 'Attachment included', '3 work instructions', '1 similar story']);
+  assert.deepEqual(
+    getSourceContextChips({
+      projectCount: 2,
+      domainContextApplied: true,
+      attachmentIncluded: true,
+      linkedWiDocCount: 5,
+      retrievedWiDocCount: 3,
+      wiInsightCount: 7,
+      similarStoriesCount: 1,
+    }).map((chip) => chip.label),
+    ['2 projects', 'Guidance on', 'Attachment included', '3/5 work instructions retrieved', '7 WI insights', '1 similar story'],
+  );
 });
 
 test('shouldPauseForDraftReview always returns false (deprecated — pipeline auto-repairs internally)', () => {

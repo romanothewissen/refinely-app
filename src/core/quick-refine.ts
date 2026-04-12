@@ -30,6 +30,11 @@ import type {
 import { callLlmJsonWithUsage } from './llm';
 import { buildAdfContentOnly, buildAdfDocument, createFeatureIssue, createIssueLink } from './jira-creator';
 import {
+  buildWorkInstructionInsightArtifact,
+  formatWorkInstructionInsightsForPrompt,
+  getWorkInstructionInsightCount,
+} from './wi-insights';
+import {
   repairAcceptanceRequirements,
 } from './story-generator';
 
@@ -372,6 +377,7 @@ function buildContextMessage(input: {
   domainContext: string;
   similarStories: Array<{ key: string; summary: string }>;
   wiContextText: string;
+  wiInsightsText?: string;
   answers?: QuickRefineAnswer[];
 }): string {
   const sections = [
@@ -385,6 +391,9 @@ function buildContextMessage(input: {
   }
   if (input.similarStories.length) {
     sections.push(`SIMILAR BACKLOG SIGNAL:\n${input.similarStories.map((story) => `- ${story.key}: ${story.summary}`).join('\n')}`);
+  }
+  if (input.wiInsightsText?.trim()) {
+    sections.push(`WORK INSTRUCTION INSIGHTS:\n${input.wiInsightsText.trim().slice(0, 5000)}`);
   }
   if (input.wiContextText.trim()) {
     sections.push(`WORK INSTRUCTION SIGNAL:\n${input.wiContextText.trim().slice(0, 5000)}`);
@@ -639,18 +648,24 @@ function buildQuickRefineSessionDraft(
 
 function enrichQuickRefineContextMeta(
   contextMeta: QuickRefineContextMeta,
-  wiContext: { docs: WiDoc[]; chunks: WiChunk[] },
+  wiContext: { docs: WiDoc[]; chunks: WiChunk[]; linkedDocs?: WiDoc[] },
   similarStories: SimilarStory[],
 ): QuickRefineContextMeta {
+  const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
   return {
     ...contextMeta,
     wiDocsCount: wiContext.docs.length,
+    linkedWiDocCount: wiContext.linkedDocs?.length ?? wiContext.docs.length,
+    retrievedWiDocCount: wiContext.docs.length,
+    retrievedWiChunkCount: wiContext.chunks.length,
+    wiInsightCount: getWorkInstructionInsightCount(wiInsights),
     referencedWiDocs: wiContext.docs.map((doc) => ({
       docId: doc.docId,
       filename: doc.filename,
       chunkCount: doc.chunkCount,
     })),
     referencedWiSections: summarizeReferencedWiSections(wiContext.chunks, 140),
+    wiInsights,
     similarStoriesCount: similarStories.length,
     referencedSimilarStories: summarizeReferencedSimilarStories(similarStories),
   };
@@ -814,6 +829,10 @@ export async function loadQuickRefineIssueContext(opts: {
     domainRolesUsed: domainRoles,
     domainContextApplied: Boolean(domainContext.trim()),
     wiDocsCount: 0,
+    linkedWiDocCount: 0,
+    retrievedWiDocCount: 0,
+    retrievedWiChunkCount: 0,
+    wiInsightCount: 0,
     referencedWiDocs: [],
     referencedWiSections: [],
     activeFieldMapping,
@@ -902,6 +921,7 @@ export async function startQuickRefine(opts: {
     config: opts.config,
     projectKeys,
   });
+  const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
     model: resolveQuickRefineModel(opts.config, 'refineModel', opts.modelOverride),
@@ -912,6 +932,7 @@ export async function startQuickRefine(opts: {
       originalIssue: opts.context.originalIssue,
       domainContext,
       similarStories,
+      wiInsightsText: formatWorkInstructionInsightsForPrompt(wiInsights),
       wiContextText: wiContext.text,
     }),
     maxTokens: Math.min(opts.config.generatorConfig.maxTokens, 2000),
@@ -947,6 +968,7 @@ export async function submitQuickRefineAnswers(opts: {
     config: opts.config,
     projectKeys,
   });
+  const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
   const contextMeta = enrichQuickRefineContextMeta(opts.context.contextMeta, wiContext, similarStories);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
@@ -958,6 +980,7 @@ export async function submitQuickRefineAnswers(opts: {
       originalIssue: opts.context.originalIssue,
       domainContext,
       similarStories,
+      wiInsightsText: formatWorkInstructionInsightsForPrompt(wiInsights),
       wiContextText: wiContext.text,
       answers: opts.answers,
     }),
@@ -993,6 +1016,7 @@ export async function refineQuickRefineDraft(opts: {
     config: opts.config,
     projectKeys,
   });
+  const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
   const contextMeta = enrichQuickRefineContextMeta(opts.draft.contextMeta ?? opts.context.contextMeta, wiContext, similarStories);
 
   const rewrite = await callLlmJsonWithUsage<QuickRefineGenerationResponse>({
@@ -1005,6 +1029,7 @@ export async function refineQuickRefineDraft(opts: {
         originalIssue: opts.draft.currentIssue,
         domainContext,
         similarStories,
+        wiInsightsText: formatWorkInstructionInsightsForPrompt(wiInsights),
         wiContextText: wiContext.text,
         answers,
       }),

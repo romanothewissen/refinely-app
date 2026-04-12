@@ -152,6 +152,10 @@ function buildClarifyLoadingMeta(
         domainContextApplied: clarifyContext.domainContextApplied,
         attachmentIncluded: clarifyContext.attachmentIncluded,
         wiDocsCount: clarifyContext.wiDocsCount,
+        linkedWiDocCount: clarifyContext.linkedWiDocCount,
+        retrievedWiDocCount: clarifyContext.retrievedWiDocCount,
+        retrievedWiChunkCount: clarifyContext.retrievedWiChunkCount,
+        wiInsightCount: clarifyContext.wiInsightCount,
         similarStoriesCount: clarifyContext.similarStoriesCount,
       }
     : undefined;

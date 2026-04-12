@@ -53,10 +53,10 @@ export function buildTriageEnrichedWiQuery(triage: {
 }
 
 export function mergeWiContextResults(
-  broad: { text: string; docs: WiDoc[]; chunks: WiChunk[] },
-  narrow: { text: string; docs: WiDoc[]; chunks: WiChunk[] },
+  broad: { text: string; docs: WiDoc[]; chunks: WiChunk[]; linkedDocs?: WiDoc[] },
+  narrow: { text: string; docs: WiDoc[]; chunks: WiChunk[]; linkedDocs?: WiDoc[] },
   maxChars: number,
-): { text: string; docs: WiDoc[]; chunks: WiChunk[] } {
+): { text: string; docs: WiDoc[]; chunks: WiChunk[]; linkedDocs: WiDoc[] } {
   const chunkKey = (c: WiChunk) => `${c.docId}:${c.chunkIndex}`;
   const seen = new Set(broad.chunks.map(chunkKey));
   const mergedChunks = [...broad.chunks];
@@ -69,7 +69,9 @@ export function mergeWiContextResults(
   }
   const docsMap = new Map(broad.docs.map((d) => [d.docId, d]));
   for (const d of narrow.docs) docsMap.set(d.docId, d);
+  const linkedDocsMap = new Map((broad.linkedDocs ?? []).map((d) => [d.docId, d]));
+  for (const d of narrow.linkedDocs ?? []) linkedDocsMap.set(d.docId, d);
   let text = [broad.text.trim(), narrow.text.trim()].filter(Boolean).join('\n\n---\n\n');
   if (text.length > maxChars) text = text.slice(0, maxChars);
-  return { text, docs: [...docsMap.values()], chunks: mergedChunks };
+  return { text, docs: [...docsMap.values()], chunks: mergedChunks, linkedDocs: [...linkedDocsMap.values()] };
 }

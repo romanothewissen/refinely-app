@@ -404,6 +404,15 @@ export function ClarifyQuestionsView({
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[var(--rf-text-tertiary)]">
                     <span>Domain: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.domainContextApplied ? 'Included' : 'Not configured'}</span></span>
                     <span>Attachment: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.attachmentIncluded ? 'Included' : 'None'}</span></span>
+                    {typeof contextMeta.linkedWiDocCount === 'number' && (
+                      <span>Work instructions: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.retrievedWiDocCount ?? contextMeta.wiDocsCount ?? 0} retrieved / {contextMeta.linkedWiDocCount} linked</span></span>
+                    )}
+                    {typeof contextMeta.retrievedWiChunkCount === 'number' && contextMeta.retrievedWiChunkCount > 0 && (
+                      <span>WI excerpts: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.retrievedWiChunkCount}</span></span>
+                    )}
+                    {typeof contextMeta.wiInsightCount === 'number' && contextMeta.wiInsightCount > 0 && (
+                      <span>WI insights: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.wiInsightCount}</span></span>
+                    )}
                     {contextMeta.domainRolesUsed?.length > 0 && (
                       <span>Roles: <span className="text-[var(--rf-text-secondary)] font-medium">{contextMeta.domainRolesUsed.join(', ')}</span></span>
                     )}
@@ -411,12 +420,14 @@ export function ClarifyQuestionsView({
                   {(contextMeta.referencedWiSections?.length ?? 0) > 0 && (
                     <div>
                       <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-1.5">
-                        Work instructions · {contextMeta.referencedWiDocs?.length ?? 0} docs
+                        Work instructions · {contextMeta.retrievedWiDocCount ?? contextMeta.referencedWiDocs?.length ?? 0} retrieved / {contextMeta.linkedWiDocCount ?? contextMeta.referencedWiDocs?.length ?? 0} linked
                       </div>
                       <div className="grid gap-2 xl:grid-cols-2">
                         {contextMeta.referencedWiSections!.map((section, i) => (
                           <div key={`${section.docId}-${section.chunkIndex}-${i}`} className="rounded-lg border border-[var(--rf-border)] bg-white/55 px-3 py-2">
-                            <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">Instruction excerpt {i + 1}</div>
+                            <div className="text-[13px] font-semibold text-[var(--rf-text)] truncate">
+                              {section.sectionLabel?.trim() || section.filename || `Instruction excerpt ${i + 1}`}
+                            </div>
                             <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">{normalizeDisplayText(section.excerpt)}</div>
                           </div>
                         ))}

@@ -30,8 +30,12 @@ export interface GenerationProgressPayload {
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
     wiDocsCount?: number;
+    linkedWiDocCount?: number;
+    retrievedWiDocCount?: number;
+    retrievedWiChunkCount?: number;
+    wiInsightCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
+    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string; sectionLabel?: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };

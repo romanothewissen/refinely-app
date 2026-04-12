@@ -428,6 +428,7 @@ export interface ReferencedWiSection {
   docId: string;
   filename: string;
   chunkIndex: number;
+  sectionLabel?: string;
   excerpt: string;
 }
 
@@ -565,8 +566,57 @@ export interface ClarifyProgressPayload {
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
     wiDocsCount?: number;
+    linkedWiDocCount?: number;
+    retrievedWiDocCount?: number;
+    retrievedWiChunkCount?: number;
+    wiInsightCount?: number;
     similarStoriesCount?: number;
   };
+}
+
+export interface WorkInstructionSourceSpan {
+  docId: string;
+  filename: string;
+  chunkIndex: number;
+  sectionLabel?: string;
+}
+
+export type WiFacetKind =
+  | 'actor'
+  | 'action'
+  | 'object'
+  | 'input'
+  | 'output'
+  | 'rule'
+  | 'transition'
+  | 'exception'
+  | 'sequence'
+  | 'split_decision';
+
+export interface WiFacet {
+  kind: WiFacetKind;
+  value: string;
+  confidence?: 'low' | 'medium' | 'high';
+}
+
+export interface WorkInstructionInsightItem {
+  text: string;
+  sourceSpans: WorkInstructionSourceSpan[];
+}
+
+export interface WorkInstructionInsightArtifact {
+  resolvedFacts: WorkInstructionInsightItem[];
+  workflowSteps: WorkInstructionInsightItem[];
+  actors: WorkInstructionInsightItem[];
+  inputs: WorkInstructionInsightItem[];
+  outputs: WorkInstructionInsightItem[];
+  businessRules: WorkInstructionInsightItem[];
+  stateTransitions: WorkInstructionInsightItem[];
+  exceptions: WorkInstructionInsightItem[];
+  sequencingRules: WorkInstructionInsightItem[];
+  splitVsSingleCaseRules: WorkInstructionInsightItem[];
+  mustCoverBehaviors: WorkInstructionInsightItem[];
+  sourceSpans: WorkInstructionSourceSpan[];
 }
 
 export interface ContextSourceMeta {
@@ -577,8 +627,13 @@ export interface ContextSourceMeta {
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
   wiDocsCount?: number;
+  linkedWiDocCount?: number;
+  retrievedWiDocCount?: number;
+  retrievedWiChunkCount?: number;
+  wiInsightCount?: number;
   referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
   referencedWiSections?: ReferencedWiSection[];
+  wiInsights?: WorkInstructionInsightArtifact;
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {
@@ -680,6 +735,8 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   roleCoverage?: RoleCoverageItem[];
   coverageFindings?: CoverageFindings;
   coverageReview?: CoverageReviewAdvice;
+  wiCoverageUsedByFeature?: Array<{ featureId: string; summary: string; behaviors: string[] }>;
+  wiCoverageMisses?: string[];
   autoRepairedIssues?: string[];
   remainingBlockingIssues?: string[];
   requiresUserDecision?: boolean;
@@ -913,8 +970,11 @@ export interface WiChunk {
   filename: string;
   revision: string;
   chunkIndex: number;
+  sectionLabel?: string;
+  sectionKind?: 'heading' | 'step' | 'bullet' | 'table' | 'paragraph';
   text: string;
   tokenCount: number;
+  facets?: WiFacet[];
 }
 
 export interface WiDoc {

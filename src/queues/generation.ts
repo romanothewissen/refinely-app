@@ -18,6 +18,11 @@ import {
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { formatSimilarStoriesText } from '../core/similar-stories';
+import {
+  buildWorkInstructionInsightArtifact,
+  buildWorkInstructionRetrievalIntents,
+  getWorkInstructionInsightCount,
+} from '../core/wi-insights';
 import { maskPiiText, maskPiiInAnswers, mergePiiMaskingStats, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
@@ -32,7 +37,7 @@ import {
   summarizeReferencedSimilarStories,
   summarizeReferencedWiSections,
 } from '../services/project-selection';
-import { deriveRetrievalQuery } from '../services/retrieval-query';
+import { deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -55,7 +60,7 @@ interface GenerationProgressPayload {
   failedFeatureIds?: string[];
   draftReview?: DraftReviewMetadata;
   stageDurationsMs?: GenerationStageDurationsMs;
-  sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'wiDocsCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
+  sources?: Pick<GenerationContextMeta, 'projectKey' | 'projectKeys' | 'projectCount' | 'domainContextApplied' | 'attachmentIncluded' | 'linkedWiDocCount' | 'retrievedWiDocCount' | 'retrievedWiChunkCount' | 'wiInsightCount' | 'referencedWiDocs' | 'similarStoriesCount' | 'referencedSimilarStories' | 'referencedWiSections'>;
 }
 
 const PROGRESS_HEARTBEAT_MS = 15000;
@@ -248,7 +253,7 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     const advisorySizingContract = clarifySizingContract;
     const advisoryTriage = clarifyAdvisoryTriage;
-    const [wiContext, similarStories] = await Promise.all([
+    const [initialWiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(
             deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
@@ -256,7 +261,7 @@ export async function handler(event: { body: GenerationEvent }) {
             config.wiConfig.maxChars,
             selectedProjectKeys,
           )
-        : Promise.resolve({ text: '', docs: [], chunks: [] }),
+        : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
       config.tier !== 'free'
         ? retrieveScopedSimilarStories({
             requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
@@ -268,12 +273,36 @@ export async function handler(event: { body: GenerationEvent }) {
           })
         : Promise.resolve([]),
     ]);
+    let wiContext = initialWiContext;
+    if (config.wiConfig.enabled && advisoryTriage?.reasoning?.trim()) {
+      const intents = buildWorkInstructionRetrievalIntents(maskedRequirement.text, advisoryTriage.reasoning);
+      for (const intent of intents) {
+        try {
+          const focused = await retrieveScopedWiContext(
+            intent,
+            Math.min(2, Math.max(1, config.wiConfig.topKChunks)),
+            Math.min(2500, config.wiConfig.maxChars),
+            selectedProjectKeys,
+          );
+          if (focused.chunks.length > 0) {
+            wiContext = mergeWiContextResults(wiContext, focused, config.wiConfig.maxChars);
+          }
+        } catch {
+          // keep existing WI context
+        }
+      }
+    }
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId);
       return;
     }
     const similarStoriesText = formatSimilarStoriesText(similarStories);
+    const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
+    const linkedWiDocCount = wiContext.linkedDocs.length;
+    const retrievedWiDocCount = wiContext.docs.length;
+    const retrievedWiChunkCount = wiContext.chunks.length;
+    const wiInsightCount = getWorkInstructionInsightCount(wiInsights);
     const progressSources: GenerationProgressPayload['sources'] = {
       ...baseSources,
       similarStoriesCount: similarStories.length,
@@ -284,7 +313,10 @@ export async function handler(event: { body: GenerationEvent }) {
         url: item.url,
         jiraIssueUrl: item.url,
       })),
-      wiDocsCount: wiContext.docs.length,
+      linkedWiDocCount,
+      retrievedWiDocCount,
+      retrievedWiChunkCount,
+      wiInsightCount,
       referencedWiDocs: wiContext.docs.slice(0, 6).map(doc => ({
         docId: doc.docId,
         filename: doc.filename,
@@ -315,6 +347,7 @@ export async function handler(event: { body: GenerationEvent }) {
       attachmentText: maskedAttachment.text,
       similarStoriesText,
       wiContextText: wiContext.text,
+      wiInsightsArtifact: wiInsights,
       config,
       outputProfileOverride,
       advisoryTriage,
@@ -412,13 +445,18 @@ export async function handler(event: { body: GenerationEvent }) {
       partialSuccessMessage: result.generationContext?.partialSuccessMessage,
       stageDurationsMs: result.generationContext?.stageDurationsMs ?? priorStageDurationsMs,
       tokenUsage: result.tokenUsage,
-      wiDocsCount: wiContext.docs.length,
+      wiDocsCount: retrievedWiDocCount,
+      linkedWiDocCount,
+      retrievedWiDocCount,
+      retrievedWiChunkCount,
+      wiInsightCount,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
         docId: doc.docId,
         filename: doc.filename,
         chunkCount: doc.chunkCount,
       })),
       referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 8)),
+      wiInsights,
     };
     result.generationContext = generationContext;
 
@@ -456,12 +494,15 @@ export async function handler(event: { body: GenerationEvent }) {
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
           `Generated features using ${similarStories.length} backlog references.`,
-          `Applied ${wiContext.docs.length} work instruction documents and ${config.domainRoles?.length ?? 0} roles.`,
+          `Retrieved ${retrievedWiDocCount} work instruction documents from ${linkedWiDocCount} linked documents and ${config.domainRoles?.length ?? 0} roles.`,
           'Acceptance requirements were produced in a dedicated second pass for consistency.',
         ],
         contextUsage: {
           similarStoriesCount: similarStories.length,
-          wiDocsCount: wiContext.docs.length,
+          linkedWiDocCount,
+          retrievedWiDocCount,
+          retrievedWiChunkCount,
+          wiInsightCount,
           domainRolesCount: config.domainRoles?.length ?? 0,
         },
         tokenUsage: result.tokenUsage,
@@ -518,10 +559,12 @@ export async function handler(event: { body: GenerationEvent }) {
             clarifyAdvisoryTriage,
           },
           discoveryContextGeneration: {
+            wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
             wiContextText: wiContext.text,
             similarStoriesText,
             domainContext: config.domainContext,
             domainRoles: config.domainRoles,
+            wiInsights,
           },
           generation: {
             clarifyAnswers: maskedAnswers.answers,

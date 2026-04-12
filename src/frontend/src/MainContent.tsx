@@ -169,8 +169,12 @@ type GenerationProgressMeta = {
     domainContextApplied?: boolean;
     attachmentIncluded?: boolean;
     wiDocsCount?: number;
+    linkedWiDocCount?: number;
+    retrievedWiDocCount?: number;
+    retrievedWiChunkCount?: number;
+    wiInsightCount?: number;
     referencedWiDocs?: Array<{ docId: string; filename: string; chunkCount: number }>;
-    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string }>;
+    referencedWiSections?: Array<{ docId: string; filename: string; chunkIndex: number; excerpt: string; sectionLabel?: string }>;
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };
@@ -2671,10 +2675,17 @@ export function MainContent({
                   {/* Expanded content */}
                   {runContextExpanded && (
                     <div className="px-4 pb-3 space-y-3 border-t border-[var(--rf-border-subtle)]">
-                      <div className="flex flex-wrap items-center gap-1.5 pt-3">
-                        {(generationContext.wiDocsCount ?? 0) > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-3">
+                        {((generationContext.linkedWiDocCount ?? generationContext.retrievedWiDocCount ?? generationContext.wiDocsCount ?? 0) > 0) && (
                           <span className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
-                            {generationContext.wiDocsCount} work instruction{generationContext.wiDocsCount === 1 ? '' : 's'}
+                            {typeof generationContext.linkedWiDocCount === 'number'
+                              ? `${generationContext.retrievedWiDocCount ?? generationContext.wiDocsCount ?? 0}/${generationContext.linkedWiDocCount} work instructions retrieved`
+                              : `${generationContext.retrievedWiDocCount ?? generationContext.wiDocsCount ?? 0} work instruction${(generationContext.retrievedWiDocCount ?? generationContext.wiDocsCount ?? 0) === 1 ? '' : 's'} retrieved`}
+                          </span>
+                        )}
+                        {(generationContext.wiInsightCount ?? 0) > 0 && (
+                          <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
+                            {generationContext.wiInsightCount} WI insight{generationContext.wiInsightCount === 1 ? '' : 's'}
                           </span>
                         )}
                         {generationContext.domainContextApplied && (
@@ -2708,6 +2719,16 @@ export function MainContent({
                           <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Resolved automatically</div>
                           {(generationContext.autoRepairedIssues ?? []).map((item, index) => (
                             <div key={`auto-repair-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
+                              {normalizeDisplayText(item)}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(generationContext.wiCoverageMisses?.length ?? 0) > 0 ? (
+                        <div className="rounded-xl border border-[rgba(176,122,45,0.22)] bg-[rgba(255,248,235,0.95)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                          <div className="text-[12px] font-bold uppercase tracking-widest text-[rgb(176,122,45)]">Work instruction gaps</div>
+                          {(generationContext.wiCoverageMisses ?? []).slice(0, 4).map((item, index) => (
+                            <div key={`wi-gap-${index}`} className={index > 0 ? 'mt-1.5' : 'mt-2'}>
                               {normalizeDisplayText(item)}
                             </div>
                           ))}

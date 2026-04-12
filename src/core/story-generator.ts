@@ -47,6 +47,7 @@ import {
   DraftReviewMetadata,
   DraftFeatureReviewNote,
   ValidationViolation,
+  WorkInstructionInsightArtifact,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage, LlmJsonParseError } from './llm';
 import { getTierModel } from '../services/billing';
@@ -80,6 +81,7 @@ import {
   normalizeDiscoveryProfile,
   validateAndRepairInitialDiscovery,
 } from './discovery';
+import { formatWorkInstructionInsightsForPrompt } from './wi-insights';
 
 // ─── Types from LLM response ──────────────────────────────────────────────────
 
@@ -244,6 +246,7 @@ interface ArObligations {
   scopeBoundaries: string[];
   confirmedDataObligations: string[];
   unresolvedDecisions: string[];
+  wiMustCoverBehaviors: string[];
 }
 
 interface FeatureArRepairResult {
@@ -630,6 +633,7 @@ function buildGenerationUserMessage(input: {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   wiContextText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   similarStoriesText: string;
   limits: typeof PASS1_CONTEXT_LIMITS | typeof PASS1_CONTEXT_LIMITS_COMPACT | typeof PASS2_CONTEXT_LIMITS;
 }): string {
@@ -641,6 +645,12 @@ function buildGenerationUserMessage(input: {
   }
 
   pushPromptSection(parts, 'ATTACHMENT CONTEXT', input.attachmentText, input.limits.attachment);
+  pushPromptSection(
+    parts,
+    'WORK INSTRUCTION INSIGHTS (normalized operational obligations extracted from retrieved work-instruction context; preserve them when relevant without copying organization-specific wording)',
+    formatWorkInstructionInsightsForPrompt(input.wiInsightsArtifact),
+    input.limits.wi,
+  );
   pushPromptSection(parts, 'WORK INSTRUCTIONS / OPERATIONAL GUIDANCE (treat relevant rules here as higher-authority business guidance than similar backlog stories)', input.wiContextText, input.limits.wi);
   pushPromptSection(parts, 'SIMILAR STORIES FROM BACKLOG (use these for business context only; never copy actor labels or scope when the requirement already specifies them)', input.similarStoriesText, input.limits.similar);
 
@@ -884,6 +894,7 @@ async function repairDraftFeatureDescriptions(opts: {
   attachmentText: string;
   similarStoriesText: string;
   wiContextText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   features: Feature[];
   config: TenantConfig;
   providerOpts: {
@@ -919,6 +930,7 @@ async function repairDraftFeatureDescriptions(opts: {
       clarifyAnswers: opts.clarifyAnswers,
       attachmentText: opts.attachmentText,
       wiContextText: opts.wiContextText,
+      wiInsightsArtifact: opts.wiInsightsArtifact,
       similarStoriesText: opts.similarStoriesText,
       limits: PASS1_CONTEXT_LIMITS,
     }),
@@ -2117,6 +2129,7 @@ async function reviewDraftFeatureSet(opts: {
   attachmentText: string;
   similarStoriesText: string;
   wiContextText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   features: Feature[];
   action: Exclude<DraftReviewDecision, 'continue'>;
   selectedFeatureIds?: string[];
@@ -2175,6 +2188,7 @@ async function reviewDraftFeatureSet(opts: {
       clarifyAnswers: opts.clarifyAnswers,
       attachmentText: opts.attachmentText,
       wiContextText: opts.wiContextText,
+      wiInsightsArtifact: opts.wiInsightsArtifact,
       similarStoriesText: opts.similarStoriesText,
       limits: PASS1_CONTEXT_LIMITS,
     }),
@@ -2241,6 +2255,7 @@ async function reviewDraftFeatureSet(opts: {
     attachmentText: opts.attachmentText,
     similarStoriesText: opts.similarStoriesText,
     wiContextText: opts.wiContextText,
+    wiInsightsArtifact: opts.wiInsightsArtifact,
     features: revisedFeatures,
     config: opts.config,
     providerOpts: opts.providerOpts,
@@ -2658,6 +2673,7 @@ export async function generateFeatures(opts: {
   attachmentText: string;
   similarStoriesText: string;
   wiContextText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   config: TenantConfig;
   outputProfileOverride?: OutputProfile;
   advisoryTriage?: AdvisoryTriageContract;
@@ -2688,6 +2704,7 @@ export async function generateFeatures(opts: {
     attachmentText,
     similarStoriesText,
     wiContextText,
+    wiInsightsArtifact,
     config,
     outputProfileOverride,
     advisoryTriage,
@@ -2745,6 +2762,7 @@ export async function generateFeatures(opts: {
     requirement,
     clarifyAnswers,
     wiContextText,
+    wiInsightsArtifact,
     openDecisions,
   });
   if (!precomputedDraftFeatures?.length) {
@@ -2754,6 +2772,7 @@ export async function generateFeatures(opts: {
       clarifyAnswers,
       attachmentText,
       wiContextText,
+      wiInsightsArtifact,
       similarStoriesText,
       limits: PASS1_CONTEXT_LIMITS,
     });
@@ -2794,6 +2813,7 @@ export async function generateFeatures(opts: {
       attachmentText,
       similarStoriesText,
       wiContextText,
+      wiInsightsArtifact,
       features: normalizedDraftFeatures,
       config,
       providerOpts,
@@ -2802,13 +2822,14 @@ export async function generateFeatures(opts: {
     pass1DraftFeatures = descriptionRepair.features;
     pass1Features = pass1DraftFeatures.map(toRawFeature);
     openDecisions = mergeOpenDecisions(
-      pass1Result.reviewMeta.openDecisions,
-      synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+      [...(pass1Result.reviewMeta.openDecisions ?? []), ...synthesizeRequirementOpenDecisions(requirement, clarifyAnswers)],
+      synthesizeWorkInstructionOpenDecisions(wiInsightsArtifact),
     );
     arObligations = buildArObligations({
       requirement,
       clarifyAnswers,
       wiContextText,
+      wiInsightsArtifact,
       openDecisions,
     });
     pass1ResultUsage = {
@@ -2842,6 +2863,7 @@ export async function generateFeatures(opts: {
         attachmentText,
         similarStoriesText,
         wiContextText,
+        wiInsightsArtifact,
         features: pass1DraftFeatures,
         action: 'tighten',
         currentReviewMeta: draftReview,
@@ -2853,13 +2875,14 @@ export async function generateFeatures(opts: {
       pass1DraftFeatures = tightened.features;
       pass1Features = pass1DraftFeatures.map(toRawFeature);
       openDecisions = mergeOpenDecisions(
-        tightened.reviewMeta.openDecisions ?? [],
-        synthesizeRequirementOpenDecisions(requirement, clarifyAnswers),
+        [...(tightened.reviewMeta.openDecisions ?? []), ...synthesizeRequirementOpenDecisions(requirement, clarifyAnswers)],
+        synthesizeWorkInstructionOpenDecisions(wiInsightsArtifact),
       );
       arObligations = buildArObligations({
         requirement,
         clarifyAnswers,
         wiContextText,
+        wiInsightsArtifact,
         openDecisions,
       });
       draftReview = {
@@ -3014,6 +3037,7 @@ export async function generateFeatures(opts: {
       clarifyAnswers,
       attachmentText,
       wiContextText: wiForPass2Ar,
+      wiInsightsArtifact,
       similarStoriesText: similarForPass2Ar,
       limits: PASS2_CONTEXT_LIMITS,
     });
@@ -3210,11 +3234,21 @@ export async function generateFeatures(opts: {
     attachmentText,
     similarStoriesText,
     wiContextText,
+    wiInsightsArtifact,
     features,
     openDecisions,
     config,
   });
   stageDurationsMs.coverageCheck = (stageDurationsMs.coverageCheck ?? 0) + (Date.now() - coverageStartedAt);
+  const wiCoverage = assessWiCoverage({
+    features,
+    openDecisions,
+    wiInsightsArtifact,
+  });
+  coverageReview.advice.missingCoverage = uniqueNonEmptyStrings([
+    ...coverageReview.advice.missingCoverage,
+    ...wiCoverage.missing,
+  ]);
   const coverageFindings = buildCoverageFindings(features, openDecisions);
   coverageFindings.missingUseCases = uniqueNonEmptyStrings([
     ...coverageFindings.missingUseCases,
@@ -3256,6 +3290,8 @@ export async function generateFeatures(opts: {
       roleCoverage: buildRoleCoverage(features),
       coverageFindings,
       coverageReview: coverageReview.advice,
+      wiCoverageUsedByFeature: wiCoverage.usedByFeature,
+      wiCoverageMisses: wiCoverage.missing,
       autoRepairedIssues: uniqueNonEmptyStrings(autoRepairedIssues),
       remainingBlockingIssues,
       requiresUserDecision,
@@ -3278,6 +3314,7 @@ export async function generateClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   similarStoriesText: string;
   config: TenantConfig;
   /** Cap WI bytes in the clarify user message; defaults to min(20000, wiConfig.maxChars). */
@@ -3296,7 +3333,7 @@ export async function generateClarifyingQuestions(opts: {
     discoveryForecast?: AdvisoryTriageContract['discoveryForecast'];
   }) => Promise<void>;
 }): Promise<ClarifyDiscoveryResult> {
-  const { requirement, attachmentText, wiContextText, similarStoriesText, config, onTriageComplete } = opts;
+  const { requirement, attachmentText, wiContextText, wiInsightsArtifact, similarStoriesText, config, onTriageComplete } = opts;
   const wiCap = opts.wiPromptSliceMaxChars ?? Math.min(20000, config.wiConfig?.maxChars ?? 20000);
 
   const clarifyTriageResult = opts.precomputedTriage !== undefined
@@ -3323,6 +3360,7 @@ export async function generateClarifyingQuestions(opts: {
     `REQUIREMENT: ${requirement}`,
   ];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
+  if (wiInsightsArtifact) contextParts.push(`WORK INSTRUCTION INSIGHTS:\n${formatWorkInstructionInsightsForPrompt(wiInsightsArtifact)}`);
   if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, wiCap)}`);
   if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 8000)}`);
   const baseUserMessage = contextParts.join('\n\n');
@@ -4307,6 +4345,7 @@ async function checkCoverageAdvice(opts: {
   attachmentText: string;
   similarStoriesText: string;
   wiContextText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   features: Feature[];
   openDecisions?: OpenDecision[];
   config: TenantConfig;
@@ -4317,6 +4356,7 @@ async function checkCoverageAdvice(opts: {
       clarifyAnswers: opts.clarifyAnswers,
       attachmentText: opts.attachmentText,
       wiContextText: opts.wiContextText,
+      wiInsightsArtifact: opts.wiInsightsArtifact,
       similarStoriesText: opts.similarStoriesText,
       limits: PASS2_CONTEXT_LIMITS,
     }),
@@ -4517,6 +4557,85 @@ function buildCoverageFindings(features: Feature[], openDecisions: OpenDecision[
   };
 }
 
+function getWiCoverageSignals(wiInsightsArtifact?: WorkInstructionInsightArtifact | null): string[] {
+  if (!wiInsightsArtifact) return [];
+  return uniqueNonEmptyStrings([
+    ...wiInsightsArtifact.mustCoverBehaviors.map((item) => item.text),
+    ...wiInsightsArtifact.sequencingRules.map((item) => item.text),
+    ...wiInsightsArtifact.splitVsSingleCaseRules.map((item) => item.text),
+    ...wiInsightsArtifact.stateTransitions.map((item) => item.text),
+    ...wiInsightsArtifact.exceptions.map((item) => item.text),
+  ]).slice(0, 18);
+}
+
+function textMatchesWiBehavior(text: string, behavior: string): boolean {
+  const normalizedText = String(text ?? '').toLowerCase();
+  const normalizedBehavior = String(behavior ?? '').toLowerCase();
+  if (!normalizedText || !normalizedBehavior) return false;
+  if (normalizedText.includes(normalizedBehavior) || normalizedBehavior.includes(normalizedText)) return true;
+
+  const textTokens = tokenizeDecisionText(normalizedText);
+  const behaviorTokens = tokenizeDecisionText(normalizedBehavior);
+  if (!textTokens.size || !behaviorTokens.size) return false;
+
+  let overlap = 0;
+  behaviorTokens.forEach((token) => {
+    if (textTokens.has(token)) overlap += 1;
+  });
+
+  const minimumOverlap = behaviorTokens.size >= 5 ? 3 : 2;
+  return overlap >= minimumOverlap;
+}
+
+function assessWiCoverage(input: {
+  features: Feature[];
+  openDecisions?: OpenDecision[];
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
+}): {
+  usedByFeature: Array<{ featureId: string; summary: string; behaviors: string[] }>;
+  missing: string[];
+} {
+  const signals = getWiCoverageSignals(input.wiInsightsArtifact);
+  if (!signals.length) return { usedByFeature: [], missing: [] };
+
+  const featureCoverage = new Map<string, { featureId: string; summary: string; behaviors: string[] }>();
+  const decisionCorpus = (input.openDecisions ?? [])
+    .flatMap((decision) => [decision.title, decision.detail, decision.impact])
+    .join(' ');
+  const missing: string[] = [];
+
+  signals.forEach((behavior) => {
+    const matchedFeature = input.features.find((feature) => {
+      const featureText = [
+        feature.summary,
+        feature.description,
+        ...(feature.acceptanceRequirements ?? []).flatMap((ar) => [ar.given, ar.when, ar.then]),
+      ].join(' ');
+      return textMatchesWiBehavior(featureText, behavior);
+    });
+
+    if (matchedFeature) {
+      const existing = featureCoverage.get(matchedFeature.id) ?? {
+        featureId: matchedFeature.id,
+        summary: matchedFeature.summary,
+        behaviors: [],
+      };
+      existing.behaviors = uniqueNonEmptyStrings([...existing.behaviors, behavior]);
+      featureCoverage.set(matchedFeature.id, existing);
+      return;
+    }
+
+    if (!textMatchesWiBehavior(decisionCorpus, behavior)) {
+      missing.push(behavior);
+    }
+  });
+
+  return {
+    usedByFeature: [...featureCoverage.values()],
+    missing: uniqueNonEmptyStrings(missing),
+  };
+}
+
 function determineOpenDecisionCategory(text: string): ClarifyCategoryKey | 'general' {
   const normalized = text.toLowerCase();
   if (/\b(who|permission|permissions|role|roles|owner|ownership|notify|notified)\b/.test(normalized)) return 'user_personas';
@@ -4577,6 +4696,25 @@ function synthesizeRequirementOpenDecisions(requirement: string, clarifyAnswers:
     });
 }
 
+function synthesizeWorkInstructionOpenDecisions(
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null,
+): OpenDecision[] {
+  if (!wiInsightsArtifact) return [];
+  const decisionBuckets = [
+    ...wiInsightsArtifact.sequencingRules.map((item) => ({ item, category: 'functional_flow' as const, label: 'sequencing rule' })),
+    ...wiInsightsArtifact.splitVsSingleCaseRules.map((item) => ({ item, category: 'business_rules' as const, label: 'single-vs-multiple-plan rule' })),
+    ...wiInsightsArtifact.stateTransitions.map((item) => ({ item, category: 'state_lifecycle' as const, label: 'state transition' })),
+  ];
+  return decisionBuckets.slice(0, 10).map(({ item, category, label }, index) => ({
+    id: `wi-open-decision-${index + 1}`,
+    title: `${label}: ${item.text.slice(0, 120)}`,
+    detail: item.text,
+    category,
+    impact: 'Retrieved work-instruction guidance indicates this behavior should be preserved or resolved explicitly.',
+    blocking: true,
+  }));
+}
+
 function mergeOpenDecisions(primary: OpenDecision[], secondary: OpenDecision[]): OpenDecision[] {
   const seen = new Set<string>();
   const merged: OpenDecision[] = [];
@@ -4603,6 +4741,7 @@ function buildArObligations(input: {
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
   wiContextText?: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   openDecisions?: OpenDecision[];
 }): ArObligations {
   const confirmedOutcomes = uniquePromptSummaries([
@@ -4634,12 +4773,18 @@ function buildArObligations(input: {
       .filter((decision) => decision.blocking)
       .map((decision) => `${decision.title}: ${decision.detail}`),
   );
+  const wiMustCoverBehaviors = uniquePromptSummaries([
+    ...(input.wiInsightsArtifact?.mustCoverBehaviors ?? []).map((item) => item.text),
+    ...(input.wiInsightsArtifact?.sequencingRules ?? []).map((item) => item.text),
+    ...(input.wiInsightsArtifact?.splitVsSingleCaseRules ?? []).map((item) => item.text),
+  ]);
 
   return {
     confirmedOutcomes,
     scopeBoundaries,
     confirmedDataObligations,
     unresolvedDecisions,
+    wiMustCoverBehaviors,
   };
 }
 

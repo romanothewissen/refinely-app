@@ -11,6 +11,11 @@
 import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureDiagnostics, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
 import { assessRequirementWithLlm, buildClarifyFailureDiagnostics, ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
 import { formatSimilarStoriesText } from '../core/similar-stories';
+import {
+  buildWorkInstructionInsightArtifact,
+  buildWorkInstructionRetrievalIntents,
+  getWorkInstructionInsightCount,
+} from '../core/wi-insights';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
@@ -102,7 +107,7 @@ export async function handler(event: { body: ClarifyEvent }) {
             broadWiMaxChars,
             selectedProjectKeys,
           )
-        : Promise.resolve({ text: '', docs: [], chunks: [] }),
+        : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
       config.tier !== 'free'
         ? retrieveScopedSimilarStories({
             requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
@@ -138,7 +143,35 @@ export async function handler(event: { body: ClarifyEvent }) {
           // keep broad WI only
         }
       }
+      const retrievalIntents = buildWorkInstructionRetrievalIntents(
+        maskedRequirement.text,
+        precomputedTriage.reasoning,
+      );
+      for (const intent of retrievalIntents) {
+        try {
+          const focusedWi = await retrieveScopedWiContext(
+            intent,
+            Math.min(2, Math.max(1, config.wiConfig.topKChunks)),
+            Math.min(2500, config.wiConfig.maxChars),
+            selectedProjectKeys,
+          );
+          if (focusedWi.chunks.length > 0) {
+            wiContext = mergeWiContextResults(
+              wiContext,
+              focusedWi,
+              Math.min(20000, config.wiConfig.maxChars),
+            );
+          }
+        } catch {
+          // keep the merged WI context gathered so far
+        }
+      }
     }
+    const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
+    const linkedWiDocCount = wiContext.linkedDocs.length;
+    const retrievedWiDocCount = wiContext.docs.length;
+    const retrievedWiChunkCount = wiContext.chunks.length;
+    const wiInsightCount = getWorkInstructionInsightCount(wiInsights);
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId, inputSignature);
@@ -152,7 +185,11 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectCount: selectedProjectKeys.length,
         attachmentIncluded: Boolean(attachmentText?.trim()),
         domainContextApplied: Boolean(config.domainContext?.trim()),
-        wiDocsCount: wiContext.docs.length,
+        wiDocsCount: retrievedWiDocCount,
+        linkedWiDocCount,
+        retrievedWiDocCount,
+        retrievedWiChunkCount,
+        wiInsightCount,
         similarStoriesCount: similarStories.length,
       },
     });
@@ -162,6 +199,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       requirement: maskedRequirement.text,
       attachmentText: maskedAttachment.text,
       wiContextText: wiContext.text,
+      wiInsightsArtifact: wiInsights,
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
       wiPromptSliceMaxChars: Math.min(20000, config.wiConfig.maxChars),
@@ -198,7 +236,11 @@ export async function handler(event: { body: ClarifyEvent }) {
               projectCount: selectedProjectKeys.length,
               attachmentIncluded: Boolean(attachmentText?.trim()),
               domainContextApplied: Boolean(config.domainContext?.trim()),
-              wiDocsCount: wiContext.docs.length,
+              wiDocsCount: retrievedWiDocCount,
+              linkedWiDocCount,
+              retrievedWiDocCount,
+              retrievedWiChunkCount,
+              wiInsightCount,
               similarStoriesCount: similarStories.length,
             },
           },
@@ -226,7 +268,11 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectCount: selectedProjectKeys.length,
         attachmentIncluded: Boolean(attachmentText?.trim()),
         domainContextApplied: Boolean(config.domainContext?.trim()),
-        wiDocsCount: wiContext.docs.length,
+        wiDocsCount: retrievedWiDocCount,
+        linkedWiDocCount,
+        retrievedWiDocCount,
+        retrievedWiChunkCount,
+        wiInsightCount,
         similarStoriesCount: similarStories.length,
       },
     });
@@ -262,13 +308,18 @@ export async function handler(event: { body: ClarifyEvent }) {
         reasonCodes: [],
       },
       tokenUsage,
-      wiDocsCount: wiContext.docs.length,
+      wiDocsCount: retrievedWiDocCount,
+      linkedWiDocCount,
+      retrievedWiDocCount,
+      retrievedWiChunkCount,
+      wiInsightCount,
       referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
         docId: doc.docId,
         filename: doc.filename,
         chunkCount: doc.chunkCount,
       })),
       referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 8)),
+      wiInsights,
     };
 
     await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
@@ -295,7 +346,10 @@ export async function handler(event: { body: ClarifyEvent }) {
         ],
         contextUsage: {
           similarStoriesCount: similarStories.length,
-          wiDocsCount: wiContext.docs.length,
+          linkedWiDocCount,
+          retrievedWiDocCount,
+          retrievedWiChunkCount,
+          wiInsightCount,
           ambiguityScore: ambiguityAssessment.score,
           initialClarifyDurationMs,
         },
@@ -339,10 +393,12 @@ export async function handler(event: { body: ClarifyEvent }) {
             attachmentText: maskedAttachment.text,
           },
           discoveryContextClarify: {
+            wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
             wiContextText: wiContext.text,
             similarStoriesText,
             domainContext: config.domainContext,
             domainRoles: config.domainRoles,
+            wiInsights,
           },
           clarify: {
             questions,

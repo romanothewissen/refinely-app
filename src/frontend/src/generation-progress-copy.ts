@@ -159,6 +159,10 @@ export function getSourceContextChips(input?: {
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
   wiDocsCount?: number;
+  linkedWiDocCount?: number;
+  retrievedWiDocCount?: number;
+  retrievedWiChunkCount?: number;
+  wiInsightCount?: number;
   similarStoriesCount?: number;
 } | null): SourceContextChip[] {
   if (!input) return [];
@@ -176,10 +180,31 @@ export function getSourceContextChips(input?: {
   if (input.attachmentIncluded) {
     chips.push({ id: 'attachment', label: 'Attachment included' });
   }
-  if (typeof input.wiDocsCount === 'number' && input.wiDocsCount > 0) {
+  const retrievedWiDocCount = typeof input.retrievedWiDocCount === 'number'
+    ? input.retrievedWiDocCount
+    : input.wiDocsCount;
+  const linkedWiDocCount = typeof input.linkedWiDocCount === 'number'
+    ? input.linkedWiDocCount
+    : undefined;
+  if (typeof linkedWiDocCount === 'number' && linkedWiDocCount > 0) {
     chips.push({
       id: 'wi',
-      label: input.wiDocsCount === 1 ? '1 work instruction' : `${input.wiDocsCount} work instructions`,
+      label: typeof retrievedWiDocCount === 'number'
+        ? `${retrievedWiDocCount}/${linkedWiDocCount} work instructions retrieved`
+        : linkedWiDocCount === 1
+          ? '1 linked work instruction'
+          : `${linkedWiDocCount} linked work instructions`,
+    });
+  } else if (typeof retrievedWiDocCount === 'number' && retrievedWiDocCount > 0) {
+    chips.push({
+      id: 'wi',
+      label: retrievedWiDocCount === 1 ? '1 work instruction retrieved' : `${retrievedWiDocCount} work instructions retrieved`,
+    });
+  }
+  if (typeof input.wiInsightCount === 'number' && input.wiInsightCount > 0) {
+    chips.push({
+      id: 'wi-insights',
+      label: input.wiInsightCount === 1 ? '1 WI insight' : `${input.wiInsightCount} WI insights`,
     });
   }
   if (typeof input.similarStoriesCount === 'number' && input.similarStoriesCount > 0) {

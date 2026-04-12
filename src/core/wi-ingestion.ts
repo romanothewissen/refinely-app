@@ -7,7 +7,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { WiChunk, WiDoc } from '../types';
+import { WiChunk, WiDoc, WiFacet } from '../types';
 import { objectRead, objectWrite, objectDelete, entityGet, entitySet, KEYS } from '../services/cache';
 import { extractDocumentText } from './document-parser';
 
@@ -30,8 +30,17 @@ interface WiContextResult {
 interface StoredWiChunk {
   docId: string;
   chunkIndex: number;
+  sectionLabel?: string;
+  sectionKind?: 'heading' | 'step' | 'bullet' | 'table' | 'paragraph';
   text: string;
   tokenCount: number;
+  facets?: WiFacet[];
+}
+
+interface ChunkSeed {
+  text: string;
+  sectionLabel?: string;
+  sectionKind: StoredWiChunk['sectionKind'];
 }
 
 // ─── Ingest ───────────────────────────────────────────────────────────────────
@@ -54,11 +63,14 @@ export async function ingestPdf(opts: {
   }
 
   const docId = uuidv4();
-  const chunks = chunkText(text).map((chunkText, idx): StoredWiChunk => ({
+  const chunks = chunkText(text).map((chunkSeed, idx): StoredWiChunk => ({
     docId,
     chunkIndex: idx,
-    text: chunkText,
-    tokenCount: Math.ceil(chunkText.length / 4),
+    sectionLabel: chunkSeed.sectionLabel,
+    sectionKind: chunkSeed.sectionKind,
+    text: chunkSeed.text,
+    tokenCount: Math.ceil(chunkSeed.text.length / 4),
+    facets: extractChunkFacets(chunkSeed.text, chunkSeed.sectionLabel),
   }));
 
   docs.push({
@@ -132,22 +144,53 @@ export async function removeDoc(docId: string): Promise<void> {
 
 // ─── Text chunking ────────────────────────────────────────────────────────────
 
-function chunkText(text: string, maxChars = 800, minChars = 200): string[] {
-  const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-  const chunks: string[] = [];
-  let current = '';
+function chunkText(text: string, maxChars = 800, minChars = 180): ChunkSeed[] {
+  const normalized = text.replace(/\r/g, '').trim();
+  if (!normalized) return [];
 
-  for (const para of paragraphs) {
-    if (current.length + para.length + 2 <= maxChars) {
-      current = current ? `${current}\n\n${para}` : para;
-    } else {
-      if (current.length >= minChars) chunks.push(current);
-      current = para.length > maxChars ? para.slice(0, maxChars) : para;
+  const lines = normalized.split('\n');
+  const seeds: ChunkSeed[] = [];
+  let currentLabel = '';
+  let paragraphBuffer: string[] = [];
+
+  const flushParagraphBuffer = () => {
+    if (!paragraphBuffer.length) return;
+    const blocks = paragraphBuffer.join('\n').split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+    for (const block of blocks) {
+      seeds.push({
+        text: block,
+        sectionLabel: currentLabel || detectSectionLabel(block),
+        sectionKind: detectSectionKind(block),
+      });
     }
-  }
+    paragraphBuffer = [];
+  };
 
-  if (current.length >= minChars) chunks.push(current);
-  return chunks;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      paragraphBuffer.push('');
+      continue;
+    }
+    if (isHeadingLine(line)) {
+      flushParagraphBuffer();
+      currentLabel = normalizeHeading(line);
+      continue;
+    }
+    if (isStandaloneStructuredLine(line)) {
+      flushParagraphBuffer();
+      seeds.push({
+        text: line,
+        sectionLabel: currentLabel || detectSectionLabel(line),
+        sectionKind: detectSectionKind(line),
+      });
+      continue;
+    }
+    paragraphBuffer.push(line);
+  }
+  flushParagraphBuffer();
+
+  return mergeChunkSeeds(seeds, maxChars, minChars);
 }
 
 // ─── BM25 scoring ─────────────────────────────────────────────────────────────
@@ -156,9 +199,10 @@ function bm25Score(query: string, chunks: StoredWiChunk[]): { chunk: StoredWiChu
   const k1 = 1.5, b = 0.75;
   const queryTerms = tokenize(query);
   const avgLen = chunks.reduce((s, c) => s + c.tokenCount, 0) / (chunks.length || 1);
+  const queryScores = buildTermFreq(queryTerms);
 
   const scored = chunks.map(chunk => {
-    const terms = tokenize(chunk.text);
+    const terms = tokenize(`${chunk.sectionLabel ?? ''} ${chunk.text}`);
     const termFreq = buildTermFreq(terms);
     const docLen = terms.length;
 
@@ -169,6 +213,9 @@ function bm25Score(query: string, chunks: StoredWiChunk[]): { chunk: StoredWiChu
       const idf = Math.log((chunks.length + 1) / (1 + countDocsWithTerm(term, chunks)));
       score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + b * docLen / avgLen)));
     }
+
+    score += chunkFacetScore(chunk, queryScores, queryTerms);
+    score += chunkSectionBoost(chunk, queryTerms);
 
     return { chunk, score };
   });
@@ -190,7 +237,7 @@ function buildTermFreq(terms: string[]): Record<string, number> {
 }
 
 function countDocsWithTerm(term: string, chunks: StoredWiChunk[]): number {
-  return chunks.filter(c => c.text.toLowerCase().includes(term)).length;
+  return chunks.filter(c => `${c.sectionLabel ?? ''} ${c.text}`.toLowerCase().includes(term)).length;
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
@@ -311,8 +358,11 @@ function normaliseStoredChunk(chunk: StoredWiChunk | WiChunk | Record<string, un
   return {
     docId,
     chunkIndex: Number(chunk.chunkIndex ?? 0),
+    sectionLabel: typeof chunk.sectionLabel === 'string' ? String(chunk.sectionLabel).trim() || undefined : undefined,
+    sectionKind: normalizeSectionKind(chunk.sectionKind),
     text,
     tokenCount: Number(chunk.tokenCount ?? Math.ceil(text.length / 4)),
+    facets: normalizeWiFacets(chunk.facets),
   };
 }
 
@@ -323,12 +373,178 @@ function hydrateChunk(chunk: StoredWiChunk, docsById: Map<string, WiDoc>): WiChu
     filename: doc?.filename ?? 'Unknown document',
     revision: doc?.revision ?? '',
     chunkIndex: chunk.chunkIndex,
+    sectionLabel: chunk.sectionLabel,
+    sectionKind: chunk.sectionKind,
     text: chunk.text,
     tokenCount: chunk.tokenCount,
+    facets: chunk.facets,
   };
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
+
+function mergeChunkSeeds(seeds: ChunkSeed[], maxChars: number, minChars: number): ChunkSeed[] {
+  const merged: ChunkSeed[] = [];
+  let current: ChunkSeed | null = null;
+
+  const pushCurrent = () => {
+    if (!current?.text.trim()) return;
+    if (current.text.length < minChars && merged.length > 0) {
+      const last = merged[merged.length - 1];
+      if (last.text.length + current.text.length + 2 <= maxChars) {
+        last.text = `${last.text}\n\n${current.text}`.trim();
+        current = null;
+        return;
+      }
+    }
+    merged.push(current);
+    current = null;
+  };
+
+  for (const seed of seeds) {
+    const trimmed = seed.text.trim();
+    if (!trimmed) continue;
+    if (trimmed.length > maxChars) {
+      pushCurrent();
+      for (let start = 0; start < trimmed.length; start += maxChars) {
+        merged.push({
+          ...seed,
+          text: trimmed.slice(start, start + maxChars).trim(),
+        });
+      }
+      continue;
+    }
+    if (!current) {
+      current = { ...seed, text: trimmed };
+      continue;
+    }
+    const compatibleSection = current.sectionLabel === seed.sectionLabel && current.sectionKind === seed.sectionKind;
+    if (compatibleSection && current.text.length + trimmed.length + 2 <= maxChars) {
+      current.text = `${current.text}\n\n${trimmed}`;
+      continue;
+    }
+    pushCurrent();
+    current = { ...seed, text: trimmed };
+  }
+  pushCurrent();
+  return merged;
+}
+
+function isHeadingLine(line: string): boolean {
+  if (!line) return false;
+  return /^#{1,6}\s+/.test(line)
+    || /^[A-Z][A-Z0-9\s/&-]{3,}$/.test(line)
+    || /:$/.test(line) && line.length <= 90;
+}
+
+function normalizeHeading(line: string): string {
+  return line.replace(/^#{1,6}\s+/, '').replace(/:$/, '').trim();
+}
+
+function detectSectionLabel(text: string): string | undefined {
+  const firstLine = text.split('\n')[0]?.trim() ?? '';
+  if (firstLine.length >= 4 && firstLine.length <= 90 && /:$/.test(firstLine)) {
+    return firstLine.replace(/:$/, '').trim();
+  }
+  return undefined;
+}
+
+function isStandaloneStructuredLine(line: string): boolean {
+  return detectSectionKind(line) !== 'paragraph';
+}
+
+function detectSectionKind(text: string): StoredWiChunk['sectionKind'] {
+  const trimmed = text.trim();
+  if (/^\|.+\|$/.test(trimmed)) return 'table';
+  if (/^(step\s*\d+|\d+[\.\)])\s+/i.test(trimmed)) return 'step';
+  if (/^[-*•]\s+/.test(trimmed)) return 'bullet';
+  return 'paragraph';
+}
+
+function extractChunkFacets(text: string, sectionLabel?: string): WiFacet[] {
+  const facets: WiFacet[] = [];
+  const lowered = `${sectionLabel ?? ''} ${text}`.toLowerCase();
+  const add = (kind: WiFacet['kind'], value: string, confidence: WiFacet['confidence'] = 'medium') => {
+    if (!value.trim()) return;
+    const normalized = value.trim().toLowerCase();
+    if (facets.some((facet) => facet.kind === kind && facet.value.toLowerCase() === normalized)) return;
+    facets.push({ kind, value: value.trim(), confidence });
+  };
+
+  const actorMatches = text.match(/\b(?:as|by|for)\s+(?:an?|the)?\s*([A-Z][A-Za-z0-9/\-\s]{2,60})/g) ?? [];
+  actorMatches.slice(0, 3).forEach((match) => add('actor', match.replace(/\b(?:as|by|for)\s+/i, '').replace(/^(?:an?|the)\s+/i, '').trim(), 'low'));
+
+  const actionTerms = ['create', 'update', 'review', 'approve', 'plan', 'quote', 'schedule', 'sequence', 'ship', 'order', 'install', 'deinstall', 'cancel', 'reopen', 'complete'];
+  actionTerms.forEach((term) => {
+    if (lowered.includes(term)) add('action', term);
+  });
+
+  const sectionHints: Array<[RegExp, WiFacet['kind'], string]> = [
+    [/\binput|required information|must include|capture\b/i, 'input', sectionLabel || 'required inputs'],
+    [/\boutput|result|generate|created\b/i, 'output', sectionLabel || 'outputs'],
+    [/\bif\b|\bonly when\b|\bmust\b|\bcannot\b/i, 'rule', sectionLabel || 'business rule'],
+    [/\bstatus\b|\bstate\b|\btransition\b|\bmove to\b|\badvance\b/i, 'transition', sectionLabel || 'state transition'],
+    [/\bexception\b|\berror\b|\bmissing\b|\bmanual review\b|\bfallback\b/i, 'exception', sectionLabel || 'exception handling'],
+    [/\bsequence\b|\border\b|\bpredecessor\b|\bdependency\b|\bbefore\b|\bafter\b/i, 'sequence', sectionLabel || 'sequencing'],
+    [/\bmultiple plans\b|\bsplit plan\b|\bnew plan\b|\bseparate plan\b|\bsingle plan\b/i, 'split_decision', sectionLabel || 'single vs multiple plan rules'],
+  ];
+  sectionHints.forEach(([pattern, kind, value]) => {
+    if (pattern.test(lowered)) add(kind, value);
+  });
+
+  return facets.slice(0, 8);
+}
+
+function chunkFacetScore(chunk: StoredWiChunk, queryScores: Record<string, number>, queryTerms: string[]): number {
+  const facets = chunk.facets ?? [];
+  let score = 0;
+  for (const facet of facets) {
+    const facetTerms = tokenize(facet.value);
+    const overlap = facetTerms.filter((term) => queryScores[term] > 0).length;
+    if (!overlap) continue;
+    const confidenceBoost = facet.confidence === 'high' ? 1.2 : facet.confidence === 'low' ? 0.6 : 0.9;
+    score += overlap * confidenceBoost;
+    if (facet.kind === 'sequence' && queryTerms.some((term) => ['sequence', 'dependency', 'dependencies', 'order'].includes(term))) score += 1.1;
+    if (facet.kind === 'split_decision' && queryTerms.some((term) => ['multiple', 'split', 'single', 'plan'].includes(term))) score += 1.1;
+  }
+  return score;
+}
+
+function chunkSectionBoost(chunk: StoredWiChunk, queryTerms: string[]): number {
+  const label = chunk.sectionLabel?.toLowerCase() ?? '';
+  if (!label) return 0;
+  let score = 0;
+  if (queryTerms.some((term) => label.includes(term))) score += 1.5;
+  if (chunk.sectionKind === 'step') score += 0.25;
+  if (chunk.sectionKind === 'heading') score += 0.15;
+  if (label.includes('sequence') || label.includes('dependency')) score += 0.4;
+  if (label.includes('exception') || label.includes('approval')) score += 0.3;
+  return score;
+}
+
+function normalizeSectionKind(value: unknown): StoredWiChunk['sectionKind'] {
+  return value === 'heading' || value === 'step' || value === 'bullet' || value === 'table' || value === 'paragraph'
+    ? value
+    : undefined;
+}
+
+function normalizeWiFacets(value: unknown): WiFacet[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const facets = value
+    .map((entry) => {
+      const kind = typeof (entry as WiFacet | null | undefined)?.kind === 'string' ? (entry as WiFacet).kind : null;
+      const facetValue = typeof (entry as WiFacet | null | undefined)?.value === 'string' ? (entry as WiFacet).value.trim() : '';
+      if (!kind || !facetValue) return null;
+      const confidence = (entry as WiFacet).confidence;
+      return {
+        kind,
+        value: facetValue,
+        ...(confidence === 'low' || confidence === 'medium' || confidence === 'high' ? { confidence } : {}),
+      } as WiFacet;
+    })
+    .filter((facet): facet is WiFacet => Boolean(facet));
+  return facets.length ? facets : undefined;
+}
 
 function hashText(text: string): string {
   let hash = 0;
