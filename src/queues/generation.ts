@@ -32,6 +32,7 @@ import {
   summarizeReferencedSimilarStories,
   summarizeReferencedWiSections,
 } from '../services/project-selection';
+import { deriveRetrievalQuery } from '../services/retrieval-query';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -58,30 +59,6 @@ interface GenerationProgressPayload {
 }
 
 const PROGRESS_HEARTBEAT_MS = 15000;
-
-/**
- * When the user provides only an attachment (empty requirement), use the
- * first 600 chars of the attachment as the retrieval query for WI and
- * similar-stories BM25 search. This ensures relevant chunks are returned
- * instead of an empty-string query producing meaningless results.
- */
-function deriveRetrievalQuery(
-  requirement: string,
-  attachmentText: string,
-  clarifyAnswers: Array<{ answer?: string }> = [],
-): string {
-  const requirementText = requirement?.trim() ?? '';
-  const attachmentSnippet = (attachmentText?.trim() ?? '').slice(0, 600).replace(/\s+/g, ' ');
-  const answerContext = clarifyAnswers
-    .map((answer) => String(answer?.answer ?? '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join(' ')
-    .slice(0, 500);
-  if (requirementText.length >= 30) {
-    return [requirementText, answerContext].filter(Boolean).join(' ').slice(0, 900).trim();
-  }
-  return [requirementText, answerContext, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
-}
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
   await entitySet(KEYS.generationProgress(sessionId), {
@@ -328,7 +305,7 @@ export async function handler(event: { body: GenerationEvent }) {
 
     await updateProgress(startProgress.message, 1, startProgress.payload);
 
-    const liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints'>> =
+    let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> =
       startProgress.payload.draftFeatures ?? [];
 
     getPipelineAuditWriter()?.setPhase('generate.pipeline');
@@ -341,10 +318,29 @@ export async function handler(event: { body: GenerationEvent }) {
       config,
       outputProfileOverride,
       advisoryTriage,
+      projectKeys: selectedProjectKeys,
+      clarifyDiscoveryProfile: clarifyDiscoveryProfile ?? undefined,
+      similarStories,
       precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
       allowPartialArFailure: Boolean(retryFeatureId && retryBaseFeatures?.length),
       priorStageDurationsMs,
       shouldCancel: () => isWorkflowCancelled(sessionId),
+      onPass1DraftFeatures: async (drafts) => {
+        liveDraftFeatures = mapDraftFeatures(drafts);
+        await updateProgress(
+          `Sketching features (${drafts.length} draft${drafts.length === 1 ? '' : 's'})…`,
+          1,
+          {
+            stage: 'decomposition',
+            triage: advisorySizingContract,
+            sizingContract: advisorySizingContract,
+            advisoryTriage,
+            draftFeatures: liveDraftFeatures,
+            draftFeatureCount: liveDraftFeatures.length,
+            sources: progressSources,
+          },
+        );
+      },
       onArProgress: async (snapshot) => {
         const completed = snapshot.completedFeatureIds.length;
         const retrying = snapshot.backfillFeatureIds.length;
@@ -403,6 +399,8 @@ export async function handler(event: { body: GenerationEvent }) {
       domainRolesUsed: config.domainRoles ?? [],
       domainContextApplied: Boolean(config.domainContext?.trim()),
       attachmentIncluded: Boolean(attachmentText?.trim()),
+      pass2BatchWiChunkCount: result.generationContext?.pass2BatchWiChunkCount,
+      pass2ArPatternStoryKeys: result.generationContext?.pass2ArPatternStoryKeys,
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
       sizingContract: advisorySizingContract,

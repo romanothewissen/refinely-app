@@ -155,7 +155,6 @@ test('resolveQuickRefineModel prefers the override and still applies tier downgr
       themeModel: 'gpt-4.1-mini',
       maxTokens: 8192,
     },
-    goldSources: [],
     domainContext: '',
     domainRoles: [],
     processTaxonomyEnabled: false,

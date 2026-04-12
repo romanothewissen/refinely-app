@@ -27,23 +27,32 @@ const SCOPE_LABELS: Record<string, string> = {
   narrow: 'Narrow scope', moderate: 'Moderate scope', broad: 'Broad scope', very_broad: 'Very broad scope',
 };
 
+/** Must match backend ClarifyCategoryKey / clarify LLM taxonomy. */
 const CATEGORY_ORDER: ClarifyCategoryKey[] = [
   'context_trigger',
   'user_personas',
-  'information_architecture',
+  'functional_flow',
   'business_rules',
   'state_lifecycle',
-  'edge_cases_exceptions',
+  'success_measurement',
 ];
 
 const CATEGORY_LABELS: Record<ClarifyCategoryKey, string> = {
   context_trigger: 'Context & Trigger',
   user_personas: 'User Personas',
-  information_architecture: 'Information Architecture',
+  functional_flow: 'Functional Flow',
   business_rules: 'Business Rules',
   state_lifecycle: 'State & Lifecycle',
-  edge_cases_exceptions: 'Edge Cases & Exceptions',
+  success_measurement: 'Success & Measurement',
 };
+
+const OTHER_SECTION_KEY = '__other__';
+
+function sectionKeyForQuestion(q: ClarifyQuestion): typeof OTHER_SECTION_KEY | ClarifyCategoryKey {
+  const k = q.categoryKey;
+  if (k && (CATEGORY_ORDER as readonly string[]).includes(k)) return k;
+  return OTHER_SECTION_KEY;
+}
 
 interface ClarifyProps {
   questions: ClarifyQuestion[];
@@ -201,14 +210,25 @@ export function ClarifyQuestionsView({
     onComplete(result);
   }
 
-  const categories = CATEGORY_ORDER
-    .map((categoryKey) => ({
-      categoryKey,
-      label: CATEGORY_LABELS[categoryKey],
-      items: visibleQuestions
-        .filter(({ q }) => q.categoryKey === categoryKey),
-    }))
-    .filter((section) => section.items.length > 0);
+  const categories = (() => {
+    const grouped = new Map<string, typeof visibleQuestions>();
+    for (const item of visibleQuestions) {
+      const sk = sectionKeyForQuestion(item.q);
+      if (!grouped.has(sk)) grouped.set(sk, []);
+      grouped.get(sk)!.push(item);
+    }
+    const order: Array<typeof OTHER_SECTION_KEY | ClarifyCategoryKey> = [...CATEGORY_ORDER, OTHER_SECTION_KEY];
+    return order
+      .filter((key) => (grouped.get(key)?.length ?? 0) > 0)
+      .map((key) => ({
+        sectionKey: key,
+        label:
+          key === OTHER_SECTION_KEY
+            ? 'Other discovery areas'
+            : CATEGORY_LABELS[key as ClarifyCategoryKey],
+        items: grouped.get(key)!,
+      }));
+  })();
 
   return (
     <div className="flex-1 flex min-w-0 flex-col h-full overflow-hidden fade-in bg-transparent">
@@ -347,8 +367,14 @@ export function ClarifyQuestionsView({
                           </div>
                         )}
                           <div>
-                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions</div>
-                          <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}</div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions (this round)</div>
+                            <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}</div>
+                            {typeof profile?.recommendedInitialCount === 'number'
+                              && profile.recommendedInitialCount !== questions.length ? (
+                              <div className="text-[10px] text-[var(--rf-text-tertiary)] mt-0.5 leading-snug">
+                                Triage forecast ~{profile.recommendedInitialCount} (advisory)
+                              </div>
+                            ) : null}
                           </div>
                       </div>
                     )}
@@ -465,9 +491,9 @@ export function ClarifyQuestionsView({
             </motion.div>
           )}
 
-          {questions.length > 0 && categories.map(({ categoryKey, label, items }, idx) => (
+          {questions.length > 0 && categories.map(({ sectionKey, label, items }, idx) => (
             <motion.div
-              key={categoryKey}
+              key={sectionKey}
               className="space-y-2"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}

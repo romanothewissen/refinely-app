@@ -459,6 +459,8 @@ function LegacyApp({
   const [projectKeys, setProjectKeys] = useState<string[]>([]);
   const [contextMode, setContextMode] = useState<'undecided' | 'project' | 'global'>('undecided');
   const [launchContextReady, setLaunchContextReady] = useState(false);
+  /** False until we know whether to bind session from Jira issue (avoids loading a throwaway session id). */
+  const [issueConversationBootstrapDone, setIssueConversationBootstrapDone] = useState(false);
   const [launchProjectKey, setLaunchProjectKey] = useState<string | null>(null);
   const [savedDefaultProjectKey, setSavedDefaultProjectKey] = useState<string | null>(null);
   const [workspaceSelectionVersion, setWorkspaceSelectionVersion] = useState(0);
@@ -575,6 +577,28 @@ function LegacyApp({
   }, []); // eslint-disable-line
 
   useEffect(() => {
+    if (!accountId || !launchContextReady) return;
+    let cancelled = false;
+    if (!originIssueKey) {
+      setIssueConversationBootstrapDone(true);
+      return;
+    }
+    void api.getIssueSession(originIssueKey).then((res: any) => {
+      if (cancelled) return;
+      const sid = typeof res?.sessionId === 'string' ? res.sessionId.trim() : '';
+      if (res?.success && sid) {
+        setSessionId(sid);
+      }
+      setIssueConversationBootstrapDone(true);
+    }).catch(() => {
+      if (!cancelled) setIssueConversationBootstrapDone(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, launchContextReady, originIssueKey]);
+
+  useEffect(() => {
     api.discoverJira()
       .then((res: any) => {
         const projects = Array.isArray(res?.projects) ? res.projects : [];
@@ -646,7 +670,7 @@ function LegacyApp({
 
   // Restore features from Forge Storage whenever sessionId or accountId changes
   useEffect(() => {
-    if (!accountId) return;
+    if (!accountId || !issueConversationBootstrapDone) return;
     let cancelled = false;
 
     api.getConversation(sessionId).then((res: any) => {
@@ -687,7 +711,7 @@ function LegacyApp({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, accountId]); // eslint-disable-line
+  }, [sessionId, accountId, issueConversationBootstrapDone]); // eslint-disable-line
 
   const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
@@ -1410,8 +1434,8 @@ function LegacyApp({
         setViewMode('generate');
         void persistSessionPointers(
           res.conversation.sessionId,
-          null,
-          false,
+          originIssueKey,
+          Boolean(originIssueKey),
         ).catch((err) => {
           console.error('Failed to persist restored session pointers:', err);
         });
@@ -1574,7 +1598,7 @@ function LegacyApp({
               }}
               conversations={conversations}
               currentSessionId={sessionId}
-              onRestoreSession={(sid: string) => { restoreSession(sid); closeSidebar(); }}
+              onRestoreSession={async (sid: string) => { await restoreSession(sid); closeSidebar(); }}
               isWorking={isWorking || isGenerating}
               onToggleSidebar={closeSidebar}
               onOpenHistory={() => setHistoryModalOpen(true)}
@@ -1808,7 +1832,7 @@ function LegacyApp({
       {isHistoryModalOpen && (
         <HistoryModal
           onClose={() => setHistoryModalOpen(false)}
-          onRestore={(sid: string) => { restoreSession(sid); closeSidebar(); }}
+          onRestore={async (sid: string) => { await restoreSession(sid); closeSidebar(); }}
           conversations={conversations}
           currentSessionId={sessionId}
           refreshHistory={loadHistory}

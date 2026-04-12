@@ -6,22 +6,6 @@ const DEFAULT_ANTHROPIC_STABLE = strategyCatalog.providers.anthropic.presets.sta
 
 // ─── Tenant Configuration ────────────────────────────────────────────────────
 
-export interface GoldSource {
-  key: string;              // unique identifier e.g. "proj1"
-  project: string;          // Jira project key e.g. "MYPROJ"
-  issuetype: string;        // e.g. "Story", "Feature"
-  /** @deprecated Prefer statuses — kept for backward compatibility */
-  status?: string;          // e.g. "Done", "Released"
-  statuses?: string[];      // e.g. ["Done", "Released"]
-  maxItems: number;
-  /** @deprecated Prefer arFieldIds — kept for backward compatibility */
-  requirementsFieldId: string | null;
-  /** Jira custom field IDs whose text is merged into gold acceptance_criteria (use many for multi-AR setups) */
-  arFieldIds: string[];
-  labels?: string[];                     // optional label filter
-  targetProjects?: string[];
-}
-
 export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'azure_openai';
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
@@ -155,7 +139,6 @@ export interface ProjectDomainContext {
 }
 
 export interface TenantConfig {
-  goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
   /** @deprecated Legacy workspace-level guidance text. Prefer project-scoped domainContexts. */
@@ -198,7 +181,6 @@ export interface UserPreferences {
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
-  goldSources: [],
   generatorConfig: {
     provider: 'anthropic',
     modelStrategy: 'simple',
@@ -434,12 +416,6 @@ export interface ValidationViolation {
   message: string;
 }
 
-export interface ReferencedGoldExample {
-  key: string;
-  source: string;
-  summary: string;
-}
-
 export interface ReferencedSimilarStory {
   key: string;
   summary: string;
@@ -458,10 +434,10 @@ export interface ReferencedWiSection {
 export type ClarifyCategoryKey =
   | 'context_trigger'
   | 'user_personas'
-  | 'information_architecture'
+  | 'functional_flow'
   | 'business_rules'
   | 'state_lifecycle'
-  | 'edge_cases_exceptions';
+  | 'success_measurement';
 
 export type ClarifyDiscoveryStatus = 'needs_clarification' | 'ready_for_generation' | 'discovery_failed';
 export type ClarifyFailureReasonCode =
@@ -609,8 +585,6 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   discoveryStatus?: ClarifyDiscoveryStatus;
   failureReasonCode?: ClarifyFailureReasonCode;
   failureDiagnostics?: ClarifyFailureDiagnostics;
-  goldExamplesCount?: number;
-  referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   sizingContract?: EffectiveSizingContract;
@@ -690,8 +664,8 @@ export interface GenerationStageDurationsMs {
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
-  goldExamplesCount?: number;
-  referencedGoldExamples?: ReferencedGoldExample[];
+  pass2BatchWiChunkCount?: number;
+  pass2ArPatternStoryKeys?: string[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   outputProfile?: OutputProfile;
@@ -981,8 +955,6 @@ export interface GenerationEvent {
   outputProfileOverride?: OutputProfile;
   projectKey?: string;
   projectKeys?: string[];
-  goldExamples: string;
-  wiContext: string;
   reviewedDraftFeatures?: Feature[];
   reviewedDraftReview?: DraftReviewMetadata;
   reviewedDraftDecision?: DraftReviewDecision;

@@ -27,6 +27,7 @@ import {
   OpenDecision,
   OutputProfile,
   RoleCoverageItem,
+  SimilarStory,
   CoverageFindings,
   EffectiveSizingContract,
   SizingAssessmentArDepth,
@@ -68,6 +69,8 @@ import {
 } from './prompts';
 import { detectFeatureOverlaps, validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
+import { retrieveScopedWiContext } from '../services/project-selection';
+import { formatArPatternLibraryFromSimilarStories } from './similar-stories';
 import {
   allowsZeroQuestionDiscovery,
   expandRawQuestionCandidate,
@@ -601,21 +604,23 @@ function extractDiscoveredRoles(answers?: ClarifyAnswer[]): string[] {
 function formatClarifyAnswersForPrompt(answers: ClarifyAnswer[]): string {
   return answers
     .map((answer, index) => {
-      const question = trimPromptText(String(answer.question ?? ''), 180);
-      const resolvedAnswer = trimPromptText(String(answer.answer ?? answer.customAnswer ?? ''), 240);
+      const question = trimPromptText(String(answer.question ?? ''), 220);
+      const main = trimPromptText(String(answer.answer ?? ''), 360);
+      const custom = trimPromptText(String(answer.customAnswer ?? ''), 280);
       const selectedSuggestions = uniqueNonEmptyStrings(
-        (answer.selectedSuggestions ?? []).map((item) => trimPromptText(String(item ?? ''), 80)),
-      ).slice(0, 3);
+        (answer.selectedSuggestions ?? []).map((item) => trimPromptText(String(item ?? ''), 100)),
+      ).slice(0, 4);
       const tags = [
         answer.categoryKey ? labelForCategoryKey(answer.categoryKey) : '',
         answer.intent ? String(answer.intent).trim() : '',
       ].filter(Boolean);
       const prefix = tags.length ? ` [${tags.join(' | ')}]` : '';
-      return [
-        `${index + 1}.${prefix} Q: ${question}`,
-        resolvedAnswer ? `A: ${resolvedAnswer}` : '',
+      const answerLines = [
+        main ? `A: ${main}` : '',
+        custom && custom !== main ? `Additional context: ${custom}` : '',
         selectedSuggestions.length ? `Selected signals: ${selectedSuggestions.join('; ')}` : '',
-      ].filter(Boolean).join('\n');
+      ].filter(Boolean);
+      return [`${index + 1}.${prefix} Q: ${question}`, ...answerLines].filter(Boolean).join('\n');
     })
     .join('\n\n');
 }
@@ -1144,9 +1149,13 @@ async function runParallelArPass(input: {
       feature,
       userMessage: buildArPerFeatureUserMessage({
         requirement: input.requirement,
-        clarifyAnswers: input.clarifyAnswers?.map(a => ({
+        clarifyAnswers: input.clarifyAnswers?.map((a) => ({
           question: a.question,
           answer: a.answer,
+          customAnswer: a.customAnswer,
+          selectedSuggestions: a.selectedSuggestions,
+          categoryKey: a.categoryKey,
+          intent: a.intent,
         })),
         attachmentText: input.attachmentText,
         wiContextText: input.wiContextText,
@@ -1300,9 +1309,13 @@ async function backfillMissingAcceptanceRequirements(input: {
         systemPrompt,
         userMessage: buildArPerFeatureUserMessage({
           requirement: input.requirement,
-          clarifyAnswers: input.clarifyAnswers?.map(a => ({
+          clarifyAnswers: input.clarifyAnswers?.map((a) => ({
             question: a.question,
             answer: a.answer,
+            customAnswer: a.customAnswer,
+            selectedSuggestions: a.selectedSuggestions,
+            categoryKey: a.categoryKey,
+            intent: a.intent,
           })),
           attachmentText: input.attachmentText,
           wiContextText: input.wiContextText,
@@ -2661,8 +2674,13 @@ export async function generateFeatures(opts: {
   pauseForDraftReview?: boolean;
   /** @deprecated No longer used — pipeline flows straight through without review pause. */
   onPass1Complete?: (draftFeatures: Feature[], draftReview: DraftReviewMetadata, stageDurationsMs: GenerationStageDurationsMs) => Promise<void>;
+  /** After Pass 1 drafts are final (incl. description repair and optional tighten); for UI progress only. */
+  onPass1DraftFeatures?: (draftFeatures: Feature[]) => Promise<void>;
   onArProgress?: (snapshot: ArGenerationProgressSnapshot) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
+  projectKeys?: string[];
+  clarifyDiscoveryProfile?: DiscoveryProfile;
+  similarStories?: SimilarStory[];
 }): Promise<GenerationResult> {
   const {
     requirement,
@@ -2677,7 +2695,11 @@ export async function generateFeatures(opts: {
     allowPartialArFailure,
     priorStageDurationsMs,
     onArProgress,
+    onPass1DraftFeatures,
     shouldCancel,
+    projectKeys,
+    clarifyDiscoveryProfile,
+    similarStories,
   } = opts;
   const { generatorConfig } = config;
   const outputProfile = outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first';
@@ -2736,6 +2758,10 @@ export async function generateFeatures(opts: {
       limits: PASS1_CONTEXT_LIMITS,
     });
 
+    const unansweredDiscoveryCategories = clarifyDiscoveryProfile?.missingCategoryKeys?.length
+      ? clarifyDiscoveryProfile.missingCategoryKeys.map((k) => labelForCategoryKey(k)).join('; ')
+      : undefined;
+
     const pass1System = buildDecompositionSystemPrompt({
       domainContext: config.domainContext,
       domainRoles: config.domainRoles,
@@ -2745,6 +2771,11 @@ export async function generateFeatures(opts: {
       reviewMode: true,
       backlogDepth: config.generationPreferences?.backlogDepth,
       featureProfile: config.generationPreferences?.featureProfile,
+      advisoryScopeChecklist: advisoryTriage?.reasoning
+        ? trimPromptText(advisoryTriage.reasoning, 2200)
+        : undefined,
+      unansweredDiscoveryCategories,
+      advisoryDeliveryShape: advisoryTriage?.deliveryForecast?.shape,
     });
 
     const pass1Result = await runDecompositionPass({
@@ -2845,10 +2876,47 @@ export async function generateFeatures(opts: {
     // Auto-broaden removed — coverage gaps are surfaced as user-facing suggestions
     // via coverageReview.missingCoverage instead of silently inventing features.
 
+    if (onPass1DraftFeatures) {
+      await onPass1DraftFeatures(pass1DraftFeatures);
+    }
+
     stageDurationsMs.decomposition = (stageDurationsMs.decomposition ?? 0) + (Date.now() - pass1StartedAt);
   } else {
     pass1DraftFeatures = precomputedDraftFeatures;
     pass1Features = precomputedDraftFeatures.map(toRawFeature);
+  }
+
+  let wiForPass2Ar = wiContextText;
+  let similarForPass2Ar = similarStoriesText;
+  let pass2BatchWiChunkCount = 0;
+  let pass2ArPatternStoryKeys: string[] = [];
+
+  if (!precomputedDraftFeatures?.length && config.wiConfig.enabled && projectKeys?.length && pass1DraftFeatures.length >= 2) {
+    try {
+      const batchQuery = [
+        requirement.slice(0, 500),
+        ...pass1DraftFeatures.slice(0, 8).map((f) => trimPromptText(f.summary, 120)),
+      ].join(' ');
+      const k = Math.min(6, Math.max(3, config.wiConfig.topKChunks));
+      const c = Math.min(8000, config.wiConfig.maxChars);
+      const extra = await retrieveScopedWiContext(batchQuery, k, c, projectKeys);
+      if (extra.text.trim()) {
+        pass2BatchWiChunkCount = extra.chunks.length;
+        const merged = `${wiContextText}\n\n---\n\nFEATURE-SCOPED WORK INSTRUCTIONS (use only when relevant to this feature):\n${extra.text}`;
+        wiForPass2Ar = trimPromptText(merged, 16000);
+      }
+    } catch {
+      // keep base WI
+    }
+  }
+
+  if (!precomputedDraftFeatures?.length && similarStories?.length && config.tier !== 'free') {
+    const pat = formatArPatternLibraryFromSimilarStories(similarStories, requirement, 5);
+    if (pat.text) {
+      pass2ArPatternStoryKeys = pat.storyKeys;
+      const merged = `${similarStoriesText}\n\n---\n\n${pat.text}`;
+      similarForPass2Ar = trimPromptText(merged, 5200);
+    }
   }
 
   // ── Pass 2: Acceptance Requirements ──
@@ -2866,8 +2934,8 @@ export async function generateFeatures(opts: {
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
-      similarStoriesText,
+      wiContextText: wiForPass2Ar,
+      similarStoriesText: similarForPass2Ar,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -2885,8 +2953,8 @@ export async function generateFeatures(opts: {
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
-      similarStoriesText,
+      wiContextText: wiForPass2Ar,
+      similarStoriesText: similarForPass2Ar,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -2905,8 +2973,8 @@ export async function generateFeatures(opts: {
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
-      similarStoriesText,
+      wiContextText: wiForPass2Ar,
+      similarStoriesText: similarForPass2Ar,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -2945,8 +3013,8 @@ export async function generateFeatures(opts: {
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
-      similarStoriesText,
+      wiContextText: wiForPass2Ar,
+      similarStoriesText: similarForPass2Ar,
       limits: PASS2_CONTEXT_LIMITS,
     });
 
@@ -2979,8 +3047,8 @@ export async function generateFeatures(opts: {
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
-      similarStoriesText,
+      wiContextText: wiForPass2Ar,
+      similarStoriesText: similarForPass2Ar,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -2997,8 +3065,8 @@ export async function generateFeatures(opts: {
       requirement,
       clarifyAnswers,
       attachmentText,
-      wiContextText,
-      similarStoriesText,
+      wiContextText: wiForPass2Ar,
+      similarStoriesText: similarForPass2Ar,
       arObligations,
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -3072,8 +3140,8 @@ export async function generateFeatures(opts: {
         requirement,
         clarifyAnswers,
         attachmentText,
-        wiContextText,
-        similarStoriesText,
+        wiContextText: wiForPass2Ar,
+        similarStoriesText: similarForPass2Ar,
         arObligations,
         trigger: candidate.trigger,
         reasons: candidate.reasons,
@@ -3182,6 +3250,8 @@ export async function generateFeatures(opts: {
       projectKey: '',
       domainRolesUsed: [],
       outputProfile,
+      pass2BatchWiChunkCount: pass2BatchWiChunkCount || undefined,
+      pass2ArPatternStoryKeys: pass2ArPatternStoryKeys.length ? pass2ArPatternStoryKeys : undefined,
       openDecisions,
       roleCoverage: buildRoleCoverage(features),
       coverageFindings,
@@ -3210,6 +3280,8 @@ export async function generateClarifyingQuestions(opts: {
   wiContextText: string;
   similarStoriesText: string;
   config: TenantConfig;
+  /** Cap WI bytes in the clarify user message; defaults to min(20000, wiConfig.maxChars). */
+  wiPromptSliceMaxChars?: number;
   precomputedTriage?: TriageResult | null;
   onTriageComplete?: (assessment: {
     shape?: EffectiveSizingContract['shape'];
@@ -3225,6 +3297,7 @@ export async function generateClarifyingQuestions(opts: {
   }) => Promise<void>;
 }): Promise<ClarifyDiscoveryResult> {
   const { requirement, attachmentText, wiContextText, similarStoriesText, config, onTriageComplete } = opts;
+  const wiCap = opts.wiPromptSliceMaxChars ?? Math.min(20000, config.wiConfig?.maxChars ?? 20000);
 
   const clarifyTriageResult = opts.precomputedTriage !== undefined
     ? opts.precomputedTriage
@@ -3250,8 +3323,8 @@ export async function generateClarifyingQuestions(opts: {
     `REQUIREMENT: ${requirement}`,
   ];
   if (attachmentText) contextParts.push(`ATTACHMENT: ${attachmentText}`);
-  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, 12000)}`);
-  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 6000)}`);
+  if (wiContextText) contextParts.push(`WORK INSTRUCTIONS EXCERPT: ${wiContextText.slice(0, wiCap)}`);
+  if (similarStoriesText) contextParts.push(`RELATED DEPLOYED BACKLOG ITEMS:\n${similarStoriesText.slice(0, 8000)}`);
   const baseUserMessage = contextParts.join('\n\n');
 
   const system = buildClarifySystemPrompt({
@@ -4629,6 +4702,7 @@ async function repairFeatureAcceptanceRequirements(input: {
     clarifyAnswers: input.clarifyAnswers.map((a) => ({
       question: a.question,
       answer: a.answer,
+      customAnswer: a.customAnswer,
       selectedSuggestions: a.selectedSuggestions,
       categoryKey: a.categoryKey,
       intent: a.intent,

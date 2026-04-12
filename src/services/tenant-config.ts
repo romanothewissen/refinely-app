@@ -129,9 +129,11 @@ function stripGeneratorSecrets(config: TenantConfig): TenantConfig {
 }
 
 function normalizeConfig(config: TenantConfig): TenantConfig {
-  const normalizedContexts = normalizeDomainContexts(config);
+  const withoutLegacy = { ...config };
+  delete (withoutLegacy as { goldSources?: unknown }).goldSources;
+  const normalizedContexts = normalizeDomainContexts(withoutLegacy);
   return {
-    ...config,
+    ...withoutLegacy,
     generationPreferences: {
       outputProfile: config.generationPreferences?.outputProfile === 'balanced' || config.generationPreferences?.outputProfile === 'technical_first'
         ? config.generationPreferences.outputProfile

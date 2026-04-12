@@ -148,7 +148,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
                           editingId={editingId}
                           editTitle={editTitle}
                           setEditTitle={setEditTitle}
-                          onRestore={async () => { onClose(); await onRestore(conv.sessionId); }}
+                          onRestore={async () => { await onRestore(conv.sessionId); onClose(); }}
                           toggleBookmark={toggleBookmark}
                           startEdit={startEdit}
                           saveEdit={saveEdit}
@@ -181,7 +181,7 @@ export function HistoryModal({ onClose, onRestore, conversations, currentSession
                           editingId={editingId}
                           editTitle={editTitle}
                           setEditTitle={setEditTitle}
-                          onRestore={async () => { onClose(); await onRestore(conv.sessionId); }}
+                          onRestore={async () => { await onRestore(conv.sessionId); onClose(); }}
                           toggleBookmark={toggleBookmark}
                           startEdit={startEdit}
                           saveEdit={saveEdit}
@@ -207,7 +207,7 @@ function SessionCard({ conv, currentSessionId, editingId, editTitle, setEditTitl
 
   return (
     <motion.div 
-      onClick={isEditing ? undefined : onRestore}
+      onClick={isEditing || isCurrent ? undefined : onRestore}
       className={`group relative border rounded-[20px] p-4 flex flex-col gap-3 h-full transition-all backdrop-blur-sm ${
         isCurrent ? 'border-[var(--rf-brand)] bg-white/85 shadow-[0_4px_20px_-4px_rgba(43,89,74,0.14)]' : 'bg-white/78 border-[var(--rf-border)] hover:border-[var(--rf-border-strong)] hover:shadow-[0_8px_24px_-4px_rgba(43,89,74,0.10)] cursor-pointer'
       }`}

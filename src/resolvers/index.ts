@@ -502,8 +502,6 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     license: context?.license,
     outputProfileOverride: payload?.outputProfileOverride,
     pauseForDraftReview: undefined,
-    goldExamples: '',   // fetched inside queue consumer
-    wiContext: '',      // fetched inside queue consumer
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
@@ -560,8 +558,6 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     attachmentText: retryContext?.attachmentText ?? '',
     config,
     license: context?.license,
-    goldExamples: '',
-    wiContext: '',
     projectKey: authorizedProjects.projectKey,
     projectKeys: authorizedProjects.projectKeys,
     clarifySizingContract: retryContext?.sizingContract,

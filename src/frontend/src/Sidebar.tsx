@@ -12,7 +12,7 @@ interface SidebarProps {
   onNewSession: () => void;
   conversations: any[];
   currentSessionId: string;
-  onRestoreSession: (sessionId: string) => void;
+  onRestoreSession: (sessionId: string) => void | Promise<void>;
   isWorking: boolean;
   onToggleSidebar: () => void;
   onOpenHistory: () => void;

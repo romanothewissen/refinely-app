@@ -31,40 +31,6 @@ export function processTaxonomyBlock(taxonomy: ProcessCode[]): string {
   return lines.join('\n');
 }
 
-export function formatGoldExample(item: {
-  summary?: string;
-  description?: string;
-  acceptance_criteria?: string;
-  story_points?: number;
-}, descMax?: number, acMax?: number): string {
-  let desc = item.description || '(no description)';
-  if (descMax && desc.length > descMax) desc = desc.slice(0, descMax) + '…';
-
-  const lines = [
-    `Example Feature: ${item.summary || ''}`,
-    `Description: ${desc}`,
-    'Acceptance Requirements:',
-  ];
-
-  let ac = item.acceptance_criteria || '';
-  if (ac) {
-    if (acMax && ac.length > acMax) ac = ac.slice(0, acMax) + '…';
-    for (const line of ac.trim().split('\n')) {
-      const t = line.trim();
-      if (t && (t.startsWith('-') || t.startsWith('*') || /GIVEN|WHEN|THEN/i.test(t))) {
-        lines.push(`  - ${t.replace(/^[-*]\s*/, '')}`);
-      } else if (t) {
-        lines.push(`  - ${t}`);
-      }
-    }
-  } else {
-    lines.push('  - (none)');
-  }
-
-  if (item.story_points != null) lines.push(`(Story points: ${item.story_points})`);
-  return lines.join('\n');
-}
-
 // ─── Pass 1: Decomposition ────────────────────────────────────────────────────
 
 export function buildDecompositionSystemPrompt(opts: {
@@ -79,6 +45,12 @@ export function buildDecompositionSystemPrompt(opts: {
     includeTechnicalEnablers?: boolean;
     includeCrossCuttingRules?: boolean;
   };
+  /** Early triage reasoning — checklist only; merge related capabilities where one feature suffices. */
+  advisoryScopeChecklist?: string;
+  /** Category labels still thin in discovery — infer carefully and surface gaps in open_decisions if needed. */
+  unansweredDiscoveryCategories?: string;
+  /** When set from sizing/triage, nudge against over-compression for large asks (no extra LLM round). */
+  advisoryDeliveryShape?: 'minimal' | 'narrow' | 'balanced' | 'broad' | 'epic';
 }): string {
   const roleList = opts.domainRoles.length
     ? `Configured roles in this domain: ${opts.domainRoles.join(', ')}. Reuse one only when it is directly supported by the requirement or answered Q&A.`
@@ -142,6 +114,21 @@ export function buildDecompositionSystemPrompt(opts: {
     : `Think step by step about the full scope of this requirement. Return JSON:
 {"open_decisions":[{"title":"...","detail":"...","category":"business_rules","impact":"...","blocking":true}],"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${opts.processTaxonomyEnabled ? ', "process_code": "..."' : ''}, "feature_class":"business_capability","confidence":"confirmed","actor_source":"prompt"}]}`;
 
+  const advisoryBlock = opts.advisoryScopeChecklist?.trim()
+    ? `\nEARLY SCOPE CHECKLIST (from triage — account for each distinct capability implied below unless one richer feature clearly covers it):\n${opts.advisoryScopeChecklist.trim()}\n`
+    : '';
+
+  const discoveryGapBlock = opts.unansweredDiscoveryCategories?.trim()
+    ? `\nDISCOVERY GAP SIGNAL: Little or no answered discovery for: ${opts.unansweredDiscoveryCategories.trim()}. Infer carefully from the requirement and evidence; record material uncertainty in open_decisions.\n`
+    : '';
+
+  const broadShapeBlock =
+    opts.advisoryDeliveryShape === 'epic' || opts.advisoryDeliveryShape === 'broad'
+      ? `\nADVISORY SCOPE SIGNAL: Upstream sizing labeled this ask as ${opts.advisoryDeliveryShape}. When the requirement and evidence name multiple customer-visible capabilities with genuinely different behavior, preserve them in the feature set (or as clearly separated scenarios) rather than compressing into one feature—unless the requirement itself describes a single deliverable. Apply the same anti-patterns as always: do not noun-split or clone thin features.\n`
+      : '';
+
+  const structuredFlowBlock = `\nSTRUCTURED FLOWS: When the requirement and supplied evidence imply ordered activities, dependent steps, or alternative paths that materially affect delivery or testing, reflect that structure using terminology from those inputs only. Do not invent domain-specific scenarios; infer strictly from what is written.\n`;
+
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a Jira backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleList}
@@ -201,6 +188,7 @@ ${processRule}
 ${outputProfileGuidance ? `\n${outputProfileGuidance}` : ''}
 ${backlogDepthGuidance ? `\n${backlogDepthGuidance}` : ''}
 ${discoveryContextGuidance ? `\n${discoveryContextGuidance}` : ''}
+${advisoryBlock}${discoveryGapBlock}${broadShapeBlock}${structuredFlowBlock}
 
 ${taxonomySection}
 
@@ -366,6 +354,10 @@ SCENARIO DEPTH — go beyond status gates:
 - Probe for: compound preconditions (e.g., "GIVEN a plan includes both billable and covered items AND customer authorization has been recorded"), financial consequences of actions, downstream impacts on related records, behavior when dependencies are partially met.
 - When a feature covers multiple activity types or variants, write ARs that name the specific scenario (e.g., "GIVEN a plan requires parts at one location AND equipment at another") rather than generic ARs about "activities."
 - When a feature involves sequencing or dependencies, write ARs that test the dependency enforcement (e.g., "GIVEN a preceding activity has not been completed WHEN the subsequent activity is scheduled THEN scheduling is prevented").
+- When the requirement and evidence imply materially different branches or ordering, name them in distinct ARs (or record unresolved items in open_decisions). Use vocabulary from the supplied inputs only—do not add domain-specific examples the user did not provide.
+
+ORDERING:
+- List acceptance_requirements in a coherent narrative flow for the capability (e.g. initiating context, main path, materially different branches, completion). Each AR must still test one distinct thing; ordering serves readability for testers, not padding.
 
 ACTOR ASSIGNMENT:
 - Use the actor from the feature description as the default. Do NOT override it with a generic role.
@@ -386,6 +378,7 @@ ${arGuidance ? `\n${arGuidance}` : ''}
 
 OUTPUT FORMAT (strict):
 - Return a single JSON object: {"features":[...]} — same number of features as input, same order and same "summary" strings.
+- Within each feature, order acceptance_requirements strings in the narrative flow described under ORDERING above.
 - Each feature MUST include the key "acceptance_requirements" (snake_case, array of strings). Do NOT use "acceptanceRequirements" (camelCase).
 - Each string MUST be one full requirement in the form: GIVEN ... WHEN ... THEN ... (you may use line breaks inside the string for readability).
 - Write as many acceptance_requirements as needed for the requested depth and no more. One focused feature may need only a few. A broad or risky feature may need many.
@@ -601,6 +594,7 @@ export function buildArPerFeatureUserMessage(opts: {
   clarifyAnswers?: {
     question: string;
     answer: string;
+    customAnswer?: string;
     selectedSuggestions?: string[];
     categoryKey?: string;
     intent?: string;
@@ -628,15 +622,18 @@ export function buildArPerFeatureUserMessage(opts: {
     const qaText = answers
       .map((a, index) => {
         const tags = [a.categoryKey, a.intent].filter(Boolean).join(' | ');
-        const selected = (a.selectedSuggestions ?? []).filter(Boolean).slice(0, 3);
-        return [
-          `${index + 1}.${tags ? ` [${tags}]` : ''} Q: ${a.question}`,
-          `A: ${a.answer}`,
+        const selected = (a.selectedSuggestions ?? []).filter(Boolean).slice(0, 4);
+        const main = String(a.answer ?? '').trim();
+        const custom = String(a.customAnswer ?? '').trim();
+        const answerLines = [
+          main ? `A: ${main}` : '',
+          custom && custom !== main ? `Additional context: ${custom}` : '',
           selected.length ? `Selected signals: ${selected.join('; ')}` : '',
-        ].filter(Boolean).join('\n');
+        ].filter(Boolean);
+        return [`${index + 1}.${tags ? ` [${tags}]` : ''} Q: ${a.question}`, ...answerLines].join('\n');
       })
       .join('\n\n')
-      .slice(0, 1500);
+      .slice(0, 2200);
     parts.push(`CLARIFYING Q&A:\n${qaText}`);
   }
 
@@ -652,7 +649,9 @@ export function buildArPerFeatureUserMessage(opts: {
 
   const similarStoriesText = (opts.similarStoriesText || '').trim();
   if (similarStoriesText) {
-    parts.push(`RELATED BACKLOG CONTEXT (secondary to the requirement and work instructions):\n${similarStoriesText.slice(0, 3000)}`);
+    parts.push(
+      `RELATED BACKLOG CONTEXT (secondary to the requirement and work instructions; use only when it clearly applies to this feature):\n${similarStoriesText.slice(0, 3800)}`,
+    );
   }
 
   if (opts.siblingFeatures && opts.siblingFeatures.length > 0) {
@@ -680,6 +679,9 @@ export function buildArPerFeatureUserMessage(opts: {
 
   parts.push(
     `---\n\nFEATURE TO WRITE ACCEPTANCE REQUIREMENTS FOR:\n${JSON.stringify(opts.feature, null, 2)}`,
+  );
+  parts.push(
+    'Order acceptance_requirements in a coherent narrative flow along this feature (context → main path → distinct branches → completion). Each AR remains one distinct test.',
   );
 
   return parts.join('\n\n');

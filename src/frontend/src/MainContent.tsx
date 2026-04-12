@@ -1,5 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, Edit2, Check, X, Plus, Trash2, Menu, Upload, ChevronDown, Download, CheckCircle2, Settings, RefreshCcw, AlertTriangle } from 'lucide-react';
+import {
+  Send,
+  Sparkles,
+  Edit2,
+  Check,
+  X,
+  Plus,
+  Trash2,
+  Menu,
+  Upload,
+  ChevronDown,
+  Download,
+  CheckCircle2,
+  Settings,
+  RefreshCcw,
+  AlertTriangle,
+  FolderOpen,
+  BookOpen,
+  FileText,
+  Link2,
+  Paperclip,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExcelJS from 'exceljs';
 import { api } from './hooks/useForge';
@@ -29,6 +51,7 @@ import type { AcceptanceRequirement } from './types';
 import { getCanvasIntentLabel, getPendingChangeLabel, routeCanvasEditInstruction } from './canvasChange';
 import {
   formatGenerationFeatureTarget,
+  generationTriageFeatureFootnote,
   getApprovedDraftStructureNote,
   getDiscoveryDisplayComplexity,
   getDiscoveryProfileHeadline,
@@ -38,6 +61,7 @@ import {
   getSizingRunContextNote,
   getSourceContextChips,
 } from './generation-progress-copy';
+import type { SourceContextChip } from './generation-progress-copy';
 
 function normalizeDisplayText(value: string): string {
   const trimmed = String(value ?? '').trim();
@@ -255,19 +279,31 @@ function ComplexityBar({ current }: { current?: string | null }) {
   );
 }
 
-function ContextChipList({ chips }: { chips: string[] }) {
+const SOURCE_CHIP_ICONS: Record<string, LucideIcon> = {
+  project: FolderOpen,
+  guidance: BookOpen,
+  wi: FileText,
+  similar: Link2,
+  attachment: Paperclip,
+};
+
+function ContextChipList({ chips }: { chips: SourceContextChip[] }) {
   if (!chips.length) return null;
 
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {chips.map((chip) => (
-        <span
-          key={chip}
-          className="inline-flex items-center rounded-md border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-text-secondary)]"
-        >
-          {chip}
-        </span>
-      ))}
+    <div className="flex flex-wrap gap-2">
+      {chips.map((chip) => {
+        const Icon = SOURCE_CHIP_ICONS[chip.id];
+        return (
+          <span
+            key={`${chip.id}-${chip.label}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)]/45 px-2.5 py-1 text-[11px] font-semibold text-[var(--rf-text-secondary)] tabular-nums shadow-[0_1px_2px_rgba(30,40,35,0.06)]"
+          >
+            {Icon ? <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)]" aria-hidden /> : null}
+            {chip.label}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -341,7 +377,9 @@ function TriageScoreCard({
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">{getGenerationFeatureTargetLabel()}</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">{formatGenerationFeatureTarget(forecast.featureTarget)}</div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">
+            {formatGenerationFeatureTarget(forecast.featureTarget, forecast.featureMin, forecast.featureMax)}
+          </div>
         </div>
         {phase !== 'generation' && (
           <div>
@@ -356,6 +394,11 @@ function TriageScoreCard({
           </div>
         </div>
       </div>
+      {phase === 'generation' && (
+        <p className="mt-2 text-[11px] leading-snug text-[var(--rf-text-tertiary)]">
+          {generationTriageFeatureFootnote()}
+        </p>
+      )}
     </motion.div>
   );
 }

@@ -10,8 +10,25 @@ export function getGenerationFeatureTargetLabel(): string {
   return 'Triage estimate';
 }
 
-export function formatGenerationFeatureTarget(featureTarget?: number): string {
-  return typeof featureTarget === 'number' ? `Forecast ${featureTarget}` : 'Assessing';
+export function formatGenerationFeatureTarget(
+  featureTarget?: number,
+  featureMin?: number,
+  featureMax?: number,
+): string {
+  if (typeof featureTarget !== 'number') return 'Assessing';
+  const hasBand =
+    typeof featureMin === 'number'
+    && typeof featureMax === 'number'
+    && (featureMin !== featureTarget || featureMax !== featureTarget);
+  if (hasBand) {
+    return `${featureMin}–${featureMax} (centre ${featureTarget})`;
+  }
+  return `Forecast ${featureTarget}`;
+}
+
+/** Shown under triage feature estimate during generation to set expectations. */
+export function generationTriageFeatureFootnote(): string {
+  return 'Advisory band from triage — final feature count comes from decomposition.';
 }
 
 export function getDraftFeatureHeading(): string {
@@ -135,26 +152,41 @@ export function getDiscoveryDisplayComplexity(input: {
   return displayComplexity;
 }
 
+export type SourceContextChip = { id: string; label: string };
+
 export function getSourceContextChips(input?: {
   projectCount?: number;
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
   wiDocsCount?: number;
   similarStoriesCount?: number;
-} | null): string[] {
+} | null): SourceContextChip[] {
   if (!input) return [];
 
-  const chips: string[] = [];
+  const chips: SourceContextChip[] = [];
   if (typeof input.projectCount === 'number' && input.projectCount > 0) {
-    chips.push(input.projectCount === 1 ? '1 project' : `${input.projectCount} projects`);
+    chips.push({
+      id: 'project',
+      label: input.projectCount === 1 ? '1 project' : `${input.projectCount} projects`,
+    });
   }
-  if (input.domainContextApplied) chips.push('Guidance on');
-  if (input.attachmentIncluded) chips.push('Attachment included');
+  if (input.domainContextApplied) {
+    chips.push({ id: 'guidance', label: 'Guidance on' });
+  }
+  if (input.attachmentIncluded) {
+    chips.push({ id: 'attachment', label: 'Attachment included' });
+  }
   if (typeof input.wiDocsCount === 'number' && input.wiDocsCount > 0) {
-    chips.push(input.wiDocsCount === 1 ? '1 work instruction' : `${input.wiDocsCount} work instructions`);
+    chips.push({
+      id: 'wi',
+      label: input.wiDocsCount === 1 ? '1 work instruction' : `${input.wiDocsCount} work instructions`,
+    });
   }
   if (typeof input.similarStoriesCount === 'number' && input.similarStoriesCount > 0) {
-    chips.push(input.similarStoriesCount === 1 ? '1 similar story' : `${input.similarStoriesCount} similar stories`);
+    chips.push({
+      id: 'similar',
+      label: input.similarStoriesCount === 1 ? '1 similar story' : `${input.similarStoriesCount} similar stories`,
+    });
   }
   return chips;
 }

@@ -13,7 +13,7 @@ import { assessRequirementWithLlm, buildClarifyFailureDiagnostics, ClarifyDiscov
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
-import { appendComplianceAuditEvent, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
+import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
@@ -27,21 +27,12 @@ import {
   summarizeReferencedSimilarStories,
   summarizeReferencedWiSections,
 } from '../services/project-selection';
+import { buildTriageEnrichedWiQuery, deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
 
-/**
- * When the user provides only an attachment (empty requirement), fall back to
- * using the first 600 chars of the attachment as the BM25 retrieval query.
- */
-function deriveRetrievalQuery(requirement: string, attachmentText: string): string {
-  const requirementText = requirement?.trim() ?? '';
-  const attachmentSnippet = (attachmentText?.trim() ?? '').slice(0, 600).replace(/\s+/g, ' ');
-  if (requirementText.length >= 30) return [requirementText, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
-  return [requirementText, attachmentSnippet].filter(Boolean).join(' ').slice(0, 900).trim();
-}
 export async function handler(event: { body: ClarifyEvent }) {
-  const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys } = event.body;
+  const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys, priorAnswers } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
@@ -70,6 +61,10 @@ export async function handler(event: { body: ClarifyEvent }) {
     const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
     const maskedRequirement = maskPiiText(requirement, piiEnabled);
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
+    const maskedPriorAnswers = maskPiiInAnswers(priorAnswers ?? [], piiEnabled);
+    const retrievalAnswers = maskedPriorAnswers.answers;
+    const broadWiTopK = Math.min(Math.max(1, config.wiConfig.topKChunks), 8);
+    const broadWiMaxChars = config.wiConfig.maxChars;
     await sendProgress('Reading project guidance, work instructions, and related stories…', {
       stage: 'context',
       sources: {
@@ -99,14 +94,20 @@ export async function handler(event: { body: ClarifyEvent }) {
       },
     });
 
-    const [wiContext, similarStories, precomputedTriage] = await Promise.all([
+    const [wiBroad, similarStories, precomputedTriage] = await Promise.all([
       config.wiConfig.enabled
-        ? retrieveScopedWiContext(deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text), 4, 20000, selectedProjectKeys)
+        ? retrieveScopedWiContext(
+            deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
+            broadWiTopK,
+            broadWiMaxChars,
+            selectedProjectKeys,
+          )
         : Promise.resolve({ text: '', docs: [], chunks: [] }),
       config.tier !== 'free'
         ? retrieveScopedSimilarStories({
-            requirement: maskedRequirement.text,
+            requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
             attachmentText: maskedAttachment.text,
+            clarifyAnswers: retrievalAnswers,
             config,
             projectKeys: selectedProjectKeys,
             maxResults: 8,
@@ -114,6 +115,30 @@ export async function handler(event: { body: ClarifyEvent }) {
         : Promise.resolve([]),
       triagePromise,
     ]);
+
+    let wiContext = wiBroad;
+    if (config.wiConfig.enabled && precomputedTriage) {
+      const narrowQuery = buildTriageEnrichedWiQuery(precomputedTriage);
+      if (narrowQuery.trim()) {
+        try {
+          const narrowWi = await retrieveScopedWiContext(
+            narrowQuery,
+            Math.min(4, Math.max(2, config.wiConfig.topKChunks)),
+            Math.min(12000, config.wiConfig.maxChars),
+            selectedProjectKeys,
+          );
+          if (narrowWi.text.trim()) {
+            wiContext = mergeWiContextResults(
+              wiContext,
+              narrowWi,
+              Math.min(20000, config.wiConfig.maxChars),
+            );
+          }
+        } catch {
+          // keep broad WI only
+        }
+      }
+    }
 
     if (await isWorkflowCancelled(sessionId)) {
       await markCancelled(sessionId, inputSignature);
@@ -139,6 +164,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       wiContextText: wiContext.text,
       similarStoriesText: formatSimilarStoriesText(similarStories, 8),
       config,
+      wiPromptSliceMaxChars: Math.min(20000, config.wiConfig.maxChars),
       precomputedTriage,
       onTriageComplete: async (assessment) => {
         const questionText = typeof assessment.discoveryForecast?.recommendedInitialCount === 'number'
@@ -274,7 +300,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           initialClarifyDurationMs,
         },
         tokenUsage,
-        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats),
+        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
       });
     }
     await appendComplianceAuditEvent({
@@ -306,7 +332,7 @@ export async function handler(event: { body: ClarifyEvent }) {
               clarifyModel: config.generatorConfig.clarifyModel,
             },
             piiMaskingEnabled: piiEnabled,
-            piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats),
+            piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
           },
           userInputs: {
             requirement: maskedRequirement.text,

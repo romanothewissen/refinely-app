@@ -234,8 +234,10 @@ export async function findSimilarStories(
       ? ranked.filter(item => (item.relevanceScore ?? 0) >= threshold)
       : ranked;
 
+    const deduped = dedupeBacklogDocsBySimilarSummary(filtered);
+
     const baseUrl = await getJiraBaseUrl();
-    return filtered.slice(0, maxResults).map(item => ({
+    return deduped.slice(0, maxResults).map(item => ({
       key: item.key,
       summary: item.summary,
       description: item.description,
@@ -959,7 +961,11 @@ function buildSimilarityQueryText(input: {
   if (input.clarifyAnswers?.length) {
     parts.push(
       input.clarifyAnswers
-        .map(answer => `${answer.question} ${answer.answer}`)
+        .map((answer) => {
+          const sug = (answer.selectedSuggestions ?? []).filter(Boolean).join('; ');
+          const extra = answer.customAnswer?.trim() ? ` Additional: ${answer.customAnswer.trim()}` : '';
+          return `${answer.question} ${answer.answer ?? ''}${extra}${sug ? ` Signals: ${sug}` : ''}`;
+        })
         .join('\n'),
     );
   }
@@ -1151,13 +1157,55 @@ function isSubset(left: Set<string>, right: Set<string>): boolean {
   return true;
 }
 
+function summaryJaccardTokens(left: string, right: string): number {
+  const A = new Set(tokenize(left));
+  const B = new Set(tokenize(right));
+  if (!A.size && !B.size) return 1;
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter += 1;
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+
+/** Drop near-duplicate summaries (wastes prompt budget); keep higher lexical score first. */
+function dedupeBacklogDocsBySimilarSummary<T extends BacklogDoc & { relevanceScore: number }>(
+  ordered: T[],
+  jaccardThreshold = 0.82,
+): T[] {
+  const kept: T[] = [];
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  for (const item of ordered) {
+    const ns = norm(item.summary);
+    let dup = false;
+    for (const k of kept) {
+      if (summaryJaccardTokens(ns, norm(k.summary)) >= jaccardThreshold) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) kept.push(item);
+  }
+  return kept;
+}
+
 async function rerankWithLlm(
   requirement: string,
   candidates: Array<BacklogDoc & { relevanceScore: number }>,
   model: string,
 ): Promise<Array<BacklogDoc & { relevanceScore: number }>> {
   try {
-    const summaries = candidates.map(candidate => `${candidate.key}: ${candidate.summary}`);
+    const summaries = candidates.map((candidate) => {
+      const desc = trimBacklogText(candidate.description, 220);
+      const acHead = trimBacklogText(
+        String(candidate.acceptanceCriteria ?? '').split('\n').find((ln) => ln.trim()) ?? '',
+        180,
+      );
+      const bits = [`${candidate.key}: ${candidate.summary}`];
+      if (desc) bits.push(`Desc: ${desc}`);
+      if (acHead) bits.push(`AC: ${acHead}`);
+      return bits.join(' | ');
+    });
     const prompt = buildRerankPrompt(requirement, summaries);
 
     const ranked = await callLlmJson<number[]>({
@@ -1229,6 +1277,86 @@ function trimText(value: unknown, maxChars: number): string {
 
 function dedupeStrings(items: string[]): string[] {
   return [...new Set(items.map(item => item.trim()).filter(Boolean))];
+}
+
+const AR_PATTERN_STOP = new Set([
+  'given', 'when', 'then', 'and', 'or', 'the', 'a', 'an', 'to', 'of', 'in', 'for', 'is', 'are', 'with', 'on', 'as', 'at', 'by', 'from', 'be', 'it', 'if',
+]);
+
+function requirementKeywordOverlap(requirement: string, corpus: string): number {
+  const reqTokens = new Set(
+    requirement
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !AR_PATTERN_STOP.has(t)),
+  );
+  if (!reqTokens.size) return 0;
+  let hits = 0;
+  for (const t of corpus.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/)) {
+    if (t.length > 2 && reqTokens.has(t)) hits += 1;
+  }
+  return hits;
+}
+
+function extractGwtSampleLines(acceptanceCriteria: string): { given: string; when: string; then: string } | null {
+  let given = '';
+  let when = '';
+  let then = '';
+  for (const line of acceptanceCriteria.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const head = trimmed.slice(0, 6).toUpperCase();
+    if (!given && head.startsWith('GIVEN')) given = trimmed.slice(0, 320);
+    else if (!when && head.startsWith('WHEN')) when = trimmed.slice(0, 320);
+    else if (!then && head.startsWith('THEN')) then = trimmed.slice(0, 320);
+    if (given && when && then) break;
+  }
+  return given && when && then ? { given, when, then } : null;
+}
+
+/**
+ * Compact AR phrasing patterns from already-fetched similar stories (no extra Jira fetch).
+ * Prefer stories whose text overlaps the requirement lexically and contain GIVEN/WHEN/THEN.
+ */
+export function formatArPatternLibraryFromSimilarStories(
+  stories: SimilarStory[],
+  requirement: string,
+  maxStories = 5,
+): { text: string; storyKeys: string[] } {
+  const req = requirement.trim();
+  if (!stories.length || !req) return { text: '', storyKeys: [] };
+
+  type Row = { story: SimilarStory; score: number; gwt: NonNullable<ReturnType<typeof extractGwtSampleLines>> };
+  const rows: Row[] = [];
+  for (const story of stories) {
+    const ac = String(story.acceptanceCriteria ?? '');
+    const gwt = extractGwtSampleLines(ac);
+    if (!gwt) continue;
+    const blob = `${story.summary} ${story.description ?? ''} ${ac}`.slice(0, 4000);
+    rows.push({ story, score: requirementKeywordOverlap(req, blob), gwt });
+  }
+  if (!rows.length) return { text: '', storyKeys: [] };
+
+  rows.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return (b.story.relevanceScore ?? 0) - (a.story.relevanceScore ?? 0);
+  });
+  const withOverlap = rows.filter((r) => r.score > 0).slice(0, maxStories);
+  const picked = withOverlap.length ? withOverlap : rows.slice(0, maxStories);
+
+  const lines: string[] = [
+    'ACCEPTANCE PATTERN REFERENCES (reuse structure and phrasing style only; do not copy unrelated scope):',
+  ];
+  const storyKeys: string[] = [];
+  for (const { story, gwt } of picked) {
+    storyKeys.push(story.key);
+    lines.push(`— ${story.key}: ${story.summary}`);
+    lines.push(`  ${gwt.given}`);
+    lines.push(`  ${gwt.when}`);
+    lines.push(`  ${gwt.then}`);
+  }
+  return { text: lines.join('\n'), storyKeys };
 }
 
 export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): string {

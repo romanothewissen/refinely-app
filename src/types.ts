@@ -6,22 +6,6 @@ const DEFAULT_ANTHROPIC_STABLE = strategyCatalog.providers.anthropic.presets.sta
 
 // ─── Tenant Configuration ────────────────────────────────────────────────────
 
-export interface GoldSource {
-  key: string;              // unique identifier e.g. "proj1"
-  project: string;          // Jira project key e.g. "MYPROJ"
-  issuetype: string;        // e.g. "Story", "Feature"
-  /** @deprecated Prefer statuses — kept for backward compatibility */
-  status?: string;           // e.g. "Done", "Released"
-  statuses?: string[];       // e.g. ["Done", "Released"]
-  maxItems: number;
-  /** @deprecated Prefer arFieldIds — kept for backward compatibility */
-  requirementsFieldId: string | null;
-  /** Jira custom field IDs whose text is merged into gold acceptance_criteria (use many for multi-AR setups) */
-  arFieldIds: string[];
-  labels?: string[];                     // optional label filter
-  targetProjects?: string[];              // list of project keys that should use this source (use "*" for global)
-}
-
 export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'azure_openai';
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
@@ -161,7 +145,6 @@ export interface GenerationPreferences {
 }
 
 export interface TenantConfig {
-  goldSources: GoldSource[];
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
   /** @deprecated Legacy workspace-level guidance text. Prefer project-scoped domainContexts. */
@@ -205,7 +188,6 @@ export interface UserPreferences {
 }
 
 export const DEFAULT_CONFIG: TenantConfig = {
-  goldSources: [],
   generatorConfig: {
     provider: 'anthropic',
     modelStrategy: 'simple',
@@ -441,12 +423,6 @@ export interface ValidationViolation {
   message: string;
 }
 
-export interface ReferencedGoldExample {
-  key: string;
-  source: string;
-  summary: string;
-}
-
 export interface ReferencedSimilarStory {
   key: string;
   summary: string;
@@ -616,8 +592,6 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   discoveryStatus?: ClarifyDiscoveryStatus;
   failureReasonCode?: ClarifyFailureReasonCode;
   failureDiagnostics?: ClarifyFailureDiagnostics;
-  goldExamplesCount?: number;
-  referencedGoldExamples?: ReferencedGoldExample[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   sizingContract?: EffectiveSizingContract;
@@ -697,8 +671,10 @@ export interface GenerationStageDurationsMs {
 }
 
 export interface GenerationContextMeta extends ContextSourceMeta {
-  goldExamplesCount?: number;
-  referencedGoldExamples?: ReferencedGoldExample[];
+  /** Pass-2 batched WI retrieval (chunk count merged into AR context). */
+  pass2BatchWiChunkCount?: number;
+  /** Backlog keys whose AR patterns were injected for Pass-2. */
+  pass2ArPatternStoryKeys?: string[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   outputProfile?: OutputProfile;
@@ -988,7 +964,6 @@ export interface PipelineAuditBundle {
       similarStoriesText?: string;
       domainContext?: string;
       domainRoles?: string[];
-      goldExamplesText?: string;
     };
   };
   llmCalls: PipelineAuditLlmCallRecord[];
@@ -1079,9 +1054,6 @@ export interface GenerationEvent {
   config: TenantConfig;
   license?: { active: boolean; licenseType: string };
   outputProfileOverride?: OutputProfile;
-  goldExamples?: string;
-  goldExamplesCount?: number;
-  wiContext?: string;
   projectKey: string;
   projectKeys?: string[];
   /** Discovery profile from the clarify LLM — retained for context/questioning only. */
