@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   allowsZeroQuestionDiscovery,
+  buildDiscoveryCoverageArtifact,
   computeInitialQuestionBudget,
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
@@ -76,10 +77,11 @@ test('validateAndRepairInitialDiscovery caps oversized question sets with catego
   });
   const repaired = validateAndRepairInitialDiscovery(many, profile, 10);
   assert.equal(repaired.questions.length, 10);
-  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 10);
+  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 24);
+  assert.equal(repaired.discoveryProfile.actualQuestionsAsked, 10);
 });
 
-test('validateAndRepairInitialDiscovery uses actual finalized count not aspirational plan', () => {
+test('validateAndRepairInitialDiscovery preserves aspirational plan and stores actual finalized count separately', () => {
   const repaired = validateAndRepairInitialDiscovery(
     [
       {
@@ -100,8 +102,25 @@ test('validateAndRepairInitialDiscovery uses actual finalized count not aspirati
     },
   );
 
-  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 1);
+  assert.equal(repaired.discoveryProfile.recommendedInitialCount, 6);
+  assert.equal(repaired.discoveryProfile.actualQuestionsAsked, 1);
   assert.deepEqual(repaired.discoveryProfile.missingCategoryKeys, ['business_rules', 'functional_flow']);
+});
+
+test('buildDiscoveryCoverageArtifact tracks planned and actual discovery coverage separately', () => {
+  const artifact = buildDiscoveryCoverageArtifact({
+    missingCategoryKeys: ['business_rules', 'functional_flow'],
+    plannedQuestionBudget: 12,
+    actualQuestionsAsked: 9,
+    actualAnswersReceived: 7,
+    openNonBlockingDecisions: ['Choose default priority handling'],
+  });
+
+  assert.deepEqual(artifact.mustResolveThemes, ['Functional Flow', 'Business Rules']);
+  assert.equal(artifact.plannedQuestionBudget, 12);
+  assert.equal(artifact.actualQuestionsAsked, 9);
+  assert.equal(artifact.actualAnswersReceived, 7);
+  assert.deepEqual(artifact.openNonBlockingDecisions, ['Choose default priority handling']);
 });
 
 test('expandRawQuestionCandidate splits numbered grouped prompts into single-focus questions', () => {

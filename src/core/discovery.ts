@@ -1,4 +1,10 @@
-import { ClarifyCategoryKey, ClarifyFailureReasonCode, ClarifyQuestion, DiscoveryProfile } from '../types';
+import {
+  ClarifyCategoryKey,
+  ClarifyFailureReasonCode,
+  ClarifyQuestion,
+  DiscoveryCoverageArtifact,
+  DiscoveryProfile,
+} from '../types';
 
 export const MIN_INITIAL_DISCOVERY_QUESTIONS = 4;
 export const MAX_INITIAL_DISCOVERY_QUESTIONS = 15;
@@ -359,23 +365,84 @@ export function normalizeDiscoveryProfile(
       ? Number(candidate?.recommendedInitialCount)
       : fallbackQuestionCount,
   );
+  const plannedQuestionBudget = Math.max(
+    0,
+    Number.isFinite(candidate?.plannedQuestionBudget)
+      ? Number(candidate?.plannedQuestionBudget)
+      : recommendedInitialCount,
+  );
+  const followupCap = Math.max(
+    0,
+    Math.round(Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4),
+  );
+  const softQuestionBudget = Math.max(
+    0,
+    Math.round(Number.isFinite(candidate?.softQuestionBudget) ? Number(candidate?.softQuestionBudget) : plannedQuestionBudget),
+  );
+  const hardQuestionCap = Math.max(
+    softQuestionBudget,
+    Math.round(Number.isFinite(candidate?.hardQuestionCap) ? Number(candidate?.hardQuestionCap) : Math.max(softQuestionBudget, plannedQuestionBudget + followupCap)),
+  );
   const rawMissing = Array.isArray((candidate as { missingCategoryKeys?: unknown[] } | null | undefined)?.missingCategoryKeys)
     ? ((candidate as { missingCategoryKeys?: unknown[] }).missingCategoryKeys ?? [])
     : [];
+  const missingCategoryKeys = uniqueCategoryKeys(
+    rawMissing
+      .map((value) => normalizeCategoryKey(value))
+      .filter((value): value is ClarifyCategoryKey => Boolean(value)),
+  );
+  const actualQuestionsAsked = Math.max(
+    0,
+    Math.round(Number.isFinite(candidate?.actualQuestionsAsked) ? Number(candidate?.actualQuestionsAsked) : 0),
+  );
+  const actualAnswersReceived = Number.isFinite(candidate?.actualAnswersReceived)
+    ? Math.max(0, Math.round(Number(candidate?.actualAnswersReceived)))
+    : undefined;
+  const coverageArtifact = (candidate?.coverageArtifact as DiscoveryCoverageArtifact | undefined) ?? buildDiscoveryCoverageArtifact({
+    missingCategoryKeys,
+    plannedQuestionBudget,
+    actualQuestionsAsked,
+    actualAnswersReceived,
+  });
   return {
     scope: scope === 'narrow' || scope === 'moderate' || scope === 'broad' || scope === 'very_broad' ? scope : 'narrow',
     complexity: complexity === 'low' || complexity === 'medium' || complexity === 'high' || complexity === 'very_high' ? complexity : 'low',
     ambiguity: ambiguity === 'low' || ambiguity === 'medium' || ambiguity === 'high' ? ambiguity : 'medium',
-    missingCategoryKeys: uniqueCategoryKeys(
-      rawMissing
-        .map((value) => normalizeCategoryKey(value))
-        .filter((value): value is ClarifyCategoryKey => Boolean(value)),
-    ),
+    missingCategoryKeys,
     recommendedInitialCount: Math.round(recommendedInitialCount),
-    followupCap: Math.max(
-      0,
-      Math.round(Number.isFinite(candidate?.followupCap) ? Number(candidate?.followupCap) : 4),
-    ),
+    followupCap,
+    plannedQuestionBudget,
+    actualQuestionsAsked,
+    ...(actualAnswersReceived != null ? { actualAnswersReceived } : {}),
+    softQuestionBudget,
+    hardQuestionCap,
+    coverageArtifact,
+  };
+}
+
+export function buildDiscoveryCoverageArtifact(input: {
+  missingCategoryKeys: ClarifyCategoryKey[];
+  plannedQuestionBudget: number;
+  actualQuestionsAsked: number;
+  actualAnswersReceived?: number;
+  openNonBlockingDecisions?: string[];
+}): DiscoveryCoverageArtifact {
+  const mustResolveThemes = uniqueCategoryKeys(input.missingCategoryKeys).map((key) => labelForCategoryKey(key));
+  const coveredThemes = CLARIFY_CATEGORY_ORDER
+    .filter((key) => !input.missingCategoryKeys.includes(key))
+    .map((key) => labelForCategoryKey(key));
+  const openNonBlockingDecisions = uniqueStrings(input.openNonBlockingDecisions ?? []);
+  return {
+    mustResolveThemes,
+    optionalThemes: [],
+    coveredThemes,
+    openBlockingThemes: mustResolveThemes,
+    openNonBlockingDecisions,
+    plannedQuestionBudget: Math.max(0, Math.round(input.plannedQuestionBudget)),
+    actualQuestionsAsked: Math.max(0, Math.round(input.actualQuestionsAsked)),
+    ...(input.actualAnswersReceived != null
+      ? { actualAnswersReceived: Math.max(0, Math.round(input.actualAnswersReceived)) }
+      : {}),
   };
 }
 
@@ -425,7 +492,13 @@ export function validateAndRepairInitialDiscovery(
     questions: finalizedQuestions,
     discoveryProfile: {
       ...profile,
-      recommendedInitialCount: finalizedQuestions.length,
+      actualQuestionsAsked: finalizedQuestions.length,
+      coverageArtifact: buildDiscoveryCoverageArtifact({
+        missingCategoryKeys: profile.missingCategoryKeys,
+        plannedQuestionBudget: profile.plannedQuestionBudget ?? profile.recommendedInitialCount,
+        actualQuestionsAsked: finalizedQuestions.length,
+        actualAnswersReceived: profile.actualAnswersReceived,
+      }),
     },
     repairApplied,
     failureReasonCode,

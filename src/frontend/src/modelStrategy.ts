@@ -23,6 +23,8 @@ export interface GeneratorRoleDescriptor {
   field: GeneratorRoleModelField;
   label: string;
   description: string;
+  recommendationClass: string;
+  rationale: string;
 }
 
 type StrategyCatalogData = typeof strategyCatalog;
@@ -54,36 +56,50 @@ export const GENERATOR_ROLE_ORDER: GeneratorRoleDescriptor[] = [
     field: 'triageModel',
     label: 'Triage',
     description: 'Scope, complexity, and routing',
+    recommendationClass: 'Fast classifier',
+    rationale: 'Prefer the quickest reliable model for routing and ambiguity estimation.',
   },
   {
     field: 'clarifyModel',
     label: 'Clarifying Questions',
     description: 'Round 1 discovery and follow-ups',
+    recommendationClass: 'Fast conversational reasoning',
+    rationale: 'Optimise for quick, focused question generation rather than deep long-form output.',
   },
   {
     field: 'evaluateModel',
     label: 'Sufficiency Check',
     description: 'Gate before generation continues',
+    recommendationClass: 'Fast classifier',
+    rationale: 'This step should cheaply decide whether coverage is complete or follow-up is still needed.',
   },
   {
     field: 'decompositionModel',
     label: 'Feature Breakdown',
     description: 'Draft feature structure',
+    recommendationClass: 'Deep structured reasoning',
+    rationale: 'This model should be strong at preserving scope and separating materially different workflows.',
   },
   {
     field: 'arModel',
     label: 'Acceptance Requirements',
     description: 'Write Given / When / Then',
+    recommendationClass: 'Strongest long-form generator',
+    rationale: 'This is the most quality-sensitive generation step and benefits most from higher-capability models.',
   },
   {
     field: 'themeModel',
     label: 'Theme Analysis & Titles',
     description: 'Cluster themes and title features',
+    recommendationClass: 'Fast classifier',
+    rationale: 'Use a fast model for tagging, clustering, and title support work.',
   },
   {
     field: 'refineModel',
     label: 'Refinement',
     description: 'Interactive edits on a single feature',
+    recommendationClass: 'Balanced editor',
+    rationale: 'This model should stay responsive while still making precise local edits.',
   },
 ];
 

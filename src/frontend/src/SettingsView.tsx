@@ -1350,6 +1350,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <div>
                             <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
                             <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.description}</div>
+                            <div className="mt-1 text-[11px] font-semibold text-[var(--rf-brand)]">{item.recommendationClass}</div>
+                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5 max-w-[320px]">{item.rationale}</div>
                           </div>
                           <div className="relative w-[220px] shrink-0">
                             <select value={roleModelValues[item.field]} disabled={availableModels.length === 0 || !isAdmin} onChange={e => roleModelSetters[item.field](e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
@@ -1395,6 +1397,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           {GENERATOR_ROLE_ORDER.map((item) => (
                             <div key={item.field} className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
                               <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
+                              <div className="mt-1 text-[11px] font-semibold text-[var(--rf-brand)]">{item.recommendationClass}</div>
                               <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{strategyState.resolvedModels[item.field]}</div>
                             </div>
                           ))}

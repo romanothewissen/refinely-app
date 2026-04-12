@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, Menu, AlertCircle, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
-import { getDiscoveryDisplayComplexity } from './generation-progress-copy';
+import { coerceNonNegativeQuestionCount, getDiscoveryDisplayComplexity } from './generation-progress-copy';
 
 const DISCOVERY_PAGE_SIZE = 8;
 
@@ -320,10 +320,14 @@ export function ClarifyQuestionsView({
                 const profile = contextMeta?.discoveryProfile;
                 const qPlan = contextMeta?.ambiguityAssessment?.questionPlan;
                 const advisoryTriage = contextMeta?.advisoryTriage;
+                const advisoryQ = coerceNonNegativeQuestionCount(advisoryTriage?.discoveryForecast?.recommendedInitialCount);
                 const complexityKey = getDiscoveryDisplayComplexity({
                   discoveryProfile: profile,
                   advisoryForecast: advisoryTriage?.discoveryForecast,
-                  plannedQuestions: profile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount ?? qPlan?.target,
+                  plannedQuestions:
+                    coerceNonNegativeQuestionCount(profile?.recommendedInitialCount)
+                    ?? advisoryQ
+                    ?? coerceNonNegativeQuestionCount(qPlan?.target),
                 });
                 const ci = complexityKey ? (DISCOVERY_COMPLEXITY_MAP[complexityKey] ?? 2) : 2;
 
@@ -374,10 +378,9 @@ export function ClarifyQuestionsView({
                           <div>
                             <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions (this round)</div>
                             <div className="text-[12px] font-bold text-[var(--rf-text)]">{questions.length}</div>
-                            {typeof profile?.recommendedInitialCount === 'number'
-                              && profile.recommendedInitialCount !== questions.length ? (
+                            {advisoryQ != null && advisoryQ !== questions.length ? (
                               <div className="text-[10px] text-[var(--rf-text-tertiary)] mt-0.5 leading-snug">
-                                Triage forecast ~{profile.recommendedInitialCount} (advisory)
+                                Triage forecast ~{advisoryQ} (advisory); first screen is capped for speed.
                               </div>
                             ) : null}
                           </div>

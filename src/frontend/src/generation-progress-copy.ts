@@ -72,6 +72,46 @@ export function getCoverageReviewSummary(
   };
 }
 
+/**
+ * Normalises discovery question counts for UI (avoids NaN, negatives, and stray strings from storage).
+ */
+export function coerceNonNegativeQuestionCount(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return null;
+  const rounded = Math.round(n);
+  if (rounded < 0) return null;
+  return rounded;
+}
+
+/** Triage / sizing hint for how many questions discovery might need (advisory only). */
+export function pickAdvisoryDiscoveryQuestionForecast(input: {
+  advisoryForecast?: Partial<AdvisoryDiscoveryForecast> | null;
+  sizingEstimatedQuestions?: unknown;
+  assessmentEstimatedQuestions?: unknown;
+}): number | null {
+  const fromAdvisory = coerceNonNegativeQuestionCount(input.advisoryForecast?.recommendedInitialCount);
+  if (fromAdvisory != null) return fromAdvisory;
+  const fromSizing = coerceNonNegativeQuestionCount(input.sizingEstimatedQuestions);
+  if (fromSizing != null) return fromSizing;
+  return coerceNonNegativeQuestionCount(input.assessmentEstimatedQuestions);
+}
+
+/** Actual first-round question count when clarify has finished (preferred over advisory). */
+export function pickFirstRoundQuestionCount(input: {
+  initialQuestionCount?: unknown;
+  discoveryProfile?: Partial<DiscoveryProfile> | null;
+  ambiguityGeneratedQuestions?: unknown;
+}): number | null {
+  const fromInitial = coerceNonNegativeQuestionCount(input.initialQuestionCount);
+  if (fromInitial != null) return fromInitial;
+  const fromActual = coerceNonNegativeQuestionCount(input.discoveryProfile?.actualQuestionsAsked);
+  if (fromActual != null) return fromActual;
+  const fromProfile = coerceNonNegativeQuestionCount(input.discoveryProfile?.recommendedInitialCount);
+  if (fromProfile != null) return fromProfile;
+  return coerceNonNegativeQuestionCount(input.ambiguityGeneratedQuestions);
+}
+
 export function getDiscoveryProfileHeadline(
   discoveryProfile?: ClarifyProgressPayload['discoveryProfile'] | null,
 ): string {
@@ -119,13 +159,11 @@ export function getDiscoveryDisplayComplexity(input: {
 
   const ambiguity = profile?.ambiguity ?? advisory?.ambiguity ?? 'medium';
   const scope = profile?.scope ?? advisory?.scope ?? 'moderate';
-  const plannedQuestions = typeof input.plannedQuestions === 'number'
-    ? input.plannedQuestions
-    : typeof profile?.recommendedInitialCount === 'number'
-      ? profile.recommendedInitialCount
-      : typeof advisory?.recommendedInitialCount === 'number'
-        ? advisory.recommendedInitialCount
-        : 0;
+  const plannedQuestions =
+    coerceNonNegativeQuestionCount(input.plannedQuestions)
+    ?? coerceNonNegativeQuestionCount(profile?.recommendedInitialCount)
+    ?? coerceNonNegativeQuestionCount(advisory?.recommendedInitialCount)
+    ?? 0;
   const followupCap = typeof profile?.followupCap === 'number'
     ? profile.followupCap
     : typeof advisory?.followupCap === 'number'

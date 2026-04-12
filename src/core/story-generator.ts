@@ -46,6 +46,7 @@ import {
   DraftReviewDecision,
   DraftReviewMetadata,
   DraftFeatureReviewNote,
+  DiscoveryCoverageArtifact,
   ValidationViolation,
   WorkInstructionInsightArtifact,
 } from '../types';
@@ -74,6 +75,7 @@ import { retrieveScopedWiContext } from '../services/project-selection';
 import { formatArPatternLibraryFromSimilarStories } from './similar-stories';
 import {
   allowsZeroQuestionDiscovery,
+  buildDiscoveryCoverageArtifact,
   expandRawQuestionCandidate,
   finalizeFollowupDiscoveryQuestions,
   labelForCategoryKey,
@@ -233,9 +235,11 @@ interface ClarifyDiscoveryResult {
 
 interface DiscoverySufficiencyEvaluation {
   sufficient: boolean;
+  status: 'ask_followup' | 'ready_to_generate' | 'ready_with_open_decisions';
   questions?: ClarifyQuestion[];
   missingCategoryKeys: ClarifyCategoryKey[];
   reasonCodes: string[];
+  coverageArtifact: DiscoveryCoverageArtifact;
   warning?: string;
   tokenUsage: TokenUsageSummary;
   durationMs: number;
@@ -1036,6 +1040,10 @@ function rawFeatureHasCompleteAcceptanceRequirements(feature: RawFeature): boole
   const rawArs = getRawAcceptanceArray(feature);
   return rawArs.length > 0
     && !hasIncompleteAcceptanceRequirements(rawArs as Array<{ given?: string; when?: string; then?: string } | string>);
+}
+
+function hasAnyIncompleteAcceptanceRequirements(features: RawFeature[]): boolean {
+  return features.some((feature) => !rawFeatureHasCompleteAcceptanceRequirements(feature));
 }
 
 async function generateAcceptanceRequirementsForFeature(input: {
@@ -2564,6 +2572,11 @@ function parseDiscoveryProfileCandidate(rawData: unknown): Partial<DiscoveryProf
       missingCategoryKeys: rawMissingCategoryKeys,
       recommendedInitialCount: typeof root.recommendedInitialCount === 'number' ? root.recommendedInitialCount : undefined,
       followupCap: typeof root.followupCap === 'number' ? root.followupCap : undefined,
+      plannedQuestionBudget: typeof root.plannedQuestionBudget === 'number' ? root.plannedQuestionBudget : undefined,
+      actualQuestionsAsked: typeof root.actualQuestionsAsked === 'number' ? root.actualQuestionsAsked : undefined,
+      actualAnswersReceived: typeof root.actualAnswersReceived === 'number' ? root.actualAnswersReceived : undefined,
+      softQuestionBudget: typeof root.softQuestionBudget === 'number' ? root.softQuestionBudget : undefined,
+      hardQuestionCap: typeof root.hardQuestionCap === 'number' ? root.hardQuestionCap : undefined,
     } as Partial<DiscoveryProfile>;
   }
 
@@ -2690,6 +2703,51 @@ function trimClarifyCopy(text: string, maxChars: number): string {
   const lastSpace = clipped.lastIndexOf(' ');
   const safe = lastSpace >= Math.floor(maxChars * 0.6) ? clipped.slice(0, lastSpace) : clipped;
   return `${safe.trimEnd()}...`;
+}
+
+function summarizeAskedQuestionsForEvaluation(
+  askedQuestions: Array<string | { categoryKey?: ClarifyCategoryKey; intent?: string; question: string }>,
+): {
+  details: Array<{ question: string; categoryKey?: ClarifyCategoryKey; intent?: string }>;
+  categorySummary: string[];
+} {
+  const details = askedQuestions
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return { question: trimForPrompt(entry, 180) };
+      }
+      return {
+        question: trimForPrompt(String(entry?.question ?? ''), 180),
+        categoryKey: entry?.categoryKey,
+        intent: entry?.intent,
+      };
+    })
+    .filter((entry) => entry.question);
+
+  const categoryCounts = new Map<string, number>();
+  details.forEach((entry) => {
+    const key = entry.categoryKey ? labelForCategoryKey(entry.categoryKey) : 'Unclassified';
+    categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
+  });
+
+  return {
+    details: details.slice(-12),
+    categorySummary: [...categoryCounts.entries()].map(([label, count]) => `${label}: ${count}`),
+  };
+}
+
+function summarizeAnswersForEvaluation(answers: ClarifyAnswer[]): string {
+  if (!answers.length) return 'No discovery answers provided.';
+  return answers
+    .slice(-12)
+    .map((answer, index) => {
+      const categoryLabel = answer.categoryKey ? labelForCategoryKey(answer.categoryKey) : 'General';
+      return [
+        `${index + 1}. [${categoryLabel}${answer.intent ? ` | ${answer.intent}` : ''}] ${trimForPrompt(answer.question, 180)}`,
+        `Answer: ${trimForPrompt(answer.answer, 240)}`,
+      ].join('\n');
+    })
+    .join('\n\n');
 }
 
 // ─── Main Generation ──────────────────────────────────────────────────────────
@@ -2998,51 +3056,60 @@ export async function generateFeatures(opts: {
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
     stageDurationsMs.acceptanceRequirements = (stageDurationsMs.acceptanceRequirements ?? 0) + (Date.now() - arStartedAt);
-    const backfillStartedAt = Date.now();
-    const backfillResult = await backfillMissingAcceptanceRequirements({
-      features: parallelResult.features,
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText: wiForPass2Ar,
-      similarStoriesText: similarForPass2Ar,
-      wiInsightsArtifact,
-      arObligations,
-      domainContext: config.domainContext,
-      arPlan: effectiveArPlan,
-      generatorConfig,
-      tier: config.tier,
-      discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
-      providerOpts,
-      onArProgress,
-    });
-    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
-    rawFeatures = backfillResult.features;
-    const targetedRetryStartedAt = Date.now();
-    const targetedRetryResult = await backfillMissingAcceptanceRequirements({
-      features: rawFeatures,
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText: wiForPass2Ar,
-      similarStoriesText: similarForPass2Ar,
-      wiInsightsArtifact,
-      arObligations,
-      domainContext: config.domainContext,
-      arPlan: effectiveArPlan,
-      generatorConfig,
-      tier: config.tier,
-      discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
-      providerOpts,
-      onArProgress,
-    });
-    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
-    rawFeatures = targetedRetryResult.features;
+    rawFeatures = parallelResult.features;
+    let backfillUsage = { input: 0, output: 0 };
+    let retryUsage = { input: 0, output: 0 };
+    if (hasAnyIncompleteAcceptanceRequirements(rawFeatures)) {
+      const backfillStartedAt = Date.now();
+      const backfillResult = await backfillMissingAcceptanceRequirements({
+        features: rawFeatures,
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        wiContextText: wiForPass2Ar,
+        similarStoriesText: similarForPass2Ar,
+        wiInsightsArtifact,
+        arObligations,
+        domainContext: config.domainContext,
+        arPlan: effectiveArPlan,
+        generatorConfig,
+        tier: config.tier,
+        discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
+        providerOpts,
+        onArProgress,
+      });
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+      stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
+      rawFeatures = backfillResult.features;
+      backfillUsage = backfillResult.usage;
+    }
+    if (hasAnyIncompleteAcceptanceRequirements(rawFeatures)) {
+      const targetedRetryStartedAt = Date.now();
+      const targetedRetryResult = await backfillMissingAcceptanceRequirements({
+        features: rawFeatures,
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        wiContextText: wiForPass2Ar,
+        similarStoriesText: similarForPass2Ar,
+        wiInsightsArtifact,
+        arObligations,
+        domainContext: config.domainContext,
+        arPlan: effectiveArPlan,
+        generatorConfig,
+        tier: config.tier,
+        discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
+        providerOpts,
+        onArProgress,
+      });
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
+      stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
+      rawFeatures = targetedRetryResult.features;
+      retryUsage = targetedRetryResult.usage;
+    }
     pass2Usage = {
-      input: parallelResult.usage.input + backfillResult.usage.input + targetedRetryResult.usage.input,
-      output: parallelResult.usage.output + backfillResult.usage.output + targetedRetryResult.usage.output,
+      input: parallelResult.usage.input + backfillUsage.input + retryUsage.input,
+      output: parallelResult.usage.output + backfillUsage.output + retryUsage.output,
     };
   } else {
     // Monolithic path: single LLM call for all features (used for 1-feature results)
@@ -3095,47 +3162,55 @@ export async function generateFeatures(opts: {
     rawFeatures = pass2Result.data.features?.length
       ? mergeFeatures(pass1Features, pass2Result.data.features)
       : pass1Features;
-    const backfillStartedAt = Date.now();
-    const backfillResult = await backfillMissingAcceptanceRequirements({
-      features: rawFeatures,
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText: wiForPass2Ar,
-      similarStoriesText: similarForPass2Ar,
-      wiInsightsArtifact,
-      arObligations,
-      domainContext: config.domainContext,
-      arPlan: effectiveArPlan,
-      generatorConfig,
-      tier: config.tier,
-      providerOpts,
-      onArProgress,
-    });
-    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
-    rawFeatures = backfillResult.features;
-    const targetedRetryStartedAt = Date.now();
-    const targetedRetryResult = await backfillMissingAcceptanceRequirements({
-      features: rawFeatures,
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText: wiForPass2Ar,
-      similarStoriesText: similarForPass2Ar,
-      wiInsightsArtifact,
-      arObligations,
-      domainContext: config.domainContext,
-      arPlan: effectiveArPlan,
-      generatorConfig,
-      tier: config.tier,
-      providerOpts,
-      onArProgress,
-    });
-    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
-    rawFeatures = targetedRetryResult.features;
+    let backfillUsage = { input: 0, output: 0 };
+    let retryUsage = { input: 0, output: 0 };
+    if (hasAnyIncompleteAcceptanceRequirements(rawFeatures)) {
+      const backfillStartedAt = Date.now();
+      const backfillResult = await backfillMissingAcceptanceRequirements({
+        features: rawFeatures,
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        wiContextText: wiForPass2Ar,
+        similarStoriesText: similarForPass2Ar,
+        wiInsightsArtifact,
+        arObligations,
+        domainContext: config.domainContext,
+        arPlan: effectiveArPlan,
+        generatorConfig,
+        tier: config.tier,
+        providerOpts,
+        onArProgress,
+      });
+      stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
+      rawFeatures = backfillResult.features;
+      backfillUsage = backfillResult.usage;
+    }
+    if (hasAnyIncompleteAcceptanceRequirements(rawFeatures)) {
+      const targetedRetryStartedAt = Date.now();
+      const targetedRetryResult = await backfillMissingAcceptanceRequirements({
+        features: rawFeatures,
+        requirement,
+        clarifyAnswers,
+        attachmentText,
+        wiContextText: wiForPass2Ar,
+        similarStoriesText: similarForPass2Ar,
+        wiInsightsArtifact,
+        arObligations,
+        domainContext: config.domainContext,
+        arPlan: effectiveArPlan,
+        generatorConfig,
+        tier: config.tier,
+        providerOpts,
+        onArProgress,
+      });
+      stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
+      rawFeatures = targetedRetryResult.features;
+      retryUsage = targetedRetryResult.usage;
+    }
     pass2Usage = {
-      input: pass2Result.usage.input + backfillResult.usage.input + targetedRetryResult.usage.input,
-      output: pass2Result.usage.output + backfillResult.usage.output + targetedRetryResult.usage.output,
+      input: pass2Result.usage.input + backfillUsage.input + retryUsage.input,
+      output: pass2Result.usage.output + backfillUsage.output + retryUsage.output,
     };
     const completedSingleFeatureIds = listCompleteFeatureIds(rawFeatures);
     if (onArProgress) {
@@ -3548,37 +3623,31 @@ export async function evaluateSufficiency(opts: {
 }): Promise<DiscoverySufficiencyEvaluation> {
   const initialQuestionCount = Math.max(0, Number(opts.initialQuestionCount ?? 0));
   const followupCap = Math.max(0, Math.round(opts.followupCap ?? 0));
-
-  const compactAnswers = opts.answers
-    .slice(0, 8)
-    .map((answer) => ({
-      ...answer,
-      question: trimForPrompt(answer.question, 180),
-      answer: trimForPrompt(answer.answer, 240),
-    }));
-  const qaText = formatClarifyAnswersForPrompt(compactAnswers);
-  const askedQuestionDetails = (opts.askedQuestions ?? opts.answers.map((answer) => ({
+  const askedQuestionInput = opts.askedQuestions ?? opts.answers.map((answer) => ({
     question: answer.question,
     categoryKey: answer.categoryKey,
     intent: answer.intent,
-  })))
-    .slice(0, 8)
-    .map((entry) => {
-      if (typeof entry === 'string') {
-        return { question: trimForPrompt(entry, 180) };
-      }
-
-      return {
-        question: trimForPrompt(String(entry?.question ?? ''), 180),
-        categoryKey: entry?.categoryKey,
-        intent: entry?.intent,
-      };
-    })
-    .filter((entry) => entry.question);
+  }));
+  const askedQuestionSummary = summarizeAskedQuestionsForEvaluation(askedQuestionInput);
+  const askedQuestionDetails = askedQuestionSummary.details;
+  const evaluationCoverageArtifact = buildDiscoveryCoverageArtifact({
+    missingCategoryKeys: [],
+    plannedQuestionBudget: opts.totalQuestionBudget ?? initialQuestionCount + followupCap,
+    actualQuestionsAsked: askedQuestionInput.length,
+    actualAnswersReceived: opts.answers.length,
+  });
   const baseUserMessage = [
     `REQUIREMENT: ${opts.requirement}`,
+    `DISCOVERY COVERAGE SUMMARY:\n${[
+      `Planned question budget: ${evaluationCoverageArtifact.plannedQuestionBudget}`,
+      `Actual questions asked: ${evaluationCoverageArtifact.actualQuestionsAsked}`,
+      `Answers received: ${evaluationCoverageArtifact.actualAnswersReceived ?? 0}`,
+      askedQuestionSummary.categorySummary.length
+        ? `Question distribution:\n${askedQuestionSummary.categorySummary.map((entry) => `- ${entry}`).join('\n')}`
+        : '',
+    ].filter(Boolean).join('\n')}`,
     askedQuestionDetails.length
-      ? `DISCOVERY QUESTIONS ALREADY ASKED:\n${askedQuestionDetails.map((entry, index) => {
+      ? `MOST RECENT DISCOVERY QUESTIONS:\n${askedQuestionDetails.map((entry, index) => {
           const parts = [
             entry.categoryKey ? labelForCategoryKey(entry.categoryKey) : null,
             entry.intent ? String(entry.intent).trim() : null,
@@ -3587,7 +3656,7 @@ export async function evaluateSufficiency(opts: {
           return `${index + 1}.${prefix} ${entry.question}`;
         }).join('\n')}`
       : '',
-    `DISCOVERY ANSWERS:\n${qaText}`,
+    `RECENT DISCOVERY ANSWERS:\n${summarizeAnswersForEvaluation(opts.answers)}`,
   ].filter(Boolean).join('\n\n');
 
   const runEvaluationPass = async (
@@ -3625,23 +3694,34 @@ export async function evaluateSufficiency(opts: {
       .map((code) => code.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase())
       .filter(Boolean);
 
-    const questions = !sufficient
-      ? finalizeFollowupDiscoveryQuestions(parsedQuestions, {
-          askedQuestions: askedQuestionDetails.map((entry) => entry.question),
-          askedCategoryKeys: askedQuestionDetails
-            .map((entry) => entry.categoryKey)
-            .filter((k): k is ClarifyCategoryKey => Boolean(k)),
-          missingCategoryKeys,
-          followupCap: followupCap || parsedQuestions.length,
-          initialQuestionCount,
-        })
-      : [];
+    const questions = finalizeFollowupDiscoveryQuestions(parsedQuestions, {
+      askedQuestions: askedQuestionDetails.map((entry) => entry.question),
+      askedCategoryKeys: askedQuestionDetails
+        .map((entry) => entry.categoryKey)
+        .filter((k): k is ClarifyCategoryKey => Boolean(k)),
+      missingCategoryKeys,
+      followupCap: followupCap || parsedQuestions.length,
+      initialQuestionCount,
+    });
+    const status: DiscoverySufficiencyEvaluation['status'] = sufficient
+      ? 'ready_to_generate'
+      : questions.length > 0
+        ? 'ask_followup'
+        : 'ready_with_open_decisions';
 
     return {
       sufficient,
-      questions,
-      missingCategoryKeys,
-      reasonCodes,
+      status,
+      questions: status === 'ask_followup' ? questions : [],
+      missingCategoryKeys: status === 'ready_to_generate' ? [] : missingCategoryKeys,
+      reasonCodes: status === 'ready_to_generate' ? [] : reasonCodes,
+      coverageArtifact: buildDiscoveryCoverageArtifact({
+        missingCategoryKeys: status === 'ready_to_generate' ? [] : missingCategoryKeys,
+        plannedQuestionBudget: evaluationCoverageArtifact.plannedQuestionBudget,
+        actualQuestionsAsked: askedQuestionInput.length,
+        actualAnswersReceived: opts.answers.length,
+        openNonBlockingDecisions: status === 'ready_with_open_decisions' ? reasonCodes : [],
+      }),
       durationMs,
       usage: result.usage,
       stageKey,
@@ -3669,9 +3749,11 @@ export async function evaluateSufficiency(opts: {
 
   return {
     sufficient: finalPass.sufficient,
-    questions: finalPass.sufficient ? undefined : finalQuestions,
-    missingCategoryKeys: finalPass.sufficient ? [] : finalPass.missingCategoryKeys,
-    reasonCodes: finalPass.sufficient ? [] : finalPass.reasonCodes,
+    status: finalPass.status,
+    questions: finalPass.status === 'ask_followup' ? finalQuestions : undefined,
+    missingCategoryKeys: finalPass.missingCategoryKeys,
+    reasonCodes: finalPass.reasonCodes,
+    coverageArtifact: finalPass.coverageArtifact,
     warning,
     durationMs: totalDurationMs,
     tokenUsage: {

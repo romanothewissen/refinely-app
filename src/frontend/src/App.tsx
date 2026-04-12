@@ -982,6 +982,7 @@ function LegacyApp({
     baseContext: ClarifyContextMeta | null,
     evaluation: {
       sufficient?: boolean;
+      status?: 'ask_followup' | 'ready_to_generate' | 'ready_with_open_decisions';
       missingCategoryKeys?: ClarifyCategoryKey[];
       reasonCodes?: string[];
       durationMs?: number;
@@ -1006,6 +1007,7 @@ function LegacyApp({
       finalSufficiency: {
         evaluated: true,
         sufficient: evaluation.sufficient ?? null,
+        status: evaluation.status,
         roundEvaluated: 1,
         missingCategoryKeys: evaluation.missingCategoryKeys ?? [],
         reasonCodes: evaluation.reasonCodes ?? [],

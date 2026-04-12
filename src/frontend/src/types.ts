@@ -458,6 +458,17 @@ export interface ClarifyFailureDiagnostics {
   parseShape?: string;
 }
 
+export interface DiscoveryCoverageArtifact {
+  mustResolveThemes: string[];
+  optionalThemes: string[];
+  coveredThemes: string[];
+  openBlockingThemes: string[];
+  openNonBlockingDecisions: string[];
+  plannedQuestionBudget: number;
+  actualQuestionsAsked: number;
+  actualAnswersReceived?: number;
+}
+
 export interface DiscoveryProfile {
   scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
   complexity: 'low' | 'medium' | 'high' | 'very_high';
@@ -465,6 +476,12 @@ export interface DiscoveryProfile {
   missingCategoryKeys: ClarifyCategoryKey[];
   recommendedInitialCount: number;
   followupCap: number;
+  plannedQuestionBudget?: number;
+  actualQuestionsAsked?: number;
+  actualAnswersReceived?: number;
+  softQuestionBudget?: number;
+  hardQuestionCap?: number;
+  coverageArtifact?: DiscoveryCoverageArtifact;
 }
 
 export type AdvisoryTriageConfidence = 'low' | 'medium' | 'high';
@@ -535,6 +552,7 @@ export interface EffectiveSizingContract {
 export interface DiscoverySufficiencyResult {
   evaluated: boolean;
   sufficient: boolean | null;
+  status?: 'ask_followup' | 'ready_to_generate' | 'ready_with_open_decisions';
   roundEvaluated: number;
   missingCategoryKeys: ClarifyCategoryKey[];
   reasonCodes: string[];

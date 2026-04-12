@@ -50,6 +50,7 @@ import { DiffText, alignAcceptanceRequirementsDetailed } from './diffUtils';
 import type { AcceptanceRequirement } from './types';
 import { getCanvasIntentLabel, getPendingChangeLabel, routeCanvasEditInstruction } from './canvasChange';
 import {
+  coerceNonNegativeQuestionCount,
   formatGenerationFeatureTarget,
   generationTriageFeatureFootnote,
   getApprovedDraftStructureNote,
@@ -60,6 +61,8 @@ import {
   getGenerationFeatureTargetLabel,
   getSizingRunContextNote,
   getSourceContextChips,
+  pickAdvisoryDiscoveryQuestionForecast,
+  pickFirstRoundQuestionCount,
 } from './generation-progress-copy';
 import type { SourceContextChip } from './generation-progress-copy';
 
@@ -357,7 +360,10 @@ function TriageScoreCard({
   }
 
   const complexityLabel = COMPLEXITY_LEVELS.find(l => l.key === forecast.complexity)?.label ?? forecast.complexity;
-  const forecastedQuestions = advisoryTriage?.discoveryForecast.recommendedInitialCount ?? sizingContract?.estimatedQuestions;
+  const forecastedQuestions = pickAdvisoryDiscoveryQuestionForecast({
+    advisoryForecast: advisoryTriage?.discoveryForecast,
+    sizingEstimatedQuestions: sizingContract?.estimatedQuestions,
+  });
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -388,7 +394,7 @@ function TriageScoreCard({
         {phase !== 'generation' && (
           <div>
             <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Est. discovery questions</div>
-            <div className="text-[14px] font-black text-[var(--rf-text)]">{typeof forecastedQuestions === 'number' ? `~${forecastedQuestions} questions` : 'LLM-led'}</div>
+            <div className="text-[14px] font-black text-[var(--rf-text)]">{forecastedQuestions != null ? `~${forecastedQuestions} questions` : 'LLM-led'}</div>
           </div>
         )}
         <div>
@@ -722,11 +728,27 @@ function DiscoveryScoreCard({
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
   const assessment = meta?.assessment ?? null;
   const sizingContract = meta?.sizingContract ?? context?.sizingContract;
-  const plannedQuestions = discoveryProfile?.recommendedInitialCount ?? advisoryTriage?.discoveryForecast.recommendedInitialCount ?? ambiguityAssessment?.questionPlan?.target ?? assessment?.estimatedQuestions;
+  const advisoryQuestionForecast = pickAdvisoryDiscoveryQuestionForecast({
+    advisoryForecast: advisoryTriage?.discoveryForecast,
+    sizingEstimatedQuestions: sizingContract?.estimatedQuestions,
+    assessmentEstimatedQuestions: assessment?.estimatedQuestions,
+  });
+  const firstRoundQuestionCount = pickFirstRoundQuestionCount({
+    initialQuestionCount: context?.initialQuestionCount,
+    discoveryProfile,
+    ambiguityGeneratedQuestions: ambiguityAssessment?.generatedQuestions,
+  });
+  const plannedQuestionsFallback =
+    coerceNonNegativeQuestionCount(ambiguityAssessment?.questionPlan?.target)
+    ?? advisoryQuestionForecast;
+  const plannedQuestionsDisplay =
+    discoveryProfile && firstRoundQuestionCount != null
+      ? firstRoundQuestionCount
+      : advisoryQuestionForecast ?? plannedQuestionsFallback;
   const complexityKey = getDiscoveryDisplayComplexity({
     discoveryProfile,
     advisoryForecast: advisoryTriage?.discoveryForecast,
-    plannedQuestions,
+    plannedQuestions: plannedQuestionsDisplay,
   });
   const discoveryHeadline = getDiscoveryProfileHeadline(discoveryProfile);
   const sourceChips = getSourceContextChips(meta?.sources ?? context ?? null);
@@ -806,8 +828,18 @@ function DiscoveryScoreCard({
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions planned</div>
           <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {plannedQuestions ? `~${plannedQuestions}` : 'Assessing'}
+            {plannedQuestionsDisplay != null
+              ? (discoveryProfile && firstRoundQuestionCount != null ? firstRoundQuestionCount : `~${plannedQuestionsDisplay}`)
+              : 'Assessing'}
           </div>
+          {discoveryProfile
+            && advisoryQuestionForecast != null
+            && firstRoundQuestionCount != null
+            && advisoryQuestionForecast !== firstRoundQuestionCount ? (
+            <div className="text-[10px] text-[var(--rf-text-tertiary)] mt-0.5 leading-snug">
+              Advisory suggested ~{advisoryQuestionForecast}; first screen shows {firstRoundQuestionCount} for speed.
+            </div>
+            ) : null}
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Follow-up cap</div>
@@ -3185,10 +3217,10 @@ export function MainContent({
         const hasGaps = missingCoverage.length > 0 || nonBlockingDecisions.length > 0;
         if (!hasGaps) return null;
         return (
-          <div className="shrink-0 border-t border-[var(--rf-border-subtle)] bg-[rgba(245,164,76,0.06)] px-5 py-2.5">
+          <div className="shrink-0 border-t border-[var(--rf-border-subtle)] bg-[var(--rf-surface-soft)]/55 px-5 py-2">
             <div className="flex items-center gap-2 mb-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-warning)]" />
-              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Potential gaps</span>
+              <AlertTriangle className="w-3.5 h-3.5 text-[var(--rf-text-tertiary)]" />
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-tertiary)]">Optional follow-ups</span>
               <button
                 type="button"
                 onClick={() => {
@@ -3211,7 +3243,7 @@ export function MainContent({
                     setChangeInstruction(gap);
                     requestAnimationFrame(() => refineBarRef.current?.focus());
                   }}
-                  className="inline-flex items-center gap-1 rounded-full border border-[rgba(179,94,48,0.25)] bg-white/80 px-2.5 py-1 text-[11px] font-bold text-[rgba(140,75,30,0.85)] transition hover:border-[rgba(179,94,48,0.45)] hover:bg-white"
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/80 px-2.5 py-1 text-[11px] font-bold text-[var(--rf-text-secondary)] transition hover:border-[rgba(179,94,48,0.35)] hover:bg-white"
                   whileTap={{ scale: 0.97 }}
                 >
                   <Plus className="w-3 h-3" />
