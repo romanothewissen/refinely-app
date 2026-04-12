@@ -27,6 +27,7 @@ import { maskPiiText, maskPiiInAnswers, mergePiiMaskingStats, saveTransparencyRe
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
+import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -39,6 +40,8 @@ import {
 } from '../services/project-selection';
 import { deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
+import { loadSharedPipelineContext } from '../services/shared-pipeline-context';
+import { generateStoryAssistantDefaultFeatures } from '../core/story-assistant-default';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -254,6 +257,291 @@ export async function handler(event: { body: GenerationEvent }) {
     };
     const advisorySizingContract = clarifySizingContract;
     const advisoryTriage = clarifyAdvisoryTriage;
+    if (useStoryAssistantDefaultPipeline(config)) {
+      await updateProgress(`Reading shared evidence context for ${projectLabel}…`, 1, {
+        stage: 'context',
+        sources: baseSources,
+      });
+
+      const sharedContext = await loadSharedPipelineContext({
+        requirement: maskedRequirement.text,
+        attachmentText: maskedAttachment.text,
+        clarifyAnswers: maskedAnswers.answers,
+        config,
+        projectKey,
+        projectKeys,
+        pipelineMode: 'story_assistant_default',
+      });
+
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId);
+        return;
+      }
+
+      const progressSources: GenerationProgressPayload['sources'] = {
+        ...sharedContext.sources,
+        similarStoriesCount: 0,
+        referencedSimilarStories: [],
+      };
+      progressSourcesSnapshot = progressSources;
+      const startProgress = buildGenerationStartProgressUpdate({
+        retryFeatureId,
+        retryFeature,
+        outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+        advisorySizingContract,
+        advisoryTriage,
+        sources: progressSources,
+      });
+
+      await updateProgress(startProgress.message, 1, startProgress.payload);
+
+      let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> =
+        startProgress.payload.draftFeatures ?? [];
+
+      getPipelineAuditWriter()?.setPhase('generate.pipeline');
+      const result = await generateStoryAssistantDefaultFeatures({
+        requirement,
+        clarifyAnswers: maskedAnswers.answers,
+        attachmentText: maskedAttachment.text,
+        wiContextText: sharedContext.wiContext.text,
+        wiInsightsArtifact: sharedContext.wiInsights,
+        config: {
+          ...config,
+          domainContext: sharedContext.domainContext,
+          domainRoles: sharedContext.domainRoles,
+        },
+        precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
+        priorStageDurationsMs,
+        shouldCancel: () => isWorkflowCancelled(sessionId),
+        onPass1DraftFeatures: async (drafts) => {
+          liveDraftFeatures = mapDraftFeatures(drafts);
+          await updateProgress(
+            `Sketching features (${drafts.length} draft${drafts.length === 1 ? '' : 's'})…`,
+            1,
+            {
+              stage: 'decomposition',
+              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+              triage: advisorySizingContract,
+              sizingContract: advisorySizingContract,
+              advisoryTriage,
+              draftFeatures: liveDraftFeatures,
+              draftFeatureCount: liveDraftFeatures.length,
+              sources: progressSources,
+            },
+          );
+          await updateProgress(
+            `Writing acceptance requirements in one full pass for ${drafts.length} feature${drafts.length === 1 ? '' : 's'}…`,
+            2,
+            {
+              stage: 'acceptance_requirements',
+              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+              triage: advisorySizingContract,
+              sizingContract: advisorySizingContract,
+              advisoryTriage,
+              draftFeatures: liveDraftFeatures,
+              draftFeatureCount: liveDraftFeatures.length,
+              arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
+              sources: progressSources,
+            },
+          );
+        },
+      });
+
+      result.similarStories = [];
+      result.sessionId = sessionId;
+      if (retryFeatureId && retryBaseFeatures?.length) {
+        const replacementFeature = result.features[0] ?? retryFeature;
+        const mergedFeatures = retryBaseFeatures.map((feature) => (
+          feature.id === retryFeatureId
+            ? replacementFeature
+            : feature
+        ));
+        result.features = mergedFeatures;
+        const failedFeatureIds = mergedFeatures
+          .filter((feature) => feature.arGenerationStatus === 'failed')
+          .map((feature) => feature.id);
+        result.generationContext = {
+          ...(result.generationContext ?? { projectKey: sharedContext.projectKey, domainRolesUsed: sharedContext.domainRoles }),
+          failedFeatureIds,
+          partialSuccess: failedFeatureIds.length > 0,
+          partialSuccessMessage: failedFeatureIds.length > 0
+            ? `Acceptance requirements could not be completed for ${failedFeatureIds.length} feature${failedFeatureIds.length === 1 ? '' : 's'}. Retry the highlighted feature${failedFeatureIds.length === 1 ? '' : 's'} from the canvas.`
+            : undefined,
+        };
+      }
+
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId);
+        return;
+      }
+
+      const generationContext: GenerationContextMeta = {
+        projectKey: sharedContext.projectKey,
+        projectKeys: sharedContext.projectKeys,
+        projectCount: sharedContext.projectCount,
+        pipelineMode: 'story_assistant_default',
+        domainRolesUsed: sharedContext.domainRoles,
+        domainContextApplied: sharedContext.sources.domainContextApplied,
+        attachmentIncluded: sharedContext.sources.attachmentIncluded,
+        similarStoriesCount: 0,
+        referencedSimilarStories: [],
+        outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+        sizingContract: advisorySizingContract,
+        advisoryTriage,
+        pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
+        failedFeatureIds: result.generationContext?.failedFeatureIds ?? [],
+        partialSuccess: result.generationContext?.partialSuccess,
+        partialSuccessMessage: result.generationContext?.partialSuccessMessage,
+        stageDurationsMs: result.generationContext?.stageDurationsMs ?? priorStageDurationsMs,
+        tokenUsage: result.tokenUsage,
+        wiDocsCount: sharedContext.sources.wiDocsCount,
+        linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+        retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+        retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+        wiInsightCount: sharedContext.sources.wiInsightCount,
+        referencedWiDocs: sharedContext.sources.referencedWiDocs,
+        referencedWiSections: sharedContext.sources.referencedWiSections,
+        wiInsights: sharedContext.wiInsights,
+      };
+      result.generationContext = generationContext;
+
+      await recordGeneration();
+      await saveConversationTurn(
+        sessionId,
+        accountId,
+        maskedRequirement.text,
+        result.features,
+        [],
+        config.generatorConfig.arModel,
+        generationContext,
+        result.tokenUsage,
+        {
+          clarifyAnswers: maskedAnswers.answers,
+          attachmentText: maskedAttachment.text,
+          projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+          projectKeys: selectedProjectKeys,
+          sizingContract: generationContext.sizingContract,
+          advisoryTriage: generationContext.advisoryTriage,
+        },
+      );
+
+      if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+        await saveTransparencyReport({
+          sessionId,
+          turnType: 'generate',
+          actorAccountId: accountId,
+          provider: config.generatorConfig.provider,
+          model: config.generatorConfig.arModel,
+          projectKey,
+          requirementExcerpt: maskedRequirement.text.slice(0, 240),
+          decisionSummary: [
+            'Generated features with the Story Assistant two-pass path.',
+            `Reused one shared evidence context with ${sharedContext.sources.retrievedWiDocCount} work instruction documents.`,
+            'Skipped backlog enrichment, tighten, and repair loops in the default path.',
+          ],
+          contextUsage: {
+            similarStoriesCount: 0,
+            linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+            retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+            retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+            wiInsightCount: sharedContext.sources.wiInsightCount,
+            domainRolesCount: sharedContext.domainRoles.length,
+          },
+          tokenUsage: result.tokenUsage,
+          piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedAnswers.stats),
+        });
+      }
+
+      await appendComplianceAuditEvent({
+        actorAccountId: accountId,
+        category: 'runtime',
+        action: 'GENERATION_WORKFLOW_EXECUTED',
+        details: {
+          sessionId,
+          projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+          model: config.generatorConfig.arModel,
+          pipelineMode: 'story_assistant_default',
+        },
+        enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+      });
+      await recordProjectActivity({
+        action: 'generate',
+        projectKeys: selectedProjectKeys,
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        sessionId,
+        model: config.generatorConfig.arModel,
+        tokenUsage: result.tokenUsage ?? null,
+      });
+
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId);
+        return;
+      }
+
+      const genAuditWriter = getPipelineAuditWriter();
+      if (genAuditWriter) {
+        try {
+          await genAuditWriter.flushMerge({
+            accountId,
+            mergeHeader: {
+              primaryProjectKey: sharedContext.projectKey,
+              projectKeys: sharedContext.projectKeys,
+              generatorModels: {
+                decompositionModel: config.generatorConfig.decompositionModel,
+                arModel: config.generatorConfig.arModel,
+              },
+              piiMaskingEnabled: piiEnabled,
+              piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedAnswers.stats),
+            },
+            userInputs: {
+              requirement: maskedRequirement.text,
+              attachmentText: maskedAttachment.text,
+              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+              clarifyDiscoveryProfile,
+              clarifySizingContract,
+              clarifyAdvisoryTriage,
+            },
+            discoveryContextGeneration: {
+              wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, maskedAnswers.answers),
+              wiContextText: sharedContext.wiContext.text,
+              similarStoriesText: '',
+              domainContext: sharedContext.domainContext,
+              domainRoles: sharedContext.domainRoles,
+              wiInsights: sharedContext.wiInsights,
+            },
+            generation: {
+              clarifyAnswers: maskedAnswers.answers,
+              features: result.features,
+              generationContext: result.generationContext,
+              completedAt: new Date().toISOString(),
+            },
+            completePhase: 'generation',
+          });
+        } catch (auditErr) {
+          console.warn('[generation-queue] pipeline audit merge failed:', auditErr);
+        }
+      }
+
+      await entitySet(KEYS.generationProgress(sessionId), {
+        type: 'complete',
+        sessionId,
+        payload: result,
+        updatedAt: Date.now(),
+      } as RealtimeEvent);
+
+      setImmediate(() => {
+        void generateSessionTitle(maskedRequirement.text, config)
+          .then(async (title) => {
+            await updateConversationTitle(sessionId, accountId, title);
+          })
+          .catch(async (titleErr) => {
+            console.warn('[generation-queue] Title generation failed, using fallback title:', titleErr);
+            await updateConversationTitle(sessionId, accountId, requirement.slice(0, 80));
+          });
+      });
+      return;
+    }
+
     const [initialWiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(

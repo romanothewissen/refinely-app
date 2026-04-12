@@ -22,6 +22,7 @@ import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMask
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
+import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -34,6 +35,8 @@ import {
 } from '../services/project-selection';
 import { buildTriageEnrichedWiQuery, deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
+import { loadSharedPipelineContext } from '../services/shared-pipeline-context';
+import { generateStoryAssistantDefaultClarifyingQuestions } from '../core/story-assistant-default';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
 const CLARIFY_FOCUSED_WI_INTENT_LIMIT = 1;
@@ -70,6 +73,217 @@ export async function handler(event: { body: ClarifyEvent }) {
     const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
     const maskedPriorAnswers = maskPiiInAnswers(priorAnswers ?? [], piiEnabled);
     const retrievalAnswers = maskedPriorAnswers.answers;
+    if (useStoryAssistantDefaultPipeline(config)) {
+      await sendProgress('Reading shared evidence context for discovery…', {
+        stage: 'context',
+        sources: {
+          projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+          projectCount: selectedProjectKeys.length,
+          attachmentIncluded: Boolean(attachmentText?.trim()),
+          domainContextApplied: Boolean(config.domainContext?.trim()),
+        },
+      });
+      stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
+      const sharedContext = await loadSharedPipelineContext({
+        requirement: maskedRequirement.text,
+        attachmentText: maskedAttachment.text,
+        clarifyAnswers: retrievalAnswers,
+        config,
+        projectKey,
+        projectKeys,
+        pipelineMode: 'story_assistant_default',
+      });
+
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId, inputSignature);
+        return;
+      }
+
+      await sendProgress('Writing the business questions that are still genuinely ambiguous…', {
+        stage: 'question_generation',
+        discoveryProfile: undefined,
+        sources: {
+          projectKey: sharedContext.projectKey,
+          projectCount: sharedContext.projectCount,
+          attachmentIncluded: sharedContext.sources.attachmentIncluded,
+          domainContextApplied: sharedContext.sources.domainContextApplied,
+          wiDocsCount: sharedContext.sources.wiDocsCount,
+          linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+          retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+          retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+          wiInsightCount: sharedContext.sources.wiInsightCount,
+          similarStoriesCount: 0,
+        },
+      });
+
+      const clarifyStartedAt = Date.now();
+      getPipelineAuditWriter()?.setPhase('clarify.questions');
+      const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } =
+        await generateStoryAssistantDefaultClarifyingQuestions({
+          requirement: maskedRequirement.text,
+          attachmentText: maskedAttachment.text,
+          wiContextText: sharedContext.wiContext.text,
+          wiInsightsArtifact: sharedContext.wiInsights,
+          config: {
+            ...config,
+            domainContext: sharedContext.domainContext,
+            domainRoles: sharedContext.domainRoles,
+          },
+        });
+      const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
+
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId, inputSignature);
+        return;
+      }
+
+      await sendProgress('Finalizing discovery questions…', {
+        stage: 'finalize',
+        discoveryProfile,
+        ambiguityAssessment,
+        sources: {
+          projectKey: sharedContext.projectKey,
+          projectCount: sharedContext.projectCount,
+          attachmentIncluded: sharedContext.sources.attachmentIncluded,
+          domainContextApplied: sharedContext.sources.domainContextApplied,
+          wiDocsCount: sharedContext.sources.wiDocsCount,
+          linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+          retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+          retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+          wiInsightCount: sharedContext.sources.wiInsightCount,
+          similarStoriesCount: 0,
+        },
+      });
+
+      const clarifyContext: ClarifyContextMeta = {
+        projectKey: sharedContext.projectKey,
+        projectKeys: sharedContext.projectKeys,
+        projectCount: sharedContext.projectCount,
+        pipelineMode: 'story_assistant_default',
+        domainRolesUsed: sharedContext.domainRoles,
+        discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
+        domainContextApplied: sharedContext.sources.domainContextApplied,
+        attachmentIncluded: sharedContext.sources.attachmentIncluded,
+        similarStoriesCount: 0,
+        referencedSimilarStories: [],
+        discoveryProfile,
+        ambiguityAssessment,
+        roundsCompleted: 0,
+        initialQuestionCount: questions.length,
+        followupQuestionCount: 0,
+        totalQuestionCount: questions.length,
+        followupTriggered: false,
+        initialClarifyDurationMs,
+        totalDiscoveryDurationMs: initialClarifyDurationMs,
+        finalSufficiency: {
+          evaluated: false,
+          sufficient: null,
+          roundEvaluated: 0,
+          missingCategoryKeys: discoveryProfile.missingCategoryKeys,
+          reasonCodes: [],
+        },
+        tokenUsage,
+        wiDocsCount: sharedContext.sources.wiDocsCount,
+        linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+        retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+        retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+        wiInsightCount: sharedContext.sources.wiInsightCount,
+        referencedWiDocs: sharedContext.sources.referencedWiDocs,
+        referencedWiSections: sharedContext.sources.referencedWiSections,
+        wiInsights: sharedContext.wiInsights,
+      };
+
+      await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
+      if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+        await saveTransparencyReport({
+          sessionId,
+          turnType: 'clarify',
+          actorAccountId: accountId,
+          provider: config.generatorConfig.provider,
+          model: config.generatorConfig.clarifyModel,
+          projectKey,
+          requirementExcerpt: maskedRequirement.text.slice(0, 240),
+          decisionSummary: [
+            questions.length > 0
+              ? `Generated ${questions.length} discovery questions in the initial Story Assistant round.`
+              : 'Discovery determined no clarifying questions were needed before generation.',
+            `Loaded ${sharedContext.sources.retrievedWiDocCount} work instruction documents into one shared evidence context.`,
+          ],
+          contextUsage: {
+            linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+            retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+            retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+            wiInsightCount: sharedContext.sources.wiInsightCount,
+            ambiguityScore: ambiguityAssessment.score,
+            initialClarifyDurationMs,
+          },
+          tokenUsage,
+          piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
+        });
+      }
+      await appendComplianceAuditEvent({
+        actorAccountId: accountId,
+        category: 'runtime',
+        action: 'CLARIFY_WORKFLOW_EXECUTED',
+        details: { sessionId, projectKey, model: config.generatorConfig.clarifyModel, pipelineMode: 'story_assistant_default' },
+        enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+      });
+      await recordProjectActivity({
+        action: 'clarify',
+        projectKeys: selectedProjectKeys,
+        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+        sessionId,
+        model: config.generatorConfig.clarifyModel,
+      });
+
+      const auditWriter = getPipelineAuditWriter();
+      if (auditWriter) {
+        try {
+          await auditWriter.flushMerge({
+            accountId,
+            mergeHeader: {
+              primaryProjectKey: sharedContext.projectKey,
+              projectKeys: sharedContext.projectKeys,
+              generatorModels: {
+                clarifyModel: config.generatorConfig.clarifyModel,
+              },
+              piiMaskingEnabled: piiEnabled,
+              piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
+            },
+            userInputs: {
+              requirement: maskedRequirement.text,
+              attachmentText: maskedAttachment.text,
+            },
+            discoveryContextClarify: {
+              wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
+              wiContextText: sharedContext.wiContext.text,
+              similarStoriesText: '',
+              domainContext: sharedContext.domainContext,
+              domainRoles: sharedContext.domainRoles,
+              wiInsights: sharedContext.wiInsights,
+            },
+            clarify: {
+              questions,
+              contextMeta: clarifyContext,
+              completedAt: new Date().toISOString(),
+            },
+            completePhase: 'clarify',
+          });
+        } catch (auditErr) {
+          console.warn('[clarify-queue] pipeline audit merge failed:', auditErr);
+        }
+      }
+
+      await entitySet(KEYS.clarifyProgress(sessionId), {
+        type: 'complete',
+        questions,
+        contextMeta: clarifyContext,
+        ...(inputSignature ? { inputSignature } : {}),
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
     const broadWiTopK = Math.min(Math.max(1, config.wiConfig.topKChunks), 8);
     const broadWiMaxChars = config.wiConfig.maxChars;
     await sendProgress('Reading project guidance, work instructions, and related stories…', {

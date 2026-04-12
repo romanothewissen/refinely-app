@@ -65,6 +65,9 @@ export const api = {
     requirement: string;
     answers: unknown[];
     askedQuestions?: unknown[];
+    attachmentText?: string;
+    projectKey?: string;
+    projectKeys?: string[];
     followupCap?: number;
     initialQuestionCount?: number;
     totalQuestionBudget?: number;

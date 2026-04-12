@@ -29,10 +29,13 @@ import { getProjectActivitySummary, recordProjectActivity } from '../services/pr
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
+  getCombinedPersonaRoles,
   normalizeProjectKeys,
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
 } from '../services/project-selection';
+import { loadSharedPipelineContext } from '../services/shared-pipeline-context';
+import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolver: any = new Resolver();
@@ -43,6 +46,7 @@ import {
   checkRefineFeedbackSufficiency,
   askQuestion,
 } from '../core/story-generator';
+import { evaluateStoryAssistantDefaultSufficiency } from '../core/story-assistant-default';
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { extractDocumentText } from '../core/document-parser';
@@ -706,29 +710,24 @@ resolver.define('cancelClarify', async ({ payload }: { payload: { sessionId: str
 
 resolver.define('evaluateSufficiency', async ({ payload, context }) => {
   const eventConfig = await getConfig();
-  const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
+  const selectedProjectKeys = normalizeProjectKeys(payload?.projectKey, payload?.projectKeys);
+  const config = {
+    ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
+    domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
+    tier: getEffectiveTier(eventConfig, context),
+  };
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const input = {
     requirement: payload.requirement,
     answers: payload.answers as ClarifyAnswer[],
     askedQuestions: payload.askedQuestions as string[] | undefined,
+    attachmentText: payload.attachmentText as string | undefined,
     followupCap: payload.followupCap as number | undefined,
     initialQuestionCount: payload.initialQuestionCount as number | undefined,
     totalQuestionBudget: payload.totalQuestionBudget as number | undefined,
     config,
-  } as const;
-
-  const failOpen = {
-    sufficient: true,
-    missingCategoryKeys: [],
-    reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
-    durationMs: 0,
-    tokenUsage: {
-      input: 0,
-      output: 0,
-      total: 0,
-      byStage: {},
-    },
   } as const;
 
   const withResolverBudget = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
@@ -758,21 +757,84 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
 
   const runSufficiency = async () => {
     getPipelineAuditWriter()?.setPhase('clarify.sufficiency');
-    let result: typeof failOpen | Awaited<ReturnType<typeof evaluateSufficiency>>;
-    try {
-      result = await withResolverBudget(evaluateSufficiency(input), 20000);
-    } catch (firstErr) {
-      console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
-      const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
-      const isBudgetFailure = /resolver budget/i.test(firstMessage);
-      if (isBudgetFailure) {
-        result = failOpen;
-      } else {
-        try {
-          result = await withResolverBudget(evaluateSufficiency(input), 10000);
-        } catch (retryErr) {
-          console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
+    let result: Awaited<ReturnType<typeof evaluateSufficiency>> | Awaited<ReturnType<typeof evaluateStoryAssistantDefaultSufficiency>>;
+    if (useStoryAssistantDefaultPipeline(config)) {
+      try {
+        result = await withResolverBudget((async () => {
+          const sharedContext = await loadSharedPipelineContext({
+            requirement: input.requirement,
+            attachmentText: input.attachmentText,
+            clarifyAnswers: input.answers,
+            config,
+            projectKey: payload?.projectKey as string | undefined,
+            projectKeys: payload?.projectKeys as string[] | undefined,
+            pipelineMode: 'story_assistant_default',
+          });
+          return evaluateStoryAssistantDefaultSufficiency({
+            requirement: input.requirement,
+            answers: input.answers,
+            askedQuestions: payload.askedQuestions as Array<string | { categoryKey?: string; intent?: string; question?: string }> | undefined,
+            attachmentText: input.attachmentText,
+            wiContextText: sharedContext.wiContext.text,
+            config: {
+              ...config,
+              domainContext: sharedContext.domainContext,
+              domainRoles: sharedContext.domainRoles,
+            },
+          });
+        })(), 20000);
+      } catch (err) {
+        console.warn('[evaluateSufficiency] Story Assistant sufficiency failed:', err);
+        result = {
+          sufficient: false,
+          status: 'ready_with_open_decisions',
+          missingCategoryKeys: [],
+          reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
+          warning: 'Sufficiency evaluation failed; proceeding with explicit open decisions instead of silently marking discovery complete.',
+          tokenUsage: {
+            input: 0,
+            output: 0,
+            total: 0,
+            byStage: {},
+          },
+          durationMs: 0,
+          coverageArtifact: {
+            mustResolveThemes: [],
+            plannedQuestionBudget: input.totalQuestionBudget ?? input.initialQuestionCount ?? input.answers.length,
+            actualQuestionsAsked: input.askedQuestions?.length ?? input.answers.length,
+            actualAnswersReceived: input.answers.length,
+            openNonBlockingDecisions: ['SUFFICIENCY_EVAL_FAILED'],
+          },
+        };
+      }
+    } else {
+      const failOpen = {
+        sufficient: true,
+        missingCategoryKeys: [],
+        reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
+        durationMs: 0,
+        tokenUsage: {
+          input: 0,
+          output: 0,
+          total: 0,
+          byStage: {},
+        },
+      } as const;
+      try {
+        result = await withResolverBudget(evaluateSufficiency(input), 20000);
+      } catch (firstErr) {
+        console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
+        const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
+        const isBudgetFailure = /resolver budget/i.test(firstMessage);
+        if (isBudgetFailure) {
           result = failOpen;
+        } else {
+          try {
+            result = await withResolverBudget(evaluateSufficiency(input), 10000);
+          } catch (retryErr) {
+            console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
+            result = failOpen;
+          }
         }
       }
     }

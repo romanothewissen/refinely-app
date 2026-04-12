@@ -144,6 +144,12 @@ export interface GenerationPreferences {
   };
 }
 
+export interface PipelineFlags {
+  storyAssistantDefaultPipeline?: boolean;
+  legacyLlmLedPipeline?: boolean;
+  advancedGroundingEnabled?: boolean;
+}
+
 export interface TenantConfig {
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
@@ -176,6 +182,7 @@ export interface TenantConfig {
   domainContexts: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+  pipelineFlags?: PipelineFlags;
   /** Internal QA / prompt iteration — gate pipeline audit recording and export. */
   developerTools?: {
     pipelineAuditEnabled?: boolean;
@@ -262,6 +269,11 @@ export const DEFAULT_CONFIG: TenantConfig = {
   ],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
+  pipelineFlags: {
+    storyAssistantDefaultPipeline: true,
+    legacyLlmLedPipeline: false,
+    advancedGroundingEnabled: false,
+  },
   developerTools: {
     pipelineAuditEnabled: false,
   },
@@ -648,6 +660,7 @@ export interface ContextSourceMeta {
   projectKey: string;
   projectKeys?: string[];
   projectCount?: number;
+  pipelineMode?: 'story_assistant_default' | 'legacy_llm_led';
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -787,6 +800,23 @@ export interface GenerationResult {
   sessionId: string;
   generationContext?: GenerationContextMeta;
   tokenUsage?: TokenUsageSummary;
+}
+
+export interface SimpleDiscoveryResult {
+  questions: ClarifyQuestion[];
+  tokenUsage: TokenUsageSummary;
+}
+
+export interface SimpleSufficiencyResult {
+  sufficient: boolean;
+  questions?: ClarifyQuestion[];
+  reasonCodes?: string[];
+}
+
+export interface SimpleGenerationContext {
+  wiDocsCount?: number;
+  tokenUsage?: TokenUsageSummary;
+  stageDurationsMs?: GenerationStageDurationsMs;
 }
 
 export interface TokenUsageSummary {

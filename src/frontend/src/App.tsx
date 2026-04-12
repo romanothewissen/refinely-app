@@ -1047,6 +1047,9 @@ function LegacyApp({
     setIsEvaluatingDiscovery(true);
     setWorkflowStage('sufficiency_check');
     try {
+      const attachmentText = runAttachments
+        .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
+        .join('\n\n');
       const evaluation = await api.evaluateSufficiency({
         sessionId: sessionIdRef.current,
         requirement,
@@ -1056,6 +1059,9 @@ function LegacyApp({
           intent: question.intent,
           question: question.question,
         })),
+        attachmentText,
+        projectKey: effectiveProjectKey,
+        projectKeys: effectiveProjectKeys,
         followupCap: clarifyContext?.discoveryProfile?.followupCap,
         initialQuestionCount: clarifyContext?.initialQuestionCount ?? clarifyQuestions.length,
         pipelineAudit: pipelineAuditActiveRef.current,

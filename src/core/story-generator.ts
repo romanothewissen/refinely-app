@@ -5098,7 +5098,7 @@ export function applyFeatureOutputGuardrails(feature: Feature): Feature {
   };
 }
 
-function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext): Feature {
+export function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingContext): Feature {
   const draft: Feature = {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : uuidv4(),
     summary: raw.summary ?? 'Untitled feature',

@@ -138,6 +138,12 @@ export interface ProjectDomainContext {
   personaRoles?: ProjectPersonaRole[];
 }
 
+export interface PipelineFlags {
+  storyAssistantDefaultPipeline?: boolean;
+  legacyLlmLedPipeline?: boolean;
+  advancedGroundingEnabled?: boolean;
+}
+
 export interface TenantConfig {
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
@@ -170,6 +176,7 @@ export interface TenantConfig {
   domainContexts?: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
+  pipelineFlags?: PipelineFlags;
   developerTools?: {
     pipelineAuditEnabled?: boolean;
   };
@@ -255,6 +262,11 @@ export const DEFAULT_CONFIG: TenantConfig = {
   ],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
+  pipelineFlags: {
+    storyAssistantDefaultPipeline: true,
+    legacyLlmLedPipeline: false,
+    advancedGroundingEnabled: false,
+  },
   developerTools: {
     pipelineAuditEnabled: false,
   },

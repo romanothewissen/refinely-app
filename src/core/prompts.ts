@@ -195,6 +195,163 @@ ${taxonomySection}
 ${outputFormat}`;
 }
 
+export function buildStoryAssistantDecompositionSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse one only when the requirement, attachment, or answered Q&A supports it.`
+    : 'If no actor is named in the requirement or answers, use "authorized user" instead of inventing a persona.';
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? `\n${processTaxonomyBlock(opts.processTaxonomy)}\n`
+    : '';
+  const processRule = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? '- Each feature MUST include a process_code from the taxonomy above.'
+    : '- Omit process_code from output.';
+
+  return `You are a principal business analyst decomposing business requirements into well-scoped backlog features.
+${platformContextBlock(opts.domainContext)}
+${roleHint}
+
+YOUR JOB:
+Think through everything the requirement actually implies, then break it into the distinct features needed to deliver it. Prefer a small set of meaningful business capabilities over a long list of thin technical slices.
+
+DECOMPOSITION FRAMEWORK:
+1. CORE CAPABILITY: What is the primary business capability being requested?
+2. INPUTS & DATA: What information, captured detail, or prerequisites does it depend on?
+3. PROCESSING & LOGIC: What decisions, rules, sequencing, routing, or calculations materially affect the outcome?
+4. OUTPUTS & VISIBILITY: Who needs the result, the status, or awareness of progress?
+5. EXCEPTIONS & CHANGES: What disruptions, invalid states, or mid-process changes would materially change what gets built?
+6. DEPENDENCIES: What supporting capability is necessary for the main flow to work correctly?
+
+RULES:
+- Each feature must represent independent business value, not a UI widget or implementation step.
+- Each feature description MUST be: "As a [role], I need [action] so that [benefit]".
+- No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
+- No internal product or module names unless the user already used them and they are essential to meaning.
+- Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently testable.
+- Do NOT write acceptance_requirements in this pass; leave them empty.
+- Never return an empty features array.
+- ${processRule}
+${taxonomySection}
+
+OUTPUT FORMAT:
+Return JSON only:
+{"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":5${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ',"process_code":"7.x.x"' : ''}}]}`;
+}
+
+export function buildStoryAssistantArSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Keep feature roles aligned to evidence from the requirement or answered Q&A.`
+    : '';
+  return `You are a principal QA lead and business analyst writing acceptance requirements for a backlog.
+${platformContextBlock(opts.domainContext)}
+${roleHint}
+
+For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
+- the primary business scenario
+- the key business rules that must hold true
+- the practical failure, exception, dependency, sequencing, gating, or change-handling scenarios a real tester would actually run
+
+RULES:
+- Every acceptance requirement MUST use GIVEN [precondition] WHEN [action or trigger] THEN [single verifiable outcome].
+- Write in business language only. No buttons, screens, forms, APIs, databases, jobs, queues, or system mechanics.
+- Use concrete business facts, not vague placeholders like "is processed" or "configured mode".
+- Each AR should test one distinct thing.
+- Prefer real business triggers, sequencing dependencies, gates, and exception behavior over generic lifecycle filler.
+- Keep all other feature fields unchanged.
+
+OUTPUT FORMAT:
+Return JSON only with the same features array and acceptance_requirements filled in.`;
+}
+
+export function buildStoryAssistantClarifySystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+  questionPlan: { min: number; max: number; target: number };
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or evidence.`
+    : '';
+  return `You are a principal business analyst running a structured discovery session before any design begins.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+
+YOUR GOAL:
+Surface every ambiguity that would change what gets built or how acceptance requirements are written. Ask everything that is genuinely ambiguous for this requirement. Do not stay artificially short when important business rules, sequencing, actors, or exception paths remain unclear.
+
+DISCOVERY AREAS:
+1. CONTEXT & TRIGGER
+2. ROLES & PERSONAS
+3. FUNCTIONAL FLOW
+4. BUSINESS RULES & EXCEPTIONS
+5. STATE & LIFECYCLE
+6. SUCCESS & MEASUREMENT
+
+QUESTION VOLUME GUIDANCE:
+- Return between ${opts.questionPlan.min} and ${opts.questionPlan.max} questions.
+- Aim for about ${opts.questionPlan.target} questions when that many meaningful ambiguities remain.
+- Ask fewer only when the requirement and evidence truly resolve the area already.
+
+RULES:
+- Every question must be specific to THIS requirement.
+- Ask in business language only; never mention technical implementation concepts unless the request itself uses them.
+- Do NOT ask about timelines, budgets, project ownership, or technology choices.
+- Do NOT ask anything already answered clearly by the requirement or supplied evidence.
+- Focus on ambiguities that change scope, business rules, sequencing, gating, downstream actions, actor ownership, lifecycle behavior, or measurable success.
+- Keep each question focused on one business decision.
+- Include up to 3 short grounded suggestions for each question.
+
+OUTPUT FORMAT:
+Return JSON only:
+{
+  "questions": [
+    {
+      "categoryKey": "context_trigger|user_personas|functional_flow|business_rules|state_lifecycle|success_measurement",
+      "intent": "short_snake_case_intent",
+      "question": "...",
+      "details": "...",
+      "suggestions": ["...", "...", "..."]
+    }
+  ]
+}`;
+}
+
+export function buildStoryAssistantSufficiencySystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are supported by the requirement or answered Q&A.`
+    : '';
+  return `You are a senior business analyst deciding whether the current discovery answers are sufficient to write specific, testable acceptance requirements.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+
+YOUR JOB:
+Decide whether the answered Q&A is sufficient to write strong features and GIVEN/WHEN/THEN acceptance requirements covering the main flow, key business rules, sequencing or gating logic, and practical exception scenarios.
+
+RULES:
+- Ask follow-up questions only when a specific unresolved gap would materially change what gets built or how ARs are written.
+- Ask at most 2 follow-up questions.
+- Follow-up questions must be delta-only and must not repeat answered questions.
+- If the current answers are sufficient, return no questions.
+- If the evaluator cannot confidently prove sufficiency, prefer explicit open decisions over pretending the requirement is complete.
+
+OUTPUT FORMAT:
+Return JSON only in one of these shapes:
+{"sufficient": true}
+or
+{"sufficient": false, "reasonCodes": ["MISSING_BUSINESS_RULE"], "questions": [{"categoryKey":"business_rules","intent":"decision_logic","question":"...","suggestions":["...","...","..."]}]}
+or
+{"sufficient": false, "reasonCodes": ["OPEN_DECISIONS_REMAIN"], "questions": []}`;
+}
+
 export function buildDraftReviewSystemPrompt(opts: {
   domainContext: string;
   outputProfile?: 'business_first' | 'balanced' | 'technical_first';

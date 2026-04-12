@@ -24,9 +24,13 @@ import {
   buildEvaluateSystemPrompt,
   buildSizingAssessmentSystemPrompt,
   buildSizingRepairSystemPrompt,
+  buildStoryAssistantClarifySystemPrompt,
+  buildStoryAssistantSufficiencySystemPrompt,
   buildTriageSystemPrompt,
 } from '../prompts';
 import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
+import { useStoryAssistantDefaultPipeline } from '../../services/pipeline-flags';
+import { DEFAULT_CONFIG } from '../../types';
 
 test('normalizeDiscoveryProfile preserves llm-sized discovery counts', () => {
   const profile = normalizeDiscoveryProfile({
@@ -658,6 +662,48 @@ test('decomposition prompt treats features as independently valuable and keeps s
   assert.match(prompt, /Surface independently valuable business capabilities without inventing micro-features/i);
   assert.match(prompt, /do not hide meaningful workflow branches inside one oversized feature/i);
   assert.doesNotMatch(prompt, /Output exactly/i);
+});
+
+test('story assistant clarify prompt asks every genuinely ambiguous question without small-screen budgeting language', () => {
+  const prompt = buildStoryAssistantClarifySystemPrompt({
+    domainContext: '',
+    domainRoles: [],
+    questionPlan: { min: 8, max: 12, target: 10 },
+  });
+
+  assert.match(prompt, /Ask everything that is genuinely ambiguous/i);
+  assert.doesNotMatch(prompt, /intentionally small/i);
+  assert.doesNotMatch(prompt, /first screen/i);
+});
+
+test('story assistant sufficiency prompt limits follow-up discovery to one small delta round', () => {
+  const prompt = buildStoryAssistantSufficiencySystemPrompt({
+    domainContext: '',
+    domainRoles: [],
+  });
+
+  assert.match(prompt, /at most 2 follow-up questions/i);
+  assert.match(prompt, /If the current answers are sufficient, return no questions/i);
+});
+
+test('story assistant default pipeline flag is enabled unless legacy mode is explicitly forced', () => {
+  assert.equal(useStoryAssistantDefaultPipeline(DEFAULT_CONFIG), true);
+  assert.equal(useStoryAssistantDefaultPipeline({
+    ...DEFAULT_CONFIG,
+    pipelineFlags: {
+      storyAssistantDefaultPipeline: true,
+      legacyLlmLedPipeline: true,
+      advancedGroundingEnabled: false,
+    },
+  }), false);
+  assert.equal(useStoryAssistantDefaultPipeline({
+    ...DEFAULT_CONFIG,
+    pipelineFlags: {
+      storyAssistantDefaultPipeline: false,
+      legacyLlmLedPipeline: false,
+      advancedGroundingEnabled: false,
+    },
+  }), false);
 });
 
 test('ar prompt uses range guidance without exact-count pressure', () => {
