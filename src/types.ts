@@ -819,6 +819,26 @@ export interface SimpleGenerationContext {
   stageDurationsMs?: GenerationStageDurationsMs;
 }
 
+export interface StoryAssistantClarifyResult {
+  questions: ClarifyQuestion[];
+  tokenUsage: TokenUsageSummary;
+  sources?: ContextSourceMeta;
+}
+
+export interface StoryAssistantSufficiencyResult {
+  sufficient: boolean;
+  questions?: ClarifyQuestion[];
+  warning?: string;
+  tokenUsage: TokenUsageSummary;
+}
+
+export interface StoryAssistantGenerationResult {
+  features: Feature[];
+  tokenUsage: TokenUsageSummary;
+  stageDurationsMs?: GenerationStageDurationsMs;
+  failedFeatureIds?: string[];
+}
+
 export interface TokenUsageSummary {
   input: number;
   output: number;

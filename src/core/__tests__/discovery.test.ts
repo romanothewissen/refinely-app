@@ -127,59 +127,29 @@ test('buildDiscoveryCoverageArtifact tracks planned and actual discovery coverag
   assert.deepEqual(artifact.openNonBlockingDecisions, ['Choose default priority handling']);
 });
 
-test('expandRawQuestionCandidate splits numbered grouped prompts into single-focus questions', () => {
+test('expandRawQuestionCandidate keeps bundled numbered prompts on a single card', () => {
+  const sharedSuggestions = [
+    'Start automatically once the interaction reaches a usable handoff point and the core details are present',
+    'Start only after identity or enough context has been confirmed by the team',
+    'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
+    'Apply different trigger rules by channel, but make the exclusion path explicit',
+  ];
   const questions = expandRawQuestionCandidate({
     category: 'Context & Trigger',
     intent: 'trigger_and_inputs',
     question: 'For case creation, 1. what exact event should trigger the flow, 2. what data must already be present, and 3. when should the interaction wait for manual review instead?',
-    suggestions: [
-      'Start automatically once the interaction reaches a usable handoff point and the core details are present',
-      'Start only after identity or enough context has been confirmed by the team',
-      'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
-      'Apply different trigger rules by channel, but make the exclusion path explicit',
-    ],
+    suggestions: sharedSuggestions,
   });
 
-  assert.equal(questions.length, 3);
-  assert.deepEqual(
-    questions.map((question) => question.categoryKey),
-    ['context_trigger', 'context_trigger', 'context_trigger'],
-  );
-  assert.deepEqual(
-    questions.map((question) => question.question),
-    [
-      'For case creation what event should trigger the flow?',
-      'For case creation what data must already be present?',
-      'For case creation when should the interaction wait for manual review instead?',
-    ],
-  );
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].categoryKey, 'context_trigger');
   assert.equal(questions[0].intent, 'trigger_and_inputs');
-  assert.equal(questions[0].details, undefined);
-  assert.ok(questions[1].intent.startsWith('trigger_and_inputs_part_'));
-  assert.ok(questions[2].intent.startsWith('trigger_and_inputs_part_'));
-  assert.deepEqual(
-    questions.map((question) => question.suggestions),
-    [
-      [
-        'Start automatically once the interaction reaches a usable handoff point and the core details are present',
-        'Start only after identity or enough context has been confirmed by the team',
-        'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
-        'Apply different trigger rules by channel, but make the exclusion path explicit',
-      ],
-      [
-        'Start automatically once the interaction reaches a usable handoff point and the core details are present',
-        'Start only after identity or enough context has been confirmed by the team',
-        'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
-        'Apply different trigger rules by channel, but make the exclusion path explicit',
-      ],
-      [
-        'Start automatically once the interaction reaches a usable handoff point and the core details are present',
-        'Start only after identity or enough context has been confirmed by the team',
-        'Hold the flow for manual review when the trigger is ambiguous or key context is missing',
-        'Apply different trigger rules by channel, but make the exclusion path explicit',
-      ],
-    ],
+  assert.equal(
+    questions[0].question,
+    'For case creation, 1. what event should trigger the flow, 2. what data must already be present, and 3. when should the interaction wait for manual review instead?',
   );
+  assert.equal(questions[0].details, undefined);
+  assert.deepEqual(questions[0].suggestions, sharedSuggestions);
 });
 
 test('finalizeInitialDiscoveryQuestions preserves the llm question set without padding', () => {
@@ -350,7 +320,7 @@ test('finalizeInitialDiscoveryQuestions preserves coherent model question and su
   ]);
 });
 
-test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into distinct alternatives', () => {
+test('finalizeInitialDiscoveryQuestions preserves suggestion list without semantic dedupe', () => {
   const profile = normalizeDiscoveryProfile({
     ambiguity: 'medium',
     missingCategoryKeys: ['functional_flow'],
@@ -375,9 +345,9 @@ test('finalizeInitialDiscoveryQuestions collapses overlapping suggestions into d
 
   const target = questions.find((question) => question.intent === 'outputs_displays');
   assert.ok(target);
-  assert.ok(target.suggestions.length >= 2 && target.suggestions.length <= 3);
-  assert.equal(target.suggestions.filter((suggestion) => /summary/i.test(suggestion)).length, 1);
-  assert.equal(target.suggestions.filter((suggestion) => /notify/i.test(suggestion)).length, 1);
+  assert.equal(target.suggestions.length, 4);
+  assert.equal(target.suggestions.filter((suggestion) => /summary/i.test(suggestion)).length, 2);
+  assert.equal(target.suggestions.filter((suggestion) => /notify/i.test(suggestion)).length, 2);
   assert.ok(target.suggestions.every((suggestion) => suggestion.length <= 95));
 });
 
@@ -605,22 +575,18 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /intent/);
   assert.match(clarifyPrompt, /Prefer one visible question per main business decision/i);
   assert.match(clarifyPrompt, /principal business analyst running a structured discovery session/i);
-  assert.match(clarifyPrompt, /visible "question" field must be short and plain-language first/i);
-  assert.match(clarifyPrompt, /optional "details" field/i);
-  assert.match(clarifyPrompt, /Preserve requirement-native domain wording/i);
-  assert.match(clarifyPrompt, /Include suggestions for most questions/i);
-  assert.match(clarifyPrompt, /Provide up to 3 short, grounded options per question/i);
-  assert.match(clarifyPrompt, /If the requirement already names the actor, business object, or workflow in a clear way/i);
-  assert.match(clarifyPrompt, /Never write discovery questions in first person/i);
-  assert.match(clarifyPrompt, /normalize the question voice into third-person business language/i);
-  assert.match(clarifyPrompt, /What should the TSS do when/i);
-  assert.match(clarifyPrompt, /Keep the suggestions aligned to the actual question being asked/i);
+  assert.match(clarifyPrompt, /The question field should be short and plain-language/i);
+  assert.match(clarifyPrompt, /optional details field/i);
+  assert.match(clarifyPrompt, /Do not genericize domain-rich wording into vague terms/i);
+  assert.match(clarifyPrompt, /Include up to 3 short, grounded answer suggestions per question/i);
+  assert.match(clarifyPrompt, /Reuse concrete nouns from the requirement when they make the question sharper/i);
+  assert.match(clarifyPrompt, /Never write questions in first person/i);
+  assert.match(clarifyPrompt, /INITIAL ROUND SIZE/i);
+  assert.match(clarifyPrompt, /suggestions should be included for most questions/i);
   assert.match(clarifyPrompt, /Do NOT output free-form category labels like "TRIGGER \/ CONTEXT & INPUTS"/i);
   assert.match(clarifyPrompt, /Known roles in this domain/i);
-  assert.match(clarifyPrompt, /Discovery must size itself from the unresolved business ambiguity you find/i);
-  assert.match(clarifyPrompt, /Simplify syntax, not business meaning/i);
-  assert.match(clarifyPrompt, /DISCOVERY EXEMPLARS/i);
-  assert.match(clarifyPrompt, /Which rule should decide whether an incoming request updates an existing record or creates a new one/i);
+  assert.match(clarifyPrompt, /Return JSON in this shape/i);
+  assert.match(clarifyPrompt, /recommendedInitialCount/i);
   assert.doesNotMatch(clarifyPrompt, /profileReasoning/i);
   assert.doesNotMatch(clarifyPrompt, /must equal the number of questions you return/i);
   assert.doesNotMatch(clarifyPrompt, /bundle 2-4 tightly related sub-prompts/i);
@@ -671,9 +637,16 @@ test('story assistant clarify prompt asks every genuinely ambiguous question wit
     questionPlan: { min: 8, max: 12, target: 10 },
   });
 
-  assert.match(prompt, /Ask everything that is genuinely ambiguous/i);
+  assert.match(prompt, /Ask as many questions as needed/i);
+  assert.match(prompt, /For each area, ask every question that is genuinely ambiguous/i);
+  assert.match(prompt, /Roles & Personas/i);
+  assert.match(prompt, /Trigger & Context/i);
+  assert.match(prompt, /Business Rules & Exceptions/i);
+  assert.match(prompt, /exactly 3 short grounded suggestions/i);
+  assert.match(prompt, /Return ONLY a JSON array/i);
   assert.doesNotMatch(prompt, /intentionally small/i);
   assert.doesNotMatch(prompt, /first screen/i);
+  assert.doesNotMatch(prompt, /QUESTION VOLUME GUIDANCE/i);
 });
 
 test('story assistant sufficiency prompt limits follow-up discovery to one small delta round', () => {
@@ -682,8 +655,9 @@ test('story assistant sufficiency prompt limits follow-up discovery to one small
     domainRoles: [],
   });
 
-  assert.match(prompt, /at most 2 follow-up questions/i);
-  assert.match(prompt, /If the current answers are sufficient, return no questions/i);
+  assert.match(prompt, /Ask exactly 1 or 2 follow-up questions/i);
+  assert.match(prompt, /If the current answers are sufficient, return \{"sufficient": true\}/i);
+  assert.match(prompt, /Return ONLY valid JSON/i);
 });
 
 test('story assistant default pipeline flag is enabled unless legacy mode is explicitly forced', () => {

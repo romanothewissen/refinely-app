@@ -96,7 +96,6 @@ export function buildWorkInstructionInsightArtifact(chunks: WiChunk[]): WorkInst
     }
 
     texts.forEach((text) => {
-      const lowered = text.toLowerCase();
       pushInsight(artifact.resolvedFacts, seenByBucket.get('resolvedFacts')!, text, [span]);
 
       if (facets.some((facet) => facet.kind === 'actor') || matches(text, /\bplanner|specialist|coordinator|technician|manager|approver|user\b/i)) {

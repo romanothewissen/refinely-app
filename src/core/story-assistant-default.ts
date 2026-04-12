@@ -1,5 +1,6 @@
 import type {
   ClarifyAnswer,
+  ClarifyCategoryKey,
   ClarifyQuestion,
   DiscoveryProfile,
   Feature,
@@ -19,14 +20,11 @@ import {
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 import { buildDiscoveryCoverageArtifact } from './discovery';
-import { formatWorkInstructionInsightsForPrompt } from './wi-insights';
 import {
   annotateFailedAcceptanceRequirementFeatures,
-  assessRequirement,
   findFeaturesMissingCompleteAcceptanceRequirements,
   GenerationCancelledError,
   normaliseFeature,
-  parseQuestionCandidates,
 } from './story-generator';
 
 interface RawFeature {
@@ -39,7 +37,16 @@ interface RawFeature {
   process_code?: string;
 }
 
-interface StoryAssistantDiscoveryResult {
+interface RawQuestionCandidate {
+  category?: unknown;
+  categoryKey?: unknown;
+  intent?: unknown;
+  question?: unknown;
+  details?: unknown;
+  suggestions?: unknown[];
+}
+
+export interface StoryAssistantClarifyResult {
   questions: ClarifyQuestion[];
   tokenUsage: TokenUsageSummary;
   discoveryProfile: DiscoveryProfile;
@@ -52,7 +59,7 @@ interface StoryAssistantDiscoveryResult {
   };
 }
 
-interface StoryAssistantSufficiencyResult {
+export interface StoryAssistantSufficiencyResult {
   sufficient: boolean;
   status: 'ask_followup' | 'ready_to_generate' | 'ready_with_open_decisions';
   questions?: ClarifyQuestion[];
@@ -63,6 +70,31 @@ interface StoryAssistantSufficiencyResult {
   tokenUsage: TokenUsageSummary;
   durationMs: number;
 }
+
+export interface StoryAssistantGenerationResult {
+  features: Feature[];
+  tokenUsage: TokenUsageSummary;
+  stageDurationsMs: GenerationStageDurationsMs;
+  failedFeatureIds?: string[];
+}
+
+const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
+  'roles & personas': 'user_personas',
+  'roles and personas': 'user_personas',
+  'roles': 'user_personas',
+  'personas': 'user_personas',
+  'trigger & context': 'context_trigger',
+  'trigger and context': 'context_trigger',
+  'context & trigger': 'context_trigger',
+  'context and trigger': 'context_trigger',
+  'functional flow': 'functional_flow',
+  'business rules & exceptions': 'business_rules',
+  'business rules and exceptions': 'business_rules',
+  'business rules': 'business_rules',
+  'success & measurement': 'success_measurement',
+  'success and measurement': 'success_measurement',
+  'success': 'success_measurement',
+};
 
 function buildProviderOpts(config: TenantConfig) {
   return {
@@ -100,14 +132,31 @@ function buildTokenUsageSummary(stages: Record<string, { input: number; output: 
   };
 }
 
-function formatClarifyAnswers(answers: ClarifyAnswer[]): string {
-  if (!answers.length) return '';
-  return answers
-    .map((answer, index) => {
-      const category = answer.categoryKey ? ` [${answer.categoryKey}]` : '';
-      return `${index + 1}.${category} Q: ${answer.question}\nA: ${answer.answer}`;
-    })
-    .join('\n\n');
+function cleanText(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeKey(value: unknown): string {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function ensureQuestionMark(value: string): string {
+  const trimmed = cleanText(value).replace(/[?.!]+$/g, '');
+  return trimmed ? `${trimmed}?` : '';
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach((value) => {
+    const cleaned = cleanText(value);
+    if (!cleaned) return;
+    const key = normalizeKey(cleaned);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(cleaned);
+  });
+  return result;
 }
 
 function trimPromptText(text: string, maxChars: number): string {
@@ -117,119 +166,84 @@ function trimPromptText(text: string, maxChars: number): string {
   return `${normalized.slice(0, maxChars).trimEnd()}\n...[truncated for speed]`;
 }
 
-function simpleQuestionPlan(input: {
-  requirement: string;
-  attachmentText: string;
-  wiContextText: string;
-  clarifyAnswers: ClarifyAnswer[];
-}) {
-  const assessment = assessRequirement({
-    requirement: input.requirement,
-    attachmentText: input.attachmentText,
-    wiContextText: input.wiContextText,
-    clarifyAnswers: input.clarifyAnswers,
+function mergeRequirementAndAttachment(requirement: string, attachmentText: string): string {
+  const cleanedRequirement = cleanText(requirement);
+  const cleanedAttachment = String(attachmentText ?? '').trim();
+  if (!cleanedAttachment) return cleanedRequirement;
+  return `Context from attachment:\n\n${cleanedAttachment}\n\nRequirement: ${cleanedRequirement}`;
+}
+
+function formatClarifyAnswers(answers: ClarifyAnswer[]): string {
+  if (!answers.length) return '';
+  return answers
+    .map((answer) => `Q: ${cleanText(answer.question)}\nA: ${cleanText(answer.answer) || '(not answered)'}`)
+    .join('\n\n');
+}
+
+function extractRoles(requirement: string, answers: ClarifyAnswer[] = []): string[] {
+  const seen = new Set<string>();
+  const roles: string[] = [];
+
+  const addRole = (value: string) => {
+    const cleaned = cleanText(value).replace(/\.$/, '');
+    if (cleaned.length < 3 || cleaned.length > 80) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    roles.push(cleaned);
+  };
+
+  answers.forEach((answer) => {
+    const question = `${answer.categoryKey ?? ''} ${answer.question}`.toLowerCase();
+    if (!/role|persona|who\b|actor/.test(question)) return;
+    cleanText(answer.answer)
+      .split(/\s*(?:,|;|\band\b)\s*/i)
+      .filter(Boolean)
+      .forEach(addRole);
   });
 
-  const complexity = assessment.deliveryForecast.complexity;
-  const ambiguity = assessment.discoveryForecast.ambiguity;
-  const questionPlan =
-    complexity === 'very_high'
-      ? { min: 10, max: 14, target: 12 }
-      : complexity === 'high' || ambiguity === 'high'
-        ? { min: 8, max: 12, target: 10 }
-        : complexity === 'medium' || ambiguity === 'medium'
-          ? { min: 6, max: 9, target: 7 }
-          : { min: 4, max: 6, target: 5 };
+  const roleRegex = /\bas\s+an?\s+([A-Za-z][A-Za-z ,/-]{2,60}?)(?:\s*[,.]|\s+(?:i|we|they|who|that|the)\b)/gi;
+  for (const match of requirement.matchAll(roleRegex)) {
+    addRole(match[1] ?? '');
+  }
 
-  const discoveryProfile: DiscoveryProfile = {
-    scope: assessment.discoveryForecast.scope,
-    complexity: assessment.discoveryForecast.complexity,
-    ambiguity: assessment.discoveryForecast.ambiguity,
-    missingCategoryKeys: [],
-    recommendedInitialCount: questionPlan.target,
-    followupCap: 2,
-    plannedQuestionBudget: questionPlan.target + 2,
-    actualQuestionsAsked: 0,
-    softQuestionBudget: questionPlan.target,
-    hardQuestionCap: questionPlan.max + 2,
-    coverageArtifact: buildDiscoveryCoverageArtifact({
-      missingCategoryKeys: [],
-      plannedQuestionBudget: questionPlan.target + 2,
-      actualQuestionsAsked: 0,
-      actualAnswersReceived: input.clarifyAnswers.length,
-    }),
-  };
+  return roles;
+}
 
-  const ambiguityAssessment = {
-    level: ambiguity === 'high' ? 'vague' as const : ambiguity === 'low' ? 'clear' as const : 'medium' as const,
-    score:
-      complexity === 'very_high' ? 9
-      : complexity === 'high' ? 8
-      : complexity === 'medium' ? 5
-      : 3,
-    reasons: assessment.reasoning
-      ? assessment.reasoning.split('. ').map((reason) => reason.trim()).filter(Boolean).slice(0, 4)
-      : ['Discovery is focusing on unresolved business ambiguity.'],
-    questionPlan,
-    generatedQuestions: 0,
-  };
-
-  return { assessment, questionPlan, discoveryProfile, ambiguityAssessment };
+function buildRoleHint(domainRoles: string[] | undefined, requirement: string, answers: ClarifyAnswer[]): string {
+  const extractedRoles = extractRoles(requirement, answers);
+  const combinedRoles = uniqueStrings([...(domainRoles ?? []), ...extractedRoles]);
+  return combinedRoles.length ? `KNOWN ROLES: ${combinedRoles.join(', ')}` : '';
 }
 
 function buildClarifyUserMessage(input: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
-  wiInsightsText: string;
 }) {
-  const parts = [`REQUIREMENT:\n${trimPromptText(input.requirement, 5000)}`];
-
-  if (input.attachmentText.trim()) {
-    parts.push(`ATTACHMENT CONTEXT:\n${trimPromptText(input.attachmentText, 12000)}`);
-  }
-  if (input.wiInsightsText.trim()) {
-    parts.push(`WORK INSTRUCTION INSIGHTS:\n${trimPromptText(input.wiInsightsText, 5000)}`);
-  }
+  const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
+  const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
   if (input.wiContextText.trim()) {
-    parts.push(`WORK INSTRUCTIONS / OPERATIONAL GUIDANCE:\n${trimPromptText(input.wiContextText, 12000)}`);
+    parts.push(`Domain context from Work Instructions (use to ask sharper, process-grounded questions):\n${trimPromptText(input.wiContextText, 12000)}`);
   }
-
-  return parts.join('\n\n---\n\n');
+  return parts.join('\n\n');
 }
 
 function buildSufficiencyUserMessage(input: {
   requirement: string;
   answers: ClarifyAnswer[];
-  askedQuestions?: Array<string | Pick<ClarifyQuestion, 'categoryKey' | 'intent' | 'question'>>;
   attachmentText?: string;
   wiContextText?: string;
 }) {
-  const askedQuestions = (input.askedQuestions ?? input.answers.map((answer) => ({
-    categoryKey: answer.categoryKey,
-    intent: answer.intent,
-    question: answer.question,
-  })))
-    .map((question, index) => {
-      if (typeof question === 'string') return `${index + 1}. ${question}`;
-      const parts = [question.categoryKey, question.intent].filter(Boolean).join(' | ');
-      return `${index + 1}. ${parts ? `[${parts}] ` : ''}${question.question}`;
-    })
-    .join('\n');
-
+  const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText ?? '');
   const parts = [
-    `REQUIREMENT:\n${trimPromptText(input.requirement, 5000)}`,
-    askedQuestions ? `DISCOVERY QUESTIONS ALREADY ASKED:\n${askedQuestions}` : '',
-    input.answers.length ? `DISCOVERY ANSWERS:\n${formatClarifyAnswers(input.answers)}` : '',
-    input.attachmentText?.trim()
-      ? `ATTACHMENT CONTEXT:\n${trimPromptText(input.attachmentText, 6000)}`
-      : '',
-    input.wiContextText?.trim()
-      ? `WORK INSTRUCTIONS / OPERATIONAL GUIDANCE:\n${trimPromptText(input.wiContextText, 6000)}`
-      : '',
-  ].filter(Boolean);
-
-  return parts.join('\n\n---\n\n');
+    `Requirement: ${trimPromptText(mergedRequirement, 12000)}`,
+    `Questions and answers so far:\n${formatClarifyAnswers(input.answers) || '(none)'}`,
+  ];
+  if (input.wiContextText?.trim()) {
+    parts.push(`Domain context from Work Instructions:\n${trimPromptText(input.wiContextText, 6000)}`);
+  }
+  return parts.join('\n\n');
 }
 
 function buildGenerationContextMessage(input: {
@@ -237,24 +251,161 @@ function buildGenerationContextMessage(input: {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   wiContextText: string;
-  wiInsightsText: string;
+  roleHint: string;
 }) {
-  const parts = [`REQUIREMENT:\n${trimPromptText(input.requirement, 5000)}`];
-
+  const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
+  const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
+  if (input.roleHint.trim()) {
+    parts.push(input.roleHint);
+  }
   if (input.clarifyAnswers.length) {
-    parts.push(`STAKEHOLDER CLARIFICATIONS:\n${formatClarifyAnswers(input.clarifyAnswers)}`);
-  }
-  if (input.attachmentText.trim()) {
-    parts.push(`ATTACHMENT CONTEXT:\n${trimPromptText(input.attachmentText, 12000)}`);
-  }
-  if (input.wiInsightsText.trim()) {
-    parts.push(`WORK INSTRUCTION INSIGHTS:\n${trimPromptText(input.wiInsightsText, 5000)}`);
+    parts.push(`Clarification answers:\n${formatClarifyAnswers(input.clarifyAnswers)}`);
   }
   if (input.wiContextText.trim()) {
-    parts.push(`WORK INSTRUCTIONS / OPERATIONAL GUIDANCE:\n${trimPromptText(input.wiContextText, 12000)}`);
+    parts.push(`Domain context from Work Instructions:\n${trimPromptText(input.wiContextText, 12000)}`);
   }
+  return parts.join('\n\n');
+}
 
-  return parts.join('\n\n---\n\n');
+function inferCategoryKey(question: string): ClarifyCategoryKey {
+  const normalized = cleanText(question).toLowerCase();
+  if (/\bwho\b|\brole\b|\bpersona\b|\bowner\b|\bapproval\b|\bescalation\b/.test(normalized)) {
+    return 'user_personas';
+  }
+  if (/\bmeasure\b|\bmetric\b|\bsuccess\b|\btester\b|\buat\b|\bworking correctly\b/.test(normalized)) {
+    return 'success_measurement';
+  }
+  if (/\bstatus\b|\blifecycle\b|\btransition\b|\breopen\b|\bretry\b/.test(normalized)) {
+    return 'state_lifecycle';
+  }
+  if (/\bsequence\b|\border\b|\bstep\b|\bbranch\b|\bpath\b|\bfinal output\b|\bstate after\b/.test(normalized)) {
+    return 'functional_flow';
+  }
+  if (/\bvalidation\b|\brule\b|\bexception\b|\bthreshold\b|\bconstraint\b|\bcontract\b|\bcompliance\b/.test(normalized)) {
+    return 'business_rules';
+  }
+  return 'context_trigger';
+}
+
+function mapCategoryKey(category: unknown, question: string): ClarifyCategoryKey {
+  const normalizedCategory = normalizeKey(category);
+  if (normalizedCategory && STORY_ASSISTANT_CATEGORY_LABELS[normalizedCategory]) {
+    return STORY_ASSISTANT_CATEGORY_LABELS[normalizedCategory];
+  }
+  return inferCategoryKey(question);
+}
+
+export function splitClearlyNumberedStoryAssistantQuestion(question: string): string[] {
+  const normalized = cleanText(question);
+  if (!normalized) return [];
+
+  const markerRegex = /(?:^|\s)(\d+)\.\s*/g;
+  const markers = [...normalized.matchAll(markerRegex)];
+  if (markers.length < 2) return [normalized];
+
+  const firstMatch = markers[0];
+  if (!firstMatch || firstMatch.index == null) return [normalized];
+  const prefix = cleanText(normalized.slice(0, firstMatch.index));
+  const segments: string[] = [];
+
+  markers.forEach((match, index) => {
+    if (match.index == null) return;
+    const segmentStart = match.index + match[0].length;
+    const nextStart = index + 1 < markers.length && markers[index + 1].index != null
+      ? markers[index + 1].index
+      : normalized.length;
+    const segmentBody = cleanText(normalized.slice(segmentStart, nextStart));
+    if (!segmentBody) return;
+    const combined = cleanText(`${prefix ? `${prefix} ` : ''}${segmentBody}`);
+    if (combined) segments.push(combined);
+  });
+
+  return segments.length >= 2 ? segments : [normalized];
+}
+
+function normalizeSuggestions(values: unknown[]): string[] {
+  return uniqueStrings(values)
+    .map((value) => cleanText(value).replace(/[?.!]+$/g, ''))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function extractQuestionCandidates(rawData: unknown): RawQuestionCandidate[] {
+  if (Array.isArray(rawData)) {
+    return rawData.filter((item): item is RawQuestionCandidate => typeof item === 'object' && item !== null);
+  }
+  if (rawData && typeof rawData === 'object') {
+    const candidateObject = rawData as { questions?: unknown; items?: unknown };
+    if (Array.isArray(candidateObject.questions)) {
+      return candidateObject.questions.filter((item): item is RawQuestionCandidate => typeof item === 'object' && item !== null);
+    }
+    if (Array.isArray(candidateObject.items)) {
+      return candidateObject.items.filter((item): item is RawQuestionCandidate => typeof item === 'object' && item !== null);
+    }
+  }
+  return [];
+}
+
+export function parseStoryAssistantQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
+  return extractQuestionCandidates(rawData)
+    .flatMap((candidate) => {
+      const rawQuestion = cleanText(candidate.question);
+      if (!rawQuestion) return [];
+      const categoryKey = mapCategoryKey(candidate.categoryKey ?? candidate.category, rawQuestion);
+      const category = cleanText(candidate.category)
+        || (categoryKey === 'user_personas' ? 'Roles & Personas'
+          : categoryKey === 'context_trigger' ? 'Trigger & Context'
+          : categoryKey === 'functional_flow' ? 'Functional Flow'
+          : categoryKey === 'business_rules' ? 'Business Rules & Exceptions'
+          : categoryKey === 'success_measurement' ? 'Success & Measurement'
+          : 'State & Lifecycle');
+      const intent = cleanText(candidate.intent).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48)
+        || `story_assistant_${categoryKey}`;
+      const suggestions = normalizeSuggestions(Array.isArray(candidate.suggestions) ? candidate.suggestions : []);
+      const details = cleanText(candidate.details);
+
+      return splitClearlyNumberedStoryAssistantQuestion(rawQuestion).map((segment, index) => ({
+        categoryKey,
+        category,
+        intent: index === 0 ? intent : `${intent}_part_${index + 1}`,
+        question: ensureQuestionMark(segment),
+        ...(index === 0 && details ? { details } : {}),
+        suggestions,
+      }));
+    })
+    .filter((question) => question.question.length > 0);
+}
+
+function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
+  if (questions.length < 4) return true;
+  return questions.some((question) => (
+    question.suggestions.length !== 3
+    || question.question.length > 240
+  ));
+}
+
+function buildMinimalDiscoveryProfile(questionCount: number): DiscoveryProfile {
+  const scope = questionCount >= 9 ? 'broad' : questionCount >= 6 ? 'moderate' : 'narrow';
+  const complexity = questionCount >= 9 ? 'high' : questionCount >= 6 ? 'medium' : 'low';
+  const ambiguity = questionCount >= 6 ? 'high' : questionCount >= 3 ? 'medium' : 'low';
+  return {
+    scope,
+    complexity,
+    ambiguity,
+    missingCategoryKeys: [],
+    recommendedInitialCount: questionCount,
+    followupCap: 2,
+    plannedQuestionBudget: questionCount + 2,
+    actualQuestionsAsked: questionCount,
+    softQuestionBudget: questionCount,
+    hardQuestionCap: questionCount + 2,
+    coverageArtifact: buildDiscoveryCoverageArtifact({
+      missingCategoryKeys: [],
+      plannedQuestionBudget: questionCount + 2,
+      actualQuestionsAsked: questionCount,
+      actualAnswersReceived: 0,
+    }),
+  };
 }
 
 function mergePass2IntoPass1(pass1: RawFeature[], pass2: RawFeature[]): RawFeature[] {
@@ -286,64 +437,55 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   wiContextText: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   config: TenantConfig;
-}): Promise<StoryAssistantDiscoveryResult> {
-  const planning = simpleQuestionPlan({
-    requirement: opts.requirement,
-    attachmentText: opts.attachmentText,
-    wiContextText: opts.wiContextText,
-    clarifyAnswers: [],
-  });
-  const wiInsightsText = formatWorkInstructionInsightsForPrompt(opts.wiInsightsArtifact as any, 8).trim();
-  const systemPrompt = buildStoryAssistantClarifySystemPrompt({
-    domainContext: opts.config.domainContext,
-    domainRoles: opts.config.domainRoles,
-    questionPlan: planning.questionPlan,
-  });
-  const userMessage = buildClarifyUserMessage({
-    requirement: opts.requirement,
-    attachmentText: opts.attachmentText,
-    wiContextText: opts.wiContextText,
-    wiInsightsText,
-  });
+}): Promise<StoryAssistantClarifyResult> {
+  void opts.wiInsightsArtifact;
   const providerOpts = buildProviderOpts(opts.config);
   const usageByStage: Record<string, { input: number; output: number }> = {};
   let questions: ClarifyQuestion[] = [];
 
   for (const attempt of [1, 2]) {
-    const result = await callLlmJsonWithUsage<Record<string, unknown>>({
+    const result = await callLlmJsonWithUsage<unknown>({
       model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
-      systemPrompt,
+      systemPrompt: buildStoryAssistantClarifySystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+        questionPlan: { min: 0, max: 0, target: 0 },
+      }),
       userMessage: attempt === 1
-        ? userMessage
-        : `${userMessage}\n\nIMPORTANT: The first response returned too few useful questions. Re-run discovery and return at least ${planning.questionPlan.min} materially distinct questions when that many ambiguities remain.`,
+        ? buildClarifyUserMessage({
+            requirement: opts.requirement,
+            attachmentText: opts.attachmentText,
+            wiContextText: opts.wiContextText,
+          })
+        : `${buildClarifyUserMessage({
+            requirement: opts.requirement,
+            attachmentText: opts.attachmentText,
+            wiContextText: opts.wiContextText,
+          })}\n\nIMPORTANT: Re-run discovery and return a richer question set. Keep each question focused on one business decision, and give every question exactly 3 short suggestions.`,
       maxTokens: 4096,
       reasoningEffort: 'low',
       ...providerOpts,
     });
     usageByStage[attempt === 1 ? 'clarify' : 'clarifyRetry'] = result.usage;
-    questions = parseQuestionCandidates(result.data);
-    if (questions.length >= planning.questionPlan.min || attempt === 2) break;
+    questions = parseStoryAssistantQuestionCandidates(result.data);
+    if (!shouldRetryDiscoveryQuestions(questions) || attempt === 2) break;
   }
 
-  const limitedQuestions = questions.slice(0, planning.questionPlan.max);
-  const discoveryProfile: DiscoveryProfile = {
-    ...planning.discoveryProfile,
-    actualQuestionsAsked: limitedQuestions.length,
-    coverageArtifact: buildDiscoveryCoverageArtifact({
-      missingCategoryKeys: [],
-      plannedQuestionBudget: planning.discoveryProfile.plannedQuestionBudget ?? (planning.questionPlan.target + 2),
-      actualQuestionsAsked: limitedQuestions.length,
-      actualAnswersReceived: 0,
-    }),
-  };
-
+  const discoveryProfile = buildMinimalDiscoveryProfile(questions.length);
   return {
-    questions: limitedQuestions,
+    questions,
     tokenUsage: buildTokenUsageSummary(usageByStage),
     discoveryProfile,
     ambiguityAssessment: {
-      ...planning.ambiguityAssessment,
-      generatedQuestions: limitedQuestions.length,
+      level: questions.length >= 8 ? 'vague' : questions.length >= 4 ? 'medium' : 'clear',
+      score: questions.length >= 8 ? 8 : questions.length >= 4 ? 5 : 3,
+      reasons: ['Discovery is asking every ambiguity that would materially change what gets built.'],
+      questionPlan: {
+        min: questions.length,
+        max: questions.length,
+        target: questions.length,
+      },
+      generatedQuestions: questions.length,
     },
   };
 }
@@ -356,10 +498,11 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
   wiContextText?: string;
   config: TenantConfig;
 }): Promise<StoryAssistantSufficiencyResult> {
+  void opts.askedQuestions;
   const startedAt = Date.now();
   const providerOpts = buildProviderOpts(opts.config);
   try {
-    const result = await callLlmJsonWithUsage<Record<string, unknown>>({
+    const result = await callLlmJsonWithUsage<unknown>({
       model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
       systemPrompt: buildStoryAssistantSufficiencySystemPrompt({
         domainContext: opts.config.domainContext,
@@ -368,38 +511,38 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       userMessage: buildSufficiencyUserMessage({
         requirement: opts.requirement,
         answers: opts.answers,
-        askedQuestions: opts.askedQuestions,
         attachmentText: opts.attachmentText,
         wiContextText: opts.wiContextText,
       }),
-      maxTokens: 1200,
+      maxTokens: 1600,
       reasoningEffort: 'low',
       ...providerOpts,
     });
 
-    const sufficient = Boolean(result.data.sufficient);
-    const questions = parseQuestionCandidates(result.data).slice(0, 2);
-    const reasonCodes = Array.isArray(result.data.reasonCodes)
-      ? result.data.reasonCodes.map((value) => String(value ?? '').trim()).filter(Boolean)
+    const payload = (result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {});
+    const sufficient = payload.sufficient === true;
+    const reasonCodes = Array.isArray(payload.reasonCodes)
+      ? payload.reasonCodes.map((value) => cleanText(value)).filter(Boolean)
       : [];
-    const missingCategoryKeys = questions
+    const parsedQuestions = parseStoryAssistantQuestionCandidates(payload).slice(0, 2);
+    const missingCategoryKeys = parsedQuestions
       .map((question) => question.categoryKey)
       .filter((value, index, values) => values.indexOf(value) === index);
     const status =
       sufficient ? 'ready_to_generate'
-      : questions.length > 0 ? 'ask_followup'
+      : parsedQuestions.length > 0 ? 'ask_followup'
       : 'ready_with_open_decisions';
 
     return {
       sufficient,
       status,
-      ...(status === 'ask_followup' ? { questions } : {}),
+      ...(status === 'ask_followup' ? { questions: parsedQuestions } : {}),
       missingCategoryKeys,
       reasonCodes,
       coverageArtifact: buildDiscoveryCoverageArtifact({
         missingCategoryKeys,
-        plannedQuestionBudget: (opts.askedQuestions?.length ?? opts.answers.length) + 2,
-        actualQuestionsAsked: opts.askedQuestions?.length ?? opts.answers.length,
+        plannedQuestionBudget: opts.answers.length + 2,
+        actualQuestionsAsked: opts.answers.length,
         actualAnswersReceived: opts.answers.length,
         openNonBlockingDecisions: status === 'ready_with_open_decisions' ? reasonCodes : [],
       }),
@@ -414,8 +557,8 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
       coverageArtifact: buildDiscoveryCoverageArtifact({
         missingCategoryKeys: [],
-        plannedQuestionBudget: (opts.askedQuestions?.length ?? opts.answers.length) + 2,
-        actualQuestionsAsked: opts.askedQuestions?.length ?? opts.answers.length,
+        plannedQuestionBudget: opts.answers.length + 2,
+        actualQuestionsAsked: opts.answers.length,
         actualAnswersReceived: opts.answers.length,
         openNonBlockingDecisions: ['SUFFICIENCY_EVAL_FAILED'],
       }),
@@ -443,10 +586,11 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   onPass1DraftFeatures?: (draftFeatures: Feature[]) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
+  void opts.wiInsightsArtifact;
   const providerOpts = buildProviderOpts(opts.config);
   const stageDurationsMs = { ...(opts.priorStageDurationsMs ?? {}) } as Record<string, number>;
-  const wiInsightsText = formatWorkInstructionInsightsForPrompt(opts.wiInsightsArtifact as any, 8).trim();
   const stageUsage: Record<string, { input: number; output: number }> = {};
+  const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers);
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];
 
@@ -467,8 +611,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         clarifyAnswers: opts.clarifyAnswers,
         attachmentText: opts.attachmentText,
         wiContextText: opts.wiContextText,
-        wiInsightsText,
-      })}\n\n---\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`,
+        roleHint,
+      })}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`,
       maxTokens: opts.config.generatorConfig.maxTokens,
       reasoningEffort: 'medium',
       ...providerOpts,
@@ -506,13 +650,13 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       clarifyAnswers: opts.clarifyAnswers,
       attachmentText: opts.attachmentText,
       wiContextText: opts.wiContextText,
-      wiInsightsText,
-    })}\n\n---\n\nFEATURES TO WRITE ACCEPTANCE REQUIREMENTS FOR:\n${JSON.stringify({
+      roleHint,
+    })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
       features: pass1Raw.map((feature) => ({
         ...feature,
         acceptance_requirements: [],
       })),
-    }, null, 2)}`,
+    }, null, 2)}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements.`,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
     reasoningEffort: 'medium',
     ...providerOpts,

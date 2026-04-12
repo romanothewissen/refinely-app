@@ -34,8 +34,8 @@ import {
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
 } from '../services/project-selection';
-import { loadSharedPipelineContext } from '../services/shared-pipeline-context';
 import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
+import { runStoryAssistantSufficiencyStage } from '../services/story-assistant-pipeline';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolver: any = new Resolver();
@@ -46,7 +46,6 @@ import {
   checkRefineFeedbackSufficiency,
   askQuestion,
 } from '../core/story-generator';
-import { evaluateStoryAssistantDefaultSufficiency } from '../core/story-assistant-default';
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { extractDocumentText } from '../core/document-parser';
@@ -761,27 +760,16 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
     if (useStoryAssistantDefaultPipeline(config)) {
       try {
         result = await withResolverBudget((async () => {
-          const sharedContext = await loadSharedPipelineContext({
+          const { result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
             requirement: input.requirement,
             attachmentText: input.attachmentText,
-            clarifyAnswers: input.answers,
+            answers: input.answers,
+            askedQuestions: payload.askedQuestions as Array<string | { categoryKey?: string; intent?: string; question?: string }> | undefined,
             config,
             projectKey: payload?.projectKey as string | undefined,
             projectKeys: payload?.projectKeys as string[] | undefined,
-            pipelineMode: 'story_assistant_default',
           });
-          return evaluateStoryAssistantDefaultSufficiency({
-            requirement: input.requirement,
-            answers: input.answers,
-            askedQuestions: payload.askedQuestions as Array<string | { categoryKey?: string; intent?: string; question?: string }> | undefined,
-            attachmentText: input.attachmentText,
-            wiContextText: sharedContext.wiContext.text,
-            config: {
-              ...config,
-              domainContext: sharedContext.domainContext,
-              domainRoles: sharedContext.domainRoles,
-            },
-          });
+          return sufficiencyResult;
         })(), 20000);
       } catch (err) {
         console.warn('[evaluateSufficiency] Story Assistant sufficiency failed:', err);

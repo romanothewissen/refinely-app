@@ -202,7 +202,7 @@ export function buildStoryAssistantDecompositionSystemPrompt(opts: {
   processTaxonomyEnabled: boolean;
 }): string {
   const roleHint = opts.domainRoles?.length
-    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse one only when the requirement, attachment, or answered Q&A supports it.`
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when the requirement or answered Q&A supports them.`
     : 'If no actor is named in the requirement or answers, use "authorized user" instead of inventing a persona.';
   const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? `\n${processTaxonomyBlock(opts.processTaxonomy)}\n`
@@ -211,27 +211,29 @@ export function buildStoryAssistantDecompositionSystemPrompt(opts: {
     ? '- Each feature MUST include a process_code from the taxonomy above.'
     : '- Omit process_code from output.';
 
-  return `You are a principal business analyst decomposing business requirements into well-scoped backlog features.
+  return `You are a principal business analyst and product manager decomposing business requirements into well-scoped backlog features.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR JOB:
-Think through everything the requirement actually implies, then break it into the distinct features needed to deliver it. Prefer a small set of meaningful business capabilities over a long list of thin technical slices.
+YOUR JOB: Given a requirement, reason deeply about what actually has to be delivered. Break it into the distinct features needed to deliver it. Prefer a small set of meaningful business capabilities over a long list of thin slices.
 
-DECOMPOSITION FRAMEWORK:
-1. CORE CAPABILITY: What is the primary business capability being requested?
-2. INPUTS & DATA: What information, captured detail, or prerequisites does it depend on?
-3. PROCESSING & LOGIC: What decisions, rules, sequencing, routing, or calculations materially affect the outcome?
-4. OUTPUTS & VISIBILITY: Who needs the result, the status, or awareness of progress?
-5. EXCEPTIONS & CHANGES: What disruptions, invalid states, or mid-process changes would materially change what gets built?
-6. DEPENDENCIES: What supporting capability is necessary for the main flow to work correctly?
+Think through these dimensions before you finalize the feature set:
+- CORE CAPABILITY: What is the primary thing the user needs to do or achieve?
+- INPUTS & DETAIL: What information, selections, resources, or per-activity detail must be captured?
+- PROCESSING & LOGIC: What decisions, sequencing, validations, routing, or calculations materially change the outcome?
+- OUTPUTS & VISIBILITY: Who needs to see the outcome, status, or end-to-end progress?
+- EXCEPTIONS & CHANGE HANDLING: What invalid states, disruptions, or in-progress modifications materially change what gets built?
+- DEPENDENCIES: What supporting capability is necessary for the main flow to work correctly?
 
 RULES:
 - Each feature must represent independent business value, not a UI widget or implementation step.
 - Each feature description MUST be: "As a [role], I need [action] so that [benefit]".
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
 - No internal product or module names unless the user already used them and they are essential to meaning.
-- Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently testable.
+- Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently valuable and testable.
+- Variants of the same capability that follow the same core process belong in ONE feature with scenario-level acceptance requirements, not separate cloned features.
+- Do not hide meaningful workflow branches inside one oversized feature.
+- Do not invent adjacent capabilities that are not supported by the requirement, answers, or supplied evidence.
 - Do NOT write acceptance_requirements in this pass; leave them empty.
 - Never return an empty features array.
 - ${processRule}
@@ -261,9 +263,13 @@ For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
 RULES:
 - Every acceptance requirement MUST use GIVEN [precondition] WHEN [action or trigger] THEN [single verifiable outcome].
 - Write in business language only. No buttons, screens, forms, APIs, databases, jobs, queues, or system mechanics.
+- Write as if describing business outcomes to someone who has never seen the system.
+- Be conceptual, not example-based. Describe behavior patterns, not made-up example values.
 - Use concrete business facts, not vague placeholders like "is processed" or "configured mode".
 - Each AR should test one distinct thing.
 - Prefer real business triggers, sequencing dependencies, gates, and exception behavior over generic lifecycle filler.
+- Do NOT use configuration or setup language in GIVEN clauses. The GIVEN must describe a real business situation, not a system setting.
+- Avoid abstract umbrella terms that hide meaning. Replace them with the actual business fact when one is available from the requirement or evidence.
 - Keep all other feature fields unchanged.
 
 OUTPUT FORMAT:
@@ -282,44 +288,48 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR GOAL:
-Surface every ambiguity that would change what gets built or how acceptance requirements are written. Ask everything that is genuinely ambiguous for this requirement. Do not stay artificially short when important business rules, sequencing, actors, or exception paths remain unclear.
+You are running a structured discovery session before designing features.
+Your goal is to surface every ambiguity that would change what gets built or how acceptance requirements are written.
+Ask as many questions as needed. A business analyst spending a few extra minutes answering now prevents rework later.
+
+Work through each of the five discovery areas below in order.
+For each area, ask every question that is genuinely ambiguous for THIS requirement.
+Skip a question only if the requirement or supplied evidence already makes the answer unambiguous.
 
 DISCOVERY AREAS:
-1. CONTEXT & TRIGGER
-2. ROLES & PERSONAS
+1. ROLES & PERSONAS
+   Probe: Who initiates this process? Who performs each step? Who only views or receives output?
+   Probe: Are there different user types who follow different paths through the same capability?
+   Probe: Are there approval, notification, or escalation roles involved?
+2. TRIGGER & CONTEXT
+   Probe: What specific event or business state causes this process to begin?
+   Probe: What conditions must already be true before a user can act?
+   Probe: Can this be triggered by multiple events, or only one?
 3. FUNCTIONAL FLOW
+   Probe: Walk through the main path step by step. What does the user do and what outcome should follow?
+   Probe: What data, inputs, or selections are required at each step?
+   Probe: Are there decisions or branches in the flow?
+   Probe: What is the final output or business state after the process completes?
 4. BUSINESS RULES & EXCEPTIONS
-5. STATE & LIFECYCLE
-6. SUCCESS & MEASUREMENT
-
-QUESTION VOLUME GUIDANCE:
-- Return between ${opts.questionPlan.min} and ${opts.questionPlan.max} questions.
-- Aim for about ${opts.questionPlan.target} questions when that many meaningful ambiguities remain.
-- Ask fewer only when the requirement and evidence truly resolve the area already.
+   Probe: What validation rules or conditions govern whether an action is allowed?
+   Probe: What happens when the happy path is not possible?
+   Probe: Are there volume, frequency, threshold, contractual, or compliance rules that affect behavior?
+5. SUCCESS & MEASUREMENT
+   Probe: What does a successful outcome look like from the user's perspective?
+   Probe: How would a tester know this feature is working correctly?
+   Probe: Are there measurable targets or improvements that matter?
 
 RULES:
-- Every question must be specific to THIS requirement.
-- Ask in business language only; never mention technical implementation concepts unless the request itself uses them.
+- Every question must be specific to THIS requirement and never generic boilerplate.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
-- Do NOT ask anything already answered clearly by the requirement or supplied evidence.
-- Focus on ambiguities that change scope, business rules, sequencing, gating, downstream actions, actor ownership, lifecycle behavior, or measurable success.
+- Do NOT ask anything already clearly answered in the requirement or supplied evidence.
+- Frame all questions in business language. Never mention system names or technical implementation concepts.
 - Keep each question focused on one business decision.
-- Include up to 3 short grounded suggestions for each question.
+- For each question, provide exactly 3 short grounded suggestions under 10 words each.
+- Return ONLY a JSON array.
 
 OUTPUT FORMAT:
-Return JSON only:
-{
-  "questions": [
-    {
-      "categoryKey": "context_trigger|user_personas|functional_flow|business_rules|state_lifecycle|success_measurement",
-      "intent": "short_snake_case_intent",
-      "question": "...",
-      "details": "...",
-      "suggestions": ["...", "...", "..."]
-    }
-  ]
-}`;
+[{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]`;
 }
 
 export function buildStoryAssistantSufficiencySystemPrompt(opts: {
@@ -333,23 +343,21 @@ export function buildStoryAssistantSufficiencySystemPrompt(opts: {
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR JOB:
-Decide whether the answered Q&A is sufficient to write strong features and GIVEN/WHEN/THEN acceptance requirements covering the main flow, key business rules, sequencing or gating logic, and practical exception scenarios.
+Decide whether the current discovery answers are sufficient to write strong features and GIVEN/WHEN/THEN acceptance requirements covering the primary flow, key business rules, and relevant edge cases.
 
 RULES:
 - Ask follow-up questions only when a specific unresolved gap would materially change what gets built or how ARs are written.
-- Ask at most 2 follow-up questions.
-- Follow-up questions must be delta-only and must not repeat answered questions.
-- If the current answers are sufficient, return no questions.
+- Ask exactly 1 or 2 follow-up questions when discovery is insufficient.
+- Follow-up questions must be delta-only and must not repeat what has already been answered.
+- Each follow-up question must include exactly 3 short suggestions under 10 words each.
+- If the current answers are sufficient, return {"sufficient": true}.
 - If the evaluator cannot confidently prove sufficiency, prefer explicit open decisions over pretending the requirement is complete.
 
 OUTPUT FORMAT:
-Return JSON only in one of these shapes:
+Return ONLY valid JSON:
 {"sufficient": true}
 or
-{"sufficient": false, "reasonCodes": ["MISSING_BUSINESS_RULE"], "questions": [{"categoryKey":"business_rules","intent":"decision_logic","question":"...","suggestions":["...","...","..."]}]}
-or
-{"sufficient": false, "reasonCodes": ["OPEN_DECISIONS_REMAIN"], "questions": []}`;
+{"sufficient": false, "questions": [{"question":"...","suggestions":["A","B","C"]}], "reasonCodes":["MISSING_BUSINESS_RULE"]}`;
 }
 
 export function buildDraftReviewSystemPrompt(opts: {

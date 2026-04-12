@@ -35,8 +35,7 @@ import {
 } from '../services/project-selection';
 import { buildTriageEnrichedWiQuery, deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
-import { loadSharedPipelineContext } from '../services/shared-pipeline-context';
-import { generateStoryAssistantDefaultClarifyingQuestions } from '../core/story-assistant-default';
+import { runStoryAssistantClarifyStage } from '../services/story-assistant-pipeline';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
 const CLARIFY_FOCUSED_WI_INTENT_LIMIT = 1;
@@ -84,52 +83,28 @@ export async function handler(event: { body: ClarifyEvent }) {
         },
       });
       stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
-      const sharedContext = await loadSharedPipelineContext({
-        requirement: maskedRequirement.text,
-        attachmentText: maskedAttachment.text,
-        clarifyAnswers: retrievalAnswers,
-        config,
-        projectKey,
-        projectKeys,
-        pipelineMode: 'story_assistant_default',
-      });
-
-      if (await isWorkflowCancelled(sessionId)) {
-        await markCancelled(sessionId, inputSignature);
-        return;
-      }
-
       await sendProgress('Writing the business questions that are still genuinely ambiguous…', {
         stage: 'question_generation',
         discoveryProfile: undefined,
         sources: {
-          projectKey: sharedContext.projectKey,
-          projectCount: sharedContext.projectCount,
-          attachmentIncluded: sharedContext.sources.attachmentIncluded,
-          domainContextApplied: sharedContext.sources.domainContextApplied,
-          wiDocsCount: sharedContext.sources.wiDocsCount,
-          linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
-          retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
-          retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
-          wiInsightCount: sharedContext.sources.wiInsightCount,
-          similarStoriesCount: 0,
+          projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+          projectCount: selectedProjectKeys.length,
+          attachmentIncluded: Boolean(attachmentText?.trim()),
+          domainContextApplied: Boolean(config.domainContext?.trim()),
         },
       });
 
       const clarifyStartedAt = Date.now();
       getPipelineAuditWriter()?.setPhase('clarify.questions');
-      const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } =
-        await generateStoryAssistantDefaultClarifyingQuestions({
-          requirement: maskedRequirement.text,
-          attachmentText: maskedAttachment.text,
-          wiContextText: sharedContext.wiContext.text,
-          wiInsightsArtifact: sharedContext.wiInsights,
-          config: {
-            ...config,
-            domainContext: sharedContext.domainContext,
-            domainRoles: sharedContext.domainRoles,
-          },
-        });
+      const { sharedContext, result } = await runStoryAssistantClarifyStage({
+        requirement: maskedRequirement.text,
+        attachmentText: maskedAttachment.text,
+        priorAnswers: retrievalAnswers,
+        config,
+        projectKey,
+        projectKeys,
+      });
+      const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } = result;
       const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
       if (await isWorkflowCancelled(sessionId)) {

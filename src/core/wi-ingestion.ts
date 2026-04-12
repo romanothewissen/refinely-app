@@ -500,7 +500,7 @@ function isStandaloneStructuredLine(line: string): boolean {
 function detectSectionKind(text: string): StoredWiChunk['sectionKind'] {
   const trimmed = text.trim();
   if (/^\|.+\|$/.test(trimmed)) return 'table';
-  if (/^(step\s*\d+|\d+[\.\)])\s+/i.test(trimmed)) return 'step';
+  if (/^(step\s*\d+|\d+[.)])\s+/i.test(trimmed)) return 'step';
   if (/^[-*•]\s+/.test(trimmed)) return 'bullet';
   return 'paragraph';
 }

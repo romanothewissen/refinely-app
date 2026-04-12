@@ -221,8 +221,6 @@ function normalizeQuestionText(question: string): string {
 function splitQuestionIntoPrimaryAndDetails(question: string): { question: string; details?: string } {
   const normalized = normalizeQuestionText(question);
   if (!normalized) return { question: '' };
-  const shortEnough = normalized.length <= 200 && normalized.split(/\s+/).length <= 30;
-  if (shortEnough) return { question: normalized };
   const ifPattern = normalized.match(/^If\s+(.+?),\s*(is|are|should|can|could|would|will)\s+(.+)\?$/i);
   if (ifPattern) {
     return {
@@ -251,6 +249,8 @@ function splitQuestionIntoPrimaryAndDetails(question: string): { question: strin
       details: normalizeDetailsText(`${delimiterMatch[2].replace(/^[a-z]/, (letter) => letter.toUpperCase())} ${delimiterMatch[3]}.`),
     };
   }
+  const shortEnough = normalized.length <= 200 && normalized.split(/\s+/).length <= 30;
+  if (shortEnough) return { question: normalized };
   return { question: normalized };
 }
 

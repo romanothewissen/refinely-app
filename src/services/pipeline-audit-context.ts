@@ -58,7 +58,8 @@ class PipelineAuditWriter {
 
   async flushMerge(patch: Omit<PipelineAuditMergePatch, 'appendLlmCalls'> & { appendCalls?: PipelineAuditLlmCallRecord[] }): Promise<void> {
     const appendLlmCalls = patch.appendCalls ?? this.drainLlmCalls();
-    const { appendCalls: _a, ...rest } = patch;
+    const rest = { ...patch };
+    delete rest.appendCalls;
     if (!appendLlmCalls.length && !rest.completePhase && !rest.clarify && !rest.sufficiency && !rest.generation && !rest.userInputs && !rest.mergeHeader && !rest.discoveryContextClarify && !rest.discoveryContextGeneration) {
       return;
     }

@@ -40,8 +40,7 @@ import {
 } from '../services/project-selection';
 import { deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
-import { loadSharedPipelineContext } from '../services/shared-pipeline-context';
-import { generateStoryAssistantDefaultFeatures } from '../core/story-assistant-default';
+import { runStoryAssistantGenerationStage } from '../services/story-assistant-pipeline';
 
 interface RealtimeEvent {
   type: 'progress' | 'complete' | 'error' | 'cancelled';
@@ -258,19 +257,61 @@ export async function handler(event: { body: GenerationEvent }) {
     const advisorySizingContract = clarifySizingContract;
     const advisoryTriage = clarifyAdvisoryTriage;
     if (useStoryAssistantDefaultPipeline(config)) {
+      let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> = [];
       await updateProgress(`Reading shared evidence context for ${projectLabel}…`, 1, {
         stage: 'context',
         sources: baseSources,
       });
+      getPipelineAuditWriter()?.setPhase('generate.pipeline');
 
-      const sharedContext = await loadSharedPipelineContext({
-        requirement: maskedRequirement.text,
+      const { sharedContext, result } = await runStoryAssistantGenerationStage({
+        requirement,
         attachmentText: maskedAttachment.text,
         clarifyAnswers: maskedAnswers.answers,
         config,
         projectKey,
         projectKeys,
-        pipelineMode: 'story_assistant_default',
+        precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
+        priorStageDurationsMs,
+        shouldCancel: () => isWorkflowCancelled(sessionId),
+        onPass1DraftFeatures: async (drafts) => {
+          liveDraftFeatures = mapDraftFeatures(drafts);
+          await updateProgress(
+            `Sketching features (${drafts.length} draft${drafts.length === 1 ? '' : 's'})…`,
+            1,
+            {
+              stage: 'decomposition',
+              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+              triage: advisorySizingContract,
+              sizingContract: advisorySizingContract,
+              advisoryTriage,
+              draftFeatures: liveDraftFeatures,
+              draftFeatureCount: liveDraftFeatures.length,
+              sources: {
+                projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+                projectKeys: selectedProjectKeys,
+                projectCount: selectedProjectKeys.length,
+                domainContextApplied: Boolean(config.domainContext?.trim()),
+                attachmentIncluded: Boolean(attachmentText?.trim()),
+              },
+            },
+          );
+          await updateProgress(
+            `Writing acceptance requirements in one full pass for ${drafts.length} feature${drafts.length === 1 ? '' : 's'}…`,
+            2,
+            {
+              stage: 'acceptance_requirements',
+              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+              triage: advisorySizingContract,
+              sizingContract: advisorySizingContract,
+              advisoryTriage,
+              draftFeatures: liveDraftFeatures,
+              draftFeatureCount: liveDraftFeatures.length,
+              arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
+              sources: baseSources,
+            },
+          );
+        },
       });
 
       if (await isWorkflowCancelled(sessionId)) {
@@ -294,58 +335,7 @@ export async function handler(event: { body: GenerationEvent }) {
       });
 
       await updateProgress(startProgress.message, 1, startProgress.payload);
-
-      let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> =
-        startProgress.payload.draftFeatures ?? [];
-
-      getPipelineAuditWriter()?.setPhase('generate.pipeline');
-      const result = await generateStoryAssistantDefaultFeatures({
-        requirement,
-        clarifyAnswers: maskedAnswers.answers,
-        attachmentText: maskedAttachment.text,
-        wiContextText: sharedContext.wiContext.text,
-        wiInsightsArtifact: sharedContext.wiInsights,
-        config: {
-          ...config,
-          domainContext: sharedContext.domainContext,
-          domainRoles: sharedContext.domainRoles,
-        },
-        precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
-        priorStageDurationsMs,
-        shouldCancel: () => isWorkflowCancelled(sessionId),
-        onPass1DraftFeatures: async (drafts) => {
-          liveDraftFeatures = mapDraftFeatures(drafts);
-          await updateProgress(
-            `Sketching features (${drafts.length} draft${drafts.length === 1 ? '' : 's'})…`,
-            1,
-            {
-              stage: 'decomposition',
-              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-              triage: advisorySizingContract,
-              sizingContract: advisorySizingContract,
-              advisoryTriage,
-              draftFeatures: liveDraftFeatures,
-              draftFeatureCount: liveDraftFeatures.length,
-              sources: progressSources,
-            },
-          );
-          await updateProgress(
-            `Writing acceptance requirements in one full pass for ${drafts.length} feature${drafts.length === 1 ? '' : 's'}…`,
-            2,
-            {
-              stage: 'acceptance_requirements',
-              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-              triage: advisorySizingContract,
-              sizingContract: advisorySizingContract,
-              advisoryTriage,
-              draftFeatures: liveDraftFeatures,
-              draftFeatureCount: liveDraftFeatures.length,
-              arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
-              sources: progressSources,
-            },
-          );
-        },
-      });
+      liveDraftFeatures = startProgress.payload.draftFeatures ?? liveDraftFeatures;
 
       result.similarStories = [];
       result.sessionId = sessionId;

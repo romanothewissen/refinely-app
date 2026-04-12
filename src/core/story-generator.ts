@@ -2621,6 +2621,24 @@ function shouldRetrySchemaRepair(reasonCode: ClarifyFailureReasonCode, durationM
     || reasonCode === 'question_set_truncated';
 }
 
+function combinedClarifyQuestionText(question: ClarifyQuestion): string {
+  return [question.question, question.details ?? ''].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+const GENERIC_DISCOVERY_QUESTION_PHRASE_RES = [
+  /\bwhat\s+business\s+problem\b/i,
+  /\bwhat\s+should\s+(?:this|the)\s+(?:capability|feature|system|process)\s+(?:do|achieve|deliver)\b/i,
+  /\bwhat\s+(?:is|are)\s+the\s+(?:main\s+)?(?:primary\s+)?(?:goal|goals|objective)s?\s+for\s+(?:this|the)\s+(?:capability|feature|system|process)\b/i,
+];
+
+function discoveryQuestionSetLooksTooGeneric(questions: ClarifyQuestion[], requirement: string): boolean {
+  if (!questions.length || !String(requirement ?? '').trim()) return false;
+  return questions.every((question) => {
+    const text = combinedClarifyQuestionText(question);
+    return GENERIC_DISCOVERY_QUESTION_PHRASE_RES.some((re) => re.test(text));
+  });
+}
+
 function determineInitialDiscoveryFailureReason(
   parsed: ParsedQuestionCandidatesResult,
   repairedDiscovery: {
@@ -2628,6 +2646,7 @@ function determineInitialDiscoveryFailureReason(
     discoveryProfile: DiscoveryProfile;
     failureReasonCode: ClarifyFailureReasonCode | null;
   },
+  requirement: string,
 ): ClarifyFailureReasonCode | null {
   if (parsed.source === 'missing') return 'question_array_missing';
   if (parsed.rawCandidateCount > 0 && parsed.stringQuestionCount === 0) return 'question_shape_invalid';
@@ -2637,6 +2656,9 @@ function determineInitialDiscoveryFailureReason(
   const zeroQuestionDiscoveryAllowed = allowsZeroQuestionDiscovery(repairedDiscovery.discoveryProfile);
   if (!repairedDiscovery.questions.length && !zeroQuestionDiscoveryAllowed) {
     return 'question_array_empty_when_discovery_required';
+  }
+  if (repairedDiscovery.questions.length > 0 && discoveryQuestionSetLooksTooGeneric(repairedDiscovery.questions, requirement)) {
+    return 'question_set_generic';
   }
   return null;
 }
@@ -2658,7 +2680,7 @@ export function assessInitialDiscoveryResponse(opts: {
     parsed.questions.length || opts.profileFallback?.recommendedInitialCount || 0,
   );
   const repairedDiscovery = validateAndRepairInitialDiscovery(parsed.questions, normalizedProfile);
-  const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery);
+  const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery, opts.requirement);
 
   return {
     questions: repairedDiscovery.questions,
@@ -3503,7 +3525,7 @@ export async function generateClarifyingQuestions(opts: {
         normalizedProfileCandidate,
         clarifyTriageResult?.discoveryForecast?.recommendedInitialCount ?? null,
       );
-      const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery);
+      const failureReasonCode = determineInitialDiscoveryFailureReason(parsed, repairedDiscovery, requirement);
 
       return {
         rawData: raw.data,

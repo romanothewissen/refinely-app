@@ -103,7 +103,8 @@ function mergeGenerationPayload(
 
 const POLL_INTERVAL_MS = 2000;
 const NO_FIRST_EVENT_MS = 60000;
-const STALE_PROGRESS_MS = 90000;
+/** Generation can sit on a single LLM call (especially AR pass) longer than 90s; avoid false timeouts while the queue still updates `updatedAt` via heartbeat. */
+const STALE_PROGRESS_MS = 300000;
 const PROGRESS_STABILITY_MS = 250;
 
 // Clarify runs in a 15-minute queue worker, so client-side timeouts should

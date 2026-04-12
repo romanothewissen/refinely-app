@@ -1,0 +1,132 @@
+import type {
+  ClarifyAnswer,
+  ClarifyQuestion,
+  Feature,
+  GenerationStageDurationsMs,
+  TenantConfig,
+} from '../types';
+import {
+  evaluateStoryAssistantDefaultSufficiency,
+  generateStoryAssistantDefaultClarifyingQuestions,
+  generateStoryAssistantDefaultFeatures,
+} from '../core/story-assistant-default';
+import { loadSharedPipelineContext } from './shared-pipeline-context';
+
+export async function runStoryAssistantClarifyStage(input: {
+  requirement: string;
+  attachmentText: string;
+  priorAnswers?: ClarifyAnswer[];
+  config: TenantConfig;
+  projectKey?: string;
+  projectKeys?: string[];
+}) {
+  const sharedContext = await loadSharedPipelineContext({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    clarifyAnswers: input.priorAnswers ?? [],
+    config: input.config,
+    projectKey: input.projectKey,
+    projectKeys: input.projectKeys,
+    pipelineMode: 'story_assistant_default',
+  });
+
+  const result = await generateStoryAssistantDefaultClarifyingQuestions({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    wiContextText: sharedContext.wiContext.text,
+    wiInsightsArtifact: sharedContext.wiInsights,
+    config: {
+      ...input.config,
+      domainContext: sharedContext.domainContext,
+      domainRoles: sharedContext.domainRoles,
+    },
+  });
+
+  return { sharedContext, result };
+}
+
+export async function runStoryAssistantSufficiencyStage(input: {
+  requirement: string;
+  attachmentText?: string;
+  answers: ClarifyAnswer[];
+  askedQuestions?: Array<string | { categoryKey?: string; intent?: string; question?: string }>;
+  config: TenantConfig;
+  projectKey?: string;
+  projectKeys?: string[];
+}) {
+  const askedQuestions = input.askedQuestions?.map((item) => {
+    if (typeof item === 'string') return item;
+    return {
+      categoryKey: item.categoryKey as ClarifyQuestion['categoryKey'],
+      intent: item.intent ?? '',
+      question: item.question ?? '',
+    };
+  });
+
+  const sharedContext = await loadSharedPipelineContext({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    clarifyAnswers: input.answers,
+    config: input.config,
+    projectKey: input.projectKey,
+    projectKeys: input.projectKeys,
+    pipelineMode: 'story_assistant_default',
+  });
+
+  const result = await evaluateStoryAssistantDefaultSufficiency({
+    requirement: input.requirement,
+    answers: input.answers,
+    askedQuestions,
+    attachmentText: input.attachmentText,
+    wiContextText: sharedContext.wiContext.text,
+    config: {
+      ...input.config,
+      domainContext: sharedContext.domainContext,
+      domainRoles: sharedContext.domainRoles,
+    },
+  });
+
+  return { sharedContext, result };
+}
+
+export async function runStoryAssistantGenerationStage(input: {
+  requirement: string;
+  attachmentText: string;
+  clarifyAnswers: ClarifyAnswer[];
+  config: TenantConfig;
+  projectKey?: string;
+  projectKeys?: string[];
+  precomputedDraftFeatures?: Feature[];
+  priorStageDurationsMs?: GenerationStageDurationsMs;
+  onPass1DraftFeatures?: (draftFeatures: Feature[]) => Promise<void>;
+  shouldCancel?: () => Promise<boolean> | boolean;
+}) {
+  const sharedContext = await loadSharedPipelineContext({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    clarifyAnswers: input.clarifyAnswers,
+    config: input.config,
+    projectKey: input.projectKey,
+    projectKeys: input.projectKeys,
+    pipelineMode: 'story_assistant_default',
+  });
+
+  const result = await generateStoryAssistantDefaultFeatures({
+    requirement: input.requirement,
+    clarifyAnswers: input.clarifyAnswers,
+    attachmentText: input.attachmentText,
+    wiContextText: sharedContext.wiContext.text,
+    wiInsightsArtifact: sharedContext.wiInsights,
+    config: {
+      ...input.config,
+      domainContext: sharedContext.domainContext,
+      domainRoles: sharedContext.domainRoles,
+    },
+    precomputedDraftFeatures: input.precomputedDraftFeatures,
+    priorStageDurationsMs: input.priorStageDurationsMs,
+    onPass1DraftFeatures: input.onPass1DraftFeatures,
+    shouldCancel: input.shouldCancel,
+  });
+
+  return { sharedContext, result };
+}
