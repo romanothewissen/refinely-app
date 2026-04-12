@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, Menu, AlertCircle, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ClarifyAnswer, ClarifyCategoryKey, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyQuestion } from './types';
@@ -122,6 +122,7 @@ export function ClarifyQuestionsView({
   const [showContextDetails, setShowContextDetails] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [expandedQuestionDetails, setExpandedQuestionDetails] = useState<Record<number, boolean>>({});
+  const scrollRef = useRef<HTMLDivElement>(null);
   const failureDiagnostics = contextMeta?.failureDiagnostics;
 
   useEffect(() => {
@@ -153,6 +154,10 @@ export function ClarifyQuestionsView({
     setCurrentPage(0);
     setExpandedQuestionDetails({});
   }, [questions, round]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [currentPage]);
 
   const answeredCount = Object.values(answers).filter(a => a && (a.selectedSuggestions.length > 0 || a.customAnswer.trim())).length;
   const isBlocked = Boolean(blockingState && questions.length === 0);
@@ -282,7 +287,7 @@ export function ClarifyQuestionsView({
         </div>
       </motion.header>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 py-4">
         <div className="mx-auto w-full max-w-[860px] space-y-4 pb-8">
           {contextMeta && (
             <motion.div
