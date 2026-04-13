@@ -13,6 +13,13 @@ modules:
         function: resolver
       title: Refinely
       route: story-generator
+  jira:issueAction:
+    - key: story-generator-issue-action
+      resource: main
+      resolver:
+        function: resolver
+      title: Generate Backlog
+      viewportSize: max
   function:
     - key: resolver
       handler: resolvers/index.handler
