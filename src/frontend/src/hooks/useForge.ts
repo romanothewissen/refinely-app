@@ -73,6 +73,12 @@ export const api = {
     invoke('getPipelineAudit', payload),
   deletePipelineAudit: (payload: { sessionId: string; auditRunId: string }) =>
     invoke('deletePipelineAudit', payload),
+  mergePipelineAuditClientPolling: (payload: {
+    sessionId: string;
+    auditRunId: string;
+    clarify?: unknown;
+    generation?: unknown;
+  }) => invoke('mergePipelineAuditClientPolling', payload),
 
   // Refine
   refineFeatures: (sessionId: string, requirement: string, features: unknown[], feedback: string) =>

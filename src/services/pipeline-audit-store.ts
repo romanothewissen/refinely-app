@@ -1,4 +1,9 @@
-import type { PipelineAuditBundle, PipelineAuditLlmCallRecord, PipelineAuditPhase, PiiMaskingStats } from '../types';
+import type {
+  PipelineAuditBundle,
+  PipelineAuditLlmCallRecord,
+  PipelineAuditPhase,
+  PiiMaskingStats,
+} from '../types';
 import { entityDelete, entityGet, entitySet, KEYS } from './cache';
 import { buildPipelineAuditReviewerPack } from '../core/pipeline-audit-prompts';
 
@@ -38,6 +43,7 @@ export type PipelineAuditMergePatch = {
   sufficiency?: Partial<NonNullable<PipelineAuditBundle['sufficiency']>>;
   generation?: Partial<NonNullable<PipelineAuditBundle['generation']>>;
   completePhase?: PipelineAuditPhase;
+  clientPolling?: Partial<NonNullable<PipelineAuditBundle['clientPolling']>>;
 };
 
 export async function mergePipelineAuditBundle(
@@ -96,6 +102,10 @@ export async function mergePipelineAuditBundle(
         }
       : base.discoveryContext;
 
+  const nextClientPolling = patch.clientPolling
+    ? { ...base.clientPolling, ...patch.clientPolling }
+    : base.clientPolling;
+
   const next: PipelineAuditBundle = {
     ...base,
     accountId: patch.accountId ?? base.accountId,
@@ -104,6 +114,7 @@ export async function mergePipelineAuditBundle(
     reviewerOutputSchema: reviewerPack.outputSchemaJson,
     header: nextHeader,
     completedPhases,
+    clientPolling: nextClientPolling,
     userInputs: {
       ...base.userInputs,
       ...patch.userInputs,

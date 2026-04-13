@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, type MutableRefObject } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { motion, AnimatePresence } from 'framer-motion';
+import type { PipelineAuditClientPollingStats } from '../../types';
 import { Sidebar } from './Sidebar';
 import { MainContent } from './MainContent';
 import { JiraModal } from './JiraModal';
@@ -28,6 +29,24 @@ import type {
   TokenUsageSummary,
   UndoableAiChange,
 } from './types';
+
+function submitPipelinePollingToAudit(
+  surface: 'clarify' | 'generation',
+  statsRef: MutableRefObject<PipelineAuditClientPollingStats | null>,
+  sessionId: string,
+  auditActive: boolean,
+  auditRunId: string | null | undefined,
+) {
+  if (!auditActive || !auditRunId) return;
+  const s = statsRef.current;
+  statsRef.current = null;
+  if (!s) return;
+  void api.mergePipelineAuditClientPolling(
+    surface === 'clarify'
+      ? { sessionId, auditRunId, clarify: s }
+      : { sessionId, auditRunId, generation: s },
+  );
+}
 
 export interface Feature {
   id: string;
@@ -804,10 +823,18 @@ function LegacyApp({
     progress: generationProgress,
     progressPayload: liveGenerationPayload,
     cancelGeneration,
+    generationPollingStatsRef,
   } = useGenerationRealtime(
     pendingSessionId,
     workflowRunId,
     (payload: any) => {
+      submitPipelinePollingToAudit(
+        'generation',
+        generationPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       if (payload.features) {
         setFeatures(payload.features);
       }
@@ -834,6 +861,13 @@ function LegacyApp({
       // Draft review pause removed — pipeline flows straight through
     },
     (errMsg) => {
+      submitPipelinePollingToAudit(
+        'generation',
+        generationPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       setGenerationError(errMsg);
       setGenerationProgressMeta(null);
       setPendingSessionId(null);
@@ -843,6 +877,13 @@ function LegacyApp({
     }
     ,
     () => {
+      submitPipelinePollingToAudit(
+        'generation',
+        generationPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
       setRetryingFeatureId(null);
@@ -850,6 +891,13 @@ function LegacyApp({
       setWorkflowStage('idle');
     },
     (questions, evaluation) => {
+      submitPipelinePollingToAudit(
+        'generation',
+        generationPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       const followupQuestions = questions as ClarifyQuestion[];
       const nextContext = applyDiscoveryEvaluationToContext(clarifyContext, evaluation as any, followupQuestions.length);
       setClarifyContext(nextContext);
@@ -908,11 +956,19 @@ function LegacyApp({
     progress: clarifyProgress,
     progressPayload: liveClarifyPayload,
     isClarifying,
+    clarifyPollingStatsRef,
   } = useClarifyRealtime(
     pendingClarifySessionId,
     activeSessionInputSignature,
     workflowRunId,
     ({ questions, contextMeta }) => {
+      submitPipelinePollingToAudit(
+        'clarify',
+        clarifyPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
       setPendingClarifySessionId(null);
       setClarifyBlockingError(null);
@@ -945,6 +1001,13 @@ function LegacyApp({
       void startGeneration(requirementRef.current, []);
     },
     ({ message, reasonCode, contextMeta }) => {
+      submitPipelinePollingToAudit(
+        'clarify',
+        clarifyPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       setPendingClarifySessionId(null);
       setIsEvaluatingDiscovery(false);
       setIsWorking(false);
@@ -962,6 +1025,13 @@ function LegacyApp({
       setWorkflowStage('blocked');
     },
     () => {
+      submitPipelinePollingToAudit(
+        'clarify',
+        clarifyPollingStatsRef,
+        sessionIdRef.current,
+        pipelineAuditActiveRef.current,
+        pipelineAuditRunIdRef.current,
+      );
       setPendingClarifySessionId(null);
       setIsWorking(false);
       setWorkflowStage('idle');

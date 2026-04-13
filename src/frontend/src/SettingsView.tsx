@@ -701,11 +701,16 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         });
 
         const startedAt = Date.now();
+        let pollDelayMs = 2000;
         while (Date.now() - startedAt < 15 * 60 * 1000) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          const hiddenMultiplier = (typeof document !== 'undefined' && document.visibilityState === 'hidden') ? 2 : 1;
+          await new Promise(resolve => setTimeout(resolve, pollDelayMs * hiddenMultiplier));
           const status = await loadBacklogRefreshStatus(projectKey);
           if (!status) continue;
-          if (status.status === 'queued' || status.status === 'running') continue;
+          if (status.status === 'queued' || status.status === 'running') {
+            pollDelayMs = Math.min(pollDelayMs + 1000, 10000);
+            continue;
+          }
           if (status.status === 'error') {
             alert(status.error || 'Backlog cache refresh failed.');
             return null;

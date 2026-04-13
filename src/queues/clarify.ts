@@ -11,12 +11,11 @@ import type {
   ClarifyFailureDiagnostics,
   ClarifyFailureReasonCode,
   ClarifyProgressPayload,
-  TokenUsageSummary,
 } from '../types';
 import { extractActorSets } from '../core/story-assistant-default';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, KEYS } from '../services/cache';
+import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
@@ -308,7 +307,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         }
       }
 
-      await entitySet(KEYS.clarifyProgress(sessionId), {
+      await entitySetSmall(KEYS.clarifyProgress(sessionId), {
         type: 'complete',
         questions,
         contextMeta: clarifyContext,
@@ -327,7 +326,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       });
       const message = err instanceof Error ? err.message : 'Discovery could not prepare clarifying questions.';
 
-      await entitySet(KEYS.clarifyProgress(sessionId), {
+      await entitySetSmall(KEYS.clarifyProgress(sessionId), {
         type: 'blocked',
         error: message,
         reasonCode: 'queue_error',
@@ -361,7 +360,7 @@ async function sendClarifyProgress(
   if (existing?.type === 'complete' || existing?.type === 'blocked' || existing?.type === 'error' || existing?.type === 'cancelled') {
     return;
   }
-  await entitySet(KEYS.clarifyProgress(sessionId), {
+  await entitySetSmall(KEYS.clarifyProgress(sessionId), {
     type: 'progress',
     sessionId,
     ...(inputSignature ? { inputSignature } : {}),
@@ -399,7 +398,7 @@ async function isWorkflowCancelled(sessionId: string): Promise<boolean> {
 }
 
 async function markCancelled(sessionId: string, inputSignature?: string) {
-  await entitySet(KEYS.clarifyProgress(sessionId), {
+  await entitySetSmall(KEYS.clarifyProgress(sessionId), {
     type: 'cancelled',
     sessionId,
     ...(inputSignature ? { inputSignature } : {}),

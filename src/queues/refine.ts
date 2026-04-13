@@ -1,7 +1,7 @@
 import { CanvasEditIntent, Feature, RefineEvent, StructuralRestructureProposal } from '../types';
 import { addFeaturesFromFeedback, addRequirementsFromFeedback, refineFeatures, restructureFeatures } from '../core/story-generator';
 import { getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, KEYS } from '../services/cache';
+import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
@@ -173,7 +173,7 @@ export async function handler(event: { body: RefineEvent }) {
       metadata: { operationType, restructureScope: event.body.restructureScope ?? null },
     });
 
-    await entitySet(KEYS.refineProgress(sessionId), {
+    await entitySetSmall(KEYS.refineProgress(sessionId), {
       type: 'complete',
       sessionId,
       operationType,
@@ -196,7 +196,7 @@ export async function handler(event: { body: RefineEvent }) {
       await markCancelled(sessionId);
       return;
     }
-    await entitySet(KEYS.refineProgress(sessionId), {
+    await entitySetSmall(KEYS.refineProgress(sessionId), {
       type: 'error',
       sessionId,
       operationType,
@@ -213,7 +213,7 @@ async function sendRefineProgress(
   operationType: 'light_refine' | 'add_requirements' | 'add_feature' | 'reorganize',
   intent?: CanvasEditIntent,
 ) {
-  await entitySet(KEYS.refineProgress(sessionId), {
+  await entitySetSmall(KEYS.refineProgress(sessionId), {
     type: 'progress',
     sessionId,
     operationType,
@@ -229,7 +229,7 @@ async function isWorkflowCancelled(sessionId: string): Promise<boolean> {
 }
 
 async function markCancelled(sessionId: string) {
-  await entitySet(KEYS.refineProgress(sessionId), {
+  await entitySetSmall(KEYS.refineProgress(sessionId), {
     type: 'cancelled',
     sessionId,
     operationType: 'light_refine',

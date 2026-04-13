@@ -1108,6 +1108,27 @@ export interface PipelineAuditLlmCallRecord {
   piiMasking?: PiiMaskingStats;
 }
 
+/** Client-side progress polling telemetry (Custom UI → resolver → KVS read of progress key per successful poll). */
+export interface PipelineAuditClientPollingStats {
+  surface: 'clarify' | 'generation';
+  pollIntervalMs: number;
+  hiddenTabPollMultiplier: number;
+  /** Successful `invoke(getClarifyResult|getProgress)` round-trips */
+  invokeCount: number;
+  /** Timer ticks skipped by hidden-tab downsampling */
+  skippedDueToHiddenTab: number;
+  /** `invoke` threw before a response (transient bridge/network) */
+  transientInvokeErrors: number;
+  totalInvokeDurationMs: number;
+  minInvokeDurationMs?: number;
+  maxInvokeDurationMs?: number;
+  /** Wall time from hook start to terminal poll */
+  elapsedClientMs: number;
+  /** Same as invokeCount: one poll ⇒ one typical progress-key read on the server */
+  estimatedKvsProgressReads: number;
+  capturedAt: string;
+}
+
 export interface PipelineAuditBundle {
   schemaVersion: 1;
   sessionId: string;
@@ -1118,6 +1139,11 @@ export interface PipelineAuditBundle {
   completedPhases: PipelineAuditPhase[];
   reviewerPrompt?: string;
   reviewerOutputSchema?: string;
+  /** Per-run Custom UI polling; largest invokeCount × payload size drives KVS read GB */
+  clientPolling?: {
+    clarify?: PipelineAuditClientPollingStats;
+    generation?: PipelineAuditClientPollingStats;
+  };
   header: {
     primaryProjectKey?: string;
     projectKeys?: string[];

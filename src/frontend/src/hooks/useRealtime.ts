@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
+import type { PipelineAuditClientPollingStats } from '../../../types';
 import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationModelRoute, GenerationQualityMode, OutputProfile, PipelineLatencyBreakdown } from '../types';
 
 export interface GenerationProgress {
@@ -107,7 +108,52 @@ function mergeGenerationPayload(
   };
 }
 
-const POLL_INTERVAL_MS = 2000;
+export const POLL_INTERVAL_MS = 5000;
+const HIDDEN_POLL_MULTIPLIER = 4;
+
+type PollAccum = {
+  startedAt: number;
+  invokeCount: number;
+  skippedHidden: number;
+  transientErrors: number;
+  totalInvokeMs: number;
+  minInvokeMs: number;
+  maxInvokeMs: number;
+};
+
+function createPollAccum(): PollAccum {
+  return {
+    startedAt: Date.now(),
+    invokeCount: 0,
+    skippedHidden: 0,
+    transientErrors: 0,
+    totalInvokeMs: 0,
+    minInvokeMs: Number.POSITIVE_INFINITY,
+    maxInvokeMs: 0,
+  };
+}
+
+function finalizePollingStats(
+  surface: PipelineAuditClientPollingStats['surface'],
+  accum: PollAccum,
+): PipelineAuditClientPollingStats {
+  const elapsedClientMs = Math.max(0, Date.now() - accum.startedAt);
+  const minInvokeDurationMs = Number.isFinite(accum.minInvokeMs) ? accum.minInvokeMs : undefined;
+  return {
+    surface,
+    pollIntervalMs: POLL_INTERVAL_MS,
+    hiddenTabPollMultiplier: HIDDEN_POLL_MULTIPLIER,
+    invokeCount: accum.invokeCount,
+    skippedDueToHiddenTab: accum.skippedHidden,
+    transientInvokeErrors: accum.transientErrors,
+    totalInvokeDurationMs: accum.totalInvokeMs,
+    minInvokeDurationMs,
+    maxInvokeDurationMs: accum.maxInvokeMs || undefined,
+    elapsedClientMs,
+    estimatedKvsProgressReads: accum.invokeCount,
+    capturedAt: new Date().toISOString(),
+  };
+}
 const NO_FIRST_EVENT_MS = 60000;
 /** Generation can sit on a single LLM call (especially AR pass) longer than 90s; avoid false timeouts while the queue still updates `updatedAt` via heartbeat. */
 const STALE_PROGRESS_MS = 300000;
@@ -155,6 +201,8 @@ export function useClarifyRealtime(
   const [progressPayload, setProgressPayload] = useState<ClarifyProgressPayload | null>(null);
   const [isClarifying, setIsClarifying] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clarifyPollingStatsRef = useRef<PipelineAuditClientPollingStats | null>(null);
+  const hiddenPollSkipRef = useRef(0);
   const startedAtRef = useRef<number>(0);
   const cancelledRef = useRef(false);
   // Keep callbacks in refs so the polling interval always calls the latest version
@@ -180,6 +228,9 @@ export function useClarifyRealtime(
     void runId;
     let active = true;
     cancelledRef.current = false;
+    hiddenPollSkipRef.current = 0;
+    clarifyPollingStatsRef.current = null;
+    let accum = createPollAccum();
     startedAtRef.current = Date.now();
     setIsClarifying(true);
     setProgress('Analyzing requirement and gathering context…');
@@ -187,7 +238,17 @@ export function useClarifyRealtime(
 
     timerRef.current = setInterval(async () => {
       if (!active) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        hiddenPollSkipRef.current += 1;
+        if (hiddenPollSkipRef.current % HIDDEN_POLL_MULTIPLIER !== 0) {
+          accum.skippedHidden += 1;
+          return;
+        }
+      } else {
+        hiddenPollSkipRef.current = 0;
+      }
       try {
+        const t0 = Date.now();
         const res = await invoke('getClarifyResult', { sessionId }) as {
           success: boolean;
           result?: {
@@ -202,6 +263,11 @@ export function useClarifyRealtime(
             updatedAt?: number;
           };
         };
+        const dt = Date.now() - t0;
+        accum.invokeCount += 1;
+        accum.totalInvokeMs += dt;
+        accum.minInvokeMs = Math.min(accum.minInvokeMs, dt);
+        accum.maxInvokeMs = Math.max(accum.maxInvokeMs, dt);
         if (!active) return;
         const result = res.result;
 
@@ -229,6 +295,7 @@ export function useClarifyRealtime(
           setProgressPayload(previous => mergeClarifyPayload(previous, payloadWithPollingLag));
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > CLARIFY_STALE_PROGRESS_MS) {
+            clarifyPollingStatsRef.current = finalizePollingStats('clarify', accum);
             clearInterval(timerRef.current!);
             timerRef.current = null;
             setIsClarifying(false);
@@ -242,6 +309,7 @@ export function useClarifyRealtime(
             return;
           }
           if (Date.now() - startedAtRef.current > CLARIFY_TIMEOUT_MS) {
+            clarifyPollingStatsRef.current = finalizePollingStats('clarify', accum);
             clearInterval(timerRef.current!);
             timerRef.current = null;
             setIsClarifying(false);
@@ -257,6 +325,7 @@ export function useClarifyRealtime(
         }
 
         if (result.type === 'cancelled') {
+          clarifyPollingStatsRef.current = finalizePollingStats('clarify', accum);
           clearInterval(timerRef.current!);
           timerRef.current = null;
           cancelledRef.current = true;
@@ -269,6 +338,7 @@ export function useClarifyRealtime(
 
         if (result.type === 'complete' && Array.isArray(result.questions)) {
           console.log('[useClarifyRealtime] session complete with', result.questions.length, 'questions');
+          clarifyPollingStatsRef.current = finalizePollingStats('clarify', accum);
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsClarifying(false);
@@ -277,6 +347,7 @@ export function useClarifyRealtime(
           onCompleteRef.current({ questions: result.questions, contextMeta: result.contextMeta });
         } else if (result.type === 'error' || result.type === 'blocked') {
           console.error('[useClarifyRealtime] blocked result from backend');
+          clarifyPollingStatsRef.current = finalizePollingStats('clarify', accum);
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsClarifying(false);
@@ -289,6 +360,7 @@ export function useClarifyRealtime(
           });
         }
       } catch {
+        accum.transientErrors += 1;
         // transient polling error — keep trying
       }
     }, POLL_INTERVAL_MS);
@@ -300,13 +372,14 @@ export function useClarifyRealtime(
         timerRef.current = null;
       }
       cancelledRef.current = false;
+      hiddenPollSkipRef.current = 0;
       setIsClarifying(false);
       setProgress('');
       setProgressPayload(null);
     };
   }, [sessionId, expectedInputSignature, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { cancelClarify: stopClarify, progress, progressPayload, isClarifying };
+  return { cancelClarify: stopClarify, progress, progressPayload, isClarifying, clarifyPollingStatsRef };
 }
 
 export function useGenerationRealtime(
@@ -323,6 +396,8 @@ export function useGenerationRealtime(
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressPayload, setProgressPayload] = useState<GenerationProgressPayload | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const generationPollingStatsRef = useRef<PipelineAuditClientPollingStats | null>(null);
+  const hiddenPollSkipRef = useRef(0);
   const startedAtRef = useRef<number>(0);
   const visibleProgressRef = useRef<string>('');
   const pendingProgressRef = useRef<string>('');
@@ -386,19 +461,38 @@ export function useGenerationRealtime(
     let active = true;
 
     setIsGenerating(true);
+    hiddenPollSkipRef.current = 0;
+    generationPollingStatsRef.current = null;
+    let accum = createPollAccum();
     visibleProgressRef.current = '';
     commitProgress('Starting generation…', true);
     startedAtRef.current = Date.now();
 
     timerRef.current = setInterval(async () => {
       if (!active) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        hiddenPollSkipRef.current += 1;
+        if (hiddenPollSkipRef.current % HIDDEN_POLL_MULTIPLIER !== 0) {
+          accum.skippedHidden += 1;
+          return;
+        }
+      } else {
+        hiddenPollSkipRef.current = 0;
+      }
       try {
+        const t0 = Date.now();
         const res = await invoke('getProgress', { sessionId }) as { success: boolean; progress?: GenerationProgress };
+        const dt = Date.now() - t0;
+        accum.invokeCount += 1;
+        accum.totalInvokeMs += dt;
+        accum.minInvokeMs = Math.min(accum.minInvokeMs, dt);
+        accum.maxInvokeMs = Math.max(accum.maxInvokeMs, dt);
         if (!active) return;
         const event = res.progress;
         if (!event) {
           // Queue job hasn't written anything yet — give it 90s before giving up
           if (Date.now() - startedAtRef.current > NO_FIRST_EVENT_MS) {
+            generationPollingStatsRef.current = finalizePollingStats('generation', accum);
             clearInterval(timerRef.current!);
             timerRef.current = null;
             setIsGenerating(false);
@@ -418,6 +512,7 @@ export function useGenerationRealtime(
           const updatedAt = eventUpdatedAt;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > STALE_PROGRESS_MS) {
+            generationPollingStatsRef.current = finalizePollingStats('generation', accum);
             clearInterval(timerRef.current!);
             timerRef.current = null;
             setIsGenerating(false);
@@ -445,6 +540,7 @@ export function useGenerationRealtime(
             nextPayload,
           ));
         } else if (event.type === 'cancelled') {
+          generationPollingStatsRef.current = finalizePollingStats('generation', accum);
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsGenerating(false);
@@ -454,6 +550,7 @@ export function useGenerationRealtime(
           setProgressPayload(null);
           onCancelRef.current?.(event.message ?? 'Generation stopped.');
         } else if (event.type === 'needs_clarification') {
+          generationPollingStatsRef.current = finalizePollingStats('generation', accum);
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsGenerating(false);
@@ -468,6 +565,7 @@ export function useGenerationRealtime(
           // Ensure we actually have results, or something went wrong
           const payload = event.payload as any;
           if (payload && payload.features && Array.isArray(payload.features) && payload.features.length > 0) {
+            generationPollingStatsRef.current = finalizePollingStats('generation', accum);
             clearInterval(timerRef.current!);
             timerRef.current = null;
             setIsGenerating(false);
@@ -478,6 +576,7 @@ export function useGenerationRealtime(
             onCompleteRef.current(payload);
           } else {
             console.error('[useGenerationRealtime] complete but no features found');
+            generationPollingStatsRef.current = finalizePollingStats('generation', accum);
             clearInterval(timerRef.current!);
             timerRef.current = null;
             setIsGenerating(false);
@@ -488,6 +587,7 @@ export function useGenerationRealtime(
             onErrorRef.current('Generation finished but no features were returned. Please try again.');
           }
         } else if (event.type === 'error') {
+          generationPollingStatsRef.current = finalizePollingStats('generation', accum);
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setIsGenerating(false);
@@ -498,6 +598,7 @@ export function useGenerationRealtime(
           onErrorRef.current(event.message ?? 'Generation failed');
         }
       } catch {
+        accum.transientErrors += 1;
         // polling errors are transient — keep trying
       }
     }, POLL_INTERVAL_MS);
@@ -510,11 +611,12 @@ export function useGenerationRealtime(
       }
       clearPendingProgressTimer();
       setIsGenerating(false);
+      hiddenPollSkipRef.current = 0;
       visibleProgressRef.current = '';
       setProgress('');
       setProgressPayload(null);
     };
   }, [sessionId, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { isGenerating, progress, progressPayload, cancelGeneration: stopGeneration };
+  return { isGenerating, progress, progressPayload, cancelGeneration: stopGeneration, generationPollingStatsRef };
 }

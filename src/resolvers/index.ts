@@ -11,7 +11,7 @@ import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
-import { entityDelete, entityGet, entitySet, KEYS } from '../services/cache';
+import { entityDelete, entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import { getUserPreferences, saveUserPreferences } from '../services/user-preferences';
 import {
@@ -32,7 +32,6 @@ import {
 } from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
-  getCombinedPersonaRoles,
   normalizeProjectKeys,
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
@@ -73,7 +72,7 @@ import {
   RefineEvent,
 } from '../types';
 import { handleInferProjectPersonaRoles } from './project-persona-role-inference';
-import { deletePipelineAuditBundle, loadPipelineAuditBundle } from '../services/pipeline-audit-store';
+import { deletePipelineAuditBundle, loadPipelineAuditBundle, mergePipelineAuditBundle } from '../services/pipeline-audit-store';
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -521,7 +520,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
-  await entitySet(KEYS.generationProgress(payload.sessionId), {
+  await entitySetSmall(KEYS.generationProgress(payload.sessionId), {
     type: 'progress',
     sessionId: payload.sessionId,
     message: 'Queuing generation…',
@@ -582,7 +581,7 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     enqueuedAt: Date.now(),
   };
 
-  await entitySet(KEYS.generationProgress(payload.sessionId), {
+  await entitySetSmall(KEYS.generationProgress(payload.sessionId), {
     type: 'progress',
     sessionId: payload.sessionId,
     message: 'Retrying acceptance requirements for the selected feature…',
@@ -607,7 +606,7 @@ async function cancelWorkflowProgress(
   const existing = type === 'clarify'
     ? await entityGet<{ inputSignature?: string }>(key)
     : null;
-  await entitySet(key, {
+  await entitySetSmall(key, {
     type: 'cancelled',
     sessionId,
     message,
@@ -654,7 +653,7 @@ async function enqueueClarifyWorkflow(
     enqueuedAt: Date.now(),
   };
 
-  await entitySet(KEYS.clarifyProgress(payload.sessionId), {
+  await entitySetSmall(KEYS.clarifyProgress(payload.sessionId), {
     type: 'progress',
     sessionId: payload.sessionId,
     ...(payload.inputSignature ? { inputSignature: payload.inputSignature } : {}),
@@ -770,6 +769,30 @@ resolver.define('deletePipelineAudit', async ({ payload, context }) => {
   return { success: true };
 });
 
+resolver.define('mergePipelineAuditClientPolling', async ({ payload }) => {
+  const cfg = await getConfig();
+  if (!cfg.developerTools?.pipelineAuditEnabled) {
+    return { success: false, error: 'Pipeline audit is not enabled for this workspace.' };
+  }
+  const sessionId = String(payload?.sessionId ?? '');
+  const auditRunId = String(payload?.auditRunId ?? '');
+  if (!sessionId || !auditRunId) {
+    return { success: false, error: 'sessionId and auditRunId are required.' };
+  }
+  const clarify = payload?.clarify;
+  const generation = payload?.generation;
+  if (!clarify && !generation) {
+    return { success: false, error: 'At least one of clarify or generation is required.' };
+  }
+  await mergePipelineAuditBundle(sessionId, auditRunId, {
+    clientPolling: {
+      ...(clarify ? { clarify } : {}),
+      ...(generation ? { generation } : {}),
+    },
+  });
+  return { success: true };
+});
+
 // ─── Refine ───────────────────────────────────────────────────────────────────
 
 resolver.define('refineFeatures', async ({ payload, context }) => {
@@ -800,7 +823,7 @@ resolver.define('refineFeatures', async ({ payload, context }) => {
       projectKeys: selectedProjectKeys,
     };
 
-    await entitySet(KEYS.refineProgress(payload.sessionId), {
+    await entitySetSmall(KEYS.refineProgress(payload.sessionId), {
       type: 'progress',
       sessionId: payload.sessionId,
       message: 'Queuing bulk refinement…',
@@ -855,7 +878,7 @@ resolver.define('changeCanvas', async ({ payload, context }) => {
       selectedFeatureIds: scope === 'all' ? [] : selectedFeatureIds,
     };
 
-    await entitySet(KEYS.refineProgress(payload.sessionId), {
+    await entitySetSmall(KEYS.refineProgress(payload.sessionId), {
       type: 'progress',
       sessionId: payload.sessionId,
       operationType: intent,
@@ -900,7 +923,7 @@ resolver.define('restructureFeatures', async ({ payload, context }) => {
       selectedFeatureIds: Array.isArray(payload.selectedFeatureIds) ? payload.selectedFeatureIds : [],
     };
 
-    await entitySet(KEYS.refineProgress(payload.sessionId), {
+    await entitySetSmall(KEYS.refineProgress(payload.sessionId), {
       type: 'progress',
       sessionId: payload.sessionId,
       operationType: 'restructure',
@@ -1812,7 +1835,7 @@ resolver.define('refreshBacklogCache', async ({ payload, context }) => {
   await ensureAdmin(context, payload?.projectKey);
   const projectKey = payload?.projectKey || '*';
   await ensureProjectBrowse(context, projectKey);
-  await entitySet(KEYS.backlogRefreshStatus(projectKey), {
+  await entitySetSmall(KEYS.backlogRefreshStatus(projectKey), {
     projectKey,
     status: 'queued',
     queuedAt: new Date().toISOString(),
@@ -1863,7 +1886,7 @@ async function getQuickRefineStoredSession(accountId: string, issueKey?: string,
 
 async function persistQuickRefineSession(accountId: string, session: QuickRefineSession) {
   await entitySet(KEYS.quickRefineSession(session.sessionId), session);
-  await entitySet(KEYS.userIssueSession(accountId, session.issueKey), session.sessionId);
+  await entitySetSmall(KEYS.userIssueSession(accountId, session.issueKey), session.sessionId);
 }
 
 // ─── Conversation History ─────────────────────────────────────────────────────
@@ -2038,7 +2061,7 @@ resolver.define('getLastSession', async ({ context }) => {
 resolver.define('setLastSession', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   if (!payload?.sessionId) return { success: false, error: 'missing sessionId' };
-  await entitySet(KEYS.userLastSession(accountId), payload.sessionId);
+  await entitySetSmall(KEYS.userLastSession(accountId), payload.sessionId);
   return { success: true };
 });
 
@@ -2051,7 +2074,7 @@ resolver.define('getIssueSession', async ({ payload, context }) => {
 resolver.define('setIssueSession', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   if (!payload?.issueKey || !payload?.sessionId) return { success: false, error: 'missing issueKey or sessionId' };
-  await entitySet(KEYS.userIssueSession(accountId, payload.issueKey), payload.sessionId);
+  await entitySetSmall(KEYS.userIssueSession(accountId, payload.issueKey), payload.sessionId);
   return { success: true };
 });
 

@@ -31,7 +31,6 @@ import {
   buildTriageSystemPrompt,
 } from '../prompts';
 import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
-import { DEFAULT_CONFIG } from '../../types';
 
 test('normalizeDiscoveryProfile preserves llm-sized discovery counts', () => {
   const profile = normalizeDiscoveryProfile({

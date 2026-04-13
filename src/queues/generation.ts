@@ -21,7 +21,7 @@ import { GenerationCancelledError } from '../core/feature-output';
 import { generateSessionTitle } from '../core/session-title';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, KEYS } from '../services/cache';
+import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
@@ -70,7 +70,7 @@ const PROGRESS_HEARTBEAT_MS = 15000;
 const MAX_FULL_GENERATION_ATTEMPTS = 3;
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
-  await entitySet(KEYS.generationProgress(sessionId), {
+  await entitySetSmall(KEYS.generationProgress(sessionId), {
     type: 'progress',
     sessionId,
     message,
@@ -265,7 +265,7 @@ export async function handler(event: { body: GenerationEvent }) {
         });
 
         if (sufficiencyResult.status === 'ask_followup' && Array.isArray(sufficiencyResult.questions) && sufficiencyResult.questions.length > 0) {
-          await entitySet(KEYS.generationProgress(sessionId), {
+          await entitySetSmall(KEYS.generationProgress(sessionId), {
             type: 'needs_clarification',
             sessionId,
             message: 'Discovery evaluation determined follow-up questions are required.',
@@ -654,7 +654,7 @@ export async function handler(event: { body: GenerationEvent }) {
         }
       }
 
-      await entitySet(KEYS.generationProgress(sessionId), {
+      await entitySetSmall(KEYS.generationProgress(sessionId), {
         type: 'complete',
         sessionId,
         payload: result,
@@ -678,7 +678,7 @@ export async function handler(event: { body: GenerationEvent }) {
       }
 
       console.error('[generation-queue] Error:', err);
-      await entitySet(KEYS.generationProgress(sessionId), {
+      await entitySetSmall(KEYS.generationProgress(sessionId), {
         type: 'error',
         sessionId,
         message: err instanceof Error ? err.message : 'Generation failed. Please try again.',
@@ -702,7 +702,7 @@ async function isWorkflowCancelled(sessionId: string): Promise<boolean> {
 }
 
 async function markCancelled(sessionId: string) {
-  await entitySet(KEYS.generationProgress(sessionId), {
+  await entitySetSmall(KEYS.generationProgress(sessionId), {
     type: 'cancelled',
     sessionId,
     message: 'Generation cancelled.',

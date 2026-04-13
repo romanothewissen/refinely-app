@@ -64,6 +64,11 @@ npm run build
 forge deploy -e production
 ```
 
+## Storage Cost Playbook
+
+- Forge storage inventory, cost diagnostics, optimization steps, and SQL migration boundary:
+  - `docs/forge-storage-usage-and-migration.md`
+
 ## Support
 
 - Support: `https://smartif.ai/support`

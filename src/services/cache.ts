@@ -105,6 +105,28 @@ export async function entitySet(key: string, value: unknown): Promise<void> {
   await kvs.set(key, pointer);
 }
 
+/**
+ * Fast-path writes for values that are expected to stay below inline limits.
+ *
+ * This intentionally avoids the pre-read done by `entitySet` to reduce
+ * read amplification on hot keys (progress/status/session pointers).
+ * If a payload is larger than inline limits, it falls back to `entitySet`
+ * to preserve sharded-storage behavior.
+ */
+export async function entitySetSmall(key: string, value: unknown): Promise<void> {
+  if (value === undefined || value === null) {
+    console.warn(`[cache] entitySetSmall called with null/undefined value for key=${key}, skipping write`);
+    return;
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized.length > INLINE_VALUE_CHAR_LIMIT) {
+    await entitySet(key, value);
+    return;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await kvs.set(key, value as any);
+}
+
 export async function entityGet<T = unknown>(key: string): Promise<T | undefined> {
   const stored = await kvs.get<unknown>(key);
   if (!isLargeValuePointer(stored)) {
