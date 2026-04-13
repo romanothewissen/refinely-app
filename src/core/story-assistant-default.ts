@@ -1,8 +1,11 @@
 import type {
   ActorSetGrounding,
   ClarifyAnswer,
+  ClarifyContextMeta,
   ClarifyCategoryKey,
   ClarifyQuestion,
+  DiscoveryAssessment,
+  DiscoveryDepth,
   DiscoveryProfile,
   Feature,
   GenerationResult,
@@ -13,9 +16,10 @@ import type {
   WorkInstructionInsightArtifact,
 } from '../types';
 import { getTierModel } from '../services/billing';
-import { callLlmJsonWithUsage } from './llm';
+import { callLlmJsonWithUsage, mapReasoningDepthToEffort } from './llm';
 import {
   buildStoryAssistantArSystemPrompt,
+  buildStoryAssistantDiscoveryAssessmentSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantDecompositionSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
@@ -53,6 +57,9 @@ export interface StoryAssistantClarifyResult {
   questions: ClarifyQuestion[];
   tokenUsage: TokenUsageSummary;
   discoveryProfile: DiscoveryProfile;
+  discoveryAssessment: DiscoveryAssessment;
+  coverageQualityScore?: number;
+  coverageRetryTriggered?: boolean;
   ambiguityAssessment: {
     level: 'clear' | 'medium' | 'vague';
     score: number;
@@ -621,6 +628,250 @@ function normalizeSuggestions(values: unknown[]): string[] {
     .slice(0, 4);
 }
 
+const DISCOVERY_DEPTH_ORDER: Record<DiscoveryDepth, number> = {
+  light: 1,
+  standard: 2,
+  deep: 3,
+};
+
+const OBLIGATION_CATEGORY_MAP: Record<string, ClarifyCategoryKey[]> = {
+  ownership: ['user_personas'],
+  actors: ['user_personas'],
+  approvals: ['user_personas', 'business_rules'],
+  prerequisites: ['context_trigger'],
+  trigger: ['context_trigger'],
+  sequencing: ['functional_flow'],
+  dependencies: ['functional_flow', 'business_rules'],
+  downstream_initiation: ['functional_flow', 'state_lifecycle'],
+  quote_and_billing: ['business_rules'],
+  entitlement_and_contract: ['business_rules'],
+  disruption_and_exceptions: ['business_rules', 'state_lifecycle'],
+  validation: ['business_rules'],
+  status_visibility: ['success_measurement', 'state_lifecycle'],
+  active_change_handling: ['state_lifecycle', 'business_rules'],
+  success_measurement: ['success_measurement'],
+  linked_assets: ['functional_flow'],
+};
+
+function normalizeDiscoveryDepth(value: unknown): DiscoveryDepth {
+  const normalized = normalizeKey(value);
+  if (normalized === 'light' || normalized === 'standard' || normalized === 'deep') {
+    return normalized;
+  }
+  return 'standard';
+}
+
+function normalizeDimensionLevel(value: unknown): 'low' | 'medium' | 'high' {
+  const normalized = normalizeKey(value);
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high') return normalized;
+  return 'medium';
+}
+
+function normalizeRecommendedQuestionRange(
+  value: unknown,
+  depth: DiscoveryDepth,
+): { min: number; max: number } {
+  const fallback = depth === 'light'
+    ? { min: 4, max: 7 }
+    : depth === 'deep'
+      ? { min: 12, max: 18 }
+      : { min: 8, max: 12 };
+  if (!value || typeof value !== 'object') return fallback;
+  const candidate = value as { min?: unknown; max?: unknown };
+  const min = Number.isFinite(candidate.min) ? Math.max(1, Math.round(Number(candidate.min))) : fallback.min;
+  const max = Number.isFinite(candidate.max) ? Math.max(min, Math.round(Number(candidate.max))) : fallback.max;
+  return {
+    min: Math.min(min, 18),
+    max: Math.min(Math.max(max, min), 18),
+  };
+}
+
+function normalizeCoverageObligations(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : [];
+  return uniqueStrings(raw)
+    .map((item) => normalizeKey(item).replace(/\s+/g, '_'))
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function buildEvidenceThemeSummary(
+  requirement: string,
+  attachmentText: string,
+  wiEvidenceText: string,
+  similarStoriesText: string,
+  domainContext: string,
+): string {
+  const parts = [
+    `Requirement: ${trimPromptText(mergeRequirementAndAttachment(requirement, attachmentText), 6000)}`,
+  ];
+  if (wiEvidenceText.trim()) {
+    parts.push(`Work instruction evidence summary:\n${trimPromptText(wiEvidenceText, 2400)}`);
+  }
+  if (similarStoriesText.trim()) {
+    parts.push(`Backlog theme summary:\n${trimPromptText(similarStoriesText, 1800)}`);
+  }
+  if (domainContext.trim()) {
+    parts.push(`Business context:\n${trimPromptText(domainContext, 1200)}`);
+  }
+  return parts.join('\n\n');
+}
+
+export function buildHeuristicDiscoveryAssessment(input: {
+  requirement: string;
+  attachmentText: string;
+  wiEvidenceText: string;
+  similarStoriesText: string;
+}): DiscoveryAssessment {
+  const corpus = [
+    input.requirement,
+    input.attachmentText,
+    input.wiEvidenceText,
+    input.similarStoriesText,
+  ].join('\n').toLowerCase();
+  const hasSequence = /\b(sequence|sequen|step|de-?install|re-?install|dependency|before|after|followed by|multi-activity|multi activity)\b/.test(corpus);
+  const hasMultipleTeams = /\b(team|field|in-house|logistics|coordinator|manager|specialist|approv|review)\b/.test(corpus);
+  const hasRules = /\b(quote|billable|billing|contract|entitlement|approval|authorization|threshold|validation|rule|prevent)\b/.test(corpus);
+  const hasExceptions = /\b(exception|unless|cannot|fail|delay|cancel|disruption|warning|hold|illogical)\b/.test(corpus);
+  const hasLifecycle = /\b(status|track|visibility|overall status|in progress|completed|modify|change|shipment|work order|initiat)\b/.test(corpus);
+  const highSignals = [hasSequence, hasMultipleTeams, hasRules, hasExceptions, hasLifecycle].filter(Boolean).length;
+  const depth: DiscoveryDepth = highSignals >= 4 ? 'deep' : highSignals >= 2 ? 'standard' : 'light';
+
+  const obligations = [
+    hasMultipleTeams ? 'ownership' : '',
+    /\bapproval|authori[sz]/.test(corpus) ? 'approvals' : '',
+    /\btrigger|start|begin|when\b/.test(corpus) ? 'trigger' : '',
+    /\bprecondition|required before|must already\b/.test(corpus) ? 'prerequisites' : '',
+    hasSequence ? 'sequencing' : '',
+    /\bdepend/.test(corpus) ? 'dependencies' : '',
+    /\bquote|billing|billable/.test(corpus) ? 'quote_and_billing' : '',
+    /\bcontract|entitlement|covered/.test(corpus) ? 'entitlement_and_contract' : '',
+    /\bshipment|work order|follow-on|follow on|initiat/.test(corpus) ? 'downstream_initiation' : '',
+    /\bstatus|track|visible|view/.test(corpus) ? 'status_visibility' : '',
+    /\bmodify|change|remove|add.*activity|in progress/.test(corpus) ? 'active_change_handling' : '',
+    hasExceptions ? 'disruption_and_exceptions' : '',
+    /\bloaner|equipment|asset/.test(corpus) ? 'linked_assets' : '',
+    /\bmetric|measure|success|outcome/.test(corpus) ? 'success_measurement' : '',
+  ].filter(Boolean);
+
+  return {
+    discoveryDepth: depth,
+    reasoningLevel: depth,
+    workflowComplexity: hasSequence ? 'high' : /\bworkflow|flow|process/.test(corpus) ? 'medium' : 'low',
+    actorComplexity: hasMultipleTeams ? 'high' : /\brole|user|actor/.test(corpus) ? 'medium' : 'low',
+    ruleDensity: hasRules ? 'high' : /\bpolicy|rule/.test(corpus) ? 'medium' : 'low',
+    exceptionDensity: hasExceptions ? 'high' : /\bexception|edge case/.test(corpus) ? 'medium' : 'low',
+    lifecycleComplexity: hasLifecycle ? 'high' : /\bstatus|state/.test(corpus) ? 'medium' : 'low',
+    ambiguityLevel: highSignals >= 4 ? 'high' : highSignals >= 2 ? 'medium' : 'low',
+    coverageObligations: uniqueStrings(obligations),
+    recommendedQuestionRange: normalizeRecommendedQuestionRange(undefined, depth),
+    rationale: highSignals >= 4
+      ? 'The requirement implies a coordinated workflow with multiple unresolved business dimensions.'
+      : highSignals >= 2
+        ? 'The requirement has meaningful ambiguity across workflow, rules, or ownership and needs structured discovery.'
+        : 'The requirement appears focused with limited ambiguity and can use a lighter discovery pass.',
+  };
+}
+
+export function mergeDiscoveryAssessments(
+  llmAssessment: DiscoveryAssessment | null,
+  heuristicAssessment: DiscoveryAssessment,
+): DiscoveryAssessment {
+  if (!llmAssessment) return heuristicAssessment;
+  const discoveryDepth = DISCOVERY_DEPTH_ORDER[heuristicAssessment.discoveryDepth] > DISCOVERY_DEPTH_ORDER[llmAssessment.discoveryDepth]
+    ? heuristicAssessment.discoveryDepth
+    : llmAssessment.discoveryDepth;
+  const reasoningLevel = DISCOVERY_DEPTH_ORDER[heuristicAssessment.reasoningLevel] > DISCOVERY_DEPTH_ORDER[llmAssessment.reasoningLevel]
+    ? heuristicAssessment.reasoningLevel
+    : llmAssessment.reasoningLevel;
+  return {
+    ...llmAssessment,
+    discoveryDepth,
+    reasoningLevel,
+    coverageObligations: uniqueStrings([
+      ...llmAssessment.coverageObligations,
+      ...heuristicAssessment.coverageObligations,
+    ]),
+    recommendedQuestionRange: {
+      min: Math.max(llmAssessment.recommendedQuestionRange.min, heuristicAssessment.recommendedQuestionRange.min),
+      max: Math.max(llmAssessment.recommendedQuestionRange.max, heuristicAssessment.recommendedQuestionRange.max),
+    },
+  };
+}
+
+export function parseDiscoveryAssessment(rawData: unknown): DiscoveryAssessment | null {
+  if (!rawData || typeof rawData !== 'object') return null;
+  const payload = rawData as Record<string, unknown>;
+  const discoveryDepth = normalizeDiscoveryDepth(payload.discoveryDepth);
+  const reasoningLevel = normalizeDiscoveryDepth(payload.reasoningLevel ?? payload.discoveryDepth);
+  return {
+    discoveryDepth,
+    reasoningLevel,
+    workflowComplexity: normalizeDimensionLevel(payload.workflowComplexity),
+    actorComplexity: normalizeDimensionLevel(payload.actorComplexity),
+    ruleDensity: normalizeDimensionLevel(payload.ruleDensity),
+    exceptionDensity: normalizeDimensionLevel(payload.exceptionDensity),
+    lifecycleComplexity: normalizeDimensionLevel(payload.lifecycleComplexity),
+    ambiguityLevel: normalizeDimensionLevel(payload.ambiguityLevel),
+    coverageObligations: normalizeCoverageObligations(payload.coverageObligations),
+    recommendedQuestionRange: normalizeRecommendedQuestionRange(payload.recommendedQuestionRange, discoveryDepth),
+    rationale: cleanText(payload.rationale) || 'Discovery depth inferred from semantic complexity and unresolved business ambiguity.',
+  };
+}
+
+export function evaluateClarifyQuestionSetQuality(
+  questions: ClarifyQuestion[],
+  assessment: DiscoveryAssessment,
+): { score: number; missingObligations: string[]; reasons: string[] } {
+  const reasons: string[] = [];
+  const questionText = questions
+    .map((question) => `${question.categoryKey} ${question.question} ${(question.suggestions ?? []).join(' ')}`.toLowerCase())
+    .join('\n');
+  const categoryKeys = new Set(questions.map((question) => question.categoryKey));
+  const missingObligations = assessment.coverageObligations.filter((obligation) => {
+    const requiredCategories = OBLIGATION_CATEGORY_MAP[obligation] ?? [];
+    if (requiredCategories.some((categoryKey) => categoryKeys.has(categoryKey))) return false;
+    return !new RegExp(obligation.replace(/_/g, '[ _-]?'), 'i').test(questionText);
+  });
+
+  let score = 100;
+  if (questions.length < assessment.recommendedQuestionRange.min) {
+    score -= 25;
+    reasons.push('Returned fewer questions than the assessed discovery range suggests.');
+  }
+  if (missingObligations.length) {
+    score -= Math.min(40, missingObligations.length * 8);
+    reasons.push(`Missing discovery obligation coverage: ${missingObligations.join(', ')}.`);
+  }
+  const weakSuggestions = questions.filter((question) => question.suggestions.length < 3).length;
+  if (weakSuggestions > 0) {
+    score -= Math.min(15, weakSuggestions * 4);
+    reasons.push('Some questions did not provide enough grounded suggestions.');
+  }
+  const longQuestions = questions.filter((question) => question.question.length > 220).length;
+  if (longQuestions > 0) {
+    score -= Math.min(10, longQuestions * 2);
+    reasons.push('Some discovery questions were too broad or overpacked.');
+  }
+  const sequencingRequired = assessment.coverageObligations.includes('sequencing') || assessment.coverageObligations.includes('dependencies');
+  if (sequencingRequired && !/sequence|dependency|order|before|after|prerequisite/.test(questionText)) {
+    score -= 12;
+    reasons.push('No explicit sequencing or dependency question was asked for a workflow that implies ordering.');
+  }
+  const gatesRequired = assessment.coverageObligations.includes('quote_and_billing')
+    || assessment.coverageObligations.includes('entitlement_and_contract')
+    || assessment.coverageObligations.includes('approvals');
+  if (gatesRequired && !/quote|bill|contract|entitlement|approval|authori[sz]|covered/.test(questionText)) {
+    score -= 12;
+    reasons.push('No explicit gate, billing, entitlement, or approval question was asked where one is implied.');
+  }
+
+  return {
+    score: Math.max(0, score),
+    missingObligations,
+    reasons,
+  };
+}
+
 function extractQuestionCandidates(rawData: unknown): RawQuestionCandidate[] {
   if (Array.isArray(rawData)) {
     return rawData.filter((item): item is RawQuestionCandidate => typeof item === 'object' && item !== null);
@@ -676,31 +927,87 @@ function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
   ));
 }
 
-function buildMinimalDiscoveryProfile(questions: ClarifyQuestion[]): DiscoveryProfile {
+function buildMinimalDiscoveryProfile(
+  questions: ClarifyQuestion[],
+  assessment?: DiscoveryAssessment,
+): DiscoveryProfile {
   const questionCount = questions.length;
   const askedCategoryKeys = uniqueStrings(questions.map((question) => question.categoryKey))
     .map((key) => key as ClarifyCategoryKey);
-  const scope = questionCount >= 9 ? 'broad' : questionCount >= 6 ? 'moderate' : 'narrow';
-  const complexity = questionCount >= 9 ? 'high' : questionCount >= 6 ? 'medium' : 'low';
-  const ambiguity = questionCount >= 6 ? 'high' : questionCount >= 3 ? 'medium' : 'low';
+  const scope = assessment?.discoveryDepth === 'deep'
+    ? 'broad'
+    : assessment?.discoveryDepth === 'standard'
+      ? 'moderate'
+      : questionCount >= 8
+        ? 'broad'
+        : questionCount >= 5
+          ? 'moderate'
+          : 'narrow';
+  const complexity = assessment?.workflowComplexity === 'high' || assessment?.ruleDensity === 'high' || assessment?.lifecycleComplexity === 'high'
+    ? 'high'
+    : assessment?.workflowComplexity === 'medium' || assessment?.ruleDensity === 'medium' || assessment?.lifecycleComplexity === 'medium'
+      ? 'medium'
+      : questionCount >= 6
+        ? 'medium'
+        : 'low';
+  const ambiguity = assessment?.ambiguityLevel ?? (questionCount >= 6 ? 'high' : questionCount >= 3 ? 'medium' : 'low');
+  const followupCap = assessment?.discoveryDepth === 'deep' ? 2 : 1;
+  const plannedQuestionBudget = assessment
+    ? assessment.recommendedQuestionRange.max + followupCap
+    : questionCount + 2;
   return {
     scope,
     complexity,
     ambiguity,
     missingCategoryKeys: [],
     recommendedInitialCount: questionCount,
-    followupCap: 2,
-    plannedQuestionBudget: questionCount + 2,
+    followupCap,
+    plannedQuestionBudget,
     actualQuestionsAsked: questionCount,
-    softQuestionBudget: questionCount,
-    hardQuestionCap: questionCount + 2,
+    softQuestionBudget: assessment?.recommendedQuestionRange.max ?? questionCount,
+    hardQuestionCap: plannedQuestionBudget,
     coverageArtifact: buildDiscoveryCoverageArtifact({
       missingCategoryKeys: [],
-      plannedQuestionBudget: questionCount + 2,
+      plannedQuestionBudget,
       actualQuestionsAsked: questionCount,
       actualAnswersReceived: 0,
       askedCategoryKeys,
     }),
+  };
+}
+
+function buildClarifyAmbiguityAssessment(
+  questions: ClarifyQuestion[],
+  assessment: DiscoveryAssessment,
+  qualityScore: number,
+  qualityReasons: string[],
+): NonNullable<ClarifyContextMeta['ambiguityAssessment']> {
+  const level = assessment.ambiguityLevel === 'high'
+    ? 'vague'
+    : assessment.ambiguityLevel === 'medium'
+      ? 'medium'
+      : 'clear';
+  return {
+    level,
+    score: Math.max(
+      1,
+      Math.min(
+        10,
+        assessment.discoveryDepth === 'deep' ? 8 : assessment.discoveryDepth === 'standard' ? 6 : 3,
+      ),
+    ),
+    reasons: qualityReasons.length
+      ? qualityReasons
+      : ['Discovery depth was calibrated from semantic workflow ambiguity rather than prompt length.'],
+    questionPlan: {
+      min: assessment.recommendedQuestionRange.min,
+      max: assessment.recommendedQuestionRange.max,
+      target: Math.min(
+        assessment.recommendedQuestionRange.max,
+        Math.max(assessment.recommendedQuestionRange.min, questions.length),
+      ),
+    },
+    generatedQuestions: questions.length || Math.max(assessment.recommendedQuestionRange.min, Math.round(qualityScore / 20)),
   };
 }
 
@@ -770,52 +1077,105 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   let promptAssemblyMs = 0;
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
+  const heuristicAssessment = buildHeuristicDiscoveryAssessment({
+    requirement: opts.requirement,
+    attachmentText: opts.attachmentText,
+    wiEvidenceText,
+    similarStoriesText,
+  });
+  let discoveryAssessment = heuristicAssessment;
 
-  for (const attempt of [1, 2]) {
+  try {
     const promptAssemblyStartedAt = Date.now();
-    const baseUserMessage = buildClarifyUserMessage({
-      requirement: opts.requirement,
-      attachmentText: opts.attachmentText,
+    const assessmentUserMessage = buildEvidenceThemeSummary(
+      opts.requirement,
+      opts.attachmentText,
       wiEvidenceText,
       similarStoriesText,
-    });
+      opts.config.domainContext,
+    );
     promptAssemblyMs += Date.now() - promptAssemblyStartedAt;
+    const assessmentResult = await callLlmJsonWithUsage<unknown>({
+      model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      systemPrompt: buildStoryAssistantDiscoveryAssessmentSystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+      }),
+      userMessage: assessmentUserMessage,
+      maxTokens: 1600,
+      reasoningEffort: mapReasoningDepthToEffort('light'),
+      ...providerOpts,
+    });
+    usageByStage.discoveryAssessment = assessmentResult.usage;
+    discoveryAssessment = mergeDiscoveryAssessments(
+      parseDiscoveryAssessment(assessmentResult.data),
+      heuristicAssessment,
+    );
+  } catch {
+    discoveryAssessment = heuristicAssessment;
+  }
+
+  let coverageQualityScore = 0;
+  let coverageRetryTriggered = false;
+  let qualityReasons: string[] = [];
+  const baseUserMessageStartedAt = Date.now();
+  const baseUserMessage = buildClarifyUserMessage({
+    requirement: opts.requirement,
+    attachmentText: opts.attachmentText,
+    wiEvidenceText,
+    similarStoriesText,
+  });
+  promptAssemblyMs += Date.now() - baseUserMessageStartedAt;
+
+  for (const attempt of [1, 2]) {
     const result = await callLlmJsonWithUsage<unknown>({
       model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
       systemPrompt: buildStoryAssistantClarifySystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
-        questionPlan: { min: 0, max: 0, target: 0 },
+        questionPlan: {
+          min: discoveryAssessment.recommendedQuestionRange.min,
+          max: discoveryAssessment.recommendedQuestionRange.max,
+          target: discoveryAssessment.recommendedQuestionRange.max,
+        },
+        discoveryDepth: discoveryAssessment.discoveryDepth,
+        reasoningLevel: discoveryAssessment.reasoningLevel,
+        coverageObligations: discoveryAssessment.coverageObligations,
+        recommendedQuestionRange: discoveryAssessment.recommendedQuestionRange,
       }),
       userMessage: attempt === 1
         ? baseUserMessage
-        : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and return a richer question set. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
+        : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and deepen the question set. Cover these missing or under-covered themes explicitly: ${qualityReasons.join(' ') || discoveryAssessment.coverageObligations.join(', ')}. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
       maxTokens: 4096,
-      reasoningEffort: 'low',
+      reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
       ...providerOpts,
     });
     usageByStage[attempt === 1 ? 'clarify' : 'clarifyRetry'] = result.usage;
     questions = parseStoryAssistantQuestionCandidates(result.data);
-    if (!shouldRetryDiscoveryQuestions(questions) || attempt === 2) break;
+    const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
+    coverageQualityScore = quality.score;
+    qualityReasons = quality.reasons;
+    const shouldRetry = shouldRetryDiscoveryQuestions(questions) || quality.score < 70;
+    if (!shouldRetry || attempt === 2) break;
+    coverageRetryTriggered = true;
   }
 
-  const discoveryProfile = buildMinimalDiscoveryProfile(questions);
+  const discoveryProfile = buildMinimalDiscoveryProfile(questions, discoveryAssessment);
+  const ambiguityAssessment = buildClarifyAmbiguityAssessment(
+    questions,
+    discoveryAssessment,
+    coverageQualityScore,
+    qualityReasons,
+  );
   return {
     questions,
     tokenUsage: buildTokenUsageSummary(usageByStage),
     promptAssemblyMs,
     discoveryProfile,
-    ambiguityAssessment: {
-      level: questions.length >= 8 ? 'vague' : questions.length >= 4 ? 'medium' : 'clear',
-      score: questions.length >= 8 ? 8 : questions.length >= 4 ? 5 : 3,
-      reasons: ['Discovery is asking every ambiguity that would materially change what gets built.'],
-      questionPlan: {
-        min: questions.length,
-        max: questions.length,
-        target: questions.length,
-      },
-      generatedQuestions: questions.length,
-    },
+    discoveryAssessment,
+    coverageQualityScore,
+    coverageRetryTriggered,
+    ambiguityAssessment,
   };
 }
 

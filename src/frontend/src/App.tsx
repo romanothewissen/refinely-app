@@ -1340,8 +1340,6 @@ function LegacyApp({
     setWorkflowStage('generation');
 
     try {
-      setPendingSessionId(sid);
-
       const res = await api.startGeneration({
         sessionId: sid,
         requirement: req,
@@ -1365,6 +1363,7 @@ function LegacyApp({
       }) as any;
 
       if (res?.success) {
+        setPendingSessionId(sid);
         setGenerationWarning(res?.warning || continuationWarning || null);
       } else if (res?.needsClarification && Array.isArray(res?.questions) && res.questions.length > 0) {
         const followupQuestions = res.questions as ClarifyQuestion[];
@@ -1416,12 +1415,13 @@ function LegacyApp({
     )));
 
     try {
-      setPendingSessionId(sid);
       const res = await api.retryFailedFeatureGeneration({
         sessionId: sid,
         featureId,
       }) as any;
-      if (!res?.success) {
+      if (res?.success) {
+        setPendingSessionId(sid);
+      } else {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setPendingSessionId(null);
         setRetryingFeatureId(null);

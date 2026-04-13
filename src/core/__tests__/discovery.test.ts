@@ -24,6 +24,7 @@ import {
   buildEvaluateSystemPrompt,
   buildSizingAssessmentSystemPrompt,
   buildSizingRepairSystemPrompt,
+  buildStoryAssistantDiscoveryAssessmentSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantArSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
@@ -639,10 +640,19 @@ test('story assistant clarify prompt asks every genuinely ambiguous question wit
     domainContext: '',
     domainRoles: [],
     questionPlan: { min: 8, max: 12, target: 10 },
+    discoveryDepth: 'deep',
+    reasoningLevel: 'deep',
+    coverageObligations: ['sequencing', 'quote_and_billing', 'status_visibility'],
+    recommendedQuestionRange: { min: 12, max: 18 },
   });
 
   assert.match(prompt, /Ask as many questions as needed/i);
   assert.match(prompt, /For each area, ask every question that is genuinely ambiguous/i);
+  assert.match(prompt, /DISCOVERY DEPTH: DEEP/i);
+  assert.match(prompt, /REASONING DEPTH: DEEP/i);
+  assert.match(prompt, /QUESTION RANGE: usually between 12 and 18 questions/i);
+  assert.match(prompt, /Coverage obligations for this requirement/i);
+  assert.match(prompt, /sequencing/i);
   assert.match(prompt, /Roles & Personas/i);
   assert.match(prompt, /Trigger & Context/i);
   assert.match(prompt, /Business Rules & Exceptions/i);
@@ -652,6 +662,20 @@ test('story assistant clarify prompt asks every genuinely ambiguous question wit
   assert.doesNotMatch(prompt, /intentionally small/i);
   assert.doesNotMatch(prompt, /first screen/i);
   assert.doesNotMatch(prompt, /QUESTION VOLUME GUIDANCE/i);
+});
+
+test('story assistant discovery assessment prompt evaluates semantic complexity rather than prompt length', () => {
+  const prompt = buildStoryAssistantDiscoveryAssessmentSystemPrompt({
+    domainContext: '',
+    domainRoles: [],
+  });
+
+  assert.match(prompt, /Do NOT use prompt length as a signal/i);
+  assert.match(prompt, /workflowComplexity/i);
+  assert.match(prompt, /coverageObligations/i);
+  assert.match(prompt, /Short prompts can still be deep/i);
+  assert.match(prompt, /Long prompts can still be light/i);
+  assert.match(prompt, /Return ONLY valid JSON/i);
 });
 
 test('story assistant sufficiency prompt limits follow-up discovery to one small delta round', () => {

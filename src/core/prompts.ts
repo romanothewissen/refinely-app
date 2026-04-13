@@ -291,9 +291,25 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
   questionPlan: { min: number; max: number; target: number };
+  discoveryDepth?: 'light' | 'standard' | 'deep';
+  reasoningLevel?: 'light' | 'standard' | 'deep';
+  coverageObligations?: string[];
+  recommendedQuestionRange?: { min: number; max: number };
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or evidence.`
+    : '';
+  const coverageLines = (opts.coverageObligations ?? [])
+    .map((item) => `- ${item}`)
+    .join('\n');
+  const depthLine = opts.discoveryDepth
+    ? `DISCOVERY DEPTH: ${opts.discoveryDepth.toUpperCase()}`
+    : '';
+  const reasoningLine = opts.reasoningLevel
+    ? `REASONING DEPTH: ${opts.reasoningLevel.toUpperCase()}`
+    : '';
+  const rangeLine = opts.recommendedQuestionRange
+    ? `QUESTION RANGE: usually between ${opts.recommendedQuestionRange.min} and ${opts.recommendedQuestionRange.max} questions, but only if they are materially justified.`
     : '';
   return `You are a principal business analyst running a structured discovery session before any design begins.
 ${discoveryEvidenceBlock(opts.domainContext)}
@@ -302,6 +318,9 @@ ${roleHint}
 You are running a structured discovery session before designing features.
 Your goal is to surface every ambiguity that would change what gets built or how acceptance requirements are written.
 Ask as many questions as needed. A business analyst spending a few extra minutes answering now prevents rework later.
+${depthLine}
+${reasoningLine}
+${rangeLine}
 
 Work through each of the five discovery areas below in order.
 For each area, ask every question that is genuinely ambiguous for THIS requirement.
@@ -339,12 +358,65 @@ RULES:
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
 - Keep each question focused on one business decision.
 - When the requirement implies a multi-step workflow, coordinated activities, or follow-on transactions, ask about downstream initiation, consolidated status visibility, and in-progress changes if those materially affect what gets built.
+- Coverage obligations for this requirement:
+${coverageLines || '- Cover every materially unresolved theme that changes scope, rules, or acceptance requirements.'}
 - For each question, provide 3 or 4 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must be specific enough to help the user answer without collapsing important business meaning.
 - Return ONLY a JSON array.
 
 OUTPUT FORMAT:
 [{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]`;
+}
+
+export function buildStoryAssistantDiscoveryAssessmentSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Use them only when they are supported by the runtime evidence.`
+    : '';
+  return `You are a principal business analyst assessing how much discovery is needed before writing features and GIVEN/WHEN/THEN acceptance requirements.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+
+Judge semantic complexity and ambiguity. Do NOT use prompt length as a signal.
+
+Assess these dimensions:
+- workflowComplexity: how much sequencing, coordination, or multi-step orchestration is implied
+- actorComplexity: how many roles, teams, approvals, or ownership handoffs are implied
+- ruleDensity: how many governing rules, gates, validations, billing, entitlement, or policy decisions are implied
+- exceptionDensity: how many failure paths, disruptions, alternates, or exception cases are implied
+- lifecycleComplexity: how much downstream initiation, consolidated visibility, status tracking, or in-progress change handling is implied
+- ambiguityLevel: how much the requirement leaves materially unresolved
+
+Then choose:
+- discoveryDepth: light | standard | deep
+- reasoningLevel: light | standard | deep
+- coverageObligations: a compact list of the business themes discovery must cover
+- recommendedQuestionRange: bounded min/max that reflects likely discovery depth, not a hard target
+
+RULES:
+- Short prompts can still be deep if they imply broad workflow ambiguity.
+- Long prompts can still be light if they describe a focused, low-risk ask.
+- Keep the assessment domain- and system-agnostic.
+- Use runtime evidence only; do not inject outside domain assumptions.
+- Recommend deep discovery when sequencing, handoffs, gating, exceptions, downstream initiation, or active-plan change handling materially affect scope.
+
+OUTPUT FORMAT:
+Return ONLY valid JSON:
+{
+  "discoveryDepth":"light|standard|deep",
+  "reasoningLevel":"light|standard|deep",
+  "workflowComplexity":"low|medium|high",
+  "actorComplexity":"low|medium|high",
+  "ruleDensity":"low|medium|high",
+  "exceptionDensity":"low|medium|high",
+  "lifecycleComplexity":"low|medium|high",
+  "ambiguityLevel":"low|medium|high",
+  "coverageObligations":["string"],
+  "recommendedQuestionRange":{"min":4,"max":8},
+  "rationale":"short explanation"
+}`;
 }
 
 export function buildStoryAssistantSufficiencySystemPrompt(opts: {

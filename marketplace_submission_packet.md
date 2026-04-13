@@ -69,72 +69,68 @@ Operational note:
 
 ### Short Summary
 
-AI-powered Jira refinement for turning rough requirements into backlog-ready stories and GIVEN / WHEN / THEN acceptance requirements.
+Say goodbye to poorly defined tickets. Refinely uses deep context to turn your rough ideas into well-structured, ready-to-work Jira stories.
 
 ### Tagline Alternatives
 
-1. Turn rough Jira requirements into structured backlog-ready stories.
-2. Refine ideas into clearer Jira features and acceptance requirements.
-3. Speed up backlog preparation with AI-assisted story refinement in Jira.
+1. No more vague tickets: Turn ideas into structured work.
+2. In-context backlog refinement for high-performing teams.
+3. Stop the "garbage in, garbage out" cycle with smart, grounded refinement.
 
 ### Full Overview
 
 Use this when the Marketplace overview field needs to stay under 250 characters:
 
-Refinely turns rough Jira requirements into backlog-ready stories. Start from the global page or an issue action, answer clarifying questions when needed, generate acceptance requirements, and push approved work back to Jira.
+Say goodbye to vague tickets. Refinely actively grounds its work in your project's history to ask the right clarifying questions and draft well-structured features, saving your team hours of back-and-forth.
 
 If you have more room available, expand with the details below:
 
-The app appears in two places inside Jira: a global page named `Refinely` for net-new refinement work and an issue action named `Refine Stories` for starting from an existing Jira issue. Users can enter a short requirement, optionally include supporting attachment text, choose workspace or project context, and let Refinely analyze the request.
+Ever struggled to get a Jira ticket ready for development because vital context was missing or the ask was too vague? Refinely solves the "garbage in, garbage out" problem. It’s an intelligent backlog refinement tool that actively helps your team fully specify requirements before a single line of code is written.
 
-When a requirement is ambiguous, Refinely can run a discovery step that asks focused follow-up questions before generating output. It then proposes structured feature candidates, descriptions, and GIVEN / WHEN / THEN acceptance requirements, and supports iterative refinement when a user wants to improve or adjust the result.
-
-For teams that want more consistency, admins can configure project-specific mappings, backlog context, work-instruction guidance, AI provider settings, and optional trust controls such as PII masking, transparency reports, and audit trail features. Approved output can be pushed back into Jira as Story, Task, Bug, or Epic items.
+Instead of generic AI text generation that lacks an understanding of your project, Refinely deeply integrates with your existing context. It asks the right clarifying questions up-front and drafts structured features with GIVEN / WHEN / THEN acceptance models that your engineers will actually love. It saves product managers and business analysts hours of guesswork, ensuring your team has exactly what it needs to deliver value.
 
 ### Marketplace `More details` Section
 
 Use this as the paste-ready long-form version for the listing's `More details` field:
 
-Refinely is a Jira Cloud app for teams that receive rough business requests and need to turn them into backlog-ready stories without leaving Jira. The app adds two entry points inside Jira: a global page called `Refinely` and an issue action called `Refine Stories`. Teams can start from a blank requirement in the global page or from an existing Jira issue when they want to refine work that is already in the backlog.
+**Why your team needs Refinely**
+We've all seen Jira boards filled with one-line descriptions or "one-pass AI rewrites" that simply regurgitate the prompt without adding any real substance. These tickets lead to endless clarification meetings, misaligned expectations, and slow delivery. Refinely fundamentally changes this workflow by acting as an in-context sidekick that actively grounds its work in your project's previously deployed stories and instructions.
 
-Refinely helps users move from ambiguity to a structured draft. A user enters a requirement, optionally includes attachment text or project context, and Refinely analyzes the request. If the request is still too ambiguous, the app asks targeted clarification questions first. After that, Refinely generates structured feature candidates with descriptions and GIVEN / WHEN / THEN acceptance requirements so the team has a stronger starting point for delivery planning.
+**How it makes your life better**
+Refinely helps users move from ambiguity to a perfectly structured draft:
+- **No More Vague Tickets:** Refinely analyzes your initial ask and automatically highlights what's missing by asking targeted, domain-specific questions.
+- **Deeply Grounded Context:** It learns from your previously deployed story cache and work instructions, so its output actually matches your team's unique way of working—not just a generic template.
+- **Ready for Development:** Get perfectly structured features, functional descriptions, and precise GIVEN / WHEN / THEN acceptance criteria without the headache.
+- **Bring Your Own Key (BYOK):** Keep full control over your AI costs and data by using your own Anthropic, Google Gemini, or OpenAI API keys securely.
 
-After installation, a Jira admin should complete this setup:
-
+**Admin Setup Summary**
 1. Open `Refinely` in Jira and go to `Settings`.
-2. Choose the AI provider for the workspace and enter the required API key.
-3. Select the Jira project configuration to support and configure issue mappings, field mappings, and optional issue-linking behavior.
-4. Optionally configure backlog context, work-instruction documents, and privacy controls such as PII masking, transparency reports, and audit trail settings.
+2. Choose your preferred AI provider and securely enter your API key (BYOK).
+3. Select your Jira project configuration.
+4. Set up your custom work-instruction documents and context.
 5. Save the configuration.
 
-Once setup is complete, an end user can use the app like this:
-
-1. Open the `Refinely` global page for a new requirement, or open an existing Jira issue and choose `Refine Stories`.
-2. Enter the requirement text and optionally add supporting attachment content or select project context.
-3. Answer clarification questions if Refinely requests more detail.
-4. Review the generated features, descriptions, and acceptance requirements.
-5. Push approved output back into Jira as a Story, Task, Bug, or Epic.
-
-Refinely is intended for product managers, business analysts, delivery leads, and software teams that want faster backlog preparation and more consistent acceptance requirements inside Jira.
+**How it works for your team**
+1. Open the `Refinely` global page, or use the `Refine Stories` action on an existing Jira issue.
+2. Enter your raw objective or requirement.
+3. Answer targeted clarification questions to extract exactly what the development team needs.
+4. Review the drafted features and acceptance requirements, grounded in your cached project history.
+5. Push the polished output straight to your Jira backlog!
 
 ### Key Features
 
-- Start from a Jira global page or directly from the `Refine Stories` issue action on an existing issue
-- Turn short requirement text into structured feature candidates and Jira-ready story drafts
-- Draft GIVEN / WHEN / THEN acceptance requirements for each generated feature
-- Ask targeted clarification questions before generation when the requirement is underspecified
-- Refine generated output iteratively with additional guidance and revision comparison
-- Push approved output back into Jira as Story, Task, Bug, or Epic items
-- Configure project-specific mappings, backlog context, and work-instruction guidance
-- Optionally enable PII masking, transparency reports, and audit trail features
-- Show monthly usage guidance in-app with warning-based thresholding instead of a hard stop
+- **In-Context Story Generation:** Leverages your previously deployed stories and project instructions for grounded, highly relevant results.
+- **Active Discovery:** Asks targeted clarification questions before generation to ensure nothing is missed.
+- **Not Just "AI Slop":** Escapes the generic one-pass rewrite trap by drafting robust features and GIVEN/WHEN/THEN acceptance requirements.
+- **Bring Your Own Key (BYOK):** Connect your own secure API keys for Anthropic, Google, or OpenAI to manage cost and control data.
+- **Iterative Refinement:** Review word-level diffs and easily chat with your drafted stories before syncing them to Jira.
+- **Start Anywhere:** Initiate refinement directly from a Jira global page or right on an existing issue.
 
 ### Ideal Customer / Use Cases
 
-- Product teams preparing backlog items from rough intake
-- Business analysts translating business requests into clearer Jira work
-- Delivery teams standardizing story structure and acceptance requirements
-- Jira teams that want faster requirement refinement without leaving Jira
+- Product managers and business analysts looking to produce higher quality, structured Jira tickets with less effort.
+- Delivery teams tired of missing context and vague requirements.
+- Teams seeking a secure, BYOK solution to inject intelligent, grounded refinement into their Agile workflow.
 
 ## Pricing and Tiering Guidance
 

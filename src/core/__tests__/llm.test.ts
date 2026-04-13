@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { extractJson } from '../json';
+import { mapReasoningDepthToEffort } from '../llm';
 
 test('extractJson parses markdown-fenced JSON objects', () => {
   const parsed = extractJson<{
@@ -65,4 +66,10 @@ test('extractJson repairs truncated fenced JSON when the model stops mid-string'
   assert.equal(parsed.features.length, 1);
   assert.equal(parsed.features[0]?.summary, 'Work Order Criticality and Due Date Definition');
   assert.match(parsed.features[0]?.description ?? '', /customer tier\/contract$/);
+});
+
+test('mapReasoningDepthToEffort translates provider-neutral reasoning levels', () => {
+  assert.equal(mapReasoningDepthToEffort('light'), 'low');
+  assert.equal(mapReasoningDepthToEffort('standard'), 'medium');
+  assert.equal(mapReasoningDepthToEffort('deep'), 'high');
 });

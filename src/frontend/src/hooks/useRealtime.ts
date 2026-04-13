@@ -405,8 +405,14 @@ export function useGenerationRealtime(
           return;
         }
 
+        const eventUpdatedAt = event.updatedAt ?? 0;
+        const isTerminalEvent = event.type === 'complete' || event.type === 'error' || event.type === 'cancelled';
+        if (isTerminalEvent && eventUpdatedAt > 0 && eventUpdatedAt < startedAtRef.current) {
+          return;
+        }
+
         if (event.type === 'progress') {
-          const updatedAt = event.updatedAt ?? 0;
+          const updatedAt = eventUpdatedAt;
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > STALE_PROGRESS_MS) {
             clearInterval(timerRef.current!);

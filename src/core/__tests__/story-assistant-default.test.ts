@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildHeuristicDiscoveryAssessment,
+  evaluateClarifyQuestionSetQuality,
   extractActorSets,
   extractRoles,
+  mergeDiscoveryAssessments,
   parseStoryAssistantQuestionCandidates,
+  parseDiscoveryAssessment,
   splitClearlyNumberedStoryAssistantQuestion,
 } from '../story-assistant-default';
 
@@ -176,4 +180,99 @@ test('parseStoryAssistantQuestionCandidates splits numbered prompts into separat
   assert.match(questions[0]?.question ?? '', /what activities belong in one plan/i);
   assert.match(questions[1]?.question ?? '', /what details must be captured for each activity/i);
   assert.deepEqual(questions[0]?.suggestions, ['Single workflow', 'Per activity detail', 'Depends on service type']);
+});
+
+test('heuristic discovery assessment marks short but workflow-heavy asks as deep', () => {
+  const assessment = buildHeuristicDiscoveryAssessment({
+    requirement: 'Facilitate service through a single plan.',
+    attachmentText: '',
+    wiEvidenceText: 'Sequence de-installation, loaner delivery, repair, return shipment, re-installation, status tracking, and quote/payment authorization gates.',
+    similarStoriesText: 'Examples reference multiple teams, downstream work order creation, shipments, dependencies, and active-plan changes.',
+  });
+
+  assert.equal(assessment.discoveryDepth, 'deep');
+  assert.equal(assessment.reasoningLevel, 'deep');
+  assert.match(assessment.coverageObligations.join(','), /sequencing/);
+  assert.match(assessment.coverageObligations.join(','), /downstream_initiation/);
+});
+
+test('heuristic discovery assessment keeps long but focused asks light', () => {
+  const assessment = buildHeuristicDiscoveryAssessment({
+    requirement: 'Allow a manager to rename a saved service template after reviewing a long explanatory paragraph that repeats the same focused ask in several different ways for business stakeholders.',
+    attachmentText: '',
+    wiEvidenceText: '',
+    similarStoriesText: '',
+  });
+
+  assert.equal(assessment.discoveryDepth, 'light');
+  assert.equal(assessment.reasoningLevel, 'light');
+});
+
+test('parse and merge discovery assessments preserve deeper heuristic signals', () => {
+  const llmAssessment = parseDiscoveryAssessment({
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'medium',
+    actorComplexity: 'medium',
+    ruleDensity: 'medium',
+    exceptionDensity: 'low',
+    lifecycleComplexity: 'medium',
+    ambiguityLevel: 'medium',
+    coverageObligations: ['ownership'],
+    recommendedQuestionRange: { min: 8, max: 12 },
+    rationale: 'Moderate workflow ambiguity.',
+  });
+  const merged = mergeDiscoveryAssessments(llmAssessment, {
+    discoveryDepth: 'deep',
+    reasoningLevel: 'deep',
+    workflowComplexity: 'high',
+    actorComplexity: 'high',
+    ruleDensity: 'high',
+    exceptionDensity: 'medium',
+    lifecycleComplexity: 'high',
+    ambiguityLevel: 'high',
+    coverageObligations: ['sequencing', 'status_visibility'],
+    recommendedQuestionRange: { min: 12, max: 18 },
+    rationale: 'Heuristics found deeper workflow signals.',
+  });
+
+  assert.equal(merged.discoveryDepth, 'deep');
+  assert.equal(merged.reasoningLevel, 'deep');
+  assert.deepEqual(merged.coverageObligations, ['ownership', 'sequencing', 'status_visibility']);
+  assert.deepEqual(merged.recommendedQuestionRange, { min: 12, max: 18 });
+});
+
+test('clarify quality evaluator flags missing deep-workflow obligation coverage', () => {
+  const quality = evaluateClarifyQuestionSetQuality([
+    {
+      categoryKey: 'user_personas',
+      category: 'Roles & Personas',
+      intent: 'owner',
+      question: 'Who owns the plan?',
+      suggestions: ['Service coordinator', 'Case owner', 'Dispatch lead'],
+    },
+    {
+      categoryKey: 'context_trigger',
+      category: 'Trigger & Context',
+      intent: 'trigger',
+      question: 'When should a single plan be created?',
+      suggestions: ['At diagnosis', 'After first visit', 'When activities are combined'],
+    },
+  ], {
+    discoveryDepth: 'deep',
+    reasoningLevel: 'deep',
+    workflowComplexity: 'high',
+    actorComplexity: 'medium',
+    ruleDensity: 'high',
+    exceptionDensity: 'medium',
+    lifecycleComplexity: 'high',
+    ambiguityLevel: 'high',
+    coverageObligations: ['sequencing', 'quote_and_billing', 'status_visibility'],
+    recommendedQuestionRange: { min: 12, max: 18 },
+    rationale: 'Complex multi-step workflow.',
+  });
+
+  assert.ok(quality.score < 70);
+  assert.match(quality.missingObligations.join(','), /sequencing/);
+  assert.match(quality.missingObligations.join(','), /quote_and_billing/);
 });

@@ -111,7 +111,16 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectKey,
         projectKeys,
       });
-      const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, promptAssemblyMs } = result;
+      const {
+        questions,
+        tokenUsage,
+        ambiguityAssessment,
+        discoveryProfile,
+        discoveryAssessment,
+        coverageQualityScore,
+        coverageRetryTriggered,
+        promptAssemblyMs,
+      } = result;
       const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
       if (await isWorkflowCancelled(sessionId)) {
@@ -121,7 +130,10 @@ export async function handler(event: { body: ClarifyEvent }) {
 
       await sendProgress('Finalizing discovery questions…', {
         stage: 'finalize',
+        discoveryAssessment,
         discoveryProfile,
+        coverageQualityScore,
+        coverageRetryTriggered,
         ambiguityAssessment,
         latencyMs: {
           queueWaitMs,
@@ -156,7 +168,15 @@ export async function handler(event: { body: ClarifyEvent }) {
         attachmentIncluded: sharedContext.sources.attachmentIncluded,
         similarStoriesCount: sharedContext.sources.similarStoriesCount,
         referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
+        discoveryAssessment,
         discoveryProfile,
+        discoveryDepth: discoveryAssessment.discoveryDepth,
+        reasoningLevel: discoveryAssessment.reasoningLevel,
+        coverageObligations: discoveryAssessment.coverageObligations,
+        recommendedQuestionRange: discoveryAssessment.recommendedQuestionRange,
+        assessmentRationale: discoveryAssessment.rationale,
+        coverageQualityScore,
+        coverageRetryTriggered,
         ambiguityAssessment,
         roundsCompleted: 0,
         initialQuestionCount: questions.length,

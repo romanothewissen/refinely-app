@@ -518,6 +518,23 @@ export interface DiscoveryProfile {
   coverageArtifact?: DiscoveryCoverageArtifact;
 }
 
+export type DiscoveryDepth = 'light' | 'standard' | 'deep';
+export type DiscoveryDimensionLevel = 'low' | 'medium' | 'high';
+
+export interface DiscoveryAssessment {
+  discoveryDepth: DiscoveryDepth;
+  reasoningLevel: DiscoveryDepth;
+  workflowComplexity: DiscoveryDimensionLevel;
+  actorComplexity: DiscoveryDimensionLevel;
+  ruleDensity: DiscoveryDimensionLevel;
+  exceptionDensity: DiscoveryDimensionLevel;
+  lifecycleComplexity: DiscoveryDimensionLevel;
+  ambiguityLevel: DiscoveryDimensionLevel;
+  coverageObligations: string[];
+  recommendedQuestionRange: { min: number; max: number };
+  rationale: string;
+}
+
 export type AdvisoryTriageConfidence = 'low' | 'medium' | 'high';
 
 export interface AdvisoryDeliveryForecast {
@@ -611,6 +628,9 @@ export interface ClarifyProgressPayload {
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   discoveryProfile?: DiscoveryProfile;
+  discoveryAssessment?: DiscoveryAssessment;
+  coverageQualityScore?: number;
+  coverageRetryTriggered?: boolean;
   ambiguityAssessment?: ClarifyContextMeta['ambiguityAssessment'];
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
@@ -700,6 +720,14 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   discoveryProfile?: DiscoveryProfile;
+  discoveryAssessment?: DiscoveryAssessment;
+  discoveryDepth?: DiscoveryDepth;
+  reasoningLevel?: DiscoveryDepth;
+  coverageObligations?: string[];
+  recommendedQuestionRange?: { min: number; max: number };
+  assessmentRationale?: string;
+  coverageQualityScore?: number;
+  coverageRetryTriggered?: boolean;
   ambiguityAssessment?: {
     level: 'clear' | 'medium' | 'vague';
     score: number;

@@ -47,6 +47,23 @@ export interface LlmCallOptions {
   piiMaskingEnabled?: boolean;
 }
 
+export type ProviderNeutralReasoningDepth = 'light' | 'standard' | 'deep';
+
+export function mapReasoningDepthToEffort(
+  depth: ProviderNeutralReasoningDepth | undefined,
+): LlmCallOptions['reasoningEffort'] {
+  switch (depth) {
+    case 'light':
+      return 'low';
+    case 'standard':
+      return 'medium';
+    case 'deep':
+      return 'high';
+    default:
+      return 'low';
+  }
+}
+
 function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number | undefined {
   switch (effort) {
     case 'none':
