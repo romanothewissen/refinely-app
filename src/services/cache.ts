@@ -188,6 +188,7 @@ export const KEYS = {
   wiChunks: 'wi_chunks',
   wiChunksForDoc: (docId: string) => `wi_chunks_${docId}`,
   wiDocs: 'wi_docs',
+  wiCorpusCache: 'wi_corpus_cache',
   usageCurrentMonth: 'usage_current_month',
   // site-scoped (no accountId) — kept for backward compat
   conversations: (sessionId: string) => `conv_${sessionId}`,

@@ -535,9 +535,11 @@ ORDERING:
 - List acceptance_requirements in a coherent narrative flow for the capability (e.g. initiating context, main path, materially different branches, completion). Each AR must still test one distinct thing; ordering serves readability for testers, not padding.
 
 ACTOR ASSIGNMENT:
-- Use the actor from the feature description as the default. Do NOT override it with a generic role.
-- When the feature description names a specialized role (Billing Specialist, Service Manager, etc.), keep all ARs for that feature anchored to that role's perspective.
-- When writing ARs that involve a DIFFERENT actor's action (e.g., customer acceptance, manager approval), name that actor explicitly in the WHEN clause.
+- Use the actor from the feature description as the default anchor.
+- GIVEN clauses describe business state — they rarely need to name a role. Roles belong in WHEN (who performs the action), not GIVEN (what conditions exist).
+- When the feature description names multiple actors ("As a RoleA, RoleB, or RoleC"), do not default to the first-listed role in every AR. Reason about which actor is specifically relevant to the action in this AR's WHEN clause. When any of the named roles could perform the action interchangeably, prefer a functional description drawn from the requirement text (e.g., "the plan creator", "the requesting party") over mechanically repeating one job title.
+- After the acting role is established for a feature, role-neutral phrasing in subsequent WHEN clauses ("they attempt to", "a plan is updated") is strongly preferred over restating the full role label.
+- When a DIFFERENT actor performs an action (e.g., customer acceptance, manager approval), name that actor explicitly in the WHEN clause only.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN an agreement is linked to an item that has already been received"
@@ -943,6 +945,12 @@ INTERNAL TAXONOMY — map each question to exactly one fixed categoryKey:
   - state_lifecycle (maps to area 5 above)
   - success_measurement (maps to area 6 above)
 
+CATEGORY REASONING — before assigning a categoryKey, reason through what the question is actually asking:
+- context_trigger is for area 1 only: what event starts the process, what preconditions must be true before the user can act, what entry points exist.
+- business_rules is for area 4: what governs or constrains the process — validation rules, exception paths, what-happens-when scenarios, handling rules, constraint logic. A question about what happens when a resource is unavailable, what rules filter a selection, or how a failure case is handled is a business rule, not a trigger.
+- state_lifecycle is for area 5: what statuses or stages the subject moves through, what advances or reverses it.
+- When unsure between context_trigger and business_rules: ask — is this question about when the process starts, or about how the process is governed once running? Start → context_trigger. Govern/exception/constraint → business_rules.
+
 RULES:
 - Every question must be specific to THIS requirement — never generic boilerplate.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
@@ -982,6 +990,12 @@ Return JSON in this shape:
     }
   ]
 }
+
+SELF-REVIEW — before finalising your questions array:
+Scan your draft questions for semantic overlap. Two questions that a thoughtful user would answer with the same kind of information count as one wasted slot, even if worded differently. When you spot overlap:
+- Keep the question that is more operationally grounded and actionable; drop the one that is more abstract or derivable from the other's answer.
+- The SUCCESS & MEASUREMENT area is the most prone to redundancy — "what does success look like", "how do you measure improvement", and "what outcomes indicate it works" often collapse into one or two genuinely distinct questions. If your draft contains more than two questions in this area, challenge each: does it ask for something not already captured by the others?
+After the review pass, remove or merge any duplicates before outputting.
 
 OUTPUT RULES:
 - Every question must include exactly one fixed categoryKey and one concise intent.

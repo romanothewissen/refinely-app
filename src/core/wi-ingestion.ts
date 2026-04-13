@@ -94,6 +94,7 @@ export async function ingestPdf(opts: {
   try {
     await saveDocChunks(docId, chunks);
     await saveDocMetadata(docs);
+    void invalidateCorpusCache();
   } catch (error) {
     await objectDelete(KEYS.wiChunksForDoc(docId));
     await saveDocMetadata(docs.filter(d => d.docId !== docId));
@@ -176,6 +177,7 @@ export async function removeDoc(docId: string): Promise<void> {
   const nextDocs = docs.filter(d => d.docId !== docId);
   await saveDocMetadata(nextDocs);
   await objectDelete(KEYS.wiChunksForDoc(docId));
+  void invalidateCorpusCache();
 }
 
 // ─── Text chunking ────────────────────────────────────────────────────────────
@@ -286,11 +288,40 @@ async function loadWiCacheCold(): Promise<WiCache> {
 }
 
 async function loadCache(): Promise<WiCache> {
+  // 1. Within-invocation ALS cache (avoids re-reads within the same queue handler).
   const store = wiRetrievalAls.getStore();
   if (store?.cache) return store.cache;
-  const cache = await loadWiCacheCold();
-  if (store) store.cache = cache;
-  return cache;
+
+  // 2. Cross-invocation consolidated cache (avoids the 4–5 separate KVS reads that occur when
+  //    clarify, sufficiency, and generation each cold-load the same unchanged corpus).
+  try {
+    const cached = await entityGet<{ cache: WiCache; expiresAt: number }>(KEYS.wiCorpusCache);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (store) store.cache = cached.cache;
+      return cached.cache;
+    }
+  } catch {
+    // Ignore read errors — fall through to cold load.
+  }
+
+  // 3. Full cold load from per-doc KVS entries.
+  const freshCache = await loadWiCacheCold();
+  if (store) store.cache = freshCache;
+
+  // Populate cross-invocation cache for subsequent pipeline stages (30-min TTL).
+  // Fire-and-forget — do not block the pipeline on cache write.
+  void entitySet(KEYS.wiCorpusCache, { cache: freshCache, expiresAt: Date.now() + 30 * 60 * 1000 }).catch(() => {});
+
+  return freshCache;
+}
+
+/** Invalidates the cross-invocation corpus cache. Call after any doc ingestion or removal. */
+async function invalidateCorpusCache(): Promise<void> {
+  try {
+    await objectDelete(KEYS.wiCorpusCache);
+  } catch {
+    // Best-effort — a stale cache will self-expire within 30 minutes.
+  }
 }
 
 async function loadDocs(): Promise<WiDoc[]> {
