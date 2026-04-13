@@ -682,7 +682,7 @@ test('generation progress copy summarizes coverage and discovery context in plai
       wiInsightCount: 7,
       similarStoriesCount: 1,
     }).map((chip) => chip.label),
-    ['2 projects', 'Guidance on', 'Attachment included', '3/5 work instructions retrieved', '7 WI insights', '1 similar story'],
+    ['2 projects', 'Domain guidance', 'Attachment included', '3/5 work instructions retrieved', '7 WI insights', '1 similar story'],
   );
 });
 

@@ -425,17 +425,26 @@ export function buildDiscoveryCoverageArtifact(input: {
   plannedQuestionBudget: number;
   actualQuestionsAsked: number;
   actualAnswersReceived?: number;
+  askedCategoryKeys?: ClarifyCategoryKey[];
   openNonBlockingDecisions?: string[];
 }): DiscoveryCoverageArtifact {
   const mustResolveThemes = uniqueCategoryKeys(input.missingCategoryKeys).map((key) => labelForCategoryKey(key));
-  const coveredThemes = CLARIFY_CATEGORY_ORDER
-    .filter((key) => !input.missingCategoryKeys.includes(key))
+  const askedCategoryKeys = uniqueCategoryKeys(input.askedCategoryKeys ?? []);
+  const coveredThemes = (askedCategoryKeys.length
+    ? askedCategoryKeys
+    : CLARIFY_CATEGORY_ORDER.filter((key) => !input.missingCategoryKeys.includes(key)))
     .map((key) => labelForCategoryKey(key));
   const openNonBlockingDecisions = uniqueStrings(input.openNonBlockingDecisions ?? []);
   return {
     mustResolveThemes,
     optionalThemes: [],
     coveredThemes,
+    ...(askedCategoryKeys.length
+      ? {
+          askedCategoryKeys,
+          askedThemes: askedCategoryKeys.map((key) => labelForCategoryKey(key)),
+        }
+      : {}),
     openBlockingThemes: mustResolveThemes,
     openNonBlockingDecisions,
     plannedQuestionBudget: Math.max(0, Math.round(input.plannedQuestionBudget)),
@@ -498,6 +507,7 @@ export function validateAndRepairInitialDiscovery(
         plannedQuestionBudget: profile.plannedQuestionBudget ?? profile.recommendedInitialCount,
         actualQuestionsAsked: finalizedQuestions.length,
         actualAnswersReceived: profile.actualAnswersReceived,
+        askedCategoryKeys: finalizedQuestions.map((question) => question.categoryKey),
       }),
     },
     repairApplied,

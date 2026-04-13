@@ -228,6 +228,8 @@ Think through these dimensions before you finalize the feature set:
 RULES:
 - Each feature must represent independent business value, not a UI widget or implementation step.
 - Each feature description MUST be: "As a [role], I need [action] so that [benefit]".
+- Keep the "I need" clause focused on the core capability only. Move examples, scenario lists, sequencing detail, policy detail, and downstream exceptions out of the description and into acceptance requirements or open decisions.
+- If multiple roles can perform the same activity, do not collapse them into one narrow owner unless the requirement or answered Q&A explicitly narrows ownership to one role.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
 - No internal product or module names unless the user already used them and they are essential to meaning.
 - Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently valuable and testable.
@@ -270,6 +272,8 @@ RULES:
 - Mention a specific role in GIVEN or WHEN only when that role changes the business responsibility, approval path, or outcome. Avoid repeating the same role label in every AR when the trigger is already clear.
 - Keep broad use-case narration and business-benefit phrasing out of ARs. Put the testable rule, dependency, gate, exception, or outcome in the AR instead.
 - Prefer real business triggers, sequencing dependencies, gates, and exception behavior over generic lifecycle filler.
+- When several candidate ARs share the same GIVEN and WHEN and differ only by small captured-detail fragments, collapse them into one capability-level AR instead of cloning the skeleton.
+- Keep shared approval, quoting, follow-up, or gating rules in the single sibling feature that owns that business outcome instead of repeating the same rule across multiple features.
 - Do NOT use configuration or setup language in GIVEN clauses. The GIVEN must describe a real business situation, not a system setting.
 - Avoid abstract umbrella terms that hide meaning. Replace them with the actual business fact when one is available from the requirement or evidence.
 - Keep all other feature fields unchanged.
@@ -311,6 +315,7 @@ DISCOVERY AREAS:
    Probe: Walk through the main path step by step. What does the user do and what outcome should follow?
    Probe: What data, inputs, or selections are required at each step?
    Probe: Are there decisions or branches in the flow?
+   Probe: When ordering, dependencies, coordination, or handoffs are materially implied, ask what sequence or dependency actually matters.
    Probe: What is the final output or business state after the process completes?
 4. BUSINESS RULES & EXCEPTIONS
    Probe: What validation rules or conditions govern whether an action is allowed?
@@ -354,6 +359,7 @@ RULES:
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
 - Each follow-up question must include 2 to 4 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must stay in business language and avoid implementation wording.
+- If workflow order, dependencies, handoffs, or actor coordination still materially affect what gets built, ask about that explicitly or return it as an open decision instead of pretending discovery is complete.
 - If the current answers are sufficient, return {"sufficient": true}.
 - If the evaluator cannot confidently prove sufficiency, prefer explicit open decisions over pretending the requirement is complete.
 

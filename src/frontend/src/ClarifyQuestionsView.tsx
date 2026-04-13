@@ -223,6 +223,7 @@ export function ClarifyQuestionsView({
       grouped.get(sk)!.push(item);
     }
     const order: Array<typeof OTHER_SECTION_KEY | ClarifyCategoryKey> = [...CATEGORY_ORDER, OTHER_SECTION_KEY];
+    let renderedIndex = pageStart;
     return order
       .filter((key) => (grouped.get(key)?.length ?? 0) > 0)
       .map((key) => ({
@@ -231,7 +232,10 @@ export function ClarifyQuestionsView({
           key === OTHER_SECTION_KEY
             ? 'Other discovery areas'
             : CATEGORY_LABELS[key as ClarifyCategoryKey],
-        items: grouped.get(key)!,
+        items: (grouped.get(key) ?? []).map((item) => ({
+          ...item,
+          renderedNumber: renderedIndex += 1,
+        })),
       }));
   })();
 
@@ -526,10 +530,10 @@ export function ClarifyQuestionsView({
               </div>
 
               <div className="grid gap-2">
-                {items.map(({ idx, q }) => {
+                {items.map(({ idx, q, renderedNumber }) => {
                   const ans = ensureAnswer(idx);
                   const isAnswered = ans.customAnswer.trim().length > 0 || ans.selectedSuggestions.length > 0;
-                  const suggestions = q.suggestions.slice(0, 3);
+                  const suggestions = q.suggestions.slice(0, 4);
                   const hasDetails = Boolean(q.details?.trim());
                   const detailsOpen = Boolean(expandedQuestionDetails[idx]);
 
@@ -545,7 +549,7 @@ export function ClarifyQuestionsView({
                       <div className="space-y-2.5 p-3">
                         <div className="flex items-start gap-2.5">
                           <div className={`flex h-6 w-6 rounded-lg items-center justify-center shrink-0 transition-all text-xs font-bold ${isAnswered ? 'bg-[var(--rf-brand)] text-white' : 'bg-white/60 text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]'}`}>
-                            {isAnswered ? <Check className="w-3 h-3" /> : <span>{idx + 1}</span>}
+                            {isAnswered ? <Check className="w-3 h-3" /> : <span>{renderedNumber}</span>}
                           </div>
                           <div className="min-w-0 flex-1 pt-0.5">
                             <p className="text-[14px] font-semibold text-[var(--rf-text)] leading-snug">

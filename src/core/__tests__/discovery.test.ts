@@ -118,10 +118,14 @@ test('buildDiscoveryCoverageArtifact tracks planned and actual discovery coverag
     plannedQuestionBudget: 12,
     actualQuestionsAsked: 9,
     actualAnswersReceived: 7,
+    askedCategoryKeys: ['context_trigger', 'user_personas'],
     openNonBlockingDecisions: ['Choose default priority handling'],
   });
 
   assert.deepEqual(artifact.mustResolveThemes, ['Functional Flow', 'Business Rules']);
+  assert.deepEqual(artifact.coveredThemes, ['Context & Trigger', 'User Personas']);
+  assert.deepEqual(artifact.askedCategoryKeys, ['context_trigger', 'user_personas']);
+  assert.deepEqual(artifact.askedThemes, ['Context & Trigger', 'User Personas']);
   assert.equal(artifact.plannedQuestionBudget, 12);
   assert.equal(artifact.actualQuestionsAsked, 9);
   assert.equal(artifact.actualAnswersReceived, 7);

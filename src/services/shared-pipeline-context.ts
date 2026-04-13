@@ -35,6 +35,10 @@ export interface SharedPipelineContext {
   domainRoles: string[];
   wiContext: RetrievedWiContext;
   wiInsights: WorkInstructionInsightArtifact;
+  timings: {
+    retrievalMs: number;
+    wiInsightExtractionMs: number;
+  };
   sources: SharedPipelineContextSources;
 }
 
@@ -47,6 +51,7 @@ export async function loadSharedPipelineContext(input: {
   projectKeys?: string[];
   pipelineMode?: 'story_assistant_default' | 'legacy_llm_led';
 }): Promise<SharedPipelineContext> {
+  const retrievalStartedAt = Date.now();
   const selectedProjectKeys = normalizeProjectKeys(input.projectKey, input.projectKeys);
   const primaryProjectKey = resolvePrimaryProjectKey(input.projectKey, input.projectKeys);
   const domainContext = buildCombinedDomainContext(input.config, selectedProjectKeys);
@@ -66,7 +71,10 @@ export async function loadSharedPipelineContext(input: {
         selectedProjectKeys,
       )
     : { text: '', docs: [], chunks: [], linkedDocs: [] };
+  const retrievalMs = Date.now() - retrievalStartedAt;
+  const wiInsightStartedAt = Date.now();
   const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
+  const wiInsightExtractionMs = Date.now() - wiInsightStartedAt;
   const referencedWiSections = summarizeReferencedWiSections(wiContext.chunks.slice(0, 8));
 
   return {
@@ -77,6 +85,10 @@ export async function loadSharedPipelineContext(input: {
     domainRoles,
     wiContext,
     wiInsights,
+    timings: {
+      retrievalMs,
+      wiInsightExtractionMs,
+    },
     sources: {
       projectKey: primaryProjectKey,
       projectKeys: selectedProjectKeys,

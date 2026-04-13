@@ -24,7 +24,7 @@ import {
   getWorkInstructionInsightCount,
 } from '../core/wi-insights';
 import { maskPiiText, maskPiiInAnswers, mergePiiMaskingStats, saveTransparencyReport, appendComplianceAuditEvent } from '../services/compliance';
-import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
+import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
@@ -56,6 +56,9 @@ interface GenerationProgressPayload {
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
+  latencyMs?: GenerationContextMeta['latencyMs'];
+  modelRoute?: GenerationContextMeta['modelRoute'];
+  qualityMode?: GenerationContextMeta['qualityMode'];
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>>;
   draftFeatureCount?: number;
@@ -140,6 +143,8 @@ export function buildGenerationStartProgressUpdate(opts: {
   outputProfile?: GenerationContextMeta['outputProfile'];
   advisorySizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
+  qualityMode?: GenerationContextMeta['qualityMode'];
+  modelRoute?: GenerationContextMeta['modelRoute'];
   sources?: GenerationProgressPayload['sources'];
 }): { message: string; payload: GenerationProgressPayload } {
   const {
@@ -148,6 +153,8 @@ export function buildGenerationStartProgressUpdate(opts: {
     outputProfile,
     advisorySizingContract,
     advisoryTriage,
+    qualityMode,
+    modelRoute,
     sources,
   } = opts;
 
@@ -171,6 +178,8 @@ export function buildGenerationStartProgressUpdate(opts: {
       triage: advisorySizingContract,
       sizingContract: advisorySizingContract,
       advisoryTriage,
+      qualityMode,
+      modelRoute,
       ...(seededDraftFeatures.length
         ? {
             draftFeatures: seededDraftFeatures,
@@ -203,6 +212,9 @@ export async function handler(event: { body: GenerationEvent }) {
     retryBaseFeatures,
     pipelineAudit,
     auditRunId,
+    qualityMode = 'speed',
+    modelOverrides,
+    enqueuedAt,
   } = event.body;
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
@@ -212,21 +224,33 @@ export async function handler(event: { body: GenerationEvent }) {
     domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
+  const runConfig = {
+    ...config,
+    generatorConfig: {
+      ...config.generatorConfig,
+      ...(modelOverrides ?? {}),
+    },
+  };
+  const modelRoute = buildGenerationModelRoute(config.generatorConfig, modelOverrides);
   const auditMeta = isPipelineAuditRequested(config, pipelineAudit, auditRunId)
     ? { sessionId, auditRunId: auditRunId!, accountId }
     : null;
 
   const exec = async () => {
+  const workflowStartedAt = Date.now();
+  const queueWaitMs = Math.max(0, workflowStartedAt - Number(enqueuedAt ?? workflowStartedAt));
   let stopHeartbeat: (() => void) | null = null;
   let progressSourcesSnapshot: GenerationProgressPayload['sources'] | undefined;
   const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
   const maskedRequirement = maskPiiText(requirement, piiEnabled);
   const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
   const maskedAnswers = maskPiiInAnswers(clarifyAnswers ?? [], piiEnabled);
+  let firstProgressSentAt: number | null = null;
 
   try {
     let currentProgress: { message?: string; pass?: 1 | 2; payload?: GenerationProgressPayload } = {};
     const updateProgress = async (message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) => {
+      if (firstProgressSentAt == null) firstProgressSentAt = Date.now();
       currentProgress = { message, pass, payload };
       await sendProgress(sessionId, message, pass, payload);
     };
@@ -268,7 +292,8 @@ export async function handler(event: { body: GenerationEvent }) {
         requirement,
         attachmentText: maskedAttachment.text,
         clarifyAnswers: maskedAnswers.answers,
-        config,
+        clarifyDiscoveryProfile,
+        config: runConfig,
         projectKey,
         projectKeys,
         precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
@@ -287,6 +312,8 @@ export async function handler(event: { body: GenerationEvent }) {
               advisoryTriage,
               draftFeatures: liveDraftFeatures,
               draftFeatureCount: liveDraftFeatures.length,
+              qualityMode,
+              modelRoute,
               sources: {
                 projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
                 projectKeys: selectedProjectKeys,
@@ -308,6 +335,8 @@ export async function handler(event: { body: GenerationEvent }) {
               draftFeatures: liveDraftFeatures,
               draftFeatureCount: liveDraftFeatures.length,
               arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
+              qualityMode,
+              modelRoute,
               sources: baseSources,
             },
           );
@@ -331,6 +360,8 @@ export async function handler(event: { body: GenerationEvent }) {
         outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
         advisorySizingContract,
         advisoryTriage,
+        qualityMode,
+        modelRoute,
         sources: progressSources,
       });
 
@@ -376,6 +407,7 @@ export async function handler(event: { body: GenerationEvent }) {
         similarStoriesCount: 0,
         referencedSimilarStories: [],
         outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+        qualityMode,
         sizingContract: advisorySizingContract,
         advisoryTriage,
         pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
@@ -383,6 +415,15 @@ export async function handler(event: { body: GenerationEvent }) {
         partialSuccess: result.generationContext?.partialSuccess,
         partialSuccessMessage: result.generationContext?.partialSuccessMessage,
         stageDurationsMs: result.generationContext?.stageDurationsMs ?? priorStageDurationsMs,
+        latencyMs: {
+          queueWaitMs,
+          retrievalMs: sharedContext.timings.retrievalMs,
+          wiInsightExtractionMs: sharedContext.timings.wiInsightExtractionMs,
+          promptAssemblyMs: result.generationContext?.latencyMs?.promptAssemblyMs,
+          firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+        },
+        modelRoute,
+        actorSets: result.generationContext?.actorSets,
         tokenUsage: result.tokenUsage,
         wiDocsCount: sharedContext.sources.wiDocsCount,
         linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
@@ -396,13 +437,14 @@ export async function handler(event: { body: GenerationEvent }) {
       result.generationContext = generationContext;
 
       await recordGeneration();
+      const persistenceStartedAt = Date.now();
       await saveConversationTurn(
         sessionId,
         accountId,
         maskedRequirement.text,
         result.features,
         [],
-        config.generatorConfig.arModel,
+        modelRoute.ar ?? runConfig.generatorConfig.arModel,
         generationContext,
         result.tokenUsage,
         {
@@ -414,6 +456,10 @@ export async function handler(event: { body: GenerationEvent }) {
           advisoryTriage: generationContext.advisoryTriage,
         },
       );
+      generationContext.latencyMs = {
+        ...(generationContext.latencyMs ?? {}),
+        persistenceMs: Date.now() - persistenceStartedAt,
+      };
 
       if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
         await saveTransparencyReport({
@@ -421,7 +467,7 @@ export async function handler(event: { body: GenerationEvent }) {
           turnType: 'generate',
           actorAccountId: accountId,
           provider: config.generatorConfig.provider,
-          model: config.generatorConfig.arModel,
+          model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
           projectKey,
           requirementExcerpt: maskedRequirement.text.slice(0, 240),
           decisionSummary: [
@@ -449,7 +495,7 @@ export async function handler(event: { body: GenerationEvent }) {
         details: {
           sessionId,
           projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-          model: config.generatorConfig.arModel,
+          model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
           pipelineMode: 'story_assistant_default',
         },
         enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
@@ -459,7 +505,7 @@ export async function handler(event: { body: GenerationEvent }) {
         projectKeys: selectedProjectKeys,
         projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
         sessionId,
-        model: config.generatorConfig.arModel,
+        model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
         tokenUsage: result.tokenUsage ?? null,
       });
 
@@ -471,14 +517,15 @@ export async function handler(event: { body: GenerationEvent }) {
       const genAuditWriter = getPipelineAuditWriter();
       if (genAuditWriter) {
         try {
+          const auditWriteStartedAt = Date.now();
           await genAuditWriter.flushMerge({
             accountId,
             mergeHeader: {
               primaryProjectKey: sharedContext.projectKey,
               projectKeys: sharedContext.projectKeys,
               generatorModels: {
-                decompositionModel: config.generatorConfig.decompositionModel,
-                arModel: config.generatorConfig.arModel,
+                decompositionModel: modelRoute.decomposition,
+                arModel: modelRoute.ar,
               },
               piiMaskingEnabled: piiEnabled,
               piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedAnswers.stats),
@@ -507,6 +554,10 @@ export async function handler(event: { body: GenerationEvent }) {
             },
             completePhase: 'generation',
           });
+          generationContext.latencyMs = {
+            ...(generationContext.latencyMs ?? {}),
+            auditWriteMs: Date.now() - auditWriteStartedAt,
+          };
         } catch (auditErr) {
           console.warn('[generation-queue] pipeline audit merge failed:', auditErr);
         }
@@ -532,6 +583,7 @@ export async function handler(event: { body: GenerationEvent }) {
       return;
     }
 
+    const retrievalStartedAt = Date.now();
     const [initialWiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled
         ? retrieveScopedWiContext(
@@ -552,6 +604,7 @@ export async function handler(event: { body: GenerationEvent }) {
           })
         : Promise.resolve([]),
     ]);
+    const retrievalMs = Date.now() - retrievalStartedAt;
     let wiContext = initialWiContext;
     if (config.wiConfig.enabled && advisoryTriage?.reasoning?.trim()) {
       const intents = buildWorkInstructionRetrievalIntents(maskedRequirement.text, advisoryTriage.reasoning);
@@ -577,7 +630,9 @@ export async function handler(event: { body: GenerationEvent }) {
       return;
     }
     const similarStoriesText = formatSimilarStoriesText(similarStories);
+    const wiInsightStartedAt = Date.now();
     const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
+    const wiInsightExtractionMs = Date.now() - wiInsightStartedAt;
     const linkedWiDocCount = wiContext.linkedDocs.length;
     const retrievedWiDocCount = wiContext.docs.length;
     const retrievedWiChunkCount = wiContext.chunks.length;
@@ -611,6 +666,8 @@ export async function handler(event: { body: GenerationEvent }) {
       outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
       advisorySizingContract,
       advisoryTriage,
+      qualityMode,
+      modelRoute,
       sources: progressSources,
     });
 
@@ -627,7 +684,7 @@ export async function handler(event: { body: GenerationEvent }) {
       similarStoriesText,
       wiContextText: wiContext.text,
       wiInsightsArtifact: wiInsights,
-      config,
+      config: runConfig,
       outputProfileOverride,
       advisoryTriage,
       projectKeys: selectedProjectKeys,
@@ -649,6 +706,8 @@ export async function handler(event: { body: GenerationEvent }) {
             advisoryTriage,
             draftFeatures: liveDraftFeatures,
             draftFeatureCount: liveDraftFeatures.length,
+            qualityMode,
+            modelRoute,
             sources: progressSources,
           },
         );
@@ -671,6 +730,8 @@ export async function handler(event: { body: GenerationEvent }) {
           featureProgress: buildFeatureProgressState(liveDraftFeatures, snapshot),
           arProgress: { completed, total, phase: snapshot.phase },
           failedFeatureIds: snapshot.failedFeatureIds,
+          qualityMode,
+          modelRoute,
           sources: progressSources,
         });
       },
@@ -715,6 +776,7 @@ export async function handler(event: { body: GenerationEvent }) {
       pass2ArPatternStoryKeys: result.generationContext?.pass2ArPatternStoryKeys,
       similarStoriesCount: similarStories.length,
       referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
+      qualityMode,
       sizingContract: advisorySizingContract,
       advisoryTriage,
       pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
@@ -723,6 +785,14 @@ export async function handler(event: { body: GenerationEvent }) {
       partialSuccess: result.generationContext?.partialSuccess,
       partialSuccessMessage: result.generationContext?.partialSuccessMessage,
       stageDurationsMs: result.generationContext?.stageDurationsMs ?? priorStageDurationsMs,
+      latencyMs: {
+        queueWaitMs,
+        retrievalMs,
+        wiInsightExtractionMs,
+        firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+      },
+      modelRoute,
+      actorSets: result.generationContext?.actorSets,
       tokenUsage: result.tokenUsage,
       wiDocsCount: retrievedWiDocCount,
       linkedWiDocCount,
@@ -743,13 +813,14 @@ export async function handler(event: { body: GenerationEvent }) {
     await recordGeneration();
 
     // Save to conversation history
+    const persistenceStartedAt = Date.now();
     await saveConversationTurn(
       sessionId,
       accountId,
       maskedRequirement.text,
       result.features,
       similarStories,
-      config.generatorConfig.arModel,
+      modelRoute.ar ?? runConfig.generatorConfig.arModel,
       generationContext,
       result.tokenUsage,
       {
@@ -761,6 +832,10 @@ export async function handler(event: { body: GenerationEvent }) {
         advisoryTriage: generationContext.advisoryTriage,
       },
     );
+    generationContext.latencyMs = {
+      ...(generationContext.latencyMs ?? {}),
+      persistenceMs: Date.now() - persistenceStartedAt,
+    };
 
     if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
       await saveTransparencyReport({
@@ -768,7 +843,7 @@ export async function handler(event: { body: GenerationEvent }) {
         turnType: 'generate',
         actorAccountId: accountId,
         provider: config.generatorConfig.provider,
-        model: config.generatorConfig.arModel,
+        model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
         projectKey,
         requirementExcerpt: maskedRequirement.text.slice(0, 240),
         decisionSummary: [
@@ -793,11 +868,11 @@ export async function handler(event: { body: GenerationEvent }) {
       actorAccountId: accountId,
       category: 'runtime',
       action: 'GENERATION_WORKFLOW_EXECUTED',
-      details: {
-        sessionId,
-        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-        model: config.generatorConfig.arModel,
-      },
+        details: {
+          sessionId,
+          projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+          model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
+        },
       enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
     });
     await recordProjectActivity({
@@ -805,7 +880,7 @@ export async function handler(event: { body: GenerationEvent }) {
       projectKeys: selectedProjectKeys,
       projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
       sessionId,
-      model: config.generatorConfig.arModel,
+      model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
       tokenUsage: result.tokenUsage ?? null,
     });
 
@@ -817,14 +892,15 @@ export async function handler(event: { body: GenerationEvent }) {
     const genAuditWriter = getPipelineAuditWriter();
     if (genAuditWriter) {
       try {
+        const auditWriteStartedAt = Date.now();
         await genAuditWriter.flushMerge({
           accountId,
           mergeHeader: {
             primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
             projectKeys: selectedProjectKeys,
             generatorModels: {
-              decompositionModel: config.generatorConfig.decompositionModel,
-              arModel: config.generatorConfig.arModel,
+              decompositionModel: modelRoute.decomposition,
+              arModel: modelRoute.ar,
             },
             piiMaskingEnabled: piiEnabled,
             piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedAnswers.stats),
@@ -853,6 +929,10 @@ export async function handler(event: { body: GenerationEvent }) {
           },
           completePhase: 'generation',
         });
+        generationContext.latencyMs = {
+          ...(generationContext.latencyMs ?? {}),
+          auditWriteMs: Date.now() - auditWriteStartedAt,
+        };
       } catch (auditErr) {
         console.warn('[generation-queue] pipeline audit merge failed:', auditErr);
       }

@@ -1,4 +1,5 @@
 import type {
+  ActorSetGrounding,
   ClarifyAnswer,
   ClarifyCategoryKey,
   ClarifyQuestion,
@@ -180,15 +181,50 @@ function formatClarifyAnswers(answers: ClarifyAnswer[]): string {
     .join('\n\n');
 }
 
+function stripChoicePrefix(value: string): string {
+  return cleanText(value)
+    .replace(/^chosen answer:\s*/i, '')
+    .replace(/^selected answer:\s*/i, '')
+    .replace(/^[*-]\s*/, '');
+}
+
+function splitRoleValue(value: string): string[] {
+  return stripChoicePrefix(value)
+    .split(/\s*(?:\n|,|;|\|)\s*/g)
+    .map((part) => cleanText(part))
+    .filter(Boolean);
+}
+
+function looksLikeRolePhrase(value: string): boolean {
+  const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
+  if (!cleaned || cleaned.length < 3 || cleaned.length > 80) return false;
+  if (/[?!]/.test(cleaned)) return false;
+  if (/^(?:none|no one|nobody|not applicable|n\/a|na|never|unknown)$/i.test(cleaned)) return false;
+  if (/^(?:only if|if |when |unless |because |after |before |during |while |depends\b)/i.test(cleaned)) return false;
+  if (/\b(?:billable|workflow|sequence|step|save|complete|required information|conditions?)\b/i.test(cleaned) && !/\bteam\b/i.test(cleaned)) return false;
+  if (!/[A-Za-z]/.test(cleaned)) return false;
+  return true;
+}
+
+function extractRoleValues(answer: ClarifyAnswer): string[] {
+  const structuredRoleValues = [
+    ...(answer.selectedSuggestions ?? []),
+    String(answer.customAnswer ?? '').trim(),
+  ]
+    .flatMap((value) => splitRoleValue(String(value ?? '')))
+    .filter(looksLikeRolePhrase);
+
+  if (structuredRoleValues.length) return structuredRoleValues;
+  return splitRoleValue(cleanText(answer.answer)).filter(looksLikeRolePhrase);
+}
+
 export function extractRoles(requirement: string, answers: ClarifyAnswer[] = []): string[] {
   const seen = new Set<string>();
   const roles: string[] = [];
-  const negativeRoleSignals = /^(?:none|no one|nobody|not applicable|n\/a|na|never|unknown)$/i;
 
   const addRole = (value: string) => {
-    const cleaned = cleanText(value).replace(/\.$/, '');
-    if (cleaned.length < 3 || cleaned.length > 80) return;
-    if (negativeRoleSignals.test(cleaned)) return;
+    const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
+    if (!looksLikeRolePhrase(cleaned)) return;
     const key = cleaned.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -198,20 +234,7 @@ export function extractRoles(requirement: string, answers: ClarifyAnswer[] = [])
   answers.forEach((answer) => {
     const question = `${answer.categoryKey ?? ''} ${answer.question}`.toLowerCase();
     if (!/role|persona|who\b|actor/.test(question)) return;
-    const structuredRoleValues = [
-      ...(answer.selectedSuggestions ?? []),
-      String(answer.customAnswer ?? '').trim(),
-    ]
-      .map((value) => cleanText(value))
-      .filter(Boolean);
-    const fallbackValues = structuredRoleValues.length
-      ? structuredRoleValues
-      : [cleanText(answer.answer)];
-
-    fallbackValues
-      .flatMap((value) => value.split(/\s*(?:,|;)\s*/i))
-      .filter(Boolean)
-      .forEach(addRole);
+    extractRoleValues(answer).forEach(addRole);
   });
 
   const roleRegex = /\bas\s+an?\s+([A-Za-z][A-Za-z ,/-]{2,60}?)(?:\s*[,.]|\s+(?:i|we|they|who|that|the)\b)/gi;
@@ -222,21 +245,139 @@ export function extractRoles(requirement: string, answers: ClarifyAnswer[] = [])
   return roles;
 }
 
-function buildRoleHint(domainRoles: string[] | undefined, requirement: string, answers: ClarifyAnswer[]): string {
-  const extractedRoles = extractRoles(requirement, answers);
-  const combinedRoles = uniqueStrings([...(domainRoles ?? []), ...extractedRoles]);
+export function extractActorSets(requirement: string, answers: ClarifyAnswer[] = []): ActorSetGrounding {
+  const eligibleActors: string[] = [];
+  const approverActors: string[] = [];
+  const viewerActors: string[] = [];
+
+  answers.forEach((answer) => {
+    const question = `${answer.categoryKey ?? ''} ${answer.question}`.toLowerCase();
+    if (!/role|persona|who\b|actor|approve|review|view|see|track|receive|monitor/.test(question)) return;
+    const values = extractRoleValues(answer);
+    if (!values.length) return;
+    if (/\bapprove|approval|review|sign off|authori[sz]/.test(question)) {
+      approverActors.push(...values);
+      return;
+    }
+    if (/\bview|see|track|receive|monitor|notification|status/.test(question)) {
+      viewerActors.push(...values);
+      return;
+    }
+    eligibleActors.push(...values);
+  });
+
+  const mentionedActors = uniqueStrings([
+    ...extractRoles(requirement, answers),
+    ...eligibleActors,
+    ...approverActors,
+    ...viewerActors,
+  ]);
+
+  return {
+    ...(eligibleActors.length ? { eligibleActors: uniqueStrings(eligibleActors) } : {}),
+    ...(approverActors.length ? { approverActors: uniqueStrings(approverActors) } : {}),
+    ...(viewerActors.length ? { viewerActors: uniqueStrings(viewerActors) } : {}),
+    ...(mentionedActors.length ? { mentionedActors } : {}),
+  };
+}
+
+function buildRoleHint(
+  domainRoles: string[] | undefined,
+  requirement: string,
+  answers: ClarifyAnswer[],
+  actorSets: ActorSetGrounding,
+): string {
+  const extractedRoles = actorSets.mentionedActors ?? extractRoles(requirement, answers);
+  const combinedRoles = uniqueStrings([...(domainRoles ?? []), ...extractedRoles]).filter(looksLikeRolePhrase);
   return combinedRoles.length ? `KNOWN ROLES: ${combinedRoles.join(', ')}` : '';
+}
+
+function buildActorSetHints(actorSets: ActorSetGrounding): string[] {
+  const lines: string[] = [];
+  if (actorSets.eligibleActors?.length) {
+    lines.push(`ELIGIBLE ACTORS: ${actorSets.eligibleActors.join(', ')}`);
+  }
+  if (actorSets.approverActors?.length) {
+    lines.push(`APPROVER ACTORS: ${actorSets.approverActors.join(', ')}`);
+  }
+  if (actorSets.viewerActors?.length) {
+    lines.push(`VIEWER ACTORS: ${actorSets.viewerActors.join(', ')}`);
+  }
+  return lines;
+}
+
+function formatWiEvidence(
+  wiInsightsArtifact: WorkInstructionInsightArtifact | null | undefined,
+  wiContextText: string,
+): string {
+  const insightSections = wiInsightsArtifact
+    ? ([
+        ['Workflow signals', wiInsightsArtifact.workflowSteps],
+        ['Business rules', wiInsightsArtifact.businessRules],
+        ['Sequencing', wiInsightsArtifact.sequencingRules],
+        ['Exceptions', wiInsightsArtifact.exceptions],
+        ['Must-cover behaviors', wiInsightsArtifact.mustCoverBehaviors],
+      ] as Array<[string, WorkInstructionInsightArtifact['workflowSteps']]>)
+        .map(([label, items]) => {
+          const lines = items
+            .slice(0, 3)
+            .map((item) => cleanText(item.text))
+            .filter(Boolean);
+          return lines.length ? `${label}:\n- ${lines.join('\n- ')}` : '';
+        })
+        .filter(Boolean)
+    : [];
+
+  if (insightSections.length) {
+    return trimPromptText(insightSections.join('\n\n'), 5000);
+  }
+  return trimPromptText(wiContextText, 5000);
+}
+
+function extractMustCarryRules(answers: ClarifyAnswer[]): string[] {
+  return answers
+    .filter((answer) => {
+      const answerText = cleanText(answer.answer);
+      if (!answerText) return false;
+      return ['functional_flow', 'business_rules', 'state_lifecycle', 'success_measurement'].includes(answer.categoryKey ?? '');
+    })
+    .map((answer) => `${cleanText(answer.question)} => ${cleanText(answer.answer)}`)
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function buildDiscoveryHandoff(input: {
+  answers: ClarifyAnswer[];
+  actorSets: ActorSetGrounding;
+  discoveryProfile?: DiscoveryProfile;
+}): string {
+  const coverageArtifact = input.discoveryProfile?.coverageArtifact;
+  const parts = ['DISCOVERY HANDOFF:'];
+  if (coverageArtifact?.askedThemes?.length) {
+    parts.push(`- Discovery themes actually asked: ${coverageArtifact.askedThemes.join(', ')}`);
+  }
+  buildActorSetHints(input.actorSets).forEach((line) => parts.push(`- ${line}`));
+  const mustCarryRules = extractMustCarryRules(input.answers);
+  if (mustCarryRules.length) {
+    parts.push('- Must-carry rules and workflow details from answered discovery:');
+    mustCarryRules.forEach((rule) => parts.push(`  - ${rule}`));
+  }
+  if (coverageArtifact?.openNonBlockingDecisions?.length) {
+    parts.push('- Explicit open decisions that must remain open rather than silently assumed:');
+    coverageArtifact.openNonBlockingDecisions.slice(0, 6).forEach((decision) => parts.push(`  - ${decision}`));
+  }
+  return parts.length > 1 ? parts.join('\n') : '';
 }
 
 function buildClarifyUserMessage(input: {
   requirement: string;
   attachmentText: string;
-  wiContextText: string;
+  wiEvidenceText: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
   const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
-  if (input.wiContextText.trim()) {
-    parts.push(`Domain context from Work Instructions (use to ask sharper, process-grounded questions):\n${trimPromptText(input.wiContextText, 12000)}`);
+  if (input.wiEvidenceText.trim()) {
+    parts.push(`Operational evidence from Work Instructions (use to ask sharper, process-grounded questions):\n${input.wiEvidenceText}`);
   }
   return parts.join('\n\n');
 }
@@ -245,15 +386,15 @@ function buildSufficiencyUserMessage(input: {
   requirement: string;
   answers: ClarifyAnswer[];
   attachmentText?: string;
-  wiContextText?: string;
+  wiEvidenceText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText ?? '');
   const parts = [
     `Requirement: ${trimPromptText(mergedRequirement, 12000)}`,
     `Questions and answers so far:\n${formatClarifyAnswers(input.answers) || '(none)'}`,
   ];
-  if (input.wiContextText?.trim()) {
-    parts.push(`Domain context from Work Instructions:\n${trimPromptText(input.wiContextText, 6000)}`);
+  if (input.wiEvidenceText?.trim()) {
+    parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);
   }
   return parts.join('\n\n');
 }
@@ -262,19 +403,29 @@ function buildGenerationContextMessage(input: {
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
-  wiContextText: string;
+  wiEvidenceText: string;
   roleHint: string;
+  discoveryProfile?: DiscoveryProfile;
+  actorSets: ActorSetGrounding;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
   const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
   if (input.roleHint.trim()) {
     parts.push(input.roleHint);
   }
+  const discoveryHandoff = buildDiscoveryHandoff({
+    answers: input.clarifyAnswers,
+    actorSets: input.actorSets,
+    discoveryProfile: input.discoveryProfile,
+  });
+  if (discoveryHandoff.trim()) {
+    parts.push(discoveryHandoff);
+  }
   if (input.clarifyAnswers.length) {
     parts.push(`Clarification answers:\n${formatClarifyAnswers(input.clarifyAnswers)}`);
   }
-  if (input.wiContextText.trim()) {
-    parts.push(`Domain context from Work Instructions:\n${trimPromptText(input.wiContextText, 12000)}`);
+  if (input.wiEvidenceText.trim()) {
+    parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);
   }
   return parts.join('\n\n');
 }
@@ -397,7 +548,10 @@ function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
   ));
 }
 
-function buildMinimalDiscoveryProfile(questionCount: number): DiscoveryProfile {
+function buildMinimalDiscoveryProfile(questions: ClarifyQuestion[]): DiscoveryProfile {
+  const questionCount = questions.length;
+  const askedCategoryKeys = uniqueStrings(questions.map((question) => question.categoryKey))
+    .map((key) => key as ClarifyCategoryKey);
   const scope = questionCount >= 9 ? 'broad' : questionCount >= 6 ? 'moderate' : 'narrow';
   const complexity = questionCount >= 9 ? 'high' : questionCount >= 6 ? 'medium' : 'low';
   const ambiguity = questionCount >= 6 ? 'high' : questionCount >= 3 ? 'medium' : 'low';
@@ -417,6 +571,7 @@ function buildMinimalDiscoveryProfile(questionCount: number): DiscoveryProfile {
       plannedQuestionBudget: questionCount + 2,
       actualQuestionsAsked: questionCount,
       actualAnswersReceived: 0,
+      askedCategoryKeys,
     }),
   };
 }
@@ -444,19 +599,142 @@ function featureToRaw(feature: Feature): RawFeature {
   };
 }
 
+function compactNarrativeClause(value: string, maxWords: number): string {
+  let cleaned = cleanText(value)
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b(?:for example|for instance|such as|including|including things like|for example,|for instance,)\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return value;
+  const words = cleaned.split(/\s+/);
+  if (words.length > maxWords && cleaned.includes(',')) {
+    cleaned = cleaned.split(',')[0]?.trim() || cleaned;
+  }
+  const trimmedWords = cleaned.split(/\s+/);
+  if (trimmedWords.length > maxWords) {
+    cleaned = trimmedWords.slice(0, maxWords).join(' ');
+  }
+  return cleaned.replace(/[,.]+$/g, '').trim();
+}
+
+function compactFeatureDescriptionText(description: string): string {
+  const match = description.match(/^(As an? .+?, I need(?: to)? )(.+?)( so that )(.+)$/i);
+  if (!match) return description;
+  const prefix = cleanText(match[1]);
+  const action = compactNarrativeClause(match[2] ?? '', 18);
+  const benefit = compactNarrativeClause(match[4] ?? '', 16);
+  return `${prefix} ${action}${match[3]}${benefit}`.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeArKey(ar: { given: string; when: string; then: string }): string {
+  return [ar.given, ar.when, ar.then].map((value) => normalizeKey(value)).join('||');
+}
+
+function normalizeArGroupKey(ar: { given: string; when: string; then: string }): string {
+  return [ar.given, ar.when].map((value) => normalizeKey(value)).join('||');
+}
+
+function mergeRepeatedThenClauses(thens: string[]): string | null {
+  if (thens.length < 2) return null;
+  const tokenized = thens.map((item) => cleanText(item).split(/\s+/).filter(Boolean));
+  const minLength = Math.min(...tokenized.map((tokens) => tokens.length));
+  const prefix: string[] = [];
+  for (let index = 0; index < minLength; index += 1) {
+    const candidate = tokenized[0]?.[index]?.toLowerCase();
+    if (!candidate) break;
+    if (tokenized.every((tokens) => tokens[index]?.toLowerCase() === candidate)) {
+      prefix.push(tokenized[0][index]!);
+      continue;
+    }
+    break;
+  }
+  if (prefix.length < 2) return null;
+  const suffixes = tokenized
+    .map((tokens) => cleanText(tokens.slice(prefix.length).join(' ')).replace(/^[,.;:]+\s*/, ''))
+    .filter(Boolean);
+  if (suffixes.length !== thens.length) return null;
+  if (suffixes.some((suffix) => suffix.split(/\s+/).length > 8)) return null;
+  const uniqueSuffixes = uniqueStrings(suffixes);
+  if (uniqueSuffixes.length < 2) return cleanText(thens[0]);
+  const lastSuffix = uniqueSuffixes.pop();
+  return `${prefix.join(' ')} ${uniqueSuffixes.length ? `${uniqueSuffixes.join(', ')}${lastSuffix ? `, and ${lastSuffix}` : ''}` : lastSuffix}`.trim();
+}
+
+function dedupeAcceptanceRequirements(features: Feature[]): { features: Feature[]; notes: string[] } {
+  const notes: string[] = [];
+  const seenGlobal = new Set<string>();
+  let crossFeatureRemoved = 0;
+
+  const nextFeatures = features.map((feature) => {
+    const exactDeduped = feature.acceptanceRequirements.filter((ar, index, list) => (
+      list.findIndex((candidate) => normalizeArKey(candidate) === normalizeArKey(ar)) === index
+    ));
+
+    const grouped = new Map<string, typeof exactDeduped>();
+    exactDeduped.forEach((ar) => {
+      const key = normalizeArGroupKey(ar);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(ar);
+    });
+
+    const mergedWithinFeature = exactDeduped.flatMap((ar) => {
+      const group = grouped.get(normalizeArGroupKey(ar)) ?? [];
+      if (group[0] !== ar) return [];
+      const mergedThen = mergeRepeatedThenClauses(group.map((item) => item.then));
+      if (group.length > 1 && mergedThen) {
+        return [{ ...ar, then: mergedThen }];
+      }
+      return group;
+    });
+
+    const withoutCrossFeatureDupes = mergedWithinFeature.filter((ar) => {
+      const key = normalizeArKey(ar);
+      if (seenGlobal.has(key)) {
+        crossFeatureRemoved += 1;
+        return false;
+      }
+      seenGlobal.add(key);
+      return true;
+    });
+
+    return {
+      ...feature,
+      description: compactFeatureDescriptionText(feature.description),
+      acceptanceRequirements: withoutCrossFeatureDupes,
+    };
+  });
+
+  const compactedCount = features.filter((feature, index) => feature.description !== nextFeatures[index]?.description).length;
+  if (compactedCount > 0) {
+    notes.push(`Compacted ${compactedCount} feature description${compactedCount === 1 ? '' : 's'} to keep the story sentence focused on the core capability.`);
+  }
+  if (crossFeatureRemoved > 0) {
+    notes.push(`Removed ${crossFeatureRemoved} repeated acceptance requirement${crossFeatureRemoved === 1 ? '' : 's'} that were duplicated across sibling features.`);
+  }
+  return { features: nextFeatures, notes };
+}
+
 export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
   wiContextText: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   config: TenantConfig;
-}): Promise<StoryAssistantClarifyResult> {
-  void opts.wiInsightsArtifact;
+}): Promise<StoryAssistantClarifyResult & { promptAssemblyMs: number }> {
   const providerOpts = buildProviderOpts(opts.config);
   const usageByStage: Record<string, { input: number; output: number }> = {};
   let questions: ClarifyQuestion[] = [];
+  let promptAssemblyMs = 0;
+  const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
 
   for (const attempt of [1, 2]) {
+    const promptAssemblyStartedAt = Date.now();
+    const baseUserMessage = buildClarifyUserMessage({
+      requirement: opts.requirement,
+      attachmentText: opts.attachmentText,
+      wiEvidenceText,
+    });
+    promptAssemblyMs += Date.now() - promptAssemblyStartedAt;
     const result = await callLlmJsonWithUsage<unknown>({
       model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
       systemPrompt: buildStoryAssistantClarifySystemPrompt({
@@ -465,16 +743,8 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
         questionPlan: { min: 0, max: 0, target: 0 },
       }),
       userMessage: attempt === 1
-        ? buildClarifyUserMessage({
-            requirement: opts.requirement,
-            attachmentText: opts.attachmentText,
-            wiContextText: opts.wiContextText,
-          })
-        : `${buildClarifyUserMessage({
-            requirement: opts.requirement,
-            attachmentText: opts.attachmentText,
-            wiContextText: opts.wiContextText,
-          })}\n\nIMPORTANT: Re-run discovery and return a richer question set. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
+        ? baseUserMessage
+        : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and return a richer question set. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
       maxTokens: 4096,
       reasoningEffort: 'low',
       ...providerOpts,
@@ -484,10 +754,11 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     if (!shouldRetryDiscoveryQuestions(questions) || attempt === 2) break;
   }
 
-  const discoveryProfile = buildMinimalDiscoveryProfile(questions.length);
+  const discoveryProfile = buildMinimalDiscoveryProfile(questions);
   return {
     questions,
     tokenUsage: buildTokenUsageSummary(usageByStage),
+    promptAssemblyMs,
     discoveryProfile,
     ambiguityAssessment: {
       level: questions.length >= 8 ? 'vague' : questions.length >= 4 ? 'medium' : 'clear',
@@ -509,11 +780,24 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
   askedQuestions?: Array<string | Pick<ClarifyQuestion, 'categoryKey' | 'intent' | 'question'>>;
   attachmentText?: string;
   wiContextText?: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   config: TenantConfig;
-}): Promise<StoryAssistantSufficiencyResult> {
-  void opts.askedQuestions;
+}): Promise<StoryAssistantSufficiencyResult & { promptAssemblyMs: number }> {
   const startedAt = Date.now();
   const providerOpts = buildProviderOpts(opts.config);
+  const askedCategoryKeys = uniqueStrings((opts.askedQuestions ?? [])
+    .map((item) => typeof item === 'string' ? '' : item.categoryKey ?? '')
+    .filter(Boolean))
+    .map((key) => key as ClarifyCategoryKey);
+  const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText ?? '');
+  const promptAssemblyStartedAt = Date.now();
+  const userMessage = buildSufficiencyUserMessage({
+    requirement: opts.requirement,
+    answers: opts.answers,
+    attachmentText: opts.attachmentText,
+    wiEvidenceText,
+  });
+  const promptAssemblyMs = Date.now() - promptAssemblyStartedAt;
   try {
     const result = await callLlmJsonWithUsage<unknown>({
       model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
@@ -521,12 +805,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
       }),
-      userMessage: buildSufficiencyUserMessage({
-        requirement: opts.requirement,
-        answers: opts.answers,
-        attachmentText: opts.attachmentText,
-        wiContextText: opts.wiContextText,
-      }),
+      userMessage,
       maxTokens: 1600,
       reasoningEffort: 'low',
       ...providerOpts,
@@ -557,10 +836,12 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
         plannedQuestionBudget: opts.answers.length + 2,
         actualQuestionsAsked: opts.answers.length,
         actualAnswersReceived: opts.answers.length,
+        askedCategoryKeys,
         openNonBlockingDecisions: status === 'ready_with_open_decisions' ? reasonCodes : [],
       }),
       tokenUsage: buildTokenUsageSummary({ clarifyEvaluate: result.usage }),
       durationMs: Date.now() - startedAt,
+      promptAssemblyMs,
     };
   } catch {
     return {
@@ -573,6 +854,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
         plannedQuestionBudget: opts.answers.length + 2,
         actualQuestionsAsked: opts.answers.length,
         actualAnswersReceived: opts.answers.length,
+        askedCategoryKeys,
         openNonBlockingDecisions: ['SUFFICIENCY_EVAL_FAILED'],
       }),
       tokenUsage: {
@@ -582,6 +864,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
         byStage: {},
       },
       durationMs: Date.now() - startedAt,
+      promptAssemblyMs,
       warning: 'Sufficiency evaluation failed; proceeding with explicit open decisions instead of silently marking discovery complete.',
     };
   }
@@ -593,17 +876,20 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   attachmentText: string;
   wiContextText: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
+  discoveryProfile?: DiscoveryProfile;
   config: TenantConfig;
   precomputedDraftFeatures?: Feature[];
   priorStageDurationsMs?: GenerationStageDurationsMs;
   onPass1DraftFeatures?: (draftFeatures: Feature[]) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
-  void opts.wiInsightsArtifact;
   const providerOpts = buildProviderOpts(opts.config);
   const stageDurationsMs = { ...(opts.priorStageDurationsMs ?? {}) } as Record<string, number>;
   const stageUsage: Record<string, { input: number; output: number }> = {};
-  const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers);
+  const actorSets = extractActorSets(opts.requirement, opts.clarifyAnswers);
+  const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers, actorSets);
+  const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
+  let promptAssemblyMs = 0;
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];
 
@@ -611,6 +897,17 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
 
   if (!pass1Features.length) {
     const startedAt = Date.now();
+    const decompositionPromptStartedAt = Date.now();
+    const decompositionUserMessage = `${buildGenerationContextMessage({
+      requirement: opts.requirement,
+      clarifyAnswers: opts.clarifyAnswers,
+      attachmentText: opts.attachmentText,
+      wiEvidenceText,
+      roleHint,
+      discoveryProfile: opts.discoveryProfile,
+      actorSets,
+    })}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
+    promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
       model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
       systemPrompt: buildStoryAssistantDecompositionSystemPrompt({
@@ -619,13 +916,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         processTaxonomy: opts.config.processTaxonomy,
         processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
       }),
-      userMessage: `${buildGenerationContextMessage({
-        requirement: opts.requirement,
-        clarifyAnswers: opts.clarifyAnswers,
-        attachmentText: opts.attachmentText,
-        wiContextText: opts.wiContextText,
-        roleHint,
-      })}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`,
+      userMessage: decompositionUserMessage,
       maxTokens: opts.config.generatorConfig.maxTokens,
       reasoningEffort: 'medium',
       ...providerOpts,
@@ -638,6 +929,9 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     pass1Features = pass1Raw.map((feature) => normaliseFeature({
       ...feature,
       acceptance_requirements: [],
+    })).map((feature) => ({
+      ...feature,
+      description: compactFeatureDescriptionText(feature.description),
     }));
     stageDurationsMs.decomposition = Date.now() - startedAt;
     if (opts.onPass1DraftFeatures) {
@@ -652,24 +946,29 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   }
 
   const pass2StartedAt = Date.now();
+  const arPromptStartedAt = Date.now();
+  const arUserMessage = `${buildGenerationContextMessage({
+    requirement: opts.requirement,
+    clarifyAnswers: opts.clarifyAnswers,
+    attachmentText: opts.attachmentText,
+    wiEvidenceText,
+    roleHint,
+    discoveryProfile: opts.discoveryProfile,
+    actorSets,
+  })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
+    features: pass1Raw.map((feature) => ({
+      ...feature,
+      acceptance_requirements: [],
+    })),
+  }, null, 2)}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements. Collapse repeated field-level rules into one capability-level AR when they share the same GIVEN/WHEN logic, and keep shared quote, approval, or follow-up gates in only one sibling feature.`;
+  promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
     model: getTierModel(opts.config.generatorConfig.arModel, opts.config.tier),
     systemPrompt: buildStoryAssistantArSystemPrompt({
       domainContext: opts.config.domainContext,
       domainRoles: opts.config.domainRoles,
     }),
-    userMessage: `${buildGenerationContextMessage({
-      requirement: opts.requirement,
-      clarifyAnswers: opts.clarifyAnswers,
-      attachmentText: opts.attachmentText,
-      wiContextText: opts.wiContextText,
-      roleHint,
-    })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
-      features: pass1Raw.map((feature) => ({
-        ...feature,
-        acceptance_requirements: [],
-      })),
-    }, null, 2)}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements.`,
+    userMessage: arUserMessage,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
     reasoningEffort: 'medium',
     ...providerOpts,
@@ -682,6 +981,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     ? mergePass2IntoPass1(pass1Raw, pass2Raw)
     : pass1Raw;
   let features = mergedRaw.map((feature) => normaliseFeature(feature));
+  const repairedOutput = dedupeAcceptanceRequirements(features);
+  features = repairedOutput.features;
   const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   const failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
   if (failedIds.size > 0) {
@@ -711,6 +1012,11 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       partialSuccessMessage: failedIds.size > 0
         ? `Acceptance requirements could not be completed for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}.`
         : undefined,
+      autoRepairedIssues: repairedOutput.notes,
+      actorSets,
+      latencyMs: {
+        promptAssemblyMs,
+      },
       tokenUsage,
     } as any,
   };

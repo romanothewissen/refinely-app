@@ -751,7 +751,6 @@ function DiscoveryScoreCard({
     plannedQuestions: plannedQuestionsDisplay,
   });
   const discoveryHeadline = getDiscoveryProfileHeadline(discoveryProfile);
-  const sourceChips = getSourceContextChips(meta?.sources ?? context ?? null);
   const isFinalProfile = Boolean(discoveryProfile);
 
   if (!discoveryProfile && !assessment && !ambiguityAssessment && !sizingContract) {
@@ -775,12 +774,6 @@ function DiscoveryScoreCard({
             </div>
           ))}
         </div>
-        {sourceChips.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-[rgba(0,0,0,0.05)]">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-2">Sources in this run</div>
-            <ContextChipList chips={sourceChips} />
-          </div>
-        )}
       </div>
     );
   }
@@ -791,7 +784,6 @@ function DiscoveryScoreCard({
         <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
         <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{isFinalProfile ? discoveryHeadline : 'Advisory forecast'}</span>
       </div>
-      <ContextChipList chips={sourceChips} />
       <ComplexityBar current={complexityKey} />
       {!isFinalProfile && advisoryTriage?.discoveryForecast && (
         <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
@@ -877,6 +869,7 @@ function DiscoveryPipeline({
 }) {
   const stageIndex = Math.max(0, getDiscoveryStageIndex(meta, workflowStage, progress));
   const pct = [8, 24, 46, 66, 82, 96][stageIndex] ?? 8;
+  const sourceChips = getSourceContextChips(meta?.sources ?? context ?? null);
 
   return (
     <motion.div
@@ -900,6 +893,9 @@ function DiscoveryPipeline({
               <span className="dot-bounce flex gap-0.5"><span /><span /><span /></span>
               {normalizeDisplayText(progress || 'Processing...')}
             </p>
+            <div className="mt-3">
+              <ContextChipList chips={sourceChips} />
+            </div>
           </div>
           {canCancel && onCancel && (
             <button
@@ -2727,7 +2723,12 @@ export function MainContent({
                         )}
                         {generationContext.domainContextApplied && (
                           <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
-                            Guidance on
+                            Domain guidance
+                          </span>
+                        )}
+                        {generationContext.qualityMode && (
+                          <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
+                            {generationContext.qualityMode === 'quality' ? 'Quality mode' : 'Speed mode'}
                           </span>
                         )}
                         {generationContext.outputProfile && (

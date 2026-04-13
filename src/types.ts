@@ -481,11 +481,45 @@ export interface DiscoveryCoverageArtifact {
   mustResolveThemes: string[];
   optionalThemes: string[];
   coveredThemes: string[];
+  askedCategoryKeys?: ClarifyCategoryKey[];
+  askedThemes?: string[];
   openBlockingThemes: string[];
   openNonBlockingDecisions: string[];
   plannedQuestionBudget: number;
   actualQuestionsAsked: number;
   actualAnswersReceived?: number;
+}
+
+export interface PipelineLatencyBreakdown {
+  queueWaitMs?: number;
+  retrievalMs?: number;
+  wiInsightExtractionMs?: number;
+  promptAssemblyMs?: number;
+  firstProgressEventMs?: number;
+  persistenceMs?: number;
+  auditWriteMs?: number;
+  pollingLagMs?: number;
+}
+
+export interface ActorSetGrounding {
+  eligibleActors?: string[];
+  approverActors?: string[];
+  viewerActors?: string[];
+  mentionedActors?: string[];
+}
+
+export type GenerationQualityMode = 'speed' | 'quality';
+
+export interface GenerationModelOverrides {
+  decompositionModel?: string;
+  arModel?: string;
+}
+
+export interface GenerationModelRoute {
+  clarify?: string;
+  evaluate?: string;
+  decomposition?: string;
+  ar?: string;
 }
 
 export interface DiscoveryProfile {
@@ -597,6 +631,8 @@ export interface ClarifyProgressPayload {
   advisoryTriage?: AdvisoryTriageContract;
   discoveryProfile?: DiscoveryProfile;
   ambiguityAssessment?: ClarifyContextMeta['ambiguityAssessment'];
+  latencyMs?: PipelineLatencyBreakdown;
+  modelRoute?: GenerationModelRoute;
   sources?: {
     projectKey: string;
     projectCount?: number;
@@ -700,6 +736,9 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   totalDiscoveryDurationMs?: number;
   finalSufficiency?: DiscoverySufficiencyResult;
   tokenUsage?: TokenUsageSummary;
+  actorSets?: ActorSetGrounding;
+  latencyMs?: PipelineLatencyBreakdown;
+  modelRoute?: GenerationModelRoute;
 }
 
 export type SizingAssessmentArchetype = 'guard_rule' | 'focused_capability' | 'workflow_area' | 'broad_platform';
@@ -791,6 +830,10 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   partialSuccessMessage?: string;
   stageDurationsMs?: GenerationStageDurationsMs;
   tokenUsage?: TokenUsageSummary;
+  actorSets?: ActorSetGrounding;
+  latencyMs?: PipelineLatencyBreakdown;
+  modelRoute?: GenerationModelRoute;
+  qualityMode?: GenerationQualityMode;
 }
 
 export interface GenerationResult {
@@ -1173,6 +1216,7 @@ export interface ClarifyEvent {
   /** When set with config.developerTools.pipelineAuditEnabled, persist full audit bundle. */
   pipelineAudit?: boolean;
   auditRunId?: string;
+  enqueuedAt?: number;
 }
 
 // ─── Generation Queue Event ───────────────────────────────────────────────────
@@ -1211,6 +1255,9 @@ export interface GenerationEvent {
   /** When set with config.developerTools.pipelineAuditEnabled, persist full audit bundle. */
   pipelineAudit?: boolean;
   auditRunId?: string;
+  qualityMode?: GenerationQualityMode;
+  modelOverrides?: GenerationModelOverrides;
+  enqueuedAt?: number;
 }
 
 // ─── Refine Queue Event ───────────────────────────────────────────────────────

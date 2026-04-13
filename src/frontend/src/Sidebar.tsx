@@ -1,7 +1,7 @@
 import React from 'react';
 import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { OutputProfile } from './types';
+import type { GenerationQualityMode, OutputProfile } from './types';
 
 interface SidebarProps {
   viewMode: 'generate' | 'settings';
@@ -21,6 +21,8 @@ interface SidebarProps {
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
   brandingLogoUrl?: string | null;
+  runQualityMode?: GenerationQualityMode;
+  setRunQualityMode?: (value: GenerationQualityMode) => void;
   /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
   workspaceOutputProfile?: OutputProfile;
   /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
@@ -79,6 +81,8 @@ export function Sidebar({
   usage,
   limits,
   brandingLogoUrl,
+  runQualityMode = 'speed',
+  setRunQualityMode,
   workspaceOutputProfile: _workspaceOutputProfile,
   runOutputProfileOverride: _runOutputProfileOverride,
   setRunOutputProfileOverride: _setRunOutputProfileOverride,
@@ -614,6 +618,39 @@ export function Sidebar({
           animate="visible"
           custom={3}
         >
+          {setRunQualityMode && (
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                {
+                  id: 'speed' as const,
+                  label: 'Speed',
+                  detail: 'Use saved Settings as-is for the fastest default run.',
+                },
+                {
+                  id: 'quality' as const,
+                  label: 'Quality',
+                  detail: 'Temporarily boost breakdown and AR reasoning for this run only.',
+                },
+              ].map((mode) => {
+                const selected = runQualityMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setRunQualityMode(mode.id)}
+                    className={`rounded-[18px] border px-3 py-2.5 text-left transition ${
+                      selected
+                        ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                        : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/80 hover:text-[var(--rf-text)]'
+                    }`}
+                  >
+                    <div className="text-[12px] font-bold uppercase tracking-[0.12em]">{mode.label}</div>
+                    <div className="mt-1 text-[11px] font-medium leading-relaxed">{mode.detail}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {workspacePipelineAuditEnabled && setRecordPipelineAuditForRun && (
             <label className="flex items-start gap-2.5 px-1 cursor-pointer">
               <input

@@ -26,7 +26,10 @@ import {
   saveTransparencyReport,
 } from '../services/compliance';
 import { getProjectActivitySummary, recordProjectActivity } from '../services/project-activity';
-import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
+import {
+  resolveEffectiveGeneratorConfig,
+  resolveQualityGenerationOverrides,
+} from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -495,6 +498,10 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
 
+  const qualityMode = payload?.qualityMode === 'quality' ? 'quality' : 'speed';
+  const resolvedModelOverrides =
+    payload?.modelOverrides
+    ?? resolveQualityGenerationOverrides(config.generatorConfig, qualityMode);
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -512,6 +519,9 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage ?? undefined,
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
+    qualityMode,
+    modelOverrides: resolvedModelOverrides,
+    enqueuedAt: Date.now(),
   };
 
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
@@ -553,6 +563,8 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
   });
 
+  const priorQualityMode = latestGenerateTurn?.generationContext?.qualityMode === 'quality' ? 'quality' : 'speed';
+  const resolvedModelOverrides = resolveQualityGenerationOverrides(config.generatorConfig, priorQualityMode);
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -568,6 +580,9 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     retryFeatureId: retryFeature.id,
     retryFeature,
     retryBaseFeatures,
+    qualityMode: priorQualityMode,
+    modelOverrides: resolvedModelOverrides,
+    enqueuedAt: Date.now(),
   };
 
   await entitySet(KEYS.generationProgress(payload.sessionId), {
@@ -637,6 +652,7 @@ async function enqueueClarifyWorkflow(
     priorAnswers: [],
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
+    enqueuedAt: Date.now(),
   };
 
   await entitySet(KEYS.clarifyProgress(payload.sessionId), {

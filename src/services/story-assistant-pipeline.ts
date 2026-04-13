@@ -1,6 +1,7 @@
 import type {
   ClarifyAnswer,
   ClarifyQuestion,
+  DiscoveryProfile,
   Feature,
   GenerationStageDurationsMs,
   TenantConfig,
@@ -79,6 +80,7 @@ export async function runStoryAssistantSufficiencyStage(input: {
     askedQuestions,
     attachmentText: input.attachmentText,
     wiContextText: sharedContext.wiContext.text,
+    wiInsightsArtifact: sharedContext.wiInsights,
     config: {
       ...input.config,
       domainContext: sharedContext.domainContext,
@@ -93,6 +95,7 @@ export async function runStoryAssistantGenerationStage(input: {
   requirement: string;
   attachmentText: string;
   clarifyAnswers: ClarifyAnswer[];
+  clarifyDiscoveryProfile?: DiscoveryProfile;
   config: TenantConfig;
   projectKey?: string;
   projectKeys?: string[];
@@ -117,6 +120,7 @@ export async function runStoryAssistantGenerationStage(input: {
     attachmentText: input.attachmentText,
     wiContextText: sharedContext.wiContext.text,
     wiInsightsArtifact: sharedContext.wiInsights,
+    discoveryProfile: input.clarifyDiscoveryProfile,
     config: {
       ...input.config,
       domainContext: sharedContext.domainContext,

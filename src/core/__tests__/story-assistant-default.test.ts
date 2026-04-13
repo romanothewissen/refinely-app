@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  extractActorSets,
   extractRoles,
   parseStoryAssistantQuestionCandidates,
   splitClearlyNumberedStoryAssistantQuestion,
@@ -76,6 +77,34 @@ test('extractRoles prefers structured clarify answers and ignores negative place
   ]);
 
   assert.deepEqual(roles, ['Service Sales and Billing Team']);
+});
+
+test('extractActorSets preserves multiple eligible actors while filtering non-role phrases', () => {
+  const actorSets = extractActorSets('', [
+    {
+      question: 'Which roles can perform this activity?',
+      answer: 'Technical Support Specialist, PM Specialist',
+      selectedSuggestions: [],
+      customAnswer: 'Technical Support Specialist, PM Specialist',
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who approves the outcome?',
+      answer: 'Service Manager',
+      selectedSuggestions: ['Service Manager'],
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who can view progress?',
+      answer: 'Only if billable',
+      selectedSuggestions: ['Only if billable'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.deepEqual(actorSets.eligibleActors, ['Technical Support Specialist', 'PM Specialist']);
+  assert.deepEqual(actorSets.approverActors, ['Service Manager']);
+  assert.equal(actorSets.viewerActors, undefined);
 });
 
 test('parseStoryAssistantQuestionCandidates splits numbered prompts into separate cards without rewriting the meaning', () => {

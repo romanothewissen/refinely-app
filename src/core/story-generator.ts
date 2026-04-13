@@ -3657,6 +3657,9 @@ export async function evaluateSufficiency(opts: {
     plannedQuestionBudget: opts.totalQuestionBudget ?? initialQuestionCount + followupCap,
     actualQuestionsAsked: askedQuestionInput.length,
     actualAnswersReceived: opts.answers.length,
+    askedCategoryKeys: askedQuestionDetails
+      .map((entry) => entry.categoryKey)
+      .filter((key): key is ClarifyCategoryKey => Boolean(key)),
   });
   const baseUserMessage = [
     `REQUIREMENT: ${opts.requirement}`,
@@ -3742,6 +3745,9 @@ export async function evaluateSufficiency(opts: {
         plannedQuestionBudget: evaluationCoverageArtifact.plannedQuestionBudget,
         actualQuestionsAsked: askedQuestionInput.length,
         actualAnswersReceived: opts.answers.length,
+        askedCategoryKeys: askedQuestionDetails
+          .map((entry) => entry.categoryKey)
+          .filter((key): key is ClarifyCategoryKey => Boolean(key)),
         openNonBlockingDecisions: status === 'ready_with_open_decisions' ? reasonCodes : [],
       }),
       durationMs,

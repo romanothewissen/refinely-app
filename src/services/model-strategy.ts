@@ -1,9 +1,14 @@
 import type {
+  GenerationModelOverrides,
+  GenerationModelRoute,
+  GenerationQualityMode,
   GeneratorBucketClasses,
   GeneratorConfig,
   LlmProvider,
 } from '../types';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
+
+type StrategyCatalogProvider = keyof typeof strategyCatalog.providers;
 
 export type GeneratorRoleModelField =
   | 'decompositionModel'
@@ -43,6 +48,10 @@ export interface ResolvedGeneratorStrategyState {
 function normalizeProvider(provider?: LlmProvider): LlmProvider {
   if (!provider || provider === 'forge_llms') return 'anthropic';
   return provider;
+}
+
+function getPresetProvider(provider: LlmProvider) {
+  return normalizeProvider(provider) as StrategyCatalogProvider;
 }
 
 
@@ -122,4 +131,47 @@ export function resolveGeneratorModelForRole(
   role: GeneratorRoleModelField,
 ): string {
   return resolveEffectiveGeneratorConfig(generatorConfig)[role];
+}
+
+function inferModelFamily(modelId?: string): 'pro' | 'flash' | 'lite' | undefined {
+  const normalized = String(modelId ?? '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.includes('flash')) return 'flash';
+  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano') || normalized.includes('haiku')) return 'lite';
+  if (normalized.includes('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
+  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.includes('sonnet')) return normalized.includes('mini') ? 'lite' : 'flash';
+  return undefined;
+}
+
+export function resolveQualityGenerationOverrides(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+  qualityMode?: GenerationQualityMode,
+): GenerationModelOverrides | undefined {
+  if (qualityMode !== 'quality') return undefined;
+  const effective = resolveEffectiveGeneratorConfig(generatorConfig);
+  const providerCatalog = strategyCatalog.providers[getPresetProvider(effective.provider)];
+  const proModel = providerCatalog?.presets?.stable?.pro?.[0];
+  if (!proModel) return undefined;
+
+  const overrides: GenerationModelOverrides = {};
+  if (inferModelFamily(effective.decompositionModel) !== 'pro') {
+    overrides.decompositionModel = proModel;
+  }
+  if (inferModelFamily(effective.arModel) !== 'pro') {
+    overrides.arModel = proModel;
+  }
+  return Object.keys(overrides).length ? overrides : undefined;
+}
+
+export function buildGenerationModelRoute(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+  overrides?: GenerationModelOverrides,
+): GenerationModelRoute {
+  const effective = resolveEffectiveGeneratorConfig(generatorConfig);
+  return {
+    clarify: effective.clarifyModel,
+    evaluate: effective.evaluateModel,
+    decomposition: overrides?.decompositionModel ?? effective.decompositionModel,
+    ar: overrides?.arModel ?? effective.arModel,
+  };
 }

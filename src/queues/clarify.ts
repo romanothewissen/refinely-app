@@ -19,7 +19,7 @@ import {
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
-import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
+import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { recordProjectActivity } from '../services/project-activity';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
@@ -55,13 +55,18 @@ export async function handler(event: { body: ClarifyEvent }) {
     : null;
 
   const exec = async () => {
+  const workflowStartedAt = Date.now();
+  const queueWaitMs = Math.max(0, workflowStartedAt - Number(event.body.enqueuedAt ?? workflowStartedAt));
+  const modelRoute = buildGenerationModelRoute(config.generatorConfig);
   let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
   let stopHeartbeat: (() => void) | null = null;
+  let firstProgressSentAt: number | null = null;
 
   const sendProgress = async (
     message: string,
     payload?: ClarifyProgressPayload,
   ) => {
+    if (firstProgressSentAt == null) firstProgressSentAt = Date.now();
     currentProgress = { message, payload };
     await sendClarifyProgress(sessionId, message, inputSignature, payload);
   };
@@ -104,7 +109,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectKey,
         projectKeys,
       });
-      const { questions, tokenUsage, ambiguityAssessment, discoveryProfile } = result;
+      const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, promptAssemblyMs } = result;
       const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
       if (await isWorkflowCancelled(sessionId)) {
@@ -116,6 +121,14 @@ export async function handler(event: { body: ClarifyEvent }) {
         stage: 'finalize',
         discoveryProfile,
         ambiguityAssessment,
+        latencyMs: {
+          queueWaitMs,
+          retrievalMs: sharedContext.timings.retrievalMs,
+          wiInsightExtractionMs: sharedContext.timings.wiInsightExtractionMs,
+          promptAssemblyMs,
+          firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+        },
+        modelRoute,
         sources: {
           projectKey: sharedContext.projectKey,
           projectCount: sharedContext.projectCount,
@@ -158,6 +171,14 @@ export async function handler(event: { body: ClarifyEvent }) {
           reasonCodes: [],
         },
         tokenUsage,
+        latencyMs: {
+          queueWaitMs,
+          retrievalMs: sharedContext.timings.retrievalMs,
+          wiInsightExtractionMs: sharedContext.timings.wiInsightExtractionMs,
+          promptAssemblyMs,
+          firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+        },
+        modelRoute,
         wiDocsCount: sharedContext.sources.wiDocsCount,
         linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
         retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
@@ -168,7 +189,12 @@ export async function handler(event: { body: ClarifyEvent }) {
         wiInsights: sharedContext.wiInsights,
       };
 
+      const persistenceStartedAt = Date.now();
       await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
+      clarifyContext.latencyMs = {
+        ...(clarifyContext.latencyMs ?? {}),
+        persistenceMs: Date.now() - persistenceStartedAt,
+      };
       if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
         await saveTransparencyReport({
           sessionId,
@@ -214,6 +240,7 @@ export async function handler(event: { body: ClarifyEvent }) {
       const auditWriter = getPipelineAuditWriter();
       if (auditWriter) {
         try {
+          const auditWriteStartedAt = Date.now();
           await auditWriter.flushMerge({
             accountId,
             mergeHeader: {
@@ -244,6 +271,10 @@ export async function handler(event: { body: ClarifyEvent }) {
             },
             completePhase: 'clarify',
           });
+          clarifyContext.latencyMs = {
+            ...(clarifyContext.latencyMs ?? {}),
+            auditWriteMs: Date.now() - auditWriteStartedAt,
+          };
         } catch (auditErr) {
           console.warn('[clarify-queue] pipeline audit merge failed:', auditErr);
         }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
-import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, OutputProfile } from '../types';
+import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationModelRoute, GenerationQualityMode, OutputProfile, PipelineLatencyBreakdown } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
@@ -16,6 +16,9 @@ export interface GenerationProgressPayload {
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
+  latencyMs?: PipelineLatencyBreakdown;
+  modelRoute?: GenerationModelRoute;
+  qualityMode?: GenerationQualityMode;
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number; featureClass?: FeatureClass; confidence?: FeatureConfidence; actorSource?: FeatureActorSource }>;
   draftFeatureCount?: number;
@@ -98,6 +101,9 @@ function mergeGenerationPayload(
     resumeContext: next.resumeContext ?? previous.resumeContext,
     sources: mergeGenerationSources(previous.sources, next.sources),
     outputProfile: next.outputProfile ?? previous.outputProfile,
+    latencyMs: next.latencyMs ?? previous.latencyMs,
+    modelRoute: next.modelRoute ?? previous.modelRoute,
+    qualityMode: next.qualityMode ?? previous.qualityMode,
   };
 }
 
@@ -105,7 +111,7 @@ const POLL_INTERVAL_MS = 2000;
 const NO_FIRST_EVENT_MS = 60000;
 /** Generation can sit on a single LLM call (especially AR pass) longer than 90s; avoid false timeouts while the queue still updates `updatedAt` via heartbeat. */
 const STALE_PROGRESS_MS = 300000;
-const PROGRESS_STABILITY_MS = 250;
+const PROGRESS_STABILITY_MS = 80;
 
 // Clarify runs in a 15-minute queue worker, so client-side timeouts should
 // allow long discovery sessions and only fail when progress actually goes stale.
@@ -131,6 +137,8 @@ function mergeClarifyPayload(
     advisoryTriage: next.advisoryTriage ?? previous.advisoryTriage,
     discoveryProfile: next.discoveryProfile ?? previous.discoveryProfile,
     ambiguityAssessment: next.ambiguityAssessment ?? previous.ambiguityAssessment,
+    latencyMs: next.latencyMs ?? previous.latencyMs,
+    modelRoute: next.modelRoute ?? previous.modelRoute,
     sources: next.sources ?? previous.sources,
   };
 }
@@ -208,8 +216,17 @@ export function useClarifyRealtime(
         // Still waiting (null/undefined or 'pending' sentinel) — check for client-side timeout
         if (!result || result.type === 'pending' || result.type === 'progress') {
           if (result?.message) setProgress(result.message);
-          setProgressPayload(previous => mergeClarifyPayload(previous, result?.payload ?? null));
           const updatedAt = result?.updatedAt ?? 0;
+          const payloadWithPollingLag = result?.payload
+            ? {
+                ...result.payload,
+                latencyMs: {
+                  ...(result.payload.latencyMs ?? {}),
+                  ...(updatedAt > 0 ? { pollingLagMs: Math.max(0, Date.now() - updatedAt) } : {}),
+                },
+              }
+            : null;
+          setProgressPayload(previous => mergeClarifyPayload(previous, payloadWithPollingLag));
           const ageMs = updatedAt > 0 ? Date.now() - updatedAt : Date.now() - startedAtRef.current;
           if (ageMs > CLARIFY_STALE_PROGRESS_MS) {
             clearInterval(timerRef.current!);
@@ -405,9 +422,18 @@ export function useGenerationRealtime(
           if (event.message) {
             commitProgress(event.message, visibleProgressRef.current === '');
           }
+          const nextPayload = (event.payload as GenerationProgressPayload | undefined)
+            ? {
+                ...(event.payload as GenerationProgressPayload),
+                latencyMs: {
+                  ...((event.payload as GenerationProgressPayload).latencyMs ?? {}),
+                  ...(updatedAt > 0 ? { pollingLagMs: Math.max(0, Date.now() - updatedAt) } : {}),
+                },
+              }
+            : null;
           setProgressPayload(previous => mergeGenerationPayload(
             previous,
-            (event.payload as GenerationProgressPayload | undefined) ?? null,
+            nextPayload,
           ));
         } else if (event.type === 'cancelled') {
           clearInterval(timerRef.current!);

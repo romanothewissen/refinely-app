@@ -213,7 +213,7 @@ export function getSourceContextChips(input?: {
     });
   }
   if (input.domainContextApplied) {
-    chips.push({ id: 'guidance', label: 'Guidance on' });
+    chips.push({ id: 'guidance', label: 'Domain guidance' });
   }
   if (input.attachmentIncluded) {
     chips.push({ id: 'attachment', label: 'Attachment included' });

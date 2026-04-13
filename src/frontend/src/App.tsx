@@ -23,6 +23,7 @@ import type {
   FeatureClass,
   FeatureConfidence,
   GenerationContextMeta,
+  GenerationQualityMode,
   OutputProfile,
   TokenUsageSummary,
   UndoableAiChange,
@@ -172,6 +173,8 @@ function buildClarifyLoadingMeta(
           advisoryTriage: livePayload?.advisoryTriage ?? clarifyContext?.advisoryTriage,
           discoveryProfile: livePayload?.discoveryProfile ?? clarifyContext?.discoveryProfile,
           ambiguityAssessment: livePayload?.ambiguityAssessment ?? clarifyContext?.ambiguityAssessment,
+          latencyMs: livePayload?.latencyMs ?? clarifyContext?.latencyMs,
+          modelRoute: livePayload?.modelRoute ?? clarifyContext?.modelRoute,
           sources: livePayload?.sources ?? contextSources,
         }
     : null;
@@ -477,6 +480,7 @@ function LegacyApp({
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
+  const [runQualityMode, setRunQualityMode] = useState<GenerationQualityMode>('speed');
   const [reviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
@@ -1344,6 +1348,7 @@ function LegacyApp({
         clarifyAnswers,
         attachmentText,
         outputProfileOverride: runOutputProfileOverride,
+        qualityMode: runQualityMode,
         projectKey: effectiveProjectKey,
         projectKeys: effectiveProjectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
@@ -1630,6 +1635,8 @@ function LegacyApp({
               usage={usage}
               limits={limits}
               brandingLogoUrl={brandingLogoUrl}
+              runQualityMode={runQualityMode}
+              setRunQualityMode={setRunQualityMode}
               reviewBeforeARs={reviewBeforeARs}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
