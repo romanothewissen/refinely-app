@@ -914,8 +914,8 @@ function LegacyApp({
         const adaptiveQuestions = questions as ClarifyQuestion[];
         if (adaptiveQuestions.length > 0) {
           setClarifyQuestions(adaptiveQuestions);
-          setClarifyRound((nextClarifyContext?.totalQuestionCount ?? 0) > 1 ? 2 : 1);
-          setWorkflowStage((nextClarifyContext?.totalQuestionCount ?? 0) > 1 ? 'clarify_round_2' : 'clarify_round_1');
+          setClarifyRound(1);
+          setWorkflowStage('clarify_round_1');
           setIsWorking(false);
           return;
         }
@@ -1084,7 +1084,7 @@ function LegacyApp({
       setWorkflowRunId(prev => prev + 1);
       setPendingClarifySessionId(sessionIdRef.current);
       setClarifyBlockingError(null);
-      setWorkflowStage('clarify_round_2');
+      setWorkflowStage('clarify_round_1');
 
       try {
         const clarifySessionId = await resolveDiscoverySessionId();
@@ -1843,19 +1843,27 @@ function LegacyApp({
                 transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
               >
                 <ClarifyQuestionsView 
-                  key={`clarify-round-${clarifyRound}`}
+                  key={`clarify-round-${clarifyRound}-${clarifyQuestions.map((question) => question.question).join('|')}`}
                   questions={clarifyQuestions} 
                   onComplete={handleClarifyComplete}
                   onSkip={handleClarifySkip}
                   onRetry={handleRetryClarify}
                   round={clarifyRound}
                   isSubmitting={isEvaluatingDiscovery}
-                  submitLabel={clarifyRound === 2 ? 'Generate Features' : 'Continue Discovery'}
-                  skipLabel={clarifyRound === 2 ? 'Skip follow-up' : 'Skip all'}
+                  submitLabel={clarifyContext?.discoveryMode === 'adaptive_v1'
+                    ? 'Continue Discovery'
+                    : clarifyRound === 2
+                      ? 'Generate Features'
+                      : 'Continue Discovery'}
+                  skipLabel={clarifyContext?.discoveryMode === 'adaptive_v1'
+                    ? 'Skip to generation'
+                    : clarifyRound === 2
+                      ? 'Skip follow-up'
+                      : 'Skip all'}
                   contextMeta={clarifyContext}
                   blockingState={clarifyBlockingError}
                   inlineError={clarifyEvaluationError}
-                  priorAnswers={clarifyRound === 1 ? clarifyAnswers : []}
+                  priorAnswers={clarifyContext?.discoveryMode === 'adaptive_v1' ? clarifyAnswers : (clarifyRound === 1 ? clarifyAnswers : [])}
                   sidebarOpen={sidebarOpen}
                   setSidebarOpen={setSidebarOpen}
                 />

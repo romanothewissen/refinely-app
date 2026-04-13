@@ -122,8 +122,10 @@ export function ClarifyQuestionsView({
   const [showContextDetails, setShowContextDetails] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [expandedQuestionDetails, setExpandedQuestionDetails] = useState<Record<number, boolean>>({});
+  const [localValidationError, setLocalValidationError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const failureDiagnostics = contextMeta?.failureDiagnostics;
+  const isAdaptiveDiscovery = contextMeta?.discoveryMode === 'adaptive_v1';
 
   useEffect(() => {
     const priorByQuestion = new Map(
@@ -153,6 +155,7 @@ export function ClarifyQuestionsView({
   useEffect(() => {
     setCurrentPage(0);
     setExpandedQuestionDetails({});
+    setLocalValidationError(null);
   }, [questions, round]);
 
   useEffect(() => {
@@ -182,10 +185,12 @@ export function ClarifyQuestionsView({
       ? existing.selectedSuggestions.filter(s => s !== sug)
       : [...existing.selectedSuggestions, sug];
 
+    setLocalValidationError(null);
     setAnswers(prev => ({ ...prev, [qIdx]: { ...existing, selectedSuggestions: newSelected } }));
   }
 
   function handleCustomChange(qIdx: number, val: string) {
+    setLocalValidationError(null);
     setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), customAnswer: val } }));
   }
 
@@ -194,6 +199,17 @@ export function ClarifyQuestionsView({
   }
 
   function handleSubmit() {
+    if (isAdaptiveDiscovery) {
+      const currentPageAnswered = visibleQuestions.some(({ idx }) => {
+        const answer = ensureAnswer(idx);
+        return answer.customAnswer.trim().length > 0 || answer.selectedSuggestions.length > 0;
+      });
+      if (!currentPageAnswered) {
+        setLocalValidationError('Add an answer before continuing, or skip to generation if discovery is already sufficient.');
+        return;
+      }
+    }
+
     if (!isLastPage) {
       setCurrentPage((page) => Math.min(pageCount - 1, page + 1));
       return;
@@ -262,7 +278,7 @@ export function ClarifyQuestionsView({
             <div className="rf-pane-header-copy">
               <h1 className="rf-pane-header-title">Requirement Discovery</h1>
               <p className="rf-pane-header-subtitle" style={{ color: 'var(--rf-text-tertiary)' }}>
-                {round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · page <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{safeCurrentPage + 1}</span>/{pageCount} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
+                {isAdaptiveDiscovery ? 'Adaptive discovery' : round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · page <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{safeCurrentPage + 1}</span>/{pageCount} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
               </p>
             </div>
           </div>
@@ -474,14 +490,14 @@ export function ClarifyQuestionsView({
             </motion.div>
           )}
 
-          {inlineError && questions.length > 0 && (
+          {(inlineError || localValidationError) && questions.length > 0 && (
             <motion.div
               className="rounded-[22px] border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35 px-5 py-4 text-sm text-[var(--rf-danger)] shadow-sm"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <div className="font-bold">Discovery needs another try</div>
-              <div className="mt-1 leading-relaxed">{inlineError}</div>
+              <div className="font-bold">{localValidationError ? 'Answer needed' : 'Discovery needs another try'}</div>
+              <div className="mt-1 leading-relaxed">{localValidationError ?? inlineError}</div>
             </motion.div>
           )}
 

@@ -59,6 +59,16 @@ function trimPromptText(text: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
+function cleanSummaryText(value: string): string {
+  return trimPromptText(
+    cleanText(value)
+      .replace(/[([{]\s*$/g, '')
+      .replace(/[,;:-]\s*$/g, '')
+      .trim(),
+    180,
+  );
+}
+
 function mergeRequirementAndAttachment(requirement: string, attachmentText?: string): string {
   const cleanedRequirement = cleanText(requirement);
   const cleanedAttachment = String(attachmentText ?? '').trim();
@@ -104,7 +114,7 @@ function summarizeObjective(requirement: string): string {
   const normalized = cleanText(requirement);
   if (!normalized) return 'Clarify the requirement enough to generate a strong backlog artifact.';
   const sentence = normalized.split(/(?<=[.?!])\s+/)[0] ?? normalized;
-  return trimPromptText(sentence, 140);
+  return cleanSummaryText(sentence);
 }
 
 function detectComplexityTier(text: string): DiscoveryComplexityTier {
@@ -163,8 +173,96 @@ function createInitialLivingBrief(blueprint: DiscoveryBlueprint): LivingBrief {
     resolvedTopics: [],
     openTopics: uniqueStrings(blueprint.rankedGaps).slice(0, blueprint.complexityTier === 'simple' ? 3 : 7),
     confidenceByTopic: {},
-    summary: blueprint.objective ?? 'Discovery has started.',
+    summary: cleanSummaryText(blueprint.objective ?? 'Discovery has started.'),
     knownUnknowns: uniqueStrings(blueprint.rankedGaps).slice(0, 5),
+  };
+}
+
+function topicLabelForCategory(categoryKey: ClarifyCategoryKey): string {
+  switch (categoryKey) {
+    case 'context_trigger':
+      return 'Trigger and starting context';
+    case 'user_personas':
+      return 'Roles and ownership';
+    case 'functional_flow':
+      return 'Workflow steps';
+    case 'business_rules':
+      return 'Rules and exceptions';
+    case 'state_lifecycle':
+      return 'Status and lifecycle handling';
+    case 'success_measurement':
+      return 'Success measurement';
+    default:
+      return labelForCategoryKey(categoryKey);
+  }
+}
+
+function summarizeFactsForBrief(facts: string[], objective: string | null): string {
+  const headline = objective ? cleanSummaryText(objective) : 'Discovery is in progress.';
+  const supportingFacts = facts.slice(-2).map((fact) => cleanSummaryText(fact)).filter(Boolean);
+  if (!supportingFacts.length) return headline;
+  return cleanSummaryText(`${headline} ${supportingFacts.join(' ')}`);
+}
+
+function applyAnswersToBrief(
+  brief: LivingBrief,
+  latestAnswers: ClarifyAnswer[],
+  askedQuestions: ClarifyQuestion[],
+): LivingBrief {
+  if (!latestAnswers.length) return brief;
+
+  const nextFacts = [...brief.facts];
+  const nextConstraints = [...brief.constraints];
+  const nextResolvedTopics = [...brief.resolvedTopics];
+  const nextOpenTopics = [...brief.openTopics];
+  const nextKnownUnknowns = [...(brief.knownUnknowns ?? [])];
+  const nextConfidence = { ...brief.confidenceByTopic };
+
+  latestAnswers.forEach((answer) => {
+    const categoryKey = answer.categoryKey ?? inferCategoryKeyFromTopic(answer.question);
+    const normalizedAnswer = cleanText(answer.answer);
+    if (normalizedAnswer) {
+      nextFacts.push(`${cleanText(answer.question)}: ${normalizedAnswer}`);
+      if (/\bmust|should|only|cannot|can't|within|before|after|required|unless\b/i.test(normalizedAnswer)) {
+        nextConstraints.push(normalizedAnswer);
+      }
+    }
+
+    const topicLabel = topicLabelForCategory(categoryKey);
+    nextResolvedTopics.push(topicLabel);
+    nextConfidence[categoryKey] = Math.max(nextConfidence[categoryKey] ?? 0, normalizedAnswer ? 0.8 : 0.55);
+
+    const removeTopic = (candidate: string) => {
+      const normalizedCandidate = normalizeKey(candidate);
+      const normalizedLabel = normalizeKey(topicLabel);
+      const normalizedQuestion = normalizeKey(answer.question);
+      return normalizedCandidate === normalizedLabel
+        || normalizedCandidate.includes(normalizedLabel)
+        || normalizedLabel.includes(normalizedCandidate)
+        || normalizeKey(askedQuestions.find((question) => normalizeKey(question.question) === normalizedQuestion)?.question ?? '') === normalizedCandidate;
+    };
+
+    for (let index = nextOpenTopics.length - 1; index >= 0; index -= 1) {
+      if (removeTopic(nextOpenTopics[index] ?? '')) {
+        nextOpenTopics.splice(index, 1);
+      }
+    }
+    for (let index = nextKnownUnknowns.length - 1; index >= 0; index -= 1) {
+      if (removeTopic(nextKnownUnknowns[index] ?? '')) {
+        nextKnownUnknowns.splice(index, 1);
+      }
+    }
+  });
+
+  return {
+    ...brief,
+    facts: uniqueStrings(nextFacts).slice(0, 12),
+    constraints: uniqueStrings(nextConstraints).slice(0, 6),
+    resolvedTopics: uniqueStrings(nextResolvedTopics).slice(0, 8),
+    openTopics: uniqueStrings(nextOpenTopics).slice(0, 8),
+    knownUnknowns: uniqueStrings(nextKnownUnknowns).slice(0, 6),
+    confidenceByTopic: nextConfidence,
+    summary: summarizeFactsForBrief(uniqueStrings(nextFacts), brief.objective),
   };
 }
 
@@ -237,33 +335,67 @@ function normalizeAdaptiveQuestion(question: ClarifyQuestion | null): ClarifyQue
   };
 }
 
+function fallbackSuggestionsForCategory(categoryKey: ClarifyCategoryKey): string[] {
+  switch (categoryKey) {
+    case 'context_trigger':
+      return ['Customer request', 'Approved quote', 'Work order created'];
+    case 'user_personas':
+      return ['Coordinator', 'Field team lead', 'Operations manager'];
+    case 'functional_flow':
+      return ['Capture request, quote, approve, execute', 'Plan first, then assign and deliver', 'Route by service type'];
+    case 'business_rules':
+      return ['Approval is required for exceptions', 'Pricing depends on service type', 'Duplicate requests should be blocked'];
+    case 'state_lifecycle':
+      return ['Draft, quoted, approved, scheduled, completed', 'Paused and resumed when blocked', 'Reopen when changes are requested'];
+    case 'success_measurement':
+      return ['Faster turnaround time', 'Fewer manual handoffs', 'Better status visibility'];
+    default:
+      return [];
+  }
+}
+
+function isQuestionLowQuality(question: ClarifyQuestion | null): boolean {
+  if (!question) return true;
+  const normalized = normalizeKey(question.question);
+  if (!normalized || normalized.split(/\s+/).length < 4) return true;
+  if (/^(what|which|how)\s+(workflow|trigger|process|flow)\s+should\s+(trigger|follow)$/.test(normalized)) return true;
+  if (/(workflow|trigger|follow)\s+(workflow|trigger|follow)/.test(normalized)) return true;
+  return false;
+}
+
 function buildFallbackNextQuestion(brief: LivingBrief, askedQuestions: ClarifyQuestion[]): ClarifyQuestion | null {
   const alreadyAsked = new Set(askedQuestions.map((question) => normalizeKey(question.question)));
+  const askedCategories = new Set(askedQuestions.map((question) => question.categoryKey));
   const topic = brief.openTopics.find((candidate) => {
     const prompt = normalizeKey(candidate);
+    const categoryKey = inferCategoryKeyFromTopic(candidate);
+    return prompt && !alreadyAsked.has(prompt) && !askedCategories.has(categoryKey);
+  }) ?? brief.openTopics.find((candidate) => {
+    const prompt = normalizeKey(candidate);
     return prompt && !alreadyAsked.has(prompt);
-  }) ?? brief.knownUnknowns?.[0];
+  }) ?? brief.knownUnknowns?.find((candidate) => !askedCategories.has(inferCategoryKeyFromTopic(candidate)))
+    ?? brief.knownUnknowns?.[0];
   if (!topic) return null;
 
   const categoryKey = inferCategoryKeyFromTopic(topic);
   const questionText = categoryKey === 'user_personas'
-    ? `Who owns ${cleanText(topic).toLowerCase()}?`
+    ? 'Which role owns this step?'
     : categoryKey === 'functional_flow'
-      ? `What workflow should ${cleanText(topic).toLowerCase()} follow?`
+      ? 'What should happen step by step?'
       : categoryKey === 'business_rules'
-        ? `Which rule should govern ${cleanText(topic).toLowerCase()}?`
+        ? 'Which rules or exceptions matter most?'
         : categoryKey === 'state_lifecycle'
-          ? `How should ${cleanText(topic).toLowerCase()} change over time?`
+          ? 'How should status change over time?'
           : categoryKey === 'success_measurement'
-            ? `How will ${cleanText(topic).toLowerCase()} be measured?`
-            : `What should happen for ${cleanText(topic).toLowerCase()}?`;
+            ? 'How will success be measured?'
+            : 'What event should start this process?';
 
   return {
     categoryKey,
     category: labelForCategoryKey(categoryKey),
     intent: `adaptive_${categoryKey}`,
     question: ensureQuestionMark(questionText),
-    suggestions: [],
+    suggestions: fallbackSuggestionsForCategory(categoryKey),
   };
 }
 
@@ -569,12 +701,18 @@ export async function advanceAdaptiveDiscovery(input: {
     piiMaskingEnabled: Boolean(input.config.compliance?.enabled && input.config.compliance?.piiMaskingEnabled),
   } as const;
 
+  const heuristicBrief = applyAnswersToBrief(
+    input.state.livingBrief,
+    input.latestAnswers,
+    input.state.askedQuestions,
+  );
+
   const attemptMessages = [
     buildTurnUserMessage({
       requirement: input.requirement,
       attachmentText: input.attachmentText,
       blueprint: input.state.blueprint,
-      livingBrief: input.state.livingBrief,
+      livingBrief: heuristicBrief,
       askedQuestions: input.state.askedQuestions,
       latestAnswers: input.latestAnswers,
       wiEvidenceText: input.state.wiEvidenceText,
@@ -585,10 +723,10 @@ export async function advanceAdaptiveDiscovery(input: {
       attachmentText: input.attachmentText,
       blueprint: input.state.blueprint,
       livingBrief: {
-        ...input.state.livingBrief,
-        facts: input.state.livingBrief.facts.slice(-6),
-        openTopics: input.state.livingBrief.openTopics.slice(0, 4),
-        knownUnknowns: input.state.livingBrief.knownUnknowns?.slice(0, 3),
+        ...heuristicBrief,
+        facts: heuristicBrief.facts.slice(-6),
+        openTopics: heuristicBrief.openTopics.slice(0, 4),
+        knownUnknowns: heuristicBrief.knownUnknowns?.slice(0, 3),
       },
       askedQuestions: input.state.askedQuestions.slice(-4),
       latestAnswers: input.latestAnswers,
@@ -629,15 +767,28 @@ export async function advanceAdaptiveDiscovery(input: {
       });
 
       const payload = (result.data && typeof result.data === 'object') ? result.data as Record<string, unknown> : {};
-      const updatedBrief = normalizeLivingBrief(payload.updatedBrief, input.state.livingBrief);
+      const updatedBrief = normalizeLivingBrief(payload.updatedBrief, heuristicBrief);
       const normalizedQuestion = normalizeAdaptiveQuestion(
         parseStoryAssistantQuestionCandidates(payload.nextQuestion ? { questions: [payload.nextQuestion] } : payload).slice(0, 1)[0] ?? null,
       );
+      const enrichedQuestion = normalizedQuestion
+        ? {
+            ...normalizedQuestion,
+            suggestions: normalizedQuestion.suggestions.length
+              ? normalizedQuestion.suggestions
+              : fallbackSuggestionsForCategory(
+                  normalizedQuestion.categoryKey ?? inferCategoryKeyFromTopic(normalizedQuestion.question),
+                ),
+          }
+        : null;
       const promotedComplexityTier = cleanText(payload.promotedComplexityTier);
-      const isSufficient = payload.isSufficient === true || (!normalizedQuestion && updatedBrief.openTopics.length === 0);
+      const useFallbackQuestion = isQuestionLowQuality(enrichedQuestion);
+      const isSufficient = payload.isSufficient === true || (!enrichedQuestion && updatedBrief.openTopics.length === 0);
       const decision: TurnDecision = {
         isSufficient,
-        nextQuestion: isSufficient ? null : (normalizedQuestion ?? buildFallbackNextQuestion(updatedBrief, input.state.askedQuestions)),
+        nextQuestion: isSufficient
+          ? null
+          : ((useFallbackQuestion ? null : enrichedQuestion) ?? buildFallbackNextQuestion(updatedBrief, input.state.askedQuestions)),
         updatedBrief,
         ...(promotedComplexityTier === 'simple' || promotedComplexityTier === 'standard' || promotedComplexityTier === 'complex'
           ? { promotedComplexityTier }
@@ -658,11 +809,11 @@ export async function advanceAdaptiveDiscovery(input: {
   }
 
   const fallbackDecision: TurnDecision = {
-    isSufficient: input.state.livingBrief.openTopics.length === 0,
-    nextQuestion: buildFallbackNextQuestion(input.state.livingBrief, input.state.askedQuestions),
-    updatedBrief: input.state.livingBrief,
-    shouldFallback: input.state.livingBrief.openTopics.length > 0 && !buildFallbackNextQuestion(input.state.livingBrief, input.state.askedQuestions),
-    fallbackReason: input.state.livingBrief.openTopics.length > 0
+    isSufficient: heuristicBrief.openTopics.length === 0,
+    nextQuestion: buildFallbackNextQuestion(heuristicBrief, input.state.askedQuestions),
+    updatedBrief: heuristicBrief,
+    shouldFallback: heuristicBrief.openTopics.length > 0 && !buildFallbackNextQuestion(heuristicBrief, input.state.askedQuestions),
+    fallbackReason: heuristicBrief.openTopics.length > 0
       ? 'Adaptive discovery could not compute a reliable next question.'
       : undefined,
   };
