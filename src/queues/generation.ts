@@ -13,6 +13,7 @@ import type {
   Feature,
   GenerationContextMeta,
   GenerationEvent,
+  GenerationResult,
   GenerationStageDurationsMs,
   TokenUsageSummary,
 } from '../types';
@@ -33,6 +34,7 @@ import {
 } from '../services/project-selection';
 import { deriveRetrievalQuery } from '../services/retrieval-query';
 import { runStoryAssistantGenerationStage } from '../services/story-assistant-pipeline';
+import type { SharedPipelineContext } from '../services/shared-pipeline-context';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 interface RealtimeEvent {
@@ -65,6 +67,7 @@ interface GenerationProgressPayload {
 }
 
 const PROGRESS_HEARTBEAT_MS = 15000;
+const MAX_FULL_GENERATION_ATTEMPTS = 3;
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
   await entitySet(KEYS.generationProgress(sessionId), {
@@ -240,6 +243,7 @@ export async function handler(event: { body: GenerationEvent }) {
       const advisorySizingContract = clarifySizingContract;
       const advisoryTriage = clarifyAdvisoryTriage;
       let clarifyFinalSufficiency = preEvaluatedSufficiency;
+      let preloadedSharedContext: SharedPipelineContext | undefined;
 
       if (!clarifyFinalSufficiency?.evaluated && !retryFeatureId) {
         await updateProgress(`Evaluating requirement sufficiency…`, 1, {
@@ -249,7 +253,7 @@ export async function handler(event: { body: GenerationEvent }) {
         getPipelineAuditWriter()?.setPhase('clarify.sufficiency');
 
         const { runStoryAssistantSufficiencyStage } = await import('../services/story-assistant-pipeline');
-        const { result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
+        const { sharedContext: sufficiencyShared, result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
           requirement: maskedRequirement.text,
           attachmentText: maskedAttachment.text,
           answers: maskedAnswers.answers,
@@ -257,6 +261,7 @@ export async function handler(event: { body: GenerationEvent }) {
           config: runConfig,
           projectKey,
           projectKeys,
+          loadEvidence: false,
         });
 
         if (sufficiencyResult.status === 'ask_followup' && Array.isArray(sufficiencyResult.questions) && sufficiencyResult.questions.length > 0) {
@@ -278,7 +283,11 @@ export async function handler(event: { body: GenerationEvent }) {
           }
           return;
         }
-        
+
+        if (sufficiencyShared) {
+          preloadedSharedContext = sufficiencyShared;
+        }
+
         clarifyFinalSufficiency = {
           evaluated: true,
           sufficient: sufficiencyResult.sufficient,
@@ -287,7 +296,7 @@ export async function handler(event: { body: GenerationEvent }) {
           missingCategoryKeys: sufficiencyResult.missingCategoryKeys,
           reasonCodes: sufficiencyResult.reasonCodes,
         };
-        
+
         const w = getPipelineAuditWriter();
         if (w) {
           await w.flushMerge({
@@ -304,75 +313,120 @@ export async function handler(event: { body: GenerationEvent }) {
       });
       getPipelineAuditWriter()?.setPhase('generate.pipeline');
 
+      const maxGenAttempts = retryFeatureId ? 1 : MAX_FULL_GENERATION_ATTEMPTS;
+      let evidenceReuse: SharedPipelineContext | undefined = preloadedSharedContext;
       let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> = [];
-      const { sharedContext, result } = await runStoryAssistantGenerationStage({
-        requirement: maskedRequirement.text,
-        attachmentText: maskedAttachment.text,
-        clarifyAnswers: maskedAnswers.answers,
-        clarifyDiscoveryProfile,
-        config: runConfig,
-        projectKey,
-        projectKeys,
-        precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
-        priorStageDurationsMs,
-        shouldCancel: () => isWorkflowCancelled(sessionId),
-        onPass1DraftFeatures: async (drafts) => {
-          liveDraftFeatures = mapDraftFeatures(drafts);
+      let genOutcome: { sharedContext: SharedPipelineContext; result: GenerationResult } | null = null;
+
+      for (let genAttempt = 0; genAttempt < maxGenAttempts; genAttempt++) {
+        if (genAttempt > 0) {
+          if (await isWorkflowCancelled(sessionId)) {
+            await markCancelled(sessionId);
+            return;
+          }
+          console.warn('[generation-queue] Retrying feature generation', { sessionId, genAttempt });
           await updateProgress(
-            `Sketching features (${drafts.length} draft${drafts.length === 1 ? '' : 's'})…`,
+            `Retrying generation after an error (attempt ${genAttempt + 1}/${maxGenAttempts})…`,
             1,
-            {
-              stage: 'decomposition',
-              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-              triage: advisorySizingContract,
-              sizingContract: advisorySizingContract,
-              advisoryTriage,
-              draftFeatures: liveDraftFeatures,
-              draftFeatureCount: liveDraftFeatures.length,
-              qualityMode,
-              modelRoute,
-              sources: {
-                ...baseSources,
-                similarStoriesCount: sharedContext.sources.similarStoriesCount,
-                referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
-                linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
-                retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
-                retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
-                wiInsightCount: sharedContext.sources.wiInsightCount,
-                referencedWiDocs: sharedContext.sources.referencedWiDocs,
-                referencedWiSections: sharedContext.sources.referencedWiSections,
-              },
-            },
+            { stage: 'context', sources: baseSources },
           );
-          await updateProgress(
-            `Writing acceptance requirements in one full pass for ${drafts.length} feature${drafts.length === 1 ? '' : 's'}…`,
-            2,
-            {
-              stage: 'acceptance_requirements',
-              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-              triage: advisorySizingContract,
-              sizingContract: advisorySizingContract,
-              advisoryTriage,
-              draftFeatures: liveDraftFeatures,
-              draftFeatureCount: liveDraftFeatures.length,
-              arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
-              qualityMode,
-              modelRoute,
-              sources: {
-                ...baseSources,
-                similarStoriesCount: sharedContext.sources.similarStoriesCount,
-                referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
-                linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
-                retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
-                retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
-                wiInsightCount: sharedContext.sources.wiInsightCount,
-                referencedWiDocs: sharedContext.sources.referencedWiDocs,
-                referencedWiSections: sharedContext.sources.referencedWiSections,
-              },
+          await new Promise((r) => {
+            setTimeout(r, 1000 * genAttempt);
+          });
+        }
+
+        liveDraftFeatures = [];
+        try {
+          genOutcome = await runStoryAssistantGenerationStage({
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            clarifyAnswers: maskedAnswers.answers,
+            clarifyDiscoveryProfile,
+            config: runConfig,
+            projectKey,
+            projectKeys,
+            precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
+            priorStageDurationsMs,
+            preloadedSharedContext: evidenceReuse,
+            shouldCancel: () => isWorkflowCancelled(sessionId),
+            onPass1DraftFeatures: async (drafts, evidence) => {
+              liveDraftFeatures = mapDraftFeatures(drafts);
+              await updateProgress(
+                `Sketching features (${drafts.length} draft${drafts.length === 1 ? '' : 's'})…`,
+                1,
+                {
+                  stage: 'decomposition',
+                  outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+                  triage: advisorySizingContract,
+                  sizingContract: advisorySizingContract,
+                  advisoryTriage,
+                  draftFeatures: liveDraftFeatures,
+                  draftFeatureCount: liveDraftFeatures.length,
+                  qualityMode,
+                  modelRoute,
+                  sources: {
+                    ...baseSources,
+                    similarStoriesCount: evidence.sources.similarStoriesCount,
+                    referencedSimilarStories: evidence.sources.referencedSimilarStories,
+                    linkedWiDocCount: evidence.sources.linkedWiDocCount,
+                    retrievedWiDocCount: evidence.sources.retrievedWiDocCount,
+                    retrievedWiChunkCount: evidence.sources.retrievedWiChunkCount,
+                    wiInsightCount: evidence.sources.wiInsightCount,
+                    referencedWiDocs: evidence.sources.referencedWiDocs,
+                    referencedWiSections: evidence.sources.referencedWiSections,
+                  },
+                },
+              );
+              await updateProgress(
+                `Writing acceptance requirements in one full pass for ${drafts.length} feature${drafts.length === 1 ? '' : 's'}…`,
+                2,
+                {
+                  stage: 'acceptance_requirements',
+                  outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
+                  triage: advisorySizingContract,
+                  sizingContract: advisorySizingContract,
+                  advisoryTriage,
+                  draftFeatures: liveDraftFeatures,
+                  draftFeatureCount: liveDraftFeatures.length,
+                  arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
+                  qualityMode,
+                  modelRoute,
+                  sources: {
+                    ...baseSources,
+                    similarStoriesCount: evidence.sources.similarStoriesCount,
+                    referencedSimilarStories: evidence.sources.referencedSimilarStories,
+                    linkedWiDocCount: evidence.sources.linkedWiDocCount,
+                    retrievedWiDocCount: evidence.sources.retrievedWiDocCount,
+                    retrievedWiChunkCount: evidence.sources.retrievedWiChunkCount,
+                    wiInsightCount: evidence.sources.wiInsightCount,
+                    referencedWiDocs: evidence.sources.referencedWiDocs,
+                    referencedWiSections: evidence.sources.referencedWiSections,
+                  },
+                },
+              );
             },
-          );
-        },
-      });
+          });
+          evidenceReuse = genOutcome.sharedContext;
+          break;
+        } catch (genErr) {
+          if (genErr instanceof GenerationCancelledError) {
+            throw genErr;
+          }
+          if (await isWorkflowCancelled(sessionId)) {
+            await markCancelled(sessionId);
+            return;
+          }
+          if (genAttempt === maxGenAttempts - 1) {
+            throw genErr;
+          }
+          console.warn('[generation-queue] Generation attempt failed:', genErr);
+        }
+      }
+
+      if (!genOutcome) {
+        throw new Error('Generation did not complete.');
+      }
+      const { sharedContext, result } = genOutcome;
 
       if (await isWorkflowCancelled(sessionId)) {
         await markCancelled(sessionId);

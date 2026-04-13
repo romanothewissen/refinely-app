@@ -11,7 +11,7 @@ import {
   generateStoryAssistantDefaultClarifyingQuestions,
   generateStoryAssistantDefaultFeatures,
 } from '../core/story-assistant-default';
-import { loadSharedPipelineContext } from './shared-pipeline-context';
+import { loadSharedPipelineContext, type SharedPipelineContext } from './shared-pipeline-context';
 
 export async function runStoryAssistantClarifyStage(input: {
   requirement: string;
@@ -55,6 +55,11 @@ export async function runStoryAssistantSufficiencyStage(input: {
   config: TenantConfig;
   projectKey?: string;
   projectKeys?: string[];
+  /**
+   * When true, loads WI + similar stories before evaluation (slower, sharper sufficiency).
+   * Default false: judges Q&A + requirement only; full evidence loads once at generation.
+   */
+  loadEvidence?: boolean;
 }) {
   const askedQuestions = input.askedQuestions?.map((item) => {
     if (typeof item === 'string') return item;
@@ -65,32 +70,49 @@ export async function runStoryAssistantSufficiencyStage(input: {
     };
   });
 
-  const sharedContext = await loadSharedPipelineContext({
-    requirement: input.requirement,
-    attachmentText: input.attachmentText,
-    clarifyAnswers: input.answers,
-    config: input.config,
-    projectKey: input.projectKey,
-    projectKeys: input.projectKeys,
-    pipelineMode: 'story_assistant_default',
-  });
+  const loadEvidence = input.loadEvidence === true;
+
+  if (loadEvidence) {
+    const sharedContext = await loadSharedPipelineContext({
+      requirement: input.requirement,
+      attachmentText: input.attachmentText,
+      clarifyAnswers: input.answers,
+      config: input.config,
+      projectKey: input.projectKey,
+      projectKeys: input.projectKeys,
+      pipelineMode: 'story_assistant_default',
+    });
+
+    const result = await evaluateStoryAssistantDefaultSufficiency({
+      requirement: input.requirement,
+      answers: input.answers,
+      askedQuestions,
+      attachmentText: input.attachmentText,
+      wiContextText: sharedContext.wiContext.text,
+      wiInsightsArtifact: sharedContext.wiInsights,
+      similarStories: sharedContext.similarStories,
+      config: {
+        ...input.config,
+        domainContext: sharedContext.domainContext,
+        domainRoles: sharedContext.domainRoles,
+      },
+    });
+
+    return { sharedContext, result };
+  }
 
   const result = await evaluateStoryAssistantDefaultSufficiency({
     requirement: input.requirement,
     answers: input.answers,
     askedQuestions,
     attachmentText: input.attachmentText,
-    wiContextText: sharedContext.wiContext.text,
-    wiInsightsArtifact: sharedContext.wiInsights,
-    similarStories: sharedContext.similarStories,
-    config: {
-      ...input.config,
-      domainContext: sharedContext.domainContext,
-      domainRoles: sharedContext.domainRoles,
-    },
+    wiContextText: '',
+    wiInsightsArtifact: null,
+    similarStories: [],
+    config: input.config,
   });
 
-  return { sharedContext, result };
+  return { sharedContext: undefined, result };
 }
 
 export async function runStoryAssistantGenerationStage(input: {
@@ -103,18 +125,21 @@ export async function runStoryAssistantGenerationStage(input: {
   projectKeys?: string[];
   precomputedDraftFeatures?: Feature[];
   priorStageDurationsMs?: GenerationStageDurationsMs;
-  onPass1DraftFeatures?: (draftFeatures: Feature[]) => Promise<void>;
+  preloadedSharedContext?: SharedPipelineContext;
+  onPass1DraftFeatures?: (draftFeatures: Feature[], evidence: SharedPipelineContext) => Promise<void>;
   shouldCancel?: () => Promise<boolean> | boolean;
 }) {
-  const sharedContext = await loadSharedPipelineContext({
-    requirement: input.requirement,
-    attachmentText: input.attachmentText,
-    clarifyAnswers: input.clarifyAnswers,
-    config: input.config,
-    projectKey: input.projectKey,
-    projectKeys: input.projectKeys,
-    pipelineMode: 'story_assistant_default',
-  });
+  const sharedContext =
+    input.preloadedSharedContext ??
+    (await loadSharedPipelineContext({
+      requirement: input.requirement,
+      attachmentText: input.attachmentText,
+      clarifyAnswers: input.clarifyAnswers,
+      config: input.config,
+      projectKey: input.projectKey,
+      projectKeys: input.projectKeys,
+      pipelineMode: 'story_assistant_default',
+    }));
 
   const result = await generateStoryAssistantDefaultFeatures({
     requirement: input.requirement,
@@ -133,7 +158,9 @@ export async function runStoryAssistantGenerationStage(input: {
       arPatternStoryKeys: sharedContext.sources.arPatternStoryKeys,
       precomputedDraftFeatures: input.precomputedDraftFeatures,
       priorStageDurationsMs: input.priorStageDurationsMs,
-      onPass1DraftFeatures: input.onPass1DraftFeatures,
+      onPass1DraftFeatures: input.onPass1DraftFeatures
+        ? async (draftFeatures) => input.onPass1DraftFeatures!(draftFeatures, sharedContext)
+        : undefined,
     shouldCancel: input.shouldCancel,
   });
 

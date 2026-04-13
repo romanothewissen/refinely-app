@@ -552,7 +552,7 @@ export function ClarifyQuestionsView({
                             {isAnswered ? <Check className="w-3 h-3" /> : <span>{renderedNumber}</span>}
                           </div>
                           <div className="min-w-0 flex-1 pt-0.5">
-                            <p className="text-[14px] font-semibold text-[var(--rf-text)] leading-snug">
+                            <p className="min-w-0 break-words text-[14px] font-semibold text-[var(--rf-text)] leading-snug">
                               {normalizeDisplayText(q.question)}
                             </p>
                             {hasDetails && (
@@ -590,11 +590,11 @@ export function ClarifyQuestionsView({
                                       : 'border-[var(--rf-border)] bg-[rgba(255,255,255,0.88)] text-[var(--rf-text-secondary)] hover:border-[var(--rf-brand-subtle)] hover:text-[var(--rf-brand)]'
                                   }`}
                                 >
-                                  <div className="flex w-full items-start gap-2">
+                                  <div className="flex w-full min-w-0 items-start gap-2">
                                     <div className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${sel ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white' : 'border-[var(--rf-border-strong)] bg-white text-transparent'}`}>
                                       <Check className="w-2.5 h-2.5" />
                                     </div>
-                                    <span>{normalizeDisplayText(sug)}</span>
+                                    <span className="min-w-0 flex-1 break-words text-left">{normalizeDisplayText(sug)}</span>
                                   </div>
                                 </button>
                               );

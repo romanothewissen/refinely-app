@@ -410,10 +410,14 @@ function LegacyApp({
   
   // Realtime Integration
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[]>([]);
+  const clarifyQuestionsRef = useRef<ClarifyQuestion[]>([]);
+  clarifyQuestionsRef.current = clarifyQuestions;
   const [clarifyAnswers, setClarifyAnswers] = useState<ClarifyAnswer[]>([]);
   const clarifyAnswersRef = useRef<ClarifyAnswer[]>([]);
   clarifyAnswersRef.current = clarifyAnswers;
   const [clarifyRound, setClarifyRound] = useState<1 | 2>(1);
+  const clarifyRoundRef = useRef<1 | 2>(1);
+  clarifyRoundRef.current = clarifyRound;
   const [isEvaluatingDiscovery, setIsEvaluatingDiscovery] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingClarifySessionId, setPendingClarifySessionId] = useState<string | null>(null);
@@ -785,6 +789,16 @@ function LegacyApp({
     } catch {}
   };
 
+  const restoreWorkflowAfterGenerationFailure = useCallback(() => {
+    const q = clarifyQuestionsRef.current;
+    const round = clarifyRoundRef.current;
+    if (q.length > 0) {
+      setWorkflowStage(round === 2 ? 'clarify_round_2' : 'clarify_round_1');
+    } else {
+      setWorkflowStage('blocked');
+    }
+  }, []);
+
   const {
     isGenerating,
     progress: generationProgress,
@@ -825,7 +839,7 @@ function LegacyApp({
       setPendingSessionId(null);
       setRetryingFeatureId(null);
       setIsWorking(false);
-      setWorkflowStage('blocked');
+      restoreWorkflowAfterGenerationFailure();
     }
     ,
     () => {
@@ -1058,6 +1072,7 @@ function LegacyApp({
 
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
+      setClarifyAnswers(mergedAnswers);
       setWorkflowStage('generation');
       await startGeneration(requirement, mergedAnswers);
       return;
@@ -1300,7 +1315,6 @@ function LegacyApp({
     setGenerationError(null);
     // We DO NOT wipe clarifyQuestions and clarifyAnswers here so that if
     // the queue returns a needs_clarification async event, we still have the answers.
-    setClarifyRound(1);
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
     setIsEvaluatingDiscovery(false);
@@ -1354,14 +1368,14 @@ function LegacyApp({
         setIsWorking(false);
         setPendingSessionId(null);
         setGenerationProgressMeta(null);
-        setWorkflowStage('blocked');
+        restoreWorkflowAfterGenerationFailure();
       }
     } catch (err: any) {
       setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
       setIsWorking(false);
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
-      setWorkflowStage('blocked');
+      restoreWorkflowAfterGenerationFailure();
     }
   };
 
@@ -1730,8 +1744,20 @@ function LegacyApp({
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
               >
-                <span className="flex-1">{generationError}</span>
-                <button onClick={() => setGenerationError(null)} className="text-rose-500 hover:text-rose-800 font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition">&times;</button>
+                <span className="flex-1 min-w-0">{generationError}</span>
+                {clarifyQuestions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGenerationError(null);
+                      void startGeneration(requirement, clarifyAnswers);
+                    }}
+                    className="shrink-0 rounded-lg border border-[var(--rf-danger)]/40 bg-white/80 px-3 py-1.5 text-[12px] font-bold text-[var(--rf-danger)] hover:bg-white transition"
+                  >
+                    Retry generation
+                  </button>
+                )}
+                <button type="button" onClick={() => setGenerationError(null)} className="text-rose-500 hover:text-rose-800 font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition shrink-0">&times;</button>
               </motion.div>
             )}
             {generationWarning && !generationError && (
