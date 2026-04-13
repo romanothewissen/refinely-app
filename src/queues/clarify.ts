@@ -665,6 +665,10 @@ async function sendClarifyProgress(
   inputSignature?: string,
   payload?: ClarifyProgressPayload,
 ) {
+  const existing = await entityGet<{ type?: string }>(KEYS.clarifyProgress(sessionId));
+  if (existing?.type === 'complete' || existing?.type === 'blocked' || existing?.type === 'error' || existing?.type === 'cancelled') {
+    return;
+  }
   await entitySet(KEYS.clarifyProgress(sessionId), {
     type: 'progress',
     sessionId,
