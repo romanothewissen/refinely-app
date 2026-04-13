@@ -671,18 +671,19 @@ function normalizeRecommendedQuestionRange(
   value: unknown,
   depth: DiscoveryDepth,
 ): { min: number; max: number } {
+  // Generous defaults: the LLM should be encouraged to ask what's genuinely needed.
   const fallback = depth === 'light'
-    ? { min: 4, max: 7 }
+    ? { min: 5, max: 10 }
     : depth === 'deep'
-      ? { min: 12, max: 18 }
-      : { min: 8, max: 12 };
+      ? { min: 15, max: 20 }
+      : { min: 10, max: 15 };
   if (!value || typeof value !== 'object') return fallback;
   const candidate = value as { min?: unknown; max?: unknown };
   const min = Number.isFinite(candidate.min) ? Math.max(1, Math.round(Number(candidate.min))) : fallback.min;
   const max = Number.isFinite(candidate.max) ? Math.max(min, Math.round(Number(candidate.max))) : fallback.max;
   return {
-    min: Math.min(min, 18),
-    max: Math.min(Math.max(max, min), 18),
+    min: Math.min(min, 20),
+    max: Math.min(Math.max(max, min), 20),
   };
 }
 
@@ -1077,13 +1078,24 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   let promptAssemblyMs = 0;
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
-  const heuristicAssessment = buildHeuristicDiscoveryAssessment({
-    requirement: opts.requirement,
-    attachmentText: opts.attachmentText,
-    wiEvidenceText,
-    similarStoriesText,
-  });
-  let discoveryAssessment = heuristicAssessment;
+
+  // Static fallback — used only if the LLM assessment call fails entirely.
+  // Not keyword-driven: the LLM decides depth; this just ensures the pipeline
+  // can proceed with a reasonable medium-depth assumption.
+  const fallbackAssessment: DiscoveryAssessment = {
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'medium',
+    actorComplexity: 'medium',
+    ruleDensity: 'medium',
+    exceptionDensity: 'medium',
+    lifecycleComplexity: 'medium',
+    ambiguityLevel: 'medium',
+    coverageObligations: [],
+    recommendedQuestionRange: { min: 10, max: 15 },
+    rationale: 'LLM assessment unavailable; using default medium-depth assumption.',
+  };
+  let discoveryAssessment: DiscoveryAssessment = fallbackAssessment;
 
   try {
     const promptAssemblyStartedAt = Date.now();
@@ -1107,12 +1119,11 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       ...providerOpts,
     });
     usageByStage.discoveryAssessment = assessmentResult.usage;
-    discoveryAssessment = mergeDiscoveryAssessments(
-      parseDiscoveryAssessment(assessmentResult.data),
-      heuristicAssessment,
-    );
+    // Use the LLM assessment directly — no heuristic merge.
+    const parsed = parseDiscoveryAssessment(assessmentResult.data);
+    if (parsed) discoveryAssessment = parsed;
   } catch {
-    discoveryAssessment = heuristicAssessment;
+    discoveryAssessment = fallbackAssessment;
   }
 
   let coverageQualityScore = 0;

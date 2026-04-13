@@ -1257,6 +1257,7 @@ export interface GenerationEvent {
   /** Shared advisory triage contract captured during discovery. */
   clarifyAdvisoryTriage?: AdvisoryTriageContract;
   clarifyFinalSufficiency?: DiscoverySufficiencyResult;
+  clarifyQuestionsAsked?: Array<string | { categoryKey?: string; intent?: string; question?: string }>;
   /** Resume generation from an already-reviewed pass-1 draft. */
   reviewedDraftFeatures?: Feature[];
   reviewedDraftReview?: DraftReviewMetadata;

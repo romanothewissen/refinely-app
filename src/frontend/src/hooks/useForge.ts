@@ -64,20 +64,6 @@ export const api = {
   }) => invoke('retryClarify', payload),
   getClarifyResult: (sessionId: string) =>
     invoke('getClarifyResult', { sessionId }),
-  evaluateSufficiency: (payload: {
-    sessionId?: string;
-    requirement: string;
-    answers: unknown[];
-    askedQuestions?: unknown[];
-    attachmentText?: string;
-    projectKey?: string;
-    projectKeys?: string[];
-    followupCap?: number;
-    initialQuestionCount?: number;
-    totalQuestionBudget?: number;
-    pipelineAudit?: boolean;
-    auditRunId?: string;
-  }) => invoke('evaluateSufficiency', payload),
 
   getPipelineAudit: (payload: { sessionId: string; auditRunId: string }) =>
     invoke('getPipelineAudit', payload),

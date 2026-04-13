@@ -36,11 +36,13 @@ import { runStoryAssistantGenerationStage } from '../services/story-assistant-pi
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 interface RealtimeEvent {
-  type: 'progress' | 'complete' | 'error' | 'cancelled';
+  type: 'progress' | 'complete' | 'error' | 'cancelled' | 'needs_clarification';
   sessionId: string;
   message?: string;
   pass?: 1 | 2;
   payload?: unknown;
+  questions?: unknown[];
+  sufficiencyResult?: unknown;
 }
 
 interface GenerationProgressPayload {
@@ -170,7 +172,8 @@ export async function handler(event: { body: GenerationEvent }) {
     clarifySizingContract,
     clarifyAdvisoryTriage,
     clarifyDiscoveryProfile,
-    clarifyFinalSufficiency,
+    clarifyFinalSufficiency: preEvaluatedSufficiency,
+    clarifyQuestionsAsked,
     priorStageDurationsMs,
     outputProfileOverride,
     retryFeatureId,
@@ -236,6 +239,64 @@ export async function handler(event: { body: GenerationEvent }) {
       };
       const advisorySizingContract = clarifySizingContract;
       const advisoryTriage = clarifyAdvisoryTriage;
+      let clarifyFinalSufficiency = preEvaluatedSufficiency;
+
+      if (!clarifyFinalSufficiency?.evaluated && !retryFeatureId) {
+        await updateProgress(`Evaluating requirement sufficiency…`, 1, {
+          stage: 'context',
+          sources: baseSources,
+        });
+        getPipelineAuditWriter()?.setPhase('clarify.sufficiency');
+
+        const { runStoryAssistantSufficiencyStage } = await import('../services/story-assistant-pipeline');
+        const { result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
+          requirement: maskedRequirement.text,
+          attachmentText: maskedAttachment.text,
+          answers: maskedAnswers.answers,
+          askedQuestions: clarifyQuestionsAsked,
+          config: runConfig,
+          projectKey,
+          projectKeys,
+        });
+
+        if (sufficiencyResult.status === 'ask_followup' && Array.isArray(sufficiencyResult.questions) && sufficiencyResult.questions.length > 0) {
+          await entitySet(KEYS.generationProgress(sessionId), {
+            type: 'needs_clarification',
+            sessionId,
+            message: 'Discovery evaluation determined follow-up questions are required.',
+            questions: sufficiencyResult.questions,
+            sufficiencyResult,
+            updatedAt: Date.now(),
+          } as RealtimeEvent);
+          const w = getPipelineAuditWriter();
+          if (w) {
+            await w.flushMerge({
+              accountId,
+              sufficiency: { evaluation: sufficiencyResult as any, completedAt: new Date().toISOString() },
+              completePhase: 'sufficiency',
+            });
+          }
+          return;
+        }
+        
+        clarifyFinalSufficiency = {
+          evaluated: true,
+          sufficient: sufficiencyResult.sufficient,
+          status: sufficiencyResult.status,
+          roundEvaluated: 1,
+          missingCategoryKeys: sufficiencyResult.missingCategoryKeys,
+          reasonCodes: sufficiencyResult.reasonCodes,
+        };
+        
+        const w = getPipelineAuditWriter();
+        if (w) {
+          await w.flushMerge({
+            accountId,
+            sufficiency: { evaluation: sufficiencyResult as any, completedAt: new Date().toISOString() },
+            completePhase: 'sufficiency',
+          });
+        }
+      }
 
       await updateProgress(`Reading shared evidence context for ${projectLabel}…`, 1, {
         stage: 'context',

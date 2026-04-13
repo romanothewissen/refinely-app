@@ -309,7 +309,7 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
     ? `REASONING DEPTH: ${opts.reasoningLevel.toUpperCase()}`
     : '';
   const rangeLine = opts.recommendedQuestionRange
-    ? `QUESTION RANGE: usually between ${opts.recommendedQuestionRange.min} and ${opts.recommendedQuestionRange.max} questions, but only if they are materially justified.`
+    ? `QUESTION TARGET: Aim for ${opts.recommendedQuestionRange.min} to ${opts.recommendedQuestionRange.max} questions. Ask the full upper-bound count when all five discovery areas have genuinely unresolved ambiguity. Only go below the minimum when the requirement or evidence has already made an area unambiguous.`
     : '';
   return `You are a principal business analyst running a structured discovery session before any design begins.
 ${discoveryEvidenceBlock(opts.domainContext)}
@@ -414,9 +414,16 @@ Return ONLY valid JSON:
   "lifecycleComplexity":"low|medium|high",
   "ambiguityLevel":"low|medium|high",
   "coverageObligations":["string"],
-  "recommendedQuestionRange":{"min":4,"max":8},
+  "recommendedQuestionRange":{"min":10,"max":18},
   "rationale":"short explanation"
-}`;
+}
+
+Depth-to-count guidance:
+- light: 5–10 questions
+- standard: 10–15 questions
+- deep: 15–20 questions
+
+For multi-step workflows, coordinated handoffs, approval chains, or requirements with high ruleDensity and lifecycleComplexity, always recommend deep with a range of at least 15–18.`;
 }
 
 export function buildStoryAssistantSufficiencySystemPrompt(opts: {

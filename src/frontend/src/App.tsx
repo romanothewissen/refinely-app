@@ -832,6 +832,20 @@ function LegacyApp({
       setRetryingFeatureId(null);
       setIsWorking(false);
       setWorkflowStage('idle');
+    },
+    (questions, evaluation) => {
+      const followupQuestions = questions as ClarifyQuestion[];
+      const nextContext = applyDiscoveryEvaluationToContext(clarifyContext, evaluation as any, followupQuestions.length);
+      setClarifyContext(nextContext);
+      setClarifyQuestions(followupQuestions);
+      setClarifyRound(2);
+      setClarifyEvaluationError(null);
+      setGenerationWarning(null);
+      setGenerationError(null);
+      setIsWorking(false);
+      setPendingSessionId(null);
+      setGenerationProgressMeta(null);
+      setWorkflowStage('clarify_round_2');
     }
   );
 
@@ -1048,57 +1062,10 @@ function LegacyApp({
     }
 
     setClarifyAnswers(mergedAnswers);
+    markDiscoveryRoundComplete(1);
     setIsEvaluatingDiscovery(true);
-    setWorkflowStage('sufficiency_check');
-    try {
-      const attachmentText = runAttachments
-        .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
-        .join('\n\n');
-      const evaluation = await api.evaluateSufficiency({
-        sessionId: sessionIdRef.current,
-        requirement,
-        answers: mergedAnswers,
-        askedQuestions: clarifyQuestions.map((question) => ({
-          categoryKey: question.categoryKey,
-          intent: question.intent,
-          question: question.question,
-        })),
-        attachmentText,
-        projectKey: effectiveProjectKey,
-        projectKeys: effectiveProjectKeys,
-        followupCap: clarifyContext?.discoveryProfile?.followupCap,
-        initialQuestionCount: clarifyContext?.initialQuestionCount ?? clarifyQuestions.length,
-        pipelineAudit: pipelineAuditActiveRef.current,
-        auditRunId: pipelineAuditRunIdRef.current ?? undefined,
-      }) as any;
-
-      setWorkflowTokenUsage(prev => addTokenUsage(prev, evaluation?.tokenUsage ?? null));
-      const followupQuestions = Array.isArray(evaluation?.questions) ? evaluation.questions : [];
-      const nextContext = applyDiscoveryEvaluationToContext(clarifyContext, evaluation ?? {}, followupQuestions.length);
-      setClarifyContext(nextContext);
-      const evaluationWarning = typeof evaluation?.warning === 'string' ? evaluation.warning : null;
-
-      if (!evaluation?.sufficient && followupQuestions.length > 0) {
-        setClarifyAnswers(mergedAnswers);
-        setClarifyRound(2);
-        setClarifyQuestions(followupQuestions as ClarifyQuestion[]);
-        setClarifyEvaluationError(null);
-        setIsWorking(false);
-        setWorkflowStage('clarify_round_2');
-        return;
-      }
-
-      markDiscoveryRoundComplete(1);
-      setWorkflowStage('generation');
-      await startGeneration(requirement, mergedAnswers, evaluationWarning ?? undefined);
-    } catch (err) {
-      console.error('Discovery sufficiency evaluation failed', err);
-      markDiscoveryRoundComplete(1);
-      setWorkflowStage('generation');
-      await startGeneration(requirement, mergedAnswers);
-    } finally {
-      setIsEvaluatingDiscovery(false);
-    }
+    // The generation-queue now handles the sufficiency check asynchronously.
+    await startGeneration(requirement, mergedAnswers);
   };
 
   const handleClarifySkip = async () => {
@@ -1329,8 +1296,8 @@ function LegacyApp({
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
-    setClarifyQuestions([]);
-    setClarifyAnswers([]);
+    // We DO NOT wipe clarifyQuestions and clarifyAnswers here so that if
+    // the queue returns a needs_clarification async event, we still have the answers.
     setClarifyRound(1);
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);

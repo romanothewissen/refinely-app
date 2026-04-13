@@ -317,6 +317,7 @@ export function useGenerationRealtime(
   _onReview: (payload: { message?: string; payload?: GenerationProgressPayload }) => void,
   onError: (message: string) => void,
   onCancel?: (message: string) => void,
+  onNeedsClarification?: (questions: unknown[], sufficiencyResult: unknown) => void,
 ) {
   const [progress, setProgress] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -333,6 +334,8 @@ export function useGenerationRealtime(
   onErrorRef.current = onError;
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  const onNeedsClarificationRef = useRef(onNeedsClarification);
+  onNeedsClarificationRef.current = onNeedsClarification;
 
   const clearPendingProgressTimer = () => {
     if (pendingProgressTimerRef.current) {
@@ -406,7 +409,7 @@ export function useGenerationRealtime(
         }
 
         const eventUpdatedAt = event.updatedAt ?? 0;
-        const isTerminalEvent = event.type === 'complete' || event.type === 'error' || event.type === 'cancelled';
+        const isTerminalEvent = event.type === 'complete' || event.type === 'error' || event.type === 'cancelled' || event.type === 'needs_clarification';
         if (isTerminalEvent && eventUpdatedAt > 0 && eventUpdatedAt < startedAtRef.current) {
           return;
         }
@@ -450,6 +453,16 @@ export function useGenerationRealtime(
           setProgress('');
           setProgressPayload(null);
           onCancelRef.current?.(event.message ?? 'Generation stopped.');
+        } else if (event.type === 'needs_clarification') {
+          clearInterval(timerRef.current!);
+          timerRef.current = null;
+          setIsGenerating(false);
+          clearPendingProgressTimer();
+          visibleProgressRef.current = '';
+          setProgress('');
+          setProgressPayload(null);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onNeedsClarificationRef.current?.((event as any).questions ?? [], (event as any).sufficiencyResult);
         } else if (event.type === 'complete') {
           console.log('[useGenerationRealtime] session complete, payload keys', Object.keys(event.payload || {}));
           // Ensure we actually have results, or something went wrong
