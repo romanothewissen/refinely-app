@@ -155,6 +155,14 @@ function ensureQuestionMark(value: string): string {
   return trimmed ? `${trimmed}?` : '';
 }
 
+function isLikelyTruncatedQuestion(value: string): boolean {
+  const trimmed = cleanText(value);
+  if (!trimmed) return true;
+  if (trimmed.length < 12) return true;
+  if (!/[?.!]$/.test(trimmed)) return true;
+  return /\b(and|or|to|for|with|about|when|where|must|should)\?$/.test(trimmed.toLowerCase());
+}
+
 function uniqueStrings(values: unknown[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -436,9 +444,9 @@ function formatWiEvidence(
     : [];
 
   if (insightSections.length) {
-    return trimPromptText(insightSections.join('\n\n'), 5000);
+    return trimPromptText(insightSections.join('\n\n'), 3600);
   }
-  return trimPromptText(wiContextText, 5000);
+  return trimPromptText(wiContextText, 3600);
 }
 
 function formatDiscoveryBacklogEvidence(similarStories: SimilarStory[] = []): string {
@@ -449,8 +457,8 @@ function formatDiscoveryBacklogEvidence(similarStories: SimilarStory[] = []): st
 
 function formatGenerationBacklogEvidence(similarStories: SimilarStory[] = []): string {
   if (!similarStories.length) return '';
-  const formatted = formatSimilarStoriesText(similarStories, 4);
-  return trimPromptText(formatted, 4200);
+  const formatted = formatSimilarStoriesText(similarStories, 3);
+  return trimPromptText(formatted, 3000);
 }
 
 function extractMustCarryRules(answers: ClarifyAnswer[]): string[] {
@@ -621,11 +629,11 @@ export function splitClearlyNumberedStoryAssistantQuestion(question: string): st
   return segments.length >= 2 ? segments : [normalized];
 }
 
-function normalizeSuggestions(values: unknown[]): string[] {
+function normalizeSuggestions(values: unknown[], min = 0, max = 4): string[] {
   return uniqueStrings(values)
     .map((value) => cleanText(value).replace(/[?.!]+$/g, ''))
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, Math.max(min, max));
 }
 
 const DISCOVERY_DEPTH_ORDER: Record<DiscoveryDepth, number> = {
@@ -728,8 +736,8 @@ export function buildHeuristicDiscoveryAssessment(input: {
     input.wiEvidenceText,
     input.similarStoriesText,
   ].join('\n').toLowerCase();
-  const hasSequence = /\b(sequence|sequen|step|de-?install|re-?install|dependency|before|after|followed by|multi-activity|multi activity)\b/.test(corpus);
-  const hasMultipleTeams = /\b(team|field|in-house|logistics|coordinator|manager|specialist|approv|review)\b/.test(corpus);
+  const hasSequence = /\b(sequence|sequen|step|de-?install|re-?install|dependency|followed by|multi-activity|multi activity)\b/.test(corpus);
+  const hasMultipleTeams = /\b(teams?|field|in-house|logistics|coordinator|manager|specialist|approv|review)\b/.test(corpus);
   const hasRules = /\b(quote|billable|billing|contract|entitlement|approval|authorization|threshold|validation|rule|prevent)\b/.test(corpus);
   const hasExceptions = /\b(exception|unless|cannot|fail|delay|cancel|disruption|warning|hold|illogical)\b/.test(corpus);
   const hasLifecycle = /\b(status|track|visibility|overall status|in progress|completed|modify|change|shipment|work order|initiat)\b/.test(corpus);
@@ -918,6 +926,21 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
     .filter((question) => question.question.length > 0);
 }
 
+function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestion[] {
+  const parsed = parseStoryAssistantQuestionCandidates(rawData)
+    .map((question) => {
+      const suggestions = normalizeSuggestions(question.suggestions, 0, 3);
+      return {
+        ...question,
+        suggestions,
+        question: ensureQuestionMark(question.question),
+      };
+    })
+    .filter((question) => !isLikelyTruncatedQuestion(question.question))
+    .filter((question) => question.suggestions.length >= 1);
+  return parsed.slice(0, 1);
+}
+
 function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
   if (questions.length < 4) return true;
   return questions.some((question) => (
@@ -1012,8 +1035,25 @@ function buildClarifyAmbiguityAssessment(
 }
 
 function mergePass2IntoPass1(pass1: RawFeature[], pass2: RawFeature[]): RawFeature[] {
+  const byStableIdentity = new Map<string, RawFeature>();
+  pass2.forEach((feature) => {
+    const rawId = cleanText(feature.id);
+    if (rawId) {
+      byStableIdentity.set(`id:${normalizeKey(rawId)}`, feature);
+    }
+    const summary = cleanText(feature.summary);
+    if (summary) {
+      byStableIdentity.set(`summary:${normalizeKey(summary)}`, feature);
+    }
+  });
+
   return pass1.map((feature, index) => {
-    const next = pass2[index];
+    const lookupId = cleanText(feature.id);
+    const lookupSummary = cleanText(feature.summary);
+    const next =
+      (lookupId ? byStableIdentity.get(`id:${normalizeKey(lookupId)}`) : undefined)
+      ?? (lookupSummary ? byStableIdentity.get(`summary:${normalizeKey(lookupSummary)}`) : undefined)
+      ?? pass2[index];
     if (!next) return feature;
     return {
       ...feature,
@@ -1063,6 +1103,23 @@ function dedupeExactAcceptanceRequirements(features: Feature[]): { features: Fea
   };
 }
 
+function extractRawFeaturesFromPayload(payload: unknown): RawFeature[] {
+  if (!payload) return [];
+  if (Array.isArray(payload)) {
+    return payload.filter((feature): feature is RawFeature => Boolean(feature && typeof feature === 'object'));
+  }
+  if (typeof payload === 'object') {
+    const candidate = payload as { features?: unknown; items?: unknown };
+    if (Array.isArray(candidate.features)) {
+      return candidate.features.filter((feature): feature is RawFeature => Boolean(feature && typeof feature === 'object'));
+    }
+    if (Array.isArray(candidate.items)) {
+      return candidate.items.filter((feature): feature is RawFeature => Boolean(feature && typeof feature === 'object'));
+    }
+  }
+  return [];
+}
+
 export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
@@ -1077,24 +1134,16 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   let promptAssemblyMs = 0;
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
-
-  // Static fallback — used only if the LLM assessment call fails entirely.
-  // Not keyword-driven: the LLM decides depth; this just ensures the pipeline
-  // can proceed with a reasonable medium-depth assumption.
-  const fallbackAssessment: DiscoveryAssessment = {
-    discoveryDepth: 'standard',
-    reasoningLevel: 'standard',
-    workflowComplexity: 'medium',
-    actorComplexity: 'medium',
-    ruleDensity: 'medium',
-    exceptionDensity: 'medium',
-    lifecycleComplexity: 'medium',
-    ambiguityLevel: 'medium',
-    coverageObligations: [],
-    recommendedQuestionRange: { min: 8, max: 12 },
-    rationale: 'LLM assessment unavailable; using default medium-depth assumption.',
+  const heuristicAssessment = buildHeuristicDiscoveryAssessment({
+    requirement: opts.requirement,
+    attachmentText: opts.attachmentText,
+    wiEvidenceText,
+    similarStoriesText,
+  });
+  let discoveryAssessment: DiscoveryAssessment = {
+    ...heuristicAssessment,
+    rationale: 'LLM assessment unavailable; using heuristic evidence-driven discovery depth.',
   };
-  let discoveryAssessment: DiscoveryAssessment = fallbackAssessment;
 
   try {
     const promptAssemblyStartedAt = Date.now();
@@ -1113,16 +1162,18 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
         domainRoles: opts.config.domainRoles,
       }),
       userMessage: assessmentUserMessage,
-      maxTokens: 1200,
+      maxTokens: 2200,
       reasoningEffort: mapReasoningDepthToEffort('light'),
       ...providerOpts,
     });
     usageByStage.discoveryAssessment = assessmentResult.usage;
-    // Use the LLM assessment directly — no heuristic merge.
     const parsed = parseDiscoveryAssessment(assessmentResult.data);
-    if (parsed) discoveryAssessment = parsed;
+    discoveryAssessment = mergeDiscoveryAssessments(parsed, heuristicAssessment);
   } catch {
-    discoveryAssessment = fallbackAssessment;
+    discoveryAssessment = {
+      ...heuristicAssessment,
+      rationale: 'LLM assessment unavailable; using heuristic evidence-driven discovery depth.',
+    };
   }
 
   let coverageQualityScore = 0;
@@ -1156,7 +1207,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       userMessage: attempt === 1
         ? baseUserMessage
         : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and deepen the question set. Cover these missing or under-covered themes explicitly: ${qualityReasons.join(' ') || discoveryAssessment.coverageObligations.join(', ')}. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
-      maxTokens: 3200,
+      maxTokens: 4600,
       reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
       ...providerOpts,
     });
@@ -1217,24 +1268,37 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
   });
   const promptAssemblyMs = Date.now() - promptAssemblyStartedAt;
   try {
-    const result = await callLlmJsonWithUsage<unknown>({
+    const evaluateOnce = async (extraInstruction?: string) => callLlmJsonWithUsage<unknown>({
       model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
       systemPrompt: buildStoryAssistantSufficiencySystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
       }),
-      userMessage,
-      maxTokens: 1600,
+      userMessage: extraInstruction ? `${userMessage}\n\n${extraInstruction}` : userMessage,
+      maxTokens: 2400,
       reasoningEffort: 'low',
       ...providerOpts,
     });
-
-    const payload = (result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {});
+    const usageByStage: Record<string, { input: number; output: number }> = {};
+    let result = await evaluateOnce();
+    usageByStage.clarifyEvaluate = result.usage;
+    let payload = (result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {});
+    let parsedQuestions = normalizeSufficiencyFollowupQuestions(payload);
+    const looksMalformedFollowup = payload.sufficient === false
+      && (!Array.isArray(payload.questions) || parsedQuestions.length === 0);
+    if (looksMalformedFollowup) {
+      const retry = await evaluateOnce(
+        'Your previous follow-up output was malformed. Return strict JSON only. If sufficient is false and you provide questions, include exactly one complete question with 1-3 grounded suggestions.',
+      );
+      result = retry;
+      usageByStage.clarifyEvaluateRetry = retry.usage;
+      payload = (retry.data && typeof retry.data === 'object' ? retry.data as Record<string, unknown> : {});
+      parsedQuestions = normalizeSufficiencyFollowupQuestions(payload);
+    }
     const sufficient = payload.sufficient === true;
     const reasonCodes = Array.isArray(payload.reasonCodes)
       ? payload.reasonCodes.map((value) => cleanText(value)).filter(Boolean)
       : [];
-    const parsedQuestions = parseStoryAssistantQuestionCandidates(payload).slice(0, 1);
     const missingCategoryKeys = parsedQuestions
       .map((question) => question.categoryKey)
       .filter((value, index, values) => values.indexOf(value) === index);
@@ -1257,7 +1321,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
         askedCategoryKeys,
         openNonBlockingDecisions: status === 'ready_with_open_decisions' ? reasonCodes : [],
       }),
-      tokenUsage: buildTokenUsageSummary({ clarifyEvaluate: result.usage }),
+      tokenUsage: buildTokenUsageSummary(usageByStage),
       durationMs: Date.now() - startedAt,
       promptAssemblyMs,
     };
@@ -1308,6 +1372,11 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   const stageDurationsMs = { ...(opts.priorStageDurationsMs ?? {}) } as Record<string, number>;
   const stageUsage: Record<string, { input: number; output: number }> = {};
   const actorSets = extractActorSets(opts.requirement, opts.clarifyAnswers);
+  const roleGrounding = {
+    requirement: opts.requirement,
+    clarifyAnswers: opts.clarifyAnswers,
+    domainRoles: opts.config.domainRoles,
+  };
   const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers, actorSets);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const similarStoriesText = formatGenerationBacklogEvidence(opts.similarStories ?? []);
@@ -1345,14 +1414,14 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       ...providerOpts,
     });
     stageUsage.decomposition = pass1Result.usage;
-    pass1Raw = Array.isArray(pass1Result.data.features) ? pass1Result.data.features : [];
+    pass1Raw = extractRawFeaturesFromPayload(pass1Result.data);
     if (!pass1Raw.length) {
       throw new Error('Feature decomposition returned no features.');
     }
     pass1Features = pass1Raw.map((feature) => normaliseFeature({
       ...feature,
       acceptance_requirements: [],
-    }));
+    }, roleGrounding));
     stageDurationsMs.decomposition = Date.now() - startedAt;
     if (opts.onPass1DraftFeatures) {
       await opts.onPass1DraftFeatures(pass1Features);
@@ -1382,7 +1451,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       ...feature,
       acceptance_requirements: [],
     })),
-  }, null, 2)}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
+  })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
     model: getTierModel(opts.config.generatorConfig.arModel, opts.config.tier),
@@ -1398,12 +1467,15 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   stageUsage.acceptanceRequirements = pass2Result.usage;
   stageDurationsMs.acceptanceRequirements = Date.now() - pass2StartedAt;
 
-  const pass2Raw = Array.isArray(pass2Result.data.features) ? pass2Result.data.features : [];
-  const mergedRaw = pass2Raw.length >= pass1Raw.length
-    ? mergePass2IntoPass1(pass1Raw, pass2Raw)
-    : pass1Raw;
-  let features = mergedRaw.map((feature) => normaliseFeature(feature));
+  const pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
+  const mergedRaw = mergePass2IntoPass1(pass1Raw, pass2Raw);
+  let features = mergedRaw.map((feature) => normaliseFeature(feature, roleGrounding));
   const repairedOutput = dedupeExactAcceptanceRequirements(features);
+  const pass2CoverageNotes = pass2Raw.length === 0
+    ? ['Acceptance requirements pass returned no feature array; preserved pass-1 features for targeted retries.']
+    : pass2Raw.length < pass1Raw.length
+      ? ['Acceptance requirements pass returned fewer features than decomposition; merged by id/summary and index fallback.']
+      : [];
   features = repairedOutput.features;
   const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   const failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
@@ -1435,6 +1507,9 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         ? `Acceptance requirements could not be completed for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}.`
         : undefined,
       autoRepairedIssues: repairedOutput.notes,
+      ...(pass2CoverageNotes.length
+        ? { mergeDiagnostics: pass2CoverageNotes }
+        : {}),
       actorSets,
       pass2ArPatternStoryKeys: opts.arPatternStoryKeys,
       latencyMs: {

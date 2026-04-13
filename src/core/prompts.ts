@@ -238,6 +238,7 @@ RULES:
 - Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently valuable and testable.
 - Variants of the same capability that follow the same core process belong in ONE feature with scenario-level acceptance requirements, not separate cloned features.
 - Do not hide meaningful workflow branches inside one oversized feature.
+- For requirements with medium/high ambiguity or multi-role handoffs, avoid under-decomposition. If several independent capabilities must be delivered, return enough features to represent each capability explicitly.
 - If backlog references or work instructions are provided, use them to calibrate feature granularity and phrasing quality only. Never copy unrelated scope from them.
 - Do not invent adjacent capabilities that are not supported by the requirement, answers, or supplied evidence.
 - Do NOT write acceptance_requirements in this pass; leave them empty.
@@ -363,7 +364,8 @@ RULES:
 ${coverageLines || '- Cover every materially unresolved theme that changes scope, rules, or acceptance requirements.'}
 - For each question, provide 3 or 4 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must be specific enough to help the user answer without collapsing important business meaning.
-- Return ONLY a JSON array.
+- Return ONLY a JSON array (no markdown fences, no prose before/after, no comments).
+- Every question must be a complete sentence that ends with a question mark.
 
 OUTPUT FORMAT:
 [{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]`;
@@ -445,8 +447,10 @@ RULES:
 - Ask a follow-up question only when a specific unresolved gap would materially change what gets built or how ARs are written.
 - Ask at most 1 follow-up question when discovery is insufficient.
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
+- If sufficient is false and you ask a follow-up, suggestions are REQUIRED and must include 1 to 3 grounded suggestions.
 - If you include suggestions, include only 1 to 3 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must stay in business language and avoid implementation wording.
+- The follow-up question must be one complete sentence ending in "?" and must not be truncated.
 - There is only one follow-up round. If the remaining uncertainty can be carried as an explicit open decision, prefer "ready_with_open_decisions" over asking more questions.
 - If workflow order, dependencies, handoffs, or actor coordination still materially affect what gets built, ask about that explicitly or return it as an open decision instead of pretending discovery is complete.
 - If the current answers are sufficient, return {"sufficient": true}.

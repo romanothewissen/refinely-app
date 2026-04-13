@@ -13,20 +13,6 @@ modules:
         function: resolver
       title: Refinely
       route: story-generator
-  jira:issuePanel:
-    - key: quick-refine-issue-panel
-      resource: main
-      resolver:
-        function: resolver
-      icon: https://developer.atlassian.com/platform/forge/images/issue-panel-icon.svg
-      title: Quick Refine
-  jira:issueAction:
-    - key: story-generator-issue-action
-      resource: main
-      resolver:
-        function: resolver
-      title: Refine Stories
-      viewportSize: max
   function:
     - key: resolver
       handler: resolvers/index.handler

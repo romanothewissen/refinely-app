@@ -174,9 +174,9 @@ function normaliseArs(ars: unknown[]): AcceptanceRequirement[] {
       if (typeof ar === 'object' && ar !== null) {
         const obj = ar as Record<string, unknown>;
         return {
-          given: sanitizeClause(obj.given ?? obj.Given ?? ''),
-          when: sanitizeClause(obj.when ?? obj.When ?? ''),
-          then: sanitizeClause(obj.then ?? obj.Then ?? ''),
+          given: sanitizeClause(obj.given ?? obj.Given ?? obj.GIVEN ?? ''),
+          when: sanitizeClause(obj.when ?? obj.When ?? obj.WHEN ?? ''),
+          then: sanitizeClause(obj.then ?? obj.Then ?? obj.THEN ?? ''),
         };
       }
       return null;

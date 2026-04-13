@@ -92,7 +92,7 @@ export async function loadSharedPipelineContext(input: {
       clarifyAnswers: input.clarifyAnswers,
       config: input.config,
       projectKeys: selectedProjectKeys,
-      maxResults: 6,
+      maxResults: 5,
     }),
   ]);
   const retrievalMs = Date.now() - retrievalStartedAt;
@@ -100,8 +100,8 @@ export async function loadSharedPipelineContext(input: {
   const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
   const wiInsightExtractionMs = Date.now() - wiInsightStartedAt;
   const referencedWiSections = summarizeReferencedWiSections(wiContext.chunks.slice(0, 8));
-  const referencedSimilarStories = summarizeReferencedSimilarStories(similarStories.slice(0, 6));
-  const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, 4);
+  const referencedSimilarStories = summarizeReferencedSimilarStories(similarStories.slice(0, 5));
+  const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, 3);
 
   return {
     projectKey: primaryProjectKey,
