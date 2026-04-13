@@ -646,11 +646,12 @@ test('story assistant clarify prompt asks every genuinely ambiguous question wit
     recommendedQuestionRange: { min: 12, max: 18 },
   });
 
-  assert.match(prompt, /Ask as many questions as needed/i);
-  assert.match(prompt, /For each area, ask every question that is genuinely ambiguous/i);
+  assert.match(prompt, /Ask enough questions up front to cover the material gaps/i);
+  assert.match(prompt, /domain-aware and process-grounded, but system-agnostic/i);
+  assert.match(prompt, /For each area, ask the strongest questions that are genuinely ambiguous/i);
   assert.match(prompt, /DISCOVERY DEPTH: DEEP/i);
   assert.match(prompt, /REASONING DEPTH: DEEP/i);
-  assert.match(prompt, /QUESTION RANGE: usually between 12 and 18 questions/i);
+  assert.match(prompt, /QUESTION TARGET: Aim for 12 to 18 questions on the upfront discovery screen/i);
   assert.match(prompt, /Coverage obligations for this requirement/i);
   assert.match(prompt, /sequencing/i);
   assert.match(prompt, /Roles & Personas/i);
@@ -684,8 +685,10 @@ test('story assistant sufficiency prompt limits follow-up discovery to one small
     domainRoles: [],
   });
 
-  assert.match(prompt, /Ask exactly 1 or 2 follow-up questions/i);
-  assert.match(prompt, /Each follow-up question must include 2 to 4 grounded suggestions/i);
+  assert.match(prompt, /Ask at most 1 follow-up question/i);
+  assert.match(prompt, /domain-aware and process-grounded, but system-agnostic/i);
+  assert.match(prompt, /Prefer explicit open decisions over follow-up/i);
+  assert.match(prompt, /If you include suggestions, include only 1 to 3 grounded suggestions/i);
   assert.match(prompt, /If the current answers are sufficient, return \{"sufficient": true\}/i);
   assert.match(prompt, /Return ONLY valid JSON/i);
 });

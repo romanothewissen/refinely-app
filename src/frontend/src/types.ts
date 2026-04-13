@@ -172,7 +172,6 @@ export interface TenantConfig {
   backlogThemeBudgetOverride?: number | null;
   developerTools?: {
     pipelineAuditEnabled?: boolean;
-    adaptiveDiscoveryEnabled?: boolean;
   };
 }
 
@@ -258,7 +257,6 @@ export const DEFAULT_CONFIG: TenantConfig = {
   backlogThemeBudgetOverride: null,
   developerTools: {
     pipelineAuditEnabled: false,
-    adaptiveDiscoveryEnabled: false,
   },
 };
 
@@ -611,66 +609,6 @@ export interface DiscoverySufficiencyResult {
   reasonCodes: string[];
 }
 
-export type DiscoveryMode = 'legacy' | 'adaptive_v1';
-export type DiscoveryComplexityTier = 'simple' | 'standard' | 'complex';
-
-export interface DiscoveryBlueprintTopicDependency {
-  topic: string;
-  dependsOn: string[];
-}
-
-export interface DiscoveryBlueprint {
-  mode: 'adaptive_v1';
-  complexityTier: DiscoveryComplexityTier;
-  persona: string | null;
-  objective: string | null;
-  candidateTopics: string[];
-  topicDependencies: DiscoveryBlueprintTopicDependency[];
-  rankedGaps: string[];
-  stopCriteria: string[];
-  branchHints?: string[];
-  riskAreas?: string[];
-}
-
-export interface LivingBrief {
-  persona: string | null;
-  objective: string | null;
-  constraints: string[];
-  facts: string[];
-  resolvedTopics: string[];
-  openTopics: string[];
-  confidenceByTopic: Partial<Record<ClarifyCategoryKey, number>>;
-  summary: string;
-  knownUnknowns?: string[];
-}
-
-export interface TurnDecision {
-  isSufficient: boolean;
-  nextQuestion: ClarifyQuestion | null;
-  updatedBrief: LivingBrief;
-  shouldFallback?: boolean;
-  fallbackReason?: string;
-  promotedComplexityTier?: DiscoveryComplexityTier;
-}
-
-export interface DiscoverySessionState {
-  sessionId: string;
-  mode: 'adaptive_v1';
-  blueprint: DiscoveryBlueprint;
-  livingBrief: LivingBrief;
-  askedQuestions: ClarifyQuestion[];
-  answers: ClarifyAnswer[];
-  turnIndex: number;
-  sourceMeta: ContextSourceMeta;
-  wiEvidenceText?: string;
-  similarStoriesText?: string;
-  createdAt: string;
-  updatedAt: string;
-  plannerDurationMs?: number;
-  lastTurnDurationMs?: number;
-  fallbackCount: number;
-}
-
 export interface ClarifyAssessmentSummary {
   shape?: EffectiveSizingContract['shape'];
   complexity?: EffectiveSizingContract['complexity'];
@@ -689,9 +627,6 @@ export interface ClarifyProgressPayload {
   assessment?: ClarifyAssessmentSummary;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
-  discoveryMode?: DiscoveryMode;
-  discoveryBlueprint?: DiscoveryBlueprint;
-  livingBrief?: LivingBrief;
   discoveryProfile?: DiscoveryProfile;
   discoveryAssessment?: DiscoveryAssessment;
   coverageQualityScore?: number;
@@ -777,7 +712,6 @@ export interface ContextSourceMeta {
 }
 
 export interface ClarifyContextMeta extends ContextSourceMeta {
-  discoveryMode?: DiscoveryMode;
   discoveryStatus?: ClarifyDiscoveryStatus;
   failureReasonCode?: ClarifyFailureReasonCode;
   failureDiagnostics?: ClarifyFailureDiagnostics;
@@ -785,8 +719,6 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   referencedSimilarStories?: ReferencedSimilarStory[];
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
-  discoveryBlueprint?: DiscoveryBlueprint;
-  livingBrief?: LivingBrief;
   askedQuestions?: ClarifyQuestion[];
   discoveryProfile?: DiscoveryProfile;
   discoveryAssessment?: DiscoveryAssessment;
@@ -813,14 +745,6 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   sufficiencyEvaluationDurationMs?: number;
   totalDiscoveryDurationMs?: number;
   finalSufficiency?: DiscoverySufficiencyResult;
-  adaptiveDiscovery?: {
-    enabled: boolean;
-    turnIndex?: number;
-    plannerDurationMs?: number;
-    lastTurnDurationMs?: number;
-    fallbackToLegacy?: boolean;
-    fallbackReason?: string;
-  };
   tokenUsage?: TokenUsageSummary;
   actorSets?: ActorSetGrounding;
   latencyMs?: PipelineLatencyBreakdown;

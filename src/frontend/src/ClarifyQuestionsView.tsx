@@ -122,10 +122,8 @@ export function ClarifyQuestionsView({
   const [showContextDetails, setShowContextDetails] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [expandedQuestionDetails, setExpandedQuestionDetails] = useState<Record<number, boolean>>({});
-  const [localValidationError, setLocalValidationError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const failureDiagnostics = contextMeta?.failureDiagnostics;
-  const isAdaptiveDiscovery = contextMeta?.discoveryMode === 'adaptive_v1';
 
   useEffect(() => {
     const priorByQuestion = new Map(
@@ -155,7 +153,6 @@ export function ClarifyQuestionsView({
   useEffect(() => {
     setCurrentPage(0);
     setExpandedQuestionDetails({});
-    setLocalValidationError(null);
   }, [questions, round]);
 
   useEffect(() => {
@@ -185,12 +182,10 @@ export function ClarifyQuestionsView({
       ? existing.selectedSuggestions.filter(s => s !== sug)
       : [...existing.selectedSuggestions, sug];
 
-    setLocalValidationError(null);
     setAnswers(prev => ({ ...prev, [qIdx]: { ...existing, selectedSuggestions: newSelected } }));
   }
 
   function handleCustomChange(qIdx: number, val: string) {
-    setLocalValidationError(null);
     setAnswers(prev => ({ ...prev, [qIdx]: { ...ensureAnswer(qIdx), customAnswer: val } }));
   }
 
@@ -199,17 +194,6 @@ export function ClarifyQuestionsView({
   }
 
   function handleSubmit() {
-    if (isAdaptiveDiscovery) {
-      const currentPageAnswered = visibleQuestions.some(({ idx }) => {
-        const answer = ensureAnswer(idx);
-        return answer.customAnswer.trim().length > 0 || answer.selectedSuggestions.length > 0;
-      });
-      if (!currentPageAnswered) {
-        setLocalValidationError('Add an answer before continuing, or skip to generation if discovery is already sufficient.');
-        return;
-      }
-    }
-
     if (!isLastPage) {
       setCurrentPage((page) => Math.min(pageCount - 1, page + 1));
       return;
@@ -278,7 +262,7 @@ export function ClarifyQuestionsView({
             <div className="rf-pane-header-copy">
               <h1 className="rf-pane-header-title">Requirement Discovery</h1>
               <p className="rf-pane-header-subtitle" style={{ color: 'var(--rf-text-tertiary)' }}>
-                {isAdaptiveDiscovery ? 'Adaptive discovery' : round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · page <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{safeCurrentPage + 1}</span>/{pageCount} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
+                {round === 2 ? 'Follow-up discovery' : 'Initial discovery'} · page <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{safeCurrentPage + 1}</span>/{pageCount} · <span style={{ color: 'var(--rf-brand)', fontWeight: 600 }}>{answeredCount}</span>/{questions.length} answered
               </p>
             </div>
           </div>
@@ -334,29 +318,6 @@ export function ClarifyQuestionsView({
                   </button>
                 </div>
               </div>
-
-              {contextMeta.discoveryMode === 'adaptive_v1' && contextMeta.livingBrief?.summary && (
-                <motion.div
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.12 }}
-                  className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 backdrop-blur-sm"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">What we know so far</div>
-                      <div className="mt-1 text-[13px] leading-relaxed text-[var(--rf-text-secondary)]">
-                        {normalizeDisplayText(contextMeta.livingBrief.summary)}
-                      </div>
-                    </div>
-                    {typeof contextMeta.adaptiveDiscovery?.turnIndex === 'number' && (
-                      <div className="shrink-0 rounded-md border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-[var(--rf-brand)]">
-                        Turn {contextMeta.adaptiveDiscovery.turnIndex + 1}
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
 
               {/* LLM scoring panel */}
               {questions.length > 0 && (() => {
@@ -490,14 +451,14 @@ export function ClarifyQuestionsView({
             </motion.div>
           )}
 
-          {(inlineError || localValidationError) && questions.length > 0 && (
+          {inlineError && questions.length > 0 && (
             <motion.div
               className="rounded-[22px] border border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35 px-5 py-4 text-sm text-[var(--rf-danger)] shadow-sm"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <div className="font-bold">{localValidationError ? 'Answer needed' : 'Discovery needs another try'}</div>
-              <div className="mt-1 leading-relaxed">{localValidationError ?? inlineError}</div>
+              <div className="font-bold">Discovery needs another try</div>
+              <div className="mt-1 leading-relaxed">{inlineError}</div>
             </motion.div>
           )}
 

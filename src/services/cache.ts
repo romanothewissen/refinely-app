@@ -195,7 +195,6 @@ export const KEYS = {
   conversationIndex: 'conv_index',
   generationProgress: (sessionId: string) => `gen_progress_${sessionId}`,
   clarifyProgress: (sessionId: string) => `clarify_progress_${sessionId}`,
-  adaptiveDiscoveryState: (sessionId: string) => `adaptive_discovery_${sessionId}`,
   refineProgress: (sessionId: string) => `refine_progress_${sessionId}`,
   quickRefineSession: (sessionId: string) => `quick_refine_${sessionId}`,
   userLastSession: (accountId: string) => `u_${accountId}_last_session`,

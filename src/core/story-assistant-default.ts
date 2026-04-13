@@ -671,19 +671,18 @@ function normalizeRecommendedQuestionRange(
   value: unknown,
   depth: DiscoveryDepth,
 ): { min: number; max: number } {
-  // Generous defaults: the LLM should be encouraged to ask what's genuinely needed.
   const fallback = depth === 'light'
-    ? { min: 5, max: 10 }
+    ? { min: 5, max: 7 }
     : depth === 'deep'
-      ? { min: 15, max: 20 }
-      : { min: 10, max: 15 };
+      ? { min: 12, max: 16 }
+      : { min: 8, max: 12 };
   if (!value || typeof value !== 'object') return fallback;
   const candidate = value as { min?: unknown; max?: unknown };
   const min = Number.isFinite(candidate.min) ? Math.max(1, Math.round(Number(candidate.min))) : fallback.min;
   const max = Number.isFinite(candidate.max) ? Math.max(min, Math.round(Number(candidate.max))) : fallback.max;
   return {
-    min: Math.min(min, 20),
-    max: Math.min(Math.max(max, min), 20),
+    min: Math.min(min, 16),
+    max: Math.min(Math.max(max, min), 16),
   };
 }
 
@@ -952,7 +951,7 @@ function buildMinimalDiscoveryProfile(
         ? 'medium'
         : 'low';
   const ambiguity = assessment?.ambiguityLevel ?? (questionCount >= 6 ? 'high' : questionCount >= 3 ? 'medium' : 'low');
-  const followupCap = assessment?.discoveryDepth === 'deep' ? 2 : 1;
+  const followupCap = 1;
   const plannedQuestionBudget = assessment
     ? assessment.recommendedQuestionRange.max + followupCap
     : questionCount + 2;
@@ -1092,7 +1091,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     lifecycleComplexity: 'medium',
     ambiguityLevel: 'medium',
     coverageObligations: [],
-    recommendedQuestionRange: { min: 10, max: 15 },
+    recommendedQuestionRange: { min: 8, max: 12 },
     rationale: 'LLM assessment unavailable; using default medium-depth assumption.',
   };
   let discoveryAssessment: DiscoveryAssessment = fallbackAssessment;
@@ -1114,7 +1113,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
         domainRoles: opts.config.domainRoles,
       }),
       userMessage: assessmentUserMessage,
-      maxTokens: 1600,
+      maxTokens: 1200,
       reasoningEffort: mapReasoningDepthToEffort('light'),
       ...providerOpts,
     });
@@ -1157,7 +1156,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       userMessage: attempt === 1
         ? baseUserMessage
         : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and deepen the question set. Cover these missing or under-covered themes explicitly: ${qualityReasons.join(' ') || discoveryAssessment.coverageObligations.join(', ')}. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
-      maxTokens: 4096,
+      maxTokens: 3200,
       reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
       ...providerOpts,
     });
@@ -1235,7 +1234,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
     const reasonCodes = Array.isArray(payload.reasonCodes)
       ? payload.reasonCodes.map((value) => cleanText(value)).filter(Boolean)
       : [];
-    const parsedQuestions = parseStoryAssistantQuestionCandidates(payload).slice(0, 2);
+    const parsedQuestions = parseStoryAssistantQuestionCandidates(payload).slice(0, 1);
     const missingCategoryKeys = parsedQuestions
       .map((question) => question.categoryKey)
       .filter((value, index, values) => values.indexOf(value) === index);

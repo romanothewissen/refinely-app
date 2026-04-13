@@ -309,21 +309,22 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
     ? `REASONING DEPTH: ${opts.reasoningLevel.toUpperCase()}`
     : '';
   const rangeLine = opts.recommendedQuestionRange
-    ? `QUESTION TARGET: Aim for ${opts.recommendedQuestionRange.min} to ${opts.recommendedQuestionRange.max} questions. Ask the full upper-bound count when all five discovery areas have genuinely unresolved ambiguity. Only go below the minimum when the requirement or evidence has already made an area unambiguous.`
+    ? `QUESTION TARGET: Aim for ${opts.recommendedQuestionRange.min} to ${opts.recommendedQuestionRange.max} questions on the upfront discovery screen. Cover the material gaps now, and do not hold back key workflow, rule, or lifecycle questions for a later round.`
     : '';
   return `You are a principal business analyst running a structured discovery session before any design begins.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
 You are running a structured discovery session before designing features.
-Your goal is to surface every ambiguity that would change what gets built or how acceptance requirements are written.
-Ask as many questions as needed. A business analyst spending a few extra minutes answering now prevents rework later.
+Your goal is to surface the ambiguities that would change what gets built or how acceptance requirements are written.
+Ask enough questions up front to cover the material gaps. A business analyst spending a few extra minutes answering now prevents rework later.
+Keep the discovery domain-aware and process-grounded, but system-agnostic in its wording.
 ${depthLine}
 ${reasoningLine}
 ${rangeLine}
 
 Work through each of the five discovery areas below in order.
-For each area, ask every question that is genuinely ambiguous for THIS requirement.
+For each area, ask the strongest questions that are genuinely ambiguous for THIS requirement.
 Skip a question only if the requirement or supplied evidence already makes the answer unambiguous.
 
 DISCOVERY AREAS:
@@ -414,16 +415,16 @@ Return ONLY valid JSON:
   "lifecycleComplexity":"low|medium|high",
   "ambiguityLevel":"low|medium|high",
   "coverageObligations":["string"],
-  "recommendedQuestionRange":{"min":10,"max":18},
+  "recommendedQuestionRange":{"min":8,"max":12},
   "rationale":"short explanation"
 }
 
 Depth-to-count guidance:
-- light: 5–10 questions
-- standard: 10–15 questions
-- deep: 15–20 questions
+- light: 5–7 questions
+- standard: 8–12 questions
+- deep: 12–16 questions
 
-For multi-step workflows, coordinated handoffs, approval chains, or requirements with high ruleDensity and lifecycleComplexity, always recommend deep with a range of at least 15–18.`;
+For multi-step workflows, coordinated handoffs, approval chains, or requirements with high ruleDensity and lifecycleComplexity, recommend deep and keep the range broad enough to cover those workflow dimensions on the upfront screen.`;
 }
 
 export function buildStoryAssistantSufficiencySystemPrompt(opts: {
@@ -438,118 +439,25 @@ ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
 Decide whether the current discovery answers are sufficient to write strong features and GIVEN/WHEN/THEN acceptance requirements covering the primary flow, key business rules, and relevant edge cases.
+Keep the evaluation domain-aware and process-grounded, but system-agnostic in its wording.
 
 RULES:
-- Ask follow-up questions only when a specific unresolved gap would materially change what gets built or how ARs are written.
-- Ask exactly 1 or 2 follow-up questions when discovery is insufficient.
+- Ask a follow-up question only when a specific unresolved gap would materially change what gets built or how ARs are written.
+- Ask at most 1 follow-up question when discovery is insufficient.
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
-- Each follow-up question must include 2 to 4 grounded suggestions.
+- If you include suggestions, include only 1 to 3 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must stay in business language and avoid implementation wording.
 - There is only one follow-up round. If the remaining uncertainty can be carried as an explicit open decision, prefer "ready_with_open_decisions" over asking more questions.
 - If workflow order, dependencies, handoffs, or actor coordination still materially affect what gets built, ask about that explicitly or return it as an open decision instead of pretending discovery is complete.
 - If the current answers are sufficient, return {"sufficient": true}.
 - If the evaluator cannot confidently prove sufficiency, prefer explicit open decisions over pretending the requirement is complete.
+- Prefer explicit open decisions over follow-up unless the missing answer would likely change feature boundaries, acceptance coverage, or a key business rule.
 
 OUTPUT FORMAT:
 Return ONLY valid JSON:
 {"sufficient": true}
 or
 {"sufficient": false, "questions": [{"question":"...","suggestions":["A","B","C"]}], "reasonCodes":["MISSING_BUSINESS_RULE"]}`;
-}
-
-export function buildAdaptiveDiscoveryBlueprintSystemPrompt(opts: {
-  domainContext: string;
-  domainRoles?: string[];
-}): string {
-  const roleHint = opts.domainRoles?.length
-    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when the requirement or evidence already supports them.`
-    : '';
-
-  return `You are designing a fast adaptive discovery blueprint before the interview begins.
-${discoveryEvidenceBlock(opts.domainContext)}
-${roleHint}
-
-Your job is to create a compact discovery map, not a full questionnaire.
-
-RULES:
-- Output a compact blueprint only.
-- Choose exactly one complexityTier: "simple", "standard", or "complex".
-- "simple" means a focused ask with only the top 3 gaps.
-- "standard" means 5 to 7 candidate topics plus dependency hints.
-- "complex" means standard plus branch hints and risk areas that may need deeper questioning later.
-- Capture only durable planning signals: likely persona, objective, candidate topics, topic dependencies, ranked gaps, and stop criteria.
-- Do not generate a long list of ready-made interview questions.
-- Prefer short topic labels, not prose paragraphs.
-- Keep every array concise.
-
-OUTPUT FORMAT:
-Return ONLY valid JSON:
-{
-  "complexityTier":"simple",
-  "persona":"...",
-  "objective":"...",
-  "candidateTopics":["..."],
-  "topicDependencies":[{"topic":"...","dependsOn":["..."]}],
-  "rankedGaps":["..."],
-  "stopCriteria":["..."],
-  "branchHints":["optional"],
-  "riskAreas":["optional"]
-}`;
-}
-
-export function buildAdaptiveDiscoveryTurnSystemPrompt(opts: {
-  domainContext: string;
-  domainRoles?: string[];
-}): string {
-  const roleHint = opts.domainRoles?.length
-    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Use them only when the requirement or answered discovery already supports them.`
-    : '';
-
-  return `You are running a fast adaptive discovery interview one turn at a time.
-${discoveryEvidenceBlock(opts.domainContext)}
-${roleHint}
-
-Your job each turn:
-1. update the living brief using the latest answer
-2. decide if discovery is now sufficient
-3. if not sufficient, ask exactly one short, high-value next question
-
-RULES:
-- Reason from the blueprint, the current living brief, and the latest answer only.
-- Do not restate the full interview or produce long explanations.
-- The next question must be delta-only and must not repeat what is already resolved.
-- Ask exactly one question or none.
-- The question must be under 18 words.
-- Suggestions are optional, but if included keep 2 to 4 grounded business-language options.
-- Mark isSufficient true when the remaining unknowns are low-impact or can be carried as open decisions.
-- If the current blueprint tier is too shallow, you may promote only one level upward.
-- If the output would be unreliable, set shouldFallback true and explain briefly in fallbackReason.
-
-OUTPUT FORMAT:
-Return ONLY valid JSON:
-{
-  "isSufficient": false,
-  "updatedBrief": {
-    "persona":"...",
-    "objective":"...",
-    "constraints":["..."],
-    "facts":["..."],
-    "resolvedTopics":["..."],
-    "openTopics":["..."],
-    "confidenceByTopic":{"context_trigger":0.6},
-    "summary":"...",
-    "knownUnknowns":["..."]
-  },
-  "nextQuestion": {
-    "categoryKey":"context_trigger",
-    "intent":"clarify_trigger",
-    "question":"What should trigger this flow?",
-    "suggestions":["A","B","C"]
-  },
-  "promotedComplexityTier":"standard",
-  "shouldFallback": false,
-  "fallbackReason":""
-}`;
 }
 
 export function buildDraftReviewSystemPrompt(opts: {

@@ -384,7 +384,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [piiMaskingEnabled, setPiiMaskingEnabled] = useState(false);
   const [auditTrailEnabled, setAuditTrailEnabled] = useState(false);
   const [pipelineAuditEnabled, setPipelineAuditEnabled] = useState(false);
-  const [adaptiveDiscoveryEnabled, setAdaptiveDiscoveryEnabled] = useState(false);
   const [complianceEvents, setComplianceEvents] = useState<ComplianceAuditEvent[]>([]);
   const [transparencyReports, setTransparencyReports] = useState<TransparencyReportRow[]>([]);
   const [complianceSummary, setComplianceSummary] = useState<ComplianceSummary | null>(null);
@@ -592,7 +591,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         setPiiMaskingEnabled(Boolean(existingConfig.compliance?.piiMaskingEnabled));
         setAuditTrailEnabled(Boolean(existingConfig.compliance?.auditTrailEnabled));
         setPipelineAuditEnabled(Boolean(existingConfig.developerTools?.pipelineAuditEnabled));
-        setAdaptiveDiscoveryEnabled(Boolean(existingConfig.developerTools?.adaptiveDiscoveryEnabled));
         if (existingConfig.wiConfig?.enabled !== undefined) setWiEnabled(existingConfig.wiConfig.enabled);
         if (existingConfig.defaultProjectKey) setDefaultProjectKey(existingConfig.defaultProjectKey);
         if (existingConfig.arMappings) setArMappings(existingConfig.arMappings.map((mapping: any) => normalizeProjectArMapping(mapping)));
@@ -879,7 +877,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         },
         developerTools: {
           pipelineAuditEnabled,
-          adaptiveDiscoveryEnabled,
         },
         branding: {
           logoUrl: brandingLogoUrl.trim() || null,
@@ -1440,20 +1437,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         className="mt-0.5 rounded border-[var(--rf-border)]"
                       />
                       <span className="text-[13px] font-semibold text-[var(--rf-text)]">Allow pipeline audit recording</span>
-                    </label>
-                    <label className="flex items-start gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={adaptiveDiscoveryEnabled}
-                        onChange={(e) => setAdaptiveDiscoveryEnabled(e.target.checked)}
-                        className="mt-0.5 rounded border-[var(--rf-border)]"
-                      />
-                      <span>
-                        <span className="text-[13px] font-semibold text-[var(--rf-text)]">Enable adaptive discovery v1</span>
-                        <span className="block mt-0.5 text-[12px] text-[var(--rf-text-tertiary)]">
-                          Uses a compact upfront blueprint and one-question-at-a-time discovery. Turn this off to roll back to the current flow instantly.
-                        </span>
-                      </span>
                     </label>
                   </div>
                 )}
