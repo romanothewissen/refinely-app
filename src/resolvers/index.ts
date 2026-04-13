@@ -625,6 +625,8 @@ async function enqueueClarifyWorkflow(
     projectKey?: string;
     projectKeys?: string[];
     inputSignature?: string;
+    round?: 1 | 2;
+    priorAnswers?: ClarifyAnswer[];
     pipelineAudit?: boolean;
     auditRunId?: string;
   },
@@ -645,8 +647,8 @@ async function enqueueClarifyWorkflow(
     license: context?.license,
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
-    round: 1,
-    priorAnswers: [],
+    round: payload.round ?? 1,
+    priorAnswers: payload.priorAnswers ?? [],
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
     enqueuedAt: Date.now(),

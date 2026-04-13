@@ -49,6 +49,8 @@ export const api = {
     projectKey?: string;
     projectKeys?: string[];
     inputSignature?: string;
+    round?: 1 | 2;
+    priorAnswers?: unknown[];
     pipelineAudit?: boolean;
     auditRunId?: string;
   }) => invoke('startClarify', payload),
@@ -59,6 +61,8 @@ export const api = {
     projectKey?: string;
     projectKeys?: string[];
     inputSignature?: string;
+    round?: 1 | 2;
+    priorAnswers?: unknown[];
     pipelineAudit?: boolean;
     auditRunId?: string;
   }) => invoke('retryClarify', payload),

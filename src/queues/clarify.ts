@@ -11,11 +11,14 @@ import type {
   ClarifyFailureDiagnostics,
   ClarifyFailureReasonCode,
   ClarifyProgressPayload,
+  DiscoverySessionState,
+  TokenUsageSummary,
 } from '../types';
+import { isAdaptiveDiscoveryEnabled } from '../core/adaptive-discovery';
 import { extractActorSets } from '../core/story-assistant-default';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, KEYS } from '../services/cache';
+import { entityDelete, entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
@@ -27,7 +30,11 @@ import {
   resolvePrimaryProjectKey,
 } from '../services/project-selection';
 import { deriveRetrievalQuery } from '../services/retrieval-query';
-import { runStoryAssistantClarifyStage } from '../services/story-assistant-pipeline';
+import {
+  runAdaptiveDiscoveryContinueStage,
+  runAdaptiveDiscoveryInitializeStage,
+  runStoryAssistantClarifyStage,
+} from '../services/story-assistant-pipeline';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
@@ -100,6 +107,308 @@ export async function handler(event: { body: ClarifyEvent }) {
           domainContextApplied: Boolean(config.domainContext?.trim()),
         },
       });
+
+      if (isAdaptiveDiscoveryEnabled(config)) {
+        const adaptiveStateKey = KEYS.adaptiveDiscoveryState(sessionId);
+        const adaptiveStartedAt = Date.now();
+        let questions: ClarifyContextMeta['askedQuestions'] = [];
+        let clarifyContext: ClarifyContextMeta | null = null;
+        let promptAssemblyMs = 0;
+        let auditWiContextText = '';
+        let auditSimilarStoriesText = '';
+        let tokenUsage: TokenUsageSummary = {
+          input: 0,
+          output: 0,
+          total: 0,
+          byStage: {},
+        };
+
+        await sendProgress('Planning an adaptive discovery blueprint…', {
+          stage: 'assessment',
+          discoveryMode: 'adaptive_v1',
+          sources: {
+            projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+            projectCount: selectedProjectKeys.length,
+            attachmentIncluded: Boolean(attachmentText?.trim()),
+            domainContextApplied: Boolean(config.domainContext?.trim()),
+          },
+        });
+
+        if (!retrievalAnswers.length) {
+          getPipelineAuditWriter()?.setPhase('clarify.questions');
+          const { sharedContext, result } = await runAdaptiveDiscoveryInitializeStage({
+            sessionId,
+            requirement: maskedRequirement.text,
+            attachmentText: maskedAttachment.text,
+            config,
+            projectKey,
+            projectKeys,
+          });
+
+          await entitySet(adaptiveStateKey, result.state);
+          questions = result.nextQuestion ? [result.nextQuestion] : [];
+          tokenUsage = result.tokenUsage;
+          promptAssemblyMs = result.promptAssemblyMs;
+          auditWiContextText = sharedContext.wiContext.text;
+          auditSimilarStoriesText = formatSimilarStoriesText(sharedContext.similarStories, 3);
+          clarifyContext = {
+            ...result.clarifyContext,
+            discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
+            similarStoriesCount: sharedContext.sources.similarStoriesCount,
+            referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
+            actorSets: extractActorSets(maskedRequirement.text, retrievalAnswers),
+            initialClarifyDurationMs: Date.now() - adaptiveStartedAt,
+            totalDiscoveryDurationMs: Date.now() - adaptiveStartedAt,
+            latencyMs: {
+              queueWaitMs,
+              retrievalMs: sharedContext.timings.retrievalMs,
+              wiInsightExtractionMs: sharedContext.timings.wiInsightExtractionMs,
+              promptAssemblyMs,
+              firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+            },
+            modelRoute,
+            wiDocsCount: sharedContext.sources.wiDocsCount,
+            linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
+            retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
+            retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
+            wiInsightCount: sharedContext.sources.wiInsightCount,
+            referencedWiDocs: sharedContext.sources.referencedWiDocs,
+            referencedWiSections: sharedContext.sources.referencedWiSections,
+            wiInsights: sharedContext.wiInsights,
+          };
+        } else {
+          const existingState = await entityGet<DiscoverySessionState>(adaptiveStateKey);
+          if (!existingState) {
+            clarifyContext = {
+              projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+              projectKeys: selectedProjectKeys,
+              projectCount: selectedProjectKeys.length,
+              pipelineMode: 'story_assistant_default',
+              domainRolesUsed: config.domainRoles,
+              discoveryMode: 'legacy',
+              discoveryStatus: 'ready_for_generation',
+              finalSufficiency: {
+                evaluated: false,
+                sufficient: false,
+                status: 'ready_with_open_decisions',
+                roundEvaluated: retrievalAnswers.length,
+                missingCategoryKeys: [],
+                reasonCodes: ['ADAPTIVE_STATE_MISSING'],
+              },
+              actorSets: extractActorSets(maskedRequirement.text, retrievalAnswers),
+              latencyMs: {
+                queueWaitMs,
+                firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+              },
+              modelRoute,
+            };
+          } else {
+            const latestAnswers = retrievalAnswers.slice(existingState.answers.length);
+            getPipelineAuditWriter()?.setPhase('clarify.questions');
+            await sendProgress('Updating the discovery brief from the latest answer…', {
+              stage: 'question_generation',
+              discoveryMode: 'adaptive_v1',
+              discoveryBlueprint: existingState.blueprint,
+              livingBrief: existingState.livingBrief,
+              sources: {
+                projectKey: existingState.sourceMeta.projectKey,
+                projectCount: existingState.sourceMeta.projectCount,
+                attachmentIncluded: existingState.sourceMeta.attachmentIncluded,
+                domainContextApplied: existingState.sourceMeta.domainContextApplied,
+                wiDocsCount: existingState.sourceMeta.wiDocsCount,
+                linkedWiDocCount: existingState.sourceMeta.linkedWiDocCount,
+                retrievedWiDocCount: existingState.sourceMeta.retrievedWiDocCount,
+                retrievedWiChunkCount: existingState.sourceMeta.retrievedWiChunkCount,
+                wiInsightCount: existingState.sourceMeta.wiInsightCount,
+                similarStoriesCount: existingState.similarStoriesText ? 1 : 0,
+              },
+            });
+
+            const { result } = await runAdaptiveDiscoveryContinueStage({
+              requirement: maskedRequirement.text,
+              attachmentText: maskedAttachment.text,
+              state: existingState,
+              latestAnswers: latestAnswers.length ? latestAnswers : retrievalAnswers.slice(-1),
+              config: {
+                ...config,
+                domainRoles: existingState.sourceMeta.domainRolesUsed,
+              },
+            });
+
+            if (result.decision.shouldFallback && !result.nextQuestion) {
+              await entityDelete(adaptiveStateKey);
+              clarifyContext = {
+                ...result.clarifyContext,
+                discoveryMode: 'legacy',
+                discoveryStatus: 'ready_for_generation',
+                actorSets: extractActorSets(maskedRequirement.text, retrievalAnswers),
+                latencyMs: {
+                  ...(result.clarifyContext.latencyMs ?? {}),
+                  queueWaitMs,
+                  firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+                },
+                modelRoute,
+              };
+            } else {
+              await entitySet(adaptiveStateKey, result.state);
+              questions = result.nextQuestion ? [result.nextQuestion] : [];
+              tokenUsage = result.tokenUsage;
+              promptAssemblyMs = result.state.lastTurnDurationMs ?? 0;
+              auditWiContextText = result.state.wiEvidenceText ?? '';
+              auditSimilarStoriesText = result.state.similarStoriesText ?? '';
+              clarifyContext = {
+                ...result.clarifyContext,
+                discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
+                actorSets: extractActorSets(maskedRequirement.text, retrievalAnswers),
+                totalDiscoveryDurationMs: (result.clarifyContext.totalDiscoveryDurationMs ?? 0) + (result.state.lastTurnDurationMs ?? 0),
+                latencyMs: {
+                  ...(result.clarifyContext.latencyMs ?? {}),
+                  queueWaitMs,
+                  promptAssemblyMs: result.state.lastTurnDurationMs,
+                  firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
+                },
+                modelRoute,
+              };
+            }
+          }
+        }
+
+        if (await isWorkflowCancelled(sessionId)) {
+          await markCancelled(sessionId, inputSignature);
+          return;
+        }
+
+        if (!clarifyContext) {
+          throw new Error('Adaptive discovery did not produce a clarify context.');
+        }
+
+        await sendProgress(
+          questions.length > 0 ? 'Finalizing the next adaptive discovery question…' : 'Discovery is sufficient and ready for generation…',
+          {
+            stage: 'finalize',
+            discoveryMode: clarifyContext.discoveryMode,
+            discoveryBlueprint: clarifyContext.discoveryBlueprint,
+            livingBrief: clarifyContext.livingBrief,
+            discoveryAssessment: clarifyContext.discoveryAssessment,
+            discoveryProfile: clarifyContext.discoveryProfile,
+            latencyMs: clarifyContext.latencyMs,
+            modelRoute,
+            sources: {
+              projectKey: clarifyContext.projectKey,
+              projectCount: clarifyContext.projectCount,
+              attachmentIncluded: clarifyContext.attachmentIncluded,
+              domainContextApplied: clarifyContext.domainContextApplied,
+              wiDocsCount: clarifyContext.wiDocsCount,
+              linkedWiDocCount: clarifyContext.linkedWiDocCount,
+              retrievedWiDocCount: clarifyContext.retrievedWiDocCount,
+              retrievedWiChunkCount: clarifyContext.retrievedWiChunkCount,
+              wiInsightCount: clarifyContext.wiInsightCount,
+              similarStoriesCount: clarifyContext.similarStoriesCount,
+            },
+          },
+        );
+
+        const persistenceStartedAt = Date.now();
+        await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
+        clarifyContext.latencyMs = {
+          ...(clarifyContext.latencyMs ?? {}),
+          persistenceMs: Date.now() - persistenceStartedAt,
+        };
+
+        if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
+          await saveTransparencyReport({
+            sessionId,
+            turnType: 'clarify',
+            actorAccountId: accountId,
+            provider: config.generatorConfig.provider,
+            model: config.generatorConfig.evaluateModel,
+            projectKey,
+            requirementExcerpt: maskedRequirement.text.slice(0, 240),
+            decisionSummary: [
+              questions.length > 0
+                ? 'Adaptive discovery generated one targeted next question.'
+                : 'Adaptive discovery determined the requirement is ready for generation.',
+              `Discovery is currently using the ${clarifyContext.discoveryBlueprint?.complexityTier ?? 'simple'} adaptive blueprint tier.`,
+            ],
+            contextUsage: {
+              totalQuestionCount: clarifyContext.totalQuestionCount,
+              plannerDurationMs: clarifyContext.adaptiveDiscovery?.plannerDurationMs,
+              lastTurnDurationMs: clarifyContext.adaptiveDiscovery?.lastTurnDurationMs,
+            },
+            tokenUsage,
+            piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
+          });
+        }
+
+        await appendComplianceAuditEvent({
+          actorAccountId: accountId,
+          category: 'runtime',
+          action: 'CLARIFY_WORKFLOW_EXECUTED',
+          details: { sessionId, projectKey, model: config.generatorConfig.evaluateModel, pipelineMode: 'adaptive_v1' },
+          enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
+        });
+
+        await recordProjectActivity({
+          action: 'clarify',
+          projectKeys: selectedProjectKeys,
+          projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+          sessionId,
+          model: config.generatorConfig.evaluateModel,
+          tokenUsage,
+        });
+
+        const auditWriter = getPipelineAuditWriter();
+        if (auditWriter) {
+          try {
+            const auditWriteStartedAt = Date.now();
+            await auditWriter.flushMerge({
+              accountId,
+              mergeHeader: {
+                primaryProjectKey: clarifyContext.projectKey,
+                projectKeys: clarifyContext.projectKeys,
+                generatorModels: {
+                  clarifyModel: config.generatorConfig.evaluateModel,
+                },
+                piiMaskingEnabled: piiEnabled,
+                piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
+              },
+              userInputs: {
+                requirement: maskedRequirement.text,
+                attachmentText: maskedAttachment.text,
+              },
+              discoveryContextClarify: {
+                wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
+                wiContextText: auditWiContextText,
+                similarStoriesText: auditSimilarStoriesText,
+                domainContext: config.domainContext,
+                domainRoles: config.domainRoles,
+                wiInsights: clarifyContext.wiInsights,
+              },
+              clarify: {
+                questions: questions ?? [],
+                contextMeta: clarifyContext,
+                completedAt: new Date().toISOString(),
+              },
+              completePhase: 'clarify',
+            });
+            clarifyContext.latencyMs = {
+              ...(clarifyContext.latencyMs ?? {}),
+              auditWriteMs: Date.now() - auditWriteStartedAt,
+            };
+          } catch (auditErr) {
+            console.warn('[clarify-queue] pipeline audit merge failed:', auditErr);
+          }
+        }
+
+        await entitySet(KEYS.clarifyProgress(sessionId), {
+          type: 'complete',
+          questions: questions ?? [],
+          contextMeta: clarifyContext,
+          ...(inputSignature ? { inputSignature } : {}),
+          updatedAt: Date.now(),
+        });
+        return;
+      }
 
       const clarifyStartedAt = Date.now();
       getPipelineAuditWriter()?.setPhase('clarify.questions');

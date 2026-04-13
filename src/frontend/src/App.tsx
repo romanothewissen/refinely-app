@@ -169,6 +169,9 @@ function buildClarifyLoadingMeta(
   const basePayload: ClarifyProgressPayload | null = livePayload || clarifyContext
       ? {
           ...livePayload,
+          discoveryMode: livePayload?.discoveryMode ?? clarifyContext?.discoveryMode,
+          discoveryBlueprint: livePayload?.discoveryBlueprint ?? clarifyContext?.discoveryBlueprint,
+          livingBrief: livePayload?.livingBrief ?? clarifyContext?.livingBrief,
           sizingContract: livePayload?.sizingContract ?? clarifyContext?.sizingContract,
           advisoryTriage: livePayload?.advisoryTriage ?? clarifyContext?.advisoryTriage,
           discoveryProfile: livePayload?.discoveryProfile ?? clarifyContext?.discoveryProfile,
@@ -411,6 +414,8 @@ function LegacyApp({
   // Realtime Integration
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[]>([]);
   const [clarifyAnswers, setClarifyAnswers] = useState<ClarifyAnswer[]>([]);
+  const clarifyAnswersRef = useRef<ClarifyAnswer[]>([]);
+  clarifyAnswersRef.current = clarifyAnswers;
   const [clarifyRound, setClarifyRound] = useState<1 | 2>(1);
   const [isEvaluatingDiscovery, setIsEvaluatingDiscovery] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
@@ -898,14 +903,29 @@ function LegacyApp({
     workflowRunId,
     ({ questions, contextMeta }) => {
       const nextClarifyContext = (contextMeta as ClarifyContextMeta | undefined) ?? null;
+      const isAdaptiveDiscovery = nextClarifyContext?.discoveryMode === 'adaptive_v1';
       setPendingClarifySessionId(null);
       setClarifyBlockingError(null);
       setClarifyEvaluationError(null);
       setClarifyContext(nextClarifyContext);
-      setClarifyRound(1);
-      setClarifyAnswers([]);
       setIsEvaluatingDiscovery(false);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, nextClarifyContext?.tokenUsage ?? null));
+      if (isAdaptiveDiscovery) {
+        const adaptiveQuestions = questions as ClarifyQuestion[];
+        if (adaptiveQuestions.length > 0) {
+          setClarifyQuestions(adaptiveQuestions);
+          setClarifyRound((nextClarifyContext?.totalQuestionCount ?? 0) > 1 ? 2 : 1);
+          setWorkflowStage((nextClarifyContext?.totalQuestionCount ?? 0) > 1 ? 'clarify_round_2' : 'clarify_round_1');
+          setIsWorking(false);
+          return;
+        }
+        setClarifyQuestions([]);
+        setWorkflowStage('generation');
+        void startGeneration(requirementRef.current, clarifyAnswersRef.current);
+        return;
+      }
+      setClarifyRound(1);
+      setClarifyAnswers([]);
       if (questions.length > 0) {
         setClarifyContext(nextClarifyContext ? {
           ...nextClarifyContext,
@@ -1054,6 +1074,67 @@ function LegacyApp({
     const mergedAnswers = [...clarifyAnswers, ...submittedAnswers];
     setClarifyEvaluationError(null);
 
+    if (clarifyContext?.discoveryMode === 'adaptive_v1') {
+      const attachmentText = runAttachments
+        .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
+        .join('\n\n');
+
+      setClarifyAnswers(mergedAnswers);
+      setIsWorking(true);
+      setWorkflowRunId(prev => prev + 1);
+      setPendingClarifySessionId(sessionIdRef.current);
+      setClarifyBlockingError(null);
+      setWorkflowStage('clarify_round_2');
+
+      try {
+        const clarifySessionId = await resolveDiscoverySessionId();
+        setPendingClarifySessionId(clarifySessionId);
+        const res = await api.retryClarify({
+          sessionId: clarifySessionId,
+          requirement,
+          attachmentText,
+          projectKey: effectiveProjectKey,
+          projectKeys: effectiveProjectKeys,
+          inputSignature: discoveryInputSignature,
+          round: 2,
+          priorAnswers: mergedAnswers,
+          pipelineAudit: pipelineAuditActiveRef.current,
+          auditRunId: pipelineAuditRunIdRef.current ?? undefined,
+        }) as any;
+
+        if (!res?.success) {
+          setPendingClarifySessionId(null);
+          setIsWorking(false);
+          setWorkflowStage('blocked');
+          setClarifyContext({
+            projectKey: effectiveProjectKey,
+            domainRolesUsed: [],
+            discoveryStatus: 'discovery_failed',
+            failureReasonCode: 'queue_error',
+          });
+          setClarifyBlockingError({
+            message: res?.error || 'Adaptive discovery could not continue. Please retry.',
+            reasonCode: 'queue_error',
+          });
+        }
+      } catch (err: any) {
+        setPendingClarifySessionId(null);
+        setIsWorking(false);
+        setWorkflowStage('blocked');
+        setClarifyContext({
+          projectKey: effectiveProjectKey,
+          domainRolesUsed: [],
+          discoveryStatus: 'discovery_failed',
+          failureReasonCode: 'queue_error',
+        });
+        setClarifyBlockingError({
+          message: err?.message ?? 'Adaptive discovery could not continue. Please retry.',
+          reasonCode: 'queue_error',
+        });
+      }
+      return;
+    }
+
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
       setWorkflowStage('generation');
@@ -1071,6 +1152,11 @@ function LegacyApp({
   const handleClarifySkip = async () => {
     setClarifyBlockingError(null);
     setClarifyEvaluationError(null);
+    if (clarifyContext?.discoveryMode === 'adaptive_v1') {
+      setWorkflowStage('generation');
+      await startGeneration(requirement, clarifyAnswersRef.current);
+      return;
+    }
     if (clarifyRound === 2) {
       markDiscoveryRoundComplete(2);
       setWorkflowStage('generation');
@@ -1311,7 +1397,7 @@ function LegacyApp({
         sessionId: sid,
         requirement: req,
         clarifyAnswers,
-        clarifyQuestionsAsked: clarifyQuestions.map((question) => ({
+        clarifyQuestionsAsked: (clarifyContext?.askedQuestions ?? clarifyQuestions).map((question) => ({
           categoryKey: question.categoryKey,
           intent: question.intent,
           question: question.question,

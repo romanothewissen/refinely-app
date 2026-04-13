@@ -457,6 +457,101 @@ or
 {"sufficient": false, "questions": [{"question":"...","suggestions":["A","B","C"]}], "reasonCodes":["MISSING_BUSINESS_RULE"]}`;
 }
 
+export function buildAdaptiveDiscoveryBlueprintSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when the requirement or evidence already supports them.`
+    : '';
+
+  return `You are designing a fast adaptive discovery blueprint before the interview begins.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+
+Your job is to create a compact discovery map, not a full questionnaire.
+
+RULES:
+- Output a compact blueprint only.
+- Choose exactly one complexityTier: "simple", "standard", or "complex".
+- "simple" means a focused ask with only the top 3 gaps.
+- "standard" means 5 to 7 candidate topics plus dependency hints.
+- "complex" means standard plus branch hints and risk areas that may need deeper questioning later.
+- Capture only durable planning signals: likely persona, objective, candidate topics, topic dependencies, ranked gaps, and stop criteria.
+- Do not generate a long list of ready-made interview questions.
+- Prefer short topic labels, not prose paragraphs.
+- Keep every array concise.
+
+OUTPUT FORMAT:
+Return ONLY valid JSON:
+{
+  "complexityTier":"simple",
+  "persona":"...",
+  "objective":"...",
+  "candidateTopics":["..."],
+  "topicDependencies":[{"topic":"...","dependsOn":["..."]}],
+  "rankedGaps":["..."],
+  "stopCriteria":["..."],
+  "branchHints":["optional"],
+  "riskAreas":["optional"]
+}`;
+}
+
+export function buildAdaptiveDiscoveryTurnSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Use them only when the requirement or answered discovery already supports them.`
+    : '';
+
+  return `You are running a fast adaptive discovery interview one turn at a time.
+${discoveryEvidenceBlock(opts.domainContext)}
+${roleHint}
+
+Your job each turn:
+1. update the living brief using the latest answer
+2. decide if discovery is now sufficient
+3. if not sufficient, ask exactly one short, high-value next question
+
+RULES:
+- Reason from the blueprint, the current living brief, and the latest answer only.
+- Do not restate the full interview or produce long explanations.
+- The next question must be delta-only and must not repeat what is already resolved.
+- Ask exactly one question or none.
+- The question must be under 18 words.
+- Suggestions are optional, but if included keep 2 to 4 grounded business-language options.
+- Mark isSufficient true when the remaining unknowns are low-impact or can be carried as open decisions.
+- If the current blueprint tier is too shallow, you may promote only one level upward.
+- If the output would be unreliable, set shouldFallback true and explain briefly in fallbackReason.
+
+OUTPUT FORMAT:
+Return ONLY valid JSON:
+{
+  "isSufficient": false,
+  "updatedBrief": {
+    "persona":"...",
+    "objective":"...",
+    "constraints":["..."],
+    "facts":["..."],
+    "resolvedTopics":["..."],
+    "openTopics":["..."],
+    "confidenceByTopic":{"context_trigger":0.6},
+    "summary":"...",
+    "knownUnknowns":["..."]
+  },
+  "nextQuestion": {
+    "categoryKey":"context_trigger",
+    "intent":"clarify_trigger",
+    "question":"What should trigger this flow?",
+    "suggestions":["A","B","C"]
+  },
+  "promotedComplexityTier":"standard",
+  "shouldFallback": false,
+  "fallbackReason":""
+}`;
+}
+
 export function buildDraftReviewSystemPrompt(opts: {
   domainContext: string;
   outputProfile?: 'business_first' | 'balanced' | 'technical_first';

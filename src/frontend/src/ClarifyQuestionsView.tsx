@@ -319,6 +319,29 @@ export function ClarifyQuestionsView({
                 </div>
               </div>
 
+              {contextMeta.discoveryMode === 'adaptive_v1' && contextMeta.livingBrief?.summary && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.12 }}
+                  className="mt-2 rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3 backdrop-blur-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">What we know so far</div>
+                      <div className="mt-1 text-[13px] leading-relaxed text-[var(--rf-text-secondary)]">
+                        {normalizeDisplayText(contextMeta.livingBrief.summary)}
+                      </div>
+                    </div>
+                    {typeof contextMeta.adaptiveDiscovery?.turnIndex === 'number' && (
+                      <div className="shrink-0 rounded-md border border-[var(--rf-border)] bg-white/70 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-[var(--rf-brand)]">
+                        Turn {contextMeta.adaptiveDiscovery.turnIndex + 1}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+
               {/* LLM scoring panel */}
               {questions.length > 0 && (() => {
                 const profile = contextMeta?.discoveryProfile;

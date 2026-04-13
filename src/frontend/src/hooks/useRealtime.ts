@@ -3,7 +3,7 @@ import { invoke } from '@forge/bridge';
 import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationModelRoute, GenerationQualityMode, OutputProfile, PipelineLatencyBreakdown } from '../types';
 
 export interface GenerationProgress {
-  type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review';
+  type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review' | 'needs_clarification';
   sessionId: string;
   message?: string;
   pass?: 1 | 2;
@@ -135,6 +135,9 @@ function mergeClarifyPayload(
     assessment: next.assessment ?? previous.assessment,
     sizingContract: next.sizingContract ?? previous.sizingContract,
     advisoryTriage: next.advisoryTriage ?? previous.advisoryTriage,
+    discoveryMode: next.discoveryMode ?? previous.discoveryMode,
+    discoveryBlueprint: next.discoveryBlueprint ?? previous.discoveryBlueprint,
+    livingBrief: next.livingBrief ?? previous.livingBrief,
     discoveryProfile: next.discoveryProfile ?? previous.discoveryProfile,
     ambiguityAssessment: next.ambiguityAssessment ?? previous.ambiguityAssessment,
     latencyMs: next.latencyMs ?? previous.latencyMs,
