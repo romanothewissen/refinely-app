@@ -9,6 +9,7 @@ import type {
   GenerationStageDurationsMs,
   TenantConfig,
   TokenUsageSummary,
+  SimilarStory,
   WorkInstructionInsightArtifact,
 } from '../types';
 import { getTierModel } from '../services/billing';
@@ -21,12 +22,13 @@ import {
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 import { buildDiscoveryCoverageArtifact } from './discovery';
+import { formatSimilarStoriesText } from './similar-stories';
 import {
   annotateFailedAcceptanceRequirementFeatures,
   findFeaturesMissingCompleteAcceptanceRequirements,
   GenerationCancelledError,
   normaliseFeature,
-} from './story-generator';
+} from './feature-output';
 
 interface RawFeature {
   id?: string;
@@ -188,39 +190,123 @@ function stripChoicePrefix(value: string): string {
     .replace(/^[*-]\s*/, '');
 }
 
+function normalizeQuestionContext(value: string): string {
+  return normalizeKey(value).replace(/\s+/g, ' ');
+}
+
 function splitRoleValue(value: string): string[] {
   return stripChoicePrefix(value)
-    .split(/\s*(?:\n|,|;|\|)\s*/g)
+    .split(/\s*(?:\n|,|;|\||\bor\b)\s*/gi)
     .map((part) => cleanText(part))
     .filter(Boolean);
+}
+
+function isNegativeRolePhrase(value: string): boolean {
+  return /^(?:none|no one|nobody|not applicable|n\/a|na|never|unknown|no formal approval is typically needed)$/i.test(value);
+}
+
+function isReferentialRolePhrase(value: string): boolean {
+  return /\b(?:same person|same role|person who|role that|creator|plan creator|case owner|record owner|owner of the case)\b/i.test(value);
 }
 
 function looksLikeRolePhrase(value: string): boolean {
   const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
   if (!cleaned || cleaned.length < 3 || cleaned.length > 80) return false;
   if (/[?!]/.test(cleaned)) return false;
-  if (/^(?:none|no one|nobody|not applicable|n\/a|na|never|unknown)$/i.test(cleaned)) return false;
+  if (isNegativeRolePhrase(cleaned)) return false;
+  if (isReferentialRolePhrase(cleaned)) return false;
   if (/^(?:only if|if |when |unless |because |after |before |during |while |depends\b)/i.test(cleaned)) return false;
+  if (/^(?:no |not |without |none )/i.test(cleaned)) return false;
+  if (/\b(?:approval|approvals?)\b/i.test(cleaned) && !/\b(?:manager|lead|owner|team|specialist|coordinator|administrator|reviewer)\b/i.test(cleaned)) return false;
+  if (/\b(?:formal approval|payment authorization|required approval|billable)\b/i.test(cleaned)) return false;
   if (/\b(?:billable|workflow|sequence|step|save|complete|required information|conditions?)\b/i.test(cleaned) && !/\bteam\b/i.test(cleaned)) return false;
   if (!/[A-Za-z]/.test(cleaned)) return false;
   return true;
 }
 
-function extractRoleValues(answer: ClarifyAnswer): string[] {
+function buildActorAliasMap(requirement: string, answers: ClarifyAnswer[]): Map<string, string> {
+  const aliasMap = new Map<string, string>();
+  const requirementRoles: string[] = [];
+  const roleRegex = /\bas\s+an?\s+([A-Za-z][A-Za-z ,/-]{2,60}?)(?:\s*[,.]|\s+(?:i|we|they|who|that|the)\b)/gi;
+  for (const match of requirement.matchAll(roleRegex)) {
+    const role = stripChoicePrefix(match[1] ?? '').replace(/\.$/, '');
+    if (looksLikeRolePhrase(role)) {
+      requirementRoles.push(role);
+    }
+  }
+  if (requirementRoles.length === 1) {
+    aliasMap.set('creator', requirementRoles[0]!);
+  }
+
+  answers.forEach((answer) => {
+    const questionContext = normalizeQuestionContext(`${answer.categoryKey ?? ''} ${answer.question}`);
+    const directRoles = [
+      ...(answer.selectedSuggestions ?? []),
+      String(answer.customAnswer ?? '').trim(),
+      cleanText(answer.answer),
+    ]
+      .flatMap((value) => splitRoleValue(String(value ?? '')))
+      .map((value) => stripChoicePrefix(value).replace(/\.$/, ''))
+      .filter(looksLikeRolePhrase);
+
+    if (!directRoles.length) return;
+    const primaryRole = directRoles[0]!;
+
+    if (/\bcreate(?:s|d|r)?\b.*\bplan\b|\bplan\b.*\bcreate(?:s|d|r)?\b/.test(questionContext)) {
+      aliasMap.set('plan creator', primaryRole);
+      aliasMap.set('the plan creator', primaryRole);
+      aliasMap.set('same person who created the plan', primaryRole);
+      aliasMap.set('person who created the plan', primaryRole);
+      aliasMap.set('creator', primaryRole);
+    }
+    if (/\bcase owner\b|\bowner of the case\b|\bwho owns the case\b/.test(questionContext)) {
+      aliasMap.set('case owner', primaryRole);
+      aliasMap.set('the case owner', primaryRole);
+      aliasMap.set('owner of the case', primaryRole);
+    }
+  });
+
+  return aliasMap;
+}
+
+function resolveReferentialRoleValue(value: string, aliasMap: Map<string, string>): string | null {
+  const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
+  if (!cleaned || !isReferentialRolePhrase(cleaned)) return null;
+
+  const normalized = normalizeKey(cleaned);
+  const direct = aliasMap.get(normalized);
+  if (direct) return direct;
+
+  if (normalized.includes('same person who created the plan') || normalized.includes('plan creator')) {
+    return aliasMap.get('same person who created the plan') ?? aliasMap.get('plan creator') ?? aliasMap.get('creator') ?? null;
+  }
+
+  if (normalized.includes('case owner') || normalized.includes('owner of the case')) {
+    return aliasMap.get('case owner') ?? aliasMap.get('owner of the case') ?? null;
+  }
+
+  return null;
+}
+
+function extractRoleValues(answer: ClarifyAnswer, aliasMap: Map<string, string>): string[] {
   const structuredRoleValues = [
     ...(answer.selectedSuggestions ?? []),
     String(answer.customAnswer ?? '').trim(),
   ]
     .flatMap((value) => splitRoleValue(String(value ?? '')))
+    .map((value) => resolveReferentialRoleValue(String(value ?? ''), aliasMap) ?? stripChoicePrefix(String(value ?? '')).replace(/\.$/, ''))
     .filter(looksLikeRolePhrase);
 
   if (structuredRoleValues.length) return structuredRoleValues;
-  return splitRoleValue(cleanText(answer.answer)).filter(looksLikeRolePhrase);
+  return splitRoleValue(cleanText(answer.answer))
+    .map((value) => resolveReferentialRoleValue(value, aliasMap) ?? value)
+    .filter(looksLikeRolePhrase);
 }
 
 export function extractRoles(requirement: string, answers: ClarifyAnswer[] = []): string[] {
   const seen = new Set<string>();
   const roles: string[] = [];
+  const aliasMap = buildActorAliasMap(requirement, answers);
 
   const addRole = (value: string) => {
     const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
@@ -234,7 +320,7 @@ export function extractRoles(requirement: string, answers: ClarifyAnswer[] = [])
   answers.forEach((answer) => {
     const question = `${answer.categoryKey ?? ''} ${answer.question}`.toLowerCase();
     if (!/role|persona|who\b|actor/.test(question)) return;
-    extractRoleValues(answer).forEach(addRole);
+    extractRoleValues(answer, aliasMap).forEach(addRole);
   });
 
   const roleRegex = /\bas\s+an?\s+([A-Za-z][A-Za-z ,/-]{2,60}?)(?:\s*[,.]|\s+(?:i|we|they|who|that|the)\b)/gi;
@@ -249,11 +335,12 @@ export function extractActorSets(requirement: string, answers: ClarifyAnswer[] =
   const eligibleActors: string[] = [];
   const approverActors: string[] = [];
   const viewerActors: string[] = [];
+  const aliasMap = buildActorAliasMap(requirement, answers);
 
   answers.forEach((answer) => {
     const question = `${answer.categoryKey ?? ''} ${answer.question}`.toLowerCase();
     if (!/role|persona|who\b|actor|approve|review|view|see|track|receive|monitor/.test(question)) return;
-    const values = extractRoleValues(answer);
+    const values = extractRoleValues(answer, aliasMap);
     if (!values.length) return;
     if (/\bapprove|approval|review|sign off|authori[sz]/.test(question)) {
       approverActors.push(...values);
@@ -287,9 +374,22 @@ function buildRoleHint(
   answers: ClarifyAnswer[],
   actorSets: ActorSetGrounding,
 ): string {
-  const extractedRoles = actorSets.mentionedActors ?? extractRoles(requirement, answers);
-  const combinedRoles = uniqueStrings([...(domainRoles ?? []), ...extractedRoles]).filter(looksLikeRolePhrase);
-  return combinedRoles.length ? `KNOWN ROLES: ${combinedRoles.join(', ')}` : '';
+  const extractedRoles = uniqueStrings(actorSets.mentionedActors ?? extractRoles(requirement, answers)).filter(looksLikeRolePhrase);
+  const fallbackRoles = uniqueStrings(domainRoles ?? []).filter(looksLikeRolePhrase);
+  const roleVocabulary = extractedRoles.length ? extractedRoles : fallbackRoles;
+
+  if (!roleVocabulary.length) return '';
+
+  const lines = [
+    `EXACT ACTOR VOCABULARY: ${roleVocabulary.join(', ')}`,
+    extractedRoles.length
+      ? 'Use only these actor labels verbatim in feature descriptions unless the requirement itself names a different exact role.'
+      : 'If you use a configured workspace role, use it verbatim and do not paraphrase or combine role labels.',
+    'Choose exactly one actor label per feature description unless the exact label is already collective.',
+    'Never use referential phrases like "the plan creator" or non-actor answers like approval states as role labels.',
+  ];
+
+  return lines.join('\n');
 }
 
 function buildActorSetHints(actorSets: ActorSetGrounding): string[] {
@@ -334,6 +434,18 @@ function formatWiEvidence(
   return trimPromptText(wiContextText, 5000);
 }
 
+function formatDiscoveryBacklogEvidence(similarStories: SimilarStory[] = []): string {
+  if (!similarStories.length) return '';
+  const formatted = formatSimilarStoriesText(similarStories, 3);
+  return trimPromptText(formatted, 3200);
+}
+
+function formatGenerationBacklogEvidence(similarStories: SimilarStory[] = []): string {
+  if (!similarStories.length) return '';
+  const formatted = formatSimilarStoriesText(similarStories, 4);
+  return trimPromptText(formatted, 4200);
+}
+
 function extractMustCarryRules(answers: ClarifyAnswer[]): string[] {
   return answers
     .filter((answer) => {
@@ -373,11 +485,15 @@ function buildClarifyUserMessage(input: {
   requirement: string;
   attachmentText: string;
   wiEvidenceText: string;
+  similarStoriesText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
   const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
   if (input.wiEvidenceText.trim()) {
     parts.push(`Operational evidence from Work Instructions (use to ask sharper, process-grounded questions):\n${input.wiEvidenceText}`);
+  }
+  if (input.similarStoriesText?.trim()) {
+    parts.push(`Relevant backlog references from this workspace (use to understand how this team usually frames good scope; do not copy unrelated details):\n${input.similarStoriesText}`);
   }
   return parts.join('\n\n');
 }
@@ -387,6 +503,7 @@ function buildSufficiencyUserMessage(input: {
   answers: ClarifyAnswer[];
   attachmentText?: string;
   wiEvidenceText?: string;
+  similarStoriesText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText ?? '');
   const parts = [
@@ -395,6 +512,9 @@ function buildSufficiencyUserMessage(input: {
   ];
   if (input.wiEvidenceText?.trim()) {
     parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);
+  }
+  if (input.similarStoriesText?.trim()) {
+    parts.push(`Relevant backlog references from this workspace:\n${input.similarStoriesText}`);
   }
   return parts.join('\n\n');
 }
@@ -407,6 +527,8 @@ function buildGenerationContextMessage(input: {
   roleHint: string;
   discoveryProfile?: DiscoveryProfile;
   actorSets: ActorSetGrounding;
+  similarStoriesText?: string;
+  arPatternLibraryText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
   const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
@@ -426,6 +548,12 @@ function buildGenerationContextMessage(input: {
   }
   if (input.wiEvidenceText.trim()) {
     parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);
+  }
+  if (input.similarStoriesText?.trim()) {
+    parts.push(`Relevant backlog references from this workspace (scope and phrasing calibration only):\n${input.similarStoriesText}`);
+  }
+  if (input.arPatternLibraryText?.trim()) {
+    parts.push(input.arPatternLibraryText);
   }
   return parts.join('\n\n');
 }
@@ -599,119 +727,33 @@ function featureToRaw(feature: Feature): RawFeature {
   };
 }
 
-function compactNarrativeClause(value: string, maxWords: number): string {
-  let cleaned = cleanText(value)
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(/\b(?:for example|for instance|such as|including|including things like|for example,|for instance,)\b.*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!cleaned) return value;
-  const words = cleaned.split(/\s+/);
-  if (words.length > maxWords && cleaned.includes(',')) {
-    cleaned = cleaned.split(',')[0]?.trim() || cleaned;
-  }
-  const trimmedWords = cleaned.split(/\s+/);
-  if (trimmedWords.length > maxWords) {
-    cleaned = trimmedWords.slice(0, maxWords).join(' ');
-  }
-  return cleaned.replace(/[,.]+$/g, '').trim();
-}
-
-function compactFeatureDescriptionText(description: string): string {
-  const match = description.match(/^(As an? .+?, I need(?: to)? )(.+?)( so that )(.+)$/i);
-  if (!match) return description;
-  const prefix = cleanText(match[1]);
-  const action = compactNarrativeClause(match[2] ?? '', 18);
-  const benefit = compactNarrativeClause(match[4] ?? '', 16);
-  return `${prefix} ${action}${match[3]}${benefit}`.replace(/\s+/g, ' ').trim();
-}
-
 function normalizeArKey(ar: { given: string; when: string; then: string }): string {
   return [ar.given, ar.when, ar.then].map((value) => normalizeKey(value)).join('||');
 }
 
-function normalizeArGroupKey(ar: { given: string; when: string; then: string }): string {
-  return [ar.given, ar.when].map((value) => normalizeKey(value)).join('||');
-}
-
-function mergeRepeatedThenClauses(thens: string[]): string | null {
-  if (thens.length < 2) return null;
-  const tokenized = thens.map((item) => cleanText(item).split(/\s+/).filter(Boolean));
-  const minLength = Math.min(...tokenized.map((tokens) => tokens.length));
-  const prefix: string[] = [];
-  for (let index = 0; index < minLength; index += 1) {
-    const candidate = tokenized[0]?.[index]?.toLowerCase();
-    if (!candidate) break;
-    if (tokenized.every((tokens) => tokens[index]?.toLowerCase() === candidate)) {
-      prefix.push(tokenized[0][index]!);
-      continue;
-    }
-    break;
-  }
-  if (prefix.length < 2) return null;
-  const suffixes = tokenized
-    .map((tokens) => cleanText(tokens.slice(prefix.length).join(' ')).replace(/^[,.;:]+\s*/, ''))
-    .filter(Boolean);
-  if (suffixes.length !== thens.length) return null;
-  if (suffixes.some((suffix) => suffix.split(/\s+/).length > 8)) return null;
-  const uniqueSuffixes = uniqueStrings(suffixes);
-  if (uniqueSuffixes.length < 2) return cleanText(thens[0]);
-  const lastSuffix = uniqueSuffixes.pop();
-  return `${prefix.join(' ')} ${uniqueSuffixes.length ? `${uniqueSuffixes.join(', ')}${lastSuffix ? `, and ${lastSuffix}` : ''}` : lastSuffix}`.trim();
-}
-
-function dedupeAcceptanceRequirements(features: Feature[]): { features: Feature[]; notes: string[] } {
-  const notes: string[] = [];
-  const seenGlobal = new Set<string>();
-  let crossFeatureRemoved = 0;
+function dedupeExactAcceptanceRequirements(features: Feature[]): { features: Feature[]; notes: string[] } {
+  let exactDuplicatesRemoved = 0;
 
   const nextFeatures = features.map((feature) => {
-    const exactDeduped = feature.acceptanceRequirements.filter((ar, index, list) => (
-      list.findIndex((candidate) => normalizeArKey(candidate) === normalizeArKey(ar)) === index
-    ));
-
-    const grouped = new Map<string, typeof exactDeduped>();
-    exactDeduped.forEach((ar) => {
-      const key = normalizeArGroupKey(ar);
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(ar);
-    });
-
-    const mergedWithinFeature = exactDeduped.flatMap((ar) => {
-      const group = grouped.get(normalizeArGroupKey(ar)) ?? [];
-      if (group[0] !== ar) return [];
-      const mergedThen = mergeRepeatedThenClauses(group.map((item) => item.then));
-      if (group.length > 1 && mergedThen) {
-        return [{ ...ar, then: mergedThen }];
-      }
-      return group;
-    });
-
-    const withoutCrossFeatureDupes = mergedWithinFeature.filter((ar) => {
-      const key = normalizeArKey(ar);
-      if (seenGlobal.has(key)) {
-        crossFeatureRemoved += 1;
-        return false;
-      }
-      seenGlobal.add(key);
-      return true;
+    const acceptanceRequirements = feature.acceptanceRequirements.filter((ar, index, list) => {
+      const firstIndex = list.findIndex((candidate) => normalizeArKey(candidate) === normalizeArKey(ar));
+      const keep = firstIndex === index;
+      if (!keep) exactDuplicatesRemoved += 1;
+      return keep;
     });
 
     return {
       ...feature,
-      description: compactFeatureDescriptionText(feature.description),
-      acceptanceRequirements: withoutCrossFeatureDupes,
+      acceptanceRequirements,
     };
   });
 
-  const compactedCount = features.filter((feature, index) => feature.description !== nextFeatures[index]?.description).length;
-  if (compactedCount > 0) {
-    notes.push(`Compacted ${compactedCount} feature description${compactedCount === 1 ? '' : 's'} to keep the story sentence focused on the core capability.`);
-  }
-  if (crossFeatureRemoved > 0) {
-    notes.push(`Removed ${crossFeatureRemoved} repeated acceptance requirement${crossFeatureRemoved === 1 ? '' : 's'} that were duplicated across sibling features.`);
-  }
-  return { features: nextFeatures, notes };
+  return {
+    features: nextFeatures,
+    notes: exactDuplicatesRemoved > 0
+      ? [`Removed ${exactDuplicatesRemoved} exact duplicate acceptance requirement${exactDuplicatesRemoved === 1 ? '' : 's'} inside feature outputs.`]
+      : [],
+  };
 }
 
 export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
@@ -719,6 +761,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   attachmentText: string;
   wiContextText: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
+  similarStories?: SimilarStory[];
   config: TenantConfig;
 }): Promise<StoryAssistantClarifyResult & { promptAssemblyMs: number }> {
   const providerOpts = buildProviderOpts(opts.config);
@@ -726,6 +769,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   let questions: ClarifyQuestion[] = [];
   let promptAssemblyMs = 0;
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
+  const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
 
   for (const attempt of [1, 2]) {
     const promptAssemblyStartedAt = Date.now();
@@ -733,6 +777,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       requirement: opts.requirement,
       attachmentText: opts.attachmentText,
       wiEvidenceText,
+      similarStoriesText,
     });
     promptAssemblyMs += Date.now() - promptAssemblyStartedAt;
     const result = await callLlmJsonWithUsage<unknown>({
@@ -781,6 +826,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
   attachmentText?: string;
   wiContextText?: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
+  similarStories?: SimilarStory[];
   config: TenantConfig;
 }): Promise<StoryAssistantSufficiencyResult & { promptAssemblyMs: number }> {
   const startedAt = Date.now();
@@ -790,12 +836,14 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
     .filter(Boolean))
     .map((key) => key as ClarifyCategoryKey);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText ?? '');
+  const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
   const promptAssemblyStartedAt = Date.now();
   const userMessage = buildSufficiencyUserMessage({
     requirement: opts.requirement,
     answers: opts.answers,
     attachmentText: opts.attachmentText,
     wiEvidenceText,
+    similarStoriesText,
   });
   const promptAssemblyMs = Date.now() - promptAssemblyStartedAt;
   try {
@@ -876,6 +924,9 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   attachmentText: string;
   wiContextText: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
+  similarStories?: SimilarStory[];
+  arPatternLibraryText?: string;
+  arPatternStoryKeys?: string[];
   discoveryProfile?: DiscoveryProfile;
   config: TenantConfig;
   precomputedDraftFeatures?: Feature[];
@@ -889,6 +940,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   const actorSets = extractActorSets(opts.requirement, opts.clarifyAnswers);
   const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers, actorSets);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
+  const similarStoriesText = formatGenerationBacklogEvidence(opts.similarStories ?? []);
   let promptAssemblyMs = 0;
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];
@@ -906,6 +958,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       roleHint,
       discoveryProfile: opts.discoveryProfile,
       actorSets,
+      similarStoriesText,
     })}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
     promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
@@ -929,9 +982,6 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     pass1Features = pass1Raw.map((feature) => normaliseFeature({
       ...feature,
       acceptance_requirements: [],
-    })).map((feature) => ({
-      ...feature,
-      description: compactFeatureDescriptionText(feature.description),
     }));
     stageDurationsMs.decomposition = Date.now() - startedAt;
     if (opts.onPass1DraftFeatures) {
@@ -955,12 +1005,14 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     roleHint,
     discoveryProfile: opts.discoveryProfile,
     actorSets,
+    similarStoriesText,
+    arPatternLibraryText: opts.arPatternLibraryText,
   })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
     features: pass1Raw.map((feature) => ({
       ...feature,
       acceptance_requirements: [],
     })),
-  }, null, 2)}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements. Collapse repeated field-level rules into one capability-level AR when they share the same GIVEN/WHEN logic, and keep shared quote, approval, or follow-up gates in only one sibling feature.`;
+  }, null, 2)}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
     model: getTierModel(opts.config.generatorConfig.arModel, opts.config.tier),
@@ -981,7 +1033,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     ? mergePass2IntoPass1(pass1Raw, pass2Raw)
     : pass1Raw;
   let features = mergedRaw.map((feature) => normaliseFeature(feature));
-  const repairedOutput = dedupeAcceptanceRequirements(features);
+  const repairedOutput = dedupeExactAcceptanceRequirements(features);
   features = repairedOutput.features;
   const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   const failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
@@ -1014,6 +1066,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         : undefined,
       autoRepairedIssues: repairedOutput.notes,
       actorSets,
+      pass2ArPatternStoryKeys: opts.arPatternStoryKeys,
       latencyMs: {
         promptAssemblyMs,
       },

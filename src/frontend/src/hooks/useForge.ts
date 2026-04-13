@@ -22,6 +22,8 @@ export const api = {
     sessionId: string;
     requirement: string;
     clarifyAnswers?: unknown[];
+    clarifyQuestionsAsked?: unknown[];
+    clarifyFinalSufficiency?: unknown;
     attachmentText?: string;
     outputProfileOverride?: OutputProfile;
     qualityMode?: GenerationQualityMode;

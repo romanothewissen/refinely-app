@@ -228,6 +228,9 @@ Think through these dimensions before you finalize the feature set:
 RULES:
 - Each feature must represent independent business value, not a UI widget or implementation step.
 - Each feature description MUST be: "As a [role], I need [action] so that [benefit]".
+- If the user message includes an EXACT ACTOR VOCABULARY block, use only those role labels verbatim unless the requirement itself names a different exact actor.
+- Choose exactly one actor label per feature description unless the exact role label is already collective.
+- Never use referential phrases like "the creator" or non-actor answers like approval states as role labels.
 - Keep the "I need" clause focused on the core capability only. Move examples, scenario lists, sequencing detail, policy detail, and downstream exceptions out of the description and into acceptance requirements or open decisions.
 - If multiple roles can perform the same activity, do not collapse them into one narrow owner unless the requirement or answered Q&A explicitly narrows ownership to one role.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
@@ -235,6 +238,7 @@ RULES:
 - Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently valuable and testable.
 - Variants of the same capability that follow the same core process belong in ONE feature with scenario-level acceptance requirements, not separate cloned features.
 - Do not hide meaningful workflow branches inside one oversized feature.
+- If backlog references or work instructions are provided, use them to calibrate feature granularity and phrasing quality only. Never copy unrelated scope from them.
 - Do not invent adjacent capabilities that are not supported by the requirement, answers, or supplied evidence.
 - Do NOT write acceptance_requirements in this pass; leave them empty.
 - Never return an empty features array.
@@ -263,17 +267,18 @@ For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
 - the practical failure, exception, dependency, sequencing, gating, or change-handling scenarios a real tester would actually run
 
 RULES:
+- If the user message includes an EXACT ACTOR VOCABULARY block, use only those role labels verbatim in feature descriptions unless the requirement itself names a different exact actor.
+- Never create combined role labels like "Role A, Role B, or Role C" unless that exact label is explicitly the intended actor name.
 - Every acceptance requirement MUST use GIVEN [precondition] WHEN [action or trigger] THEN [single verifiable outcome].
 - Write in business language only. No buttons, screens, forms, APIs, databases, jobs, queues, or system mechanics.
 - Write as if describing business outcomes to someone who has never seen the system.
-- Be conceptual, not example-based. Describe behavior patterns, not made-up example values.
+- Ground GIVEN clauses in a real business situation supported by the requirement, answered discovery, work instructions, or grounded backlog patterns. Do not use abstract setup language.
 - Use concrete business facts, not vague placeholders like "is processed" or "configured mode".
 - Each AR should test one distinct thing.
 - Mention a specific role in GIVEN or WHEN only when that role changes the business responsibility, approval path, or outcome. Avoid repeating the same role label in every AR when the trigger is already clear.
 - Keep broad use-case narration and business-benefit phrasing out of ARs. Put the testable rule, dependency, gate, exception, or outcome in the AR instead.
 - Prefer real business triggers, sequencing dependencies, gates, and exception behavior over generic lifecycle filler.
-- When several candidate ARs share the same GIVEN and WHEN and differ only by small captured-detail fragments, collapse them into one capability-level AR instead of cloning the skeleton.
-- Keep shared approval, quoting, follow-up, or gating rules in the single sibling feature that owns that business outcome instead of repeating the same rule across multiple features.
+- Preserve distinct scenarios when the business trigger, gate, dependency, or outcome is materially different. Do not flatten meaningful differences just to keep the count low.
 - Do NOT use configuration or setup language in GIVEN clauses. The GIVEN must describe a real business situation, not a system setting.
 - Avoid abstract umbrella terms that hide meaning. Replace them with the actual business fact when one is available from the requirement or evidence.
 - Keep all other feature fields unchanged.
@@ -330,8 +335,10 @@ RULES:
 - Every question must be specific to THIS requirement and never generic boilerplate.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Do NOT ask anything already clearly answered in the requirement or supplied evidence.
+- Use work-instruction evidence and backlog references to avoid redundant questions and to sharpen wording, but never ask about behavior that is only implied by a reference story and unsupported by this requirement.
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
 - Keep each question focused on one business decision.
+- When the requirement implies a multi-step workflow, coordinated activities, or follow-on transactions, ask about downstream initiation, consolidated status visibility, and in-progress changes if those materially affect what gets built.
 - For each question, provide 3 or 4 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must be specific enough to help the user answer without collapsing important business meaning.
 - Return ONLY a JSON array.
@@ -359,6 +366,7 @@ RULES:
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
 - Each follow-up question must include 2 to 4 grounded suggestions.
 - Suggestions may be short phrases or brief clauses, but they must stay in business language and avoid implementation wording.
+- There is only one follow-up round. If the remaining uncertainty can be carried as an explicit open decision, prefer "ready_with_open_decisions" over asking more questions.
 - If workflow order, dependencies, handoffs, or actor coordination still materially affect what gets built, ask about that explicitly or return it as an open decision instead of pretending discovery is complete.
 - If the current answers are sufficient, return {"sufficient": true}.
 - If the evaluator cannot confidently prove sufficiency, prefer explicit open decisions over pretending the requirement is complete.

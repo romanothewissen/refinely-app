@@ -1,47 +1,51 @@
 /**
  * Forge Queue Consumer: async clarifying question generation.
  *
- * Runs with 900s timeout — allows slow thinking models (e.g. Gemini 2.5 Pro)
- * to generate high-quality clarifying questions without hitting the 25s
- * resolver limit.
- *
- * Result is stored in Forge Storage; the frontend polls getClarifyResult.
+ * Runs with a long queue timeout so clarify models can reason without hitting
+ * resolver limits. Results are persisted in Forge Storage for polling.
  */
 
-import { ClarifyContextMeta, ClarifyEvent, ClarifyFailureDiagnostics, ClarifyFailureReasonCode, ClarifyProgressPayload } from '../types';
-import { assessRequirementWithLlm, buildClarifyFailureDiagnostics, ClarifyDiscoveryError, generateClarifyingQuestions } from '../core/story-generator';
+import type {
+  ClarifyContextMeta,
+  ClarifyEvent,
+  ClarifyFailureDiagnostics,
+  ClarifyFailureReasonCode,
+  ClarifyProgressPayload,
+} from '../types';
+import { extractActorSets } from '../core/story-assistant-default';
 import { formatSimilarStoriesText } from '../core/similar-stories';
-import {
-  buildWorkInstructionInsightArtifact,
-  buildWorkInstructionRetrievalIntents,
-  getWorkInstructionInsightCount,
-} from '../core/wi-insights';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
-import { recordProjectActivity } from '../services/project-activity';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
-import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
+import { recordProjectActivity } from '../services/project-activity';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
   normalizeProjectKeys,
   resolvePrimaryProjectKey,
-  retrieveScopedSimilarStories,
-  retrieveScopedWiContext,
-  summarizeReferencedSimilarStories,
-  summarizeReferencedWiSections,
 } from '../services/project-selection';
-import { buildTriageEnrichedWiQuery, deriveRetrievalQuery, mergeWiContextResults } from '../services/retrieval-query';
-import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
+import { deriveRetrievalQuery } from '../services/retrieval-query';
 import { runStoryAssistantClarifyStage } from '../services/story-assistant-pipeline';
+import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
-const CLARIFY_FOCUSED_WI_INTENT_LIMIT = 1;
 
 export async function handler(event: { body: ClarifyEvent }) {
-  const { sessionId, accountId, requirement, inputSignature, attachmentText, license, config: eventConfig, projectKey, projectKeys, priorAnswers } = event.body;
+  const {
+    sessionId,
+    accountId,
+    requirement,
+    inputSignature,
+    attachmentText,
+    license,
+    config: eventConfig,
+    projectKey,
+    projectKeys,
+    priorAnswers,
+  } = event.body;
+
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
   const config = {
     ...eventConfig,
@@ -50,34 +54,33 @@ export async function handler(event: { body: ClarifyEvent }) {
     domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
     tier: getEffectiveTier(eventConfig, { license }),
   };
+
   const auditMeta = isPipelineAuditRequested(config, event.body.pipelineAudit, event.body.auditRunId)
     ? { sessionId, auditRunId: event.body.auditRunId!, accountId }
     : null;
 
   const exec = async () => {
-  const workflowStartedAt = Date.now();
-  const queueWaitMs = Math.max(0, workflowStartedAt - Number(event.body.enqueuedAt ?? workflowStartedAt));
-  const modelRoute = buildGenerationModelRoute(config.generatorConfig);
-  let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
-  let stopHeartbeat: (() => void) | null = null;
-  let firstProgressSentAt: number | null = null;
+    const workflowStartedAt = Date.now();
+    const queueWaitMs = Math.max(0, workflowStartedAt - Number(event.body.enqueuedAt ?? workflowStartedAt));
+    const modelRoute = buildGenerationModelRoute(config.generatorConfig);
+    let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
+    let stopHeartbeat: (() => void) | null = null;
+    let firstProgressSentAt: number | null = null;
 
-  const sendProgress = async (
-    message: string,
-    payload?: ClarifyProgressPayload,
-  ) => {
-    if (firstProgressSentAt == null) firstProgressSentAt = Date.now();
-    currentProgress = { message, payload };
-    await sendClarifyProgress(sessionId, message, inputSignature, payload);
-  };
+    const sendProgress = async (message: string, payload?: ClarifyProgressPayload) => {
+      if (firstProgressSentAt == null) firstProgressSentAt = Date.now();
+      currentProgress = { message, payload };
+      await sendClarifyProgress(sessionId, message, inputSignature, payload);
+    };
 
-  try {
-    const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
-    const maskedRequirement = maskPiiText(requirement, piiEnabled);
-    const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
-    const maskedPriorAnswers = maskPiiInAnswers(priorAnswers ?? [], piiEnabled);
-    const retrievalAnswers = maskedPriorAnswers.answers;
-    if (useStoryAssistantDefaultPipeline(config)) {
+    try {
+      const piiEnabled = Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled);
+      const maskedRequirement = maskPiiText(requirement, piiEnabled);
+      const maskedAttachment = maskPiiText(attachmentText ?? '', piiEnabled);
+      const maskedPriorAnswers = maskPiiInAnswers(priorAnswers ?? [], piiEnabled);
+      const retrievalAnswers = maskedPriorAnswers.answers;
+
+      stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
       await sendProgress('Reading shared evidence context for discovery…', {
         stage: 'context',
         sources: {
@@ -87,10 +90,9 @@ export async function handler(event: { body: ClarifyEvent }) {
           domainContextApplied: Boolean(config.domainContext?.trim()),
         },
       });
-      stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
+
       await sendProgress('Writing the business questions that are still genuinely ambiguous…', {
         stage: 'question_generation',
-        discoveryProfile: undefined,
         sources: {
           projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
           projectCount: selectedProjectKeys.length,
@@ -139,7 +141,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
           retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
           wiInsightCount: sharedContext.sources.wiInsightCount,
-          similarStoriesCount: 0,
+          similarStoriesCount: sharedContext.sources.similarStoriesCount,
         },
       });
 
@@ -152,8 +154,8 @@ export async function handler(event: { body: ClarifyEvent }) {
         discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
         domainContextApplied: sharedContext.sources.domainContextApplied,
         attachmentIncluded: sharedContext.sources.attachmentIncluded,
-        similarStoriesCount: 0,
-        referencedSimilarStories: [],
+        similarStoriesCount: sharedContext.sources.similarStoriesCount,
+        referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
         discoveryProfile,
         ambiguityAssessment,
         roundsCompleted: 0,
@@ -171,6 +173,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           reasonCodes: [],
         },
         tokenUsage,
+        actorSets: extractActorSets(maskedRequirement.text, retrievalAnswers),
         latencyMs: {
           queueWaitMs,
           retrievalMs: sharedContext.timings.retrievalMs,
@@ -195,6 +198,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         ...(clarifyContext.latencyMs ?? {}),
         persistenceMs: Date.now() - persistenceStartedAt,
       };
+
       if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
         await saveTransparencyReport({
           sessionId,
@@ -208,9 +212,10 @@ export async function handler(event: { body: ClarifyEvent }) {
             questions.length > 0
               ? `Generated ${questions.length} discovery questions in the initial Story Assistant round.`
               : 'Discovery determined no clarifying questions were needed before generation.',
-            `Loaded ${sharedContext.sources.retrievedWiDocCount} work instruction documents into one shared evidence context.`,
+            `Loaded ${sharedContext.sources.retrievedWiDocCount} work instruction documents and ${sharedContext.sources.similarStoriesCount} related backlog references into the shared evidence bundle.`,
           ],
           contextUsage: {
+            similarStoriesCount: sharedContext.sources.similarStoriesCount,
             linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
             retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,
             retrievedWiChunkCount: sharedContext.sources.retrievedWiChunkCount,
@@ -222,6 +227,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
         });
       }
+
       await appendComplianceAuditEvent({
         actorAccountId: accountId,
         category: 'runtime',
@@ -229,6 +235,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         details: { sessionId, projectKey, model: config.generatorConfig.clarifyModel, pipelineMode: 'story_assistant_default' },
         enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
       });
+
       await recordProjectActivity({
         action: 'clarify',
         projectKeys: selectedProjectKeys,
@@ -259,7 +266,7 @@ export async function handler(event: { body: ClarifyEvent }) {
             discoveryContextClarify: {
               wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
               wiContextText: sharedContext.wiContext.text,
-              similarStoriesText: '',
+              similarStoriesText: formatSimilarStoriesText(sharedContext.similarStories, 3),
               domainContext: sharedContext.domainContext,
               domainRoles: sharedContext.domainRoles,
               wiInsights: sharedContext.wiInsights,
@@ -287,404 +294,33 @@ export async function handler(event: { body: ClarifyEvent }) {
         ...(inputSignature ? { inputSignature } : {}),
         updatedAt: Date.now(),
       });
-      return;
-    }
-
-    const broadWiTopK = Math.min(Math.max(1, config.wiConfig.topKChunks), 8);
-    const broadWiMaxChars = config.wiConfig.maxChars;
-    await sendProgress('Reading project guidance, work instructions, and related stories…', {
-      stage: 'context',
-      sources: {
-        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-        projectCount: selectedProjectKeys.length,
-        attachmentIncluded: Boolean(attachmentText?.trim()),
-        domainContextApplied: Boolean(config.domainContext?.trim()),
-      },
-    });
-    stopHeartbeat = startClarifyProgressHeartbeat(sessionId, inputSignature, () => currentProgress);
-    getPipelineAuditWriter()?.setPhase('clarify.triage');
-    const triagePromise = assessRequirementWithLlm({
-      requirement: maskedRequirement.text,
-      generatorConfig: config.generatorConfig,
-      tier: config.tier,
-      providerOpts: {
-        provider: config.generatorConfig.provider,
-        geminiApiKey: config.generatorConfig.geminiApiKey,
-        geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
-        openaiApiKey: config.generatorConfig.openaiApiKey,
-        openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-        azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
-        azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
-        azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
-        modelCatalogs: config.generatorConfig.modelCatalogs,
-        piiMaskingEnabled: piiEnabled,
-      },
-    });
-
-    const [wiBroad, similarStories, precomputedTriage] = await Promise.all([
-      config.wiConfig.enabled
-        ? retrieveScopedWiContext(
-            deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
-            broadWiTopK,
-            broadWiMaxChars,
-            selectedProjectKeys,
-          )
-        : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
-      config.tier !== 'free'
-        ? retrieveScopedSimilarStories({
-            requirement: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
-            attachmentText: maskedAttachment.text,
-            clarifyAnswers: retrievalAnswers,
-            config,
-            projectKeys: selectedProjectKeys,
-            maxResults: 6,
-          })
-        : Promise.resolve([]),
-      triagePromise,
-    ]);
-
-    let wiContext = wiBroad;
-    if (config.wiConfig.enabled && precomputedTriage) {
-      const narrowQuery = buildTriageEnrichedWiQuery(precomputedTriage);
-      const retrievalIntents = buildWorkInstructionRetrievalIntents(
-        maskedRequirement.text,
-        precomputedTriage.reasoning,
-      ).slice(0, CLARIFY_FOCUSED_WI_INTENT_LIMIT);
-
-      const extraTasks: Promise<Awaited<ReturnType<typeof retrieveScopedWiContext>>>[] = [];
-      if (narrowQuery.trim()) {
-        extraTasks.push(
-          retrieveScopedWiContext(
-            narrowQuery,
-            Math.min(4, Math.max(2, config.wiConfig.topKChunks)),
-            Math.min(12000, config.wiConfig.maxChars),
-            selectedProjectKeys,
-          ).catch(() => ({ text: '', docs: [], chunks: [], linkedDocs: [] })),
-        );
+    } catch (err) {
+      console.error('[clarify-queue] Error:', err);
+      if (await isWorkflowCancelled(sessionId)) {
+        await markCancelled(sessionId, inputSignature);
+        return;
       }
-      for (const intent of retrievalIntents) {
-        extraTasks.push(
-          retrieveScopedWiContext(
-            intent,
-            Math.min(2, Math.max(1, config.wiConfig.topKChunks)),
-            Math.min(2500, config.wiConfig.maxChars),
-            selectedProjectKeys,
-          ).catch(() => ({ text: '', docs: [], chunks: [], linkedDocs: [] })),
-        );
-      }
-      if (extraTasks.length) {
-        const extras = await Promise.all(extraTasks);
-        for (const extra of extras) {
-          if (extra.text.trim() || extra.chunks.length > 0) {
-            wiContext = mergeWiContextResults(
-              wiContext,
-              extra,
-              Math.min(20000, config.wiConfig.maxChars),
-            );
-          }
-        }
-      }
-    }
-    const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
-    const linkedWiDocCount = wiContext.linkedDocs.length;
-    const retrievedWiDocCount = wiContext.docs.length;
-    const retrievedWiChunkCount = wiContext.chunks.length;
-    const wiInsightCount = getWorkInstructionInsightCount(wiInsights);
 
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId, inputSignature);
-      return;
-    }
-
-    await sendProgress('Assessing scope, ambiguity, and question budget…', {
-      stage: 'assessment',
-      sources: {
-        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-        projectCount: selectedProjectKeys.length,
-        attachmentIncluded: Boolean(attachmentText?.trim()),
-        domainContextApplied: Boolean(config.domainContext?.trim()),
-        wiDocsCount: retrievedWiDocCount,
-        linkedWiDocCount,
-        retrievedWiDocCount,
-        retrievedWiChunkCount,
-        wiInsightCount,
-        similarStoriesCount: similarStories.length,
-      },
-    });
-    const clarifyStartedAt = Date.now();
-    getPipelineAuditWriter()?.setPhase('clarify.questions');
-    const { questions, tokenUsage, ambiguityAssessment, discoveryProfile, advisoryTriage, sizingContract } = await generateClarifyingQuestions({
-      requirement: maskedRequirement.text,
-      attachmentText: maskedAttachment.text,
-      wiContextText: wiContext.text,
-      wiInsightsArtifact: wiInsights,
-      similarStoriesText: formatSimilarStoriesText(similarStories, 6),
-      config,
-      wiPromptSliceMaxChars: Math.min(12000, config.wiConfig.maxChars),
-      precomputedTriage,
-      onTriageComplete: async (assessment) => {
-        const questionText = typeof assessment.discoveryForecast?.recommendedInitialCount === 'number'
-          ? `with an early forecast of about ${assessment.discoveryForecast.recommendedInitialCount} questions`
-          : 'letting the discovery model decide how many questions are actually needed';
-        await sendProgress(
-          `Discovery is sizing the ambiguity, ${questionText}, from the unresolved business logic it still sees…`,
-          {
-            stage: 'question_generation',
-            assessment,
-            sizingContract: assessment.shape && assessment.complexity && typeof assessment.featureTarget === 'number' && assessment.arDepth
-              ? ({
-                  shape: assessment.shape,
-                  complexity: assessment.complexity,
-                  featureTarget: assessment.featureTarget,
-                  arDepth: assessment.arDepth,
-                  arTarget: assessment.arTarget,
-                  estimatedQuestions: assessment.estimatedQuestions ?? assessment.discoveryForecast?.recommendedInitialCount ?? 0,
-                } as const)
-              : undefined,
-            advisoryTriage: assessment.deliveryForecast && assessment.discoveryForecast
-              ? {
-                  reasoning: assessment.reasoning ?? '',
-                  confidence: assessment.confidence ?? 'medium',
-                  deliveryForecast: assessment.deliveryForecast,
-                  discoveryForecast: assessment.discoveryForecast,
-                }
-              : undefined,
-            sources: {
-              projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-              projectCount: selectedProjectKeys.length,
-              attachmentIncluded: Boolean(attachmentText?.trim()),
-              domainContextApplied: Boolean(config.domainContext?.trim()),
-              wiDocsCount: retrievedWiDocCount,
-              linkedWiDocCount,
-              retrievedWiDocCount,
-              retrievedWiChunkCount,
-              wiInsightCount,
-              similarStoriesCount: similarStories.length,
-            },
-          },
-        );
-      },
-    });
-    const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
-
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId, inputSignature);
-      return;
-    }
-
-    await sendProgress('Finalizing discovery questions and coverage gaps…', {
-      stage: 'finalize',
-      sizingContract,
-      advisoryTriage,
-      discoveryProfile,
-      ambiguityAssessment: {
-        ...ambiguityAssessment,
-        generatedQuestions: questions.length,
-      },
-      sources: {
-        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-        projectCount: selectedProjectKeys.length,
-        attachmentIncluded: Boolean(attachmentText?.trim()),
-        domainContextApplied: Boolean(config.domainContext?.trim()),
-        wiDocsCount: retrievedWiDocCount,
-        linkedWiDocCount,
-        retrievedWiDocCount,
-        retrievedWiChunkCount,
-        wiInsightCount,
-        similarStoriesCount: similarStories.length,
-      },
-    });
-    const clarifyContext: ClarifyContextMeta = {
-      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-      projectKeys: selectedProjectKeys,
-      projectCount: selectedProjectKeys.length,
-      domainRolesUsed: config.domainRoles ?? [],
-      discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
-      domainContextApplied: Boolean(config.domainContext?.trim()),
-      attachmentIncluded: Boolean(attachmentText?.trim()),
-      similarStoriesCount: similarStories.length,
-      referencedSimilarStories: summarizeReferencedSimilarStories(similarStories.slice(0, 12)),
-      sizingContract,
-      advisoryTriage,
-      discoveryProfile,
-      ambiguityAssessment: {
-        ...ambiguityAssessment,
-        generatedQuestions: questions.length,
-      },
-      roundsCompleted: 0,
-      initialQuestionCount: questions.length,
-      followupQuestionCount: 0,
-      totalQuestionCount: questions.length,
-      followupTriggered: false,
-      initialClarifyDurationMs,
-      totalDiscoveryDurationMs: initialClarifyDurationMs,
-      finalSufficiency: {
-        evaluated: false,
-        sufficient: null,
-        roundEvaluated: 0,
-        missingCategoryKeys: discoveryProfile.missingCategoryKeys,
-        reasonCodes: [],
-      },
-      tokenUsage,
-      wiDocsCount: retrievedWiDocCount,
-      linkedWiDocCount,
-      retrievedWiDocCount,
-      retrievedWiChunkCount,
-      wiInsightCount,
-      referencedWiDocs: wiContext.docs.slice(0, 12).map(doc => ({
-        docId: doc.docId,
-        filename: doc.filename,
-        chunkCount: doc.chunkCount,
-      })),
-      referencedWiSections: summarizeReferencedWiSections(wiContext.chunks.slice(0, 8)),
-      wiInsights,
-    };
-
-    await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);
-    if (questions.length === 0) {
-      console.info('[clarify-queue] discovery completed without clarifying questions', {
-        sessionId,
-        projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
+      const diagnostics = buildClarifyFailureDiagnostics('queue_error', {
+        technicalSummary: err instanceof Error ? err.message : 'Clarify failed',
       });
-    }
-    if (config.compliance?.enabled && config.compliance?.transparencyReportsEnabled) {
-      await saveTransparencyReport({
-        sessionId,
-        turnType: 'clarify',
-        actorAccountId: accountId,
-        provider: config.generatorConfig.provider,
-        model: config.generatorConfig.clarifyModel,
-        projectKey,
-        requirementExcerpt: maskedRequirement.text.slice(0, 240),
-        decisionSummary: [
-          questions.length > 0
-            ? `Generated ${questions.length} initial discovery questions with a ${discoveryProfile.followupCap}-question follow-up cap.`
-            : 'Discovery determined no clarifying questions were needed before generation.',
-          `Discovery profile: ${discoveryProfile.scope} scope, ${discoveryProfile.complexity} complexity, ${discoveryProfile.ambiguity} ambiguity.`,
-        ],
-        contextUsage: {
-          similarStoriesCount: similarStories.length,
-          linkedWiDocCount,
-          retrievedWiDocCount,
-          retrievedWiChunkCount,
-          wiInsightCount,
-          ambiguityScore: ambiguityAssessment.score,
-          initialClarifyDurationMs,
-        },
-        tokenUsage,
-        piiMasking: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
+      const message = err instanceof Error ? err.message : 'Discovery could not prepare clarifying questions.';
+
+      await entitySet(KEYS.clarifyProgress(sessionId), {
+        type: 'blocked',
+        error: message,
+        reasonCode: 'queue_error',
+        contextMeta: buildBlockedClarifyContext(
+          resolvePrimaryProjectKey(projectKey, projectKeys),
+          'queue_error',
+          diagnostics,
+        ),
+        ...(inputSignature ? { inputSignature } : {}),
+        updatedAt: Date.now(),
       });
+    } finally {
+      stopHeartbeat?.();
     }
-    await appendComplianceAuditEvent({
-      actorAccountId: accountId,
-      category: 'runtime',
-      action: 'CLARIFY_WORKFLOW_EXECUTED',
-      details: { sessionId, projectKey, model: config.generatorConfig.clarifyModel },
-      enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
-    });
-    await recordProjectActivity({
-      action: 'clarify',
-      projectKeys: selectedProjectKeys,
-      projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-      sessionId,
-      model: config.generatorConfig.clarifyModel,
-    });
-
-    const auditWriter = getPipelineAuditWriter();
-    if (auditWriter) {
-      const similarStoriesText = formatSimilarStoriesText(similarStories, 6);
-      try {
-        await auditWriter.flushMerge({
-          accountId,
-          mergeHeader: {
-            primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-            projectKeys: selectedProjectKeys,
-            generatorModels: {
-              triageModel: config.generatorConfig.triageModel,
-              clarifyModel: config.generatorConfig.clarifyModel,
-            },
-            piiMaskingEnabled: piiEnabled,
-            piiMaskingStats: mergePiiMaskingStats(maskedRequirement.stats, maskedAttachment.stats, maskedPriorAnswers.stats),
-          },
-          userInputs: {
-            requirement: maskedRequirement.text,
-            attachmentText: maskedAttachment.text,
-          },
-          discoveryContextClarify: {
-            wiRetrievalQuery: deriveRetrievalQuery(maskedRequirement.text, maskedAttachment.text, retrievalAnswers),
-            wiContextText: wiContext.text,
-            similarStoriesText,
-            domainContext: config.domainContext,
-            domainRoles: config.domainRoles,
-            wiInsights,
-          },
-          clarify: {
-            questions,
-            contextMeta: clarifyContext,
-            completedAt: new Date().toISOString(),
-          },
-          completePhase: 'clarify',
-        });
-      } catch (auditErr) {
-        console.warn('[clarify-queue] pipeline audit merge failed:', auditErr);
-      }
-    }
-
-    await entitySet(KEYS.clarifyProgress(sessionId), {
-      type: 'complete',
-      questions,
-      contextMeta: clarifyContext,
-      ...(inputSignature ? { inputSignature } : {}),
-      updatedAt: Date.now(),
-    });
-  } catch (err) {
-    const auditWriterErr = getPipelineAuditWriter();
-    if (auditWriterErr) {
-      try {
-        await auditWriterErr.flushMerge({
-          accountId,
-          mergeHeader: {
-            primaryProjectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
-            projectKeys: selectedProjectKeys,
-          },
-        });
-      } catch (auditErr) {
-        console.warn('[clarify-queue] pipeline audit merge (error path) failed:', auditErr);
-      }
-    }
-    console.error('[clarify-queue] Error:', err);
-    if (await isWorkflowCancelled(sessionId)) {
-      await markCancelled(sessionId, inputSignature);
-      return;
-    }
-    const failureReasonCode: ClarifyFailureReasonCode =
-      err instanceof ClarifyDiscoveryError
-        ? err.reasonCode
-        : 'queue_error';
-    const failureDiagnostics: ClarifyFailureDiagnostics =
-      err instanceof ClarifyDiscoveryError
-        ? err.diagnostics
-        : buildClarifyFailureDiagnostics('queue_error', {
-            technicalSummary: err instanceof Error ? err.message : 'Clarify failed',
-          });
-    const message = err instanceof ClarifyDiscoveryError
-      ? err.message
-      : 'Discovery could not prepare clarifying questions.';
-    await entitySet(KEYS.clarifyProgress(sessionId), {
-      type: 'blocked',
-      error: message,
-      reasonCode: failureReasonCode,
-      contextMeta: buildBlockedClarifyContext(
-        resolvePrimaryProjectKey(projectKey, projectKeys),
-        failureReasonCode,
-        failureDiagnostics,
-      ),
-      ...(inputSignature ? { inputSignature } : {}),
-      updatedAt: Date.now(),
-    });
-  } finally {
-    stopHeartbeat?.();
-  }
   };
 
   const runScoped = () => runWithWiRetrievalCacheScope(exec);
@@ -747,6 +383,44 @@ async function markCancelled(sessionId: string, inputSignature?: string) {
   });
 }
 
+function buildClarifyFailureDiagnostics(
+  _reasonCode: ClarifyFailureReasonCode,
+  details: { technicalSummary?: string },
+): ClarifyFailureDiagnostics {
+  return {
+    technicalSummary: details.technicalSummary ?? '',
+    userActionHint: 'Retry discovery. If the problem keeps repeating, trim unusually large attachment context and try again.',
+  };
+}
+
+async function saveClarifyTurn(
+  sessionId: string,
+  accountId: string,
+  requirement: string,
+  contextMeta: ClarifyContextMeta,
+  inputSignature?: string,
+) {
+  const convKey = KEYS.userConversations(accountId, sessionId);
+  const conversation = await entityGet<{ turns?: Array<Record<string, unknown>> }>(convKey);
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const now = new Date().toISOString();
+  const nextTurns = [
+    ...turns,
+    {
+      type: 'clarify',
+      requirement,
+      contextMeta,
+      createdAt: now,
+      updatedAt: now,
+      ...(inputSignature ? { inputSignature } : {}),
+    },
+  ];
+
+  await entitySet(convKey, {
+    turns: nextTurns,
+  });
+}
+
 export function buildBlockedClarifyContext(
   projectKey: string,
   failureReasonCode: ClarifyFailureReasonCode,
@@ -758,43 +432,5 @@ export function buildBlockedClarifyContext(
     discoveryStatus: 'discovery_failed',
     failureReasonCode,
     ...(failureDiagnostics ? { failureDiagnostics } : {}),
-    roundsCompleted: 0,
-    initialQuestionCount: 0,
-    followupQuestionCount: 0,
-    totalQuestionCount: 0,
-    followupTriggered: false,
-    finalSufficiency: {
-      evaluated: false,
-      sufficient: null,
-      roundEvaluated: 0,
-      missingCategoryKeys: [],
-      reasonCodes: [failureReasonCode.toUpperCase()],
-    },
   };
-}
-
-async function saveClarifyTurn(
-  sessionId: string,
-  accountId: string,
-  requirement: string,
-  clarifyContext: ClarifyContextMeta,
-  inputSignature?: string,
-) {
-  try {
-    const key = KEYS.userConversations(accountId, sessionId);
-    const existing = await entityGet<{ turns: unknown[] }>(key) ?? { turns: [] };
-    existing.turns.push({
-      turnType: 'clarify',
-      requirement,
-      ...(inputSignature ? { inputSignature } : {}),
-      features: [],
-      similarStories: [],
-      clarifyContext,
-      tokenUsage: clarifyContext.tokenUsage,
-      timestamp: new Date().toISOString(),
-    });
-    await entitySet(key, existing);
-  } catch (err) {
-    console.warn('[clarify-queue] Failed to save clarify turn:', err);
-  }
 }

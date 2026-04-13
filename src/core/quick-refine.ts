@@ -34,9 +34,7 @@ import {
   formatWorkInstructionInsightsForPrompt,
   getWorkInstructionInsightCount,
 } from './wi-insights';
-import {
-  repairAcceptanceRequirements,
-} from './story-generator';
+import { repairAcceptanceRequirements } from './feature-output';
 
 interface QuickRefineRawIssueFields {
   summary?: unknown;

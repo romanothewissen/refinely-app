@@ -30,7 +30,6 @@ import {
   buildTriageSystemPrompt,
 } from '../prompts';
 import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
-import { useStoryAssistantDefaultPipeline } from '../../services/pipeline-flags';
 import { DEFAULT_CONFIG } from '../../types';
 
 test('normalizeDiscoveryProfile preserves llm-sized discovery counts', () => {
@@ -675,26 +674,8 @@ test('story assistant ar prompt avoids mechanical role repetition and use-case f
 
   assert.match(prompt, /Avoid repeating the same role label in every AR/i);
   assert.match(prompt, /Keep broad use-case narration and business-benefit phrasing out of ARs/i);
-});
-
-test('story assistant default pipeline flag is enabled unless legacy mode is explicitly forced', () => {
-  assert.equal(useStoryAssistantDefaultPipeline(DEFAULT_CONFIG), true);
-  assert.equal(useStoryAssistantDefaultPipeline({
-    ...DEFAULT_CONFIG,
-    pipelineFlags: {
-      storyAssistantDefaultPipeline: true,
-      legacyLlmLedPipeline: true,
-      advancedGroundingEnabled: false,
-    },
-  }), false);
-  assert.equal(useStoryAssistantDefaultPipeline({
-    ...DEFAULT_CONFIG,
-    pipelineFlags: {
-      storyAssistantDefaultPipeline: false,
-      legacyLlmLedPipeline: false,
-      advancedGroundingEnabled: false,
-    },
-  }), false);
+  assert.match(prompt, /Ground GIVEN clauses in a real business situation/i);
+  assert.doesNotMatch(prompt, /Be conceptual, not example-based/i);
 });
 
 test('ar prompt uses range guidance without exact-count pressure', () => {

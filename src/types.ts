@@ -144,12 +144,6 @@ export interface GenerationPreferences {
   };
 }
 
-export interface PipelineFlags {
-  storyAssistantDefaultPipeline?: boolean;
-  legacyLlmLedPipeline?: boolean;
-  advancedGroundingEnabled?: boolean;
-}
-
 export interface TenantConfig {
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
@@ -182,7 +176,6 @@ export interface TenantConfig {
   domainContexts: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
-  pipelineFlags?: PipelineFlags;
   /** Internal QA / prompt iteration — gate pipeline audit recording and export. */
   developerTools?: {
     pipelineAuditEnabled?: boolean;
@@ -269,11 +262,6 @@ export const DEFAULT_CONFIG: TenantConfig = {
   ],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
-  pipelineFlags: {
-    storyAssistantDefaultPipeline: true,
-    legacyLlmLedPipeline: false,
-    advancedGroundingEnabled: false,
-  },
   developerTools: {
     pipelineAuditEnabled: false,
   },
@@ -696,7 +684,7 @@ export interface ContextSourceMeta {
   projectKey: string;
   projectKeys?: string[];
   projectCount?: number;
-  pipelineMode?: 'story_assistant_default' | 'legacy_llm_led';
+  pipelineMode?: 'story_assistant_default';
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -800,6 +788,8 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   pass2BatchWiChunkCount?: number;
   /** Backlog keys whose AR patterns were injected for Pass-2. */
   pass2ArPatternStoryKeys?: string[];
+  sufficiencyStatus?: DiscoverySufficiencyResult['status'];
+  sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   outputProfile?: OutputProfile;
@@ -1238,6 +1228,7 @@ export interface GenerationEvent {
   clarifySizingContract?: EffectiveSizingContract;
   /** Shared advisory triage contract captured during discovery. */
   clarifyAdvisoryTriage?: AdvisoryTriageContract;
+  clarifyFinalSufficiency?: DiscoverySufficiencyResult;
   /** Resume generation from an already-reviewed pass-1 draft. */
   reviewedDraftFeatures?: Feature[];
   reviewedDraftReview?: DraftReviewMetadata;

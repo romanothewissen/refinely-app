@@ -1346,6 +1346,12 @@ function LegacyApp({
         sessionId: sid,
         requirement: req,
         clarifyAnswers,
+        clarifyQuestionsAsked: clarifyQuestions.map((question) => ({
+          categoryKey: question.categoryKey,
+          intent: question.intent,
+          question: question.question,
+        })),
+        clarifyFinalSufficiency: clarifyContext?.finalSufficiency ?? undefined,
         attachmentText,
         outputProfileOverride: runOutputProfileOverride,
         qualityMode: runQualityMode,
@@ -1360,6 +1366,21 @@ function LegacyApp({
 
       if (res?.success) {
         setGenerationWarning(res?.warning || continuationWarning || null);
+      } else if (res?.needsClarification && Array.isArray(res?.questions) && res.questions.length > 0) {
+        const followupQuestions = res.questions as ClarifyQuestion[];
+        const nextContext = applyDiscoveryEvaluationToContext(clarifyContext, res, followupQuestions.length);
+        setWorkflowTokenUsage(prev => addTokenUsage(prev, res?.tokenUsage ?? null));
+        setClarifyContext(nextContext);
+        setClarifyAnswers(clarifyAnswers);
+        setClarifyQuestions(followupQuestions);
+        setClarifyRound(2);
+        setClarifyEvaluationError(null);
+        setGenerationWarning(null);
+        setGenerationError(null);
+        setIsWorking(false);
+        setPendingSessionId(null);
+        setGenerationProgressMeta(null);
+        setWorkflowStage('clarify_round_2');
       } else {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setIsWorking(false);

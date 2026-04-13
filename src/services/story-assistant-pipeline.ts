@@ -36,6 +36,7 @@ export async function runStoryAssistantClarifyStage(input: {
     attachmentText: input.attachmentText,
     wiContextText: sharedContext.wiContext.text,
     wiInsightsArtifact: sharedContext.wiInsights,
+    similarStories: sharedContext.similarStories,
     config: {
       ...input.config,
       domainContext: sharedContext.domainContext,
@@ -81,6 +82,7 @@ export async function runStoryAssistantSufficiencyStage(input: {
     attachmentText: input.attachmentText,
     wiContextText: sharedContext.wiContext.text,
     wiInsightsArtifact: sharedContext.wiInsights,
+    similarStories: sharedContext.similarStories,
     config: {
       ...input.config,
       domainContext: sharedContext.domainContext,
@@ -120,15 +122,18 @@ export async function runStoryAssistantGenerationStage(input: {
     attachmentText: input.attachmentText,
     wiContextText: sharedContext.wiContext.text,
     wiInsightsArtifact: sharedContext.wiInsights,
+    similarStories: sharedContext.similarStories,
+    arPatternLibraryText: sharedContext.arPatternLibraryText,
     discoveryProfile: input.clarifyDiscoveryProfile,
     config: {
-      ...input.config,
-      domainContext: sharedContext.domainContext,
-      domainRoles: sharedContext.domainRoles,
-    },
-    precomputedDraftFeatures: input.precomputedDraftFeatures,
-    priorStageDurationsMs: input.priorStageDurationsMs,
-    onPass1DraftFeatures: input.onPass1DraftFeatures,
+        ...input.config,
+        domainContext: sharedContext.domainContext,
+        domainRoles: sharedContext.domainRoles,
+      },
+      arPatternStoryKeys: sharedContext.sources.arPatternStoryKeys,
+      precomputedDraftFeatures: input.precomputedDraftFeatures,
+      priorStageDurationsMs: input.priorStageDurationsMs,
+      onPass1DraftFeatures: input.onPass1DraftFeatures,
     shouldCancel: input.shouldCancel,
   });
 

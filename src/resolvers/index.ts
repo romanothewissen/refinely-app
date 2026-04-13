@@ -37,13 +37,11 @@ import {
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
 } from '../services/project-selection';
-import { useStoryAssistantDefaultPipeline } from '../services/pipeline-flags';
 import { runStoryAssistantSufficiencyStage } from '../services/story-assistant-pipeline';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolver: any = new Resolver();
 import {
-  evaluateSufficiency,
   feedbackRequestsStructuralRefinement,
   refineSingleFeature,
   checkRefineFeedbackSufficiency,
@@ -490,25 +488,66 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
 // ─── Generation (queue dispatch) ─────────────────────────────────────────────
 
 resolver.define('startGeneration', async ({ payload, context }) => {
-  const config = await getConfig();
-
-  const check = await checkGenerationAllowed(config, context);
+  const eventConfig = await getConfig();
+  const check = await checkGenerationAllowed(eventConfig, context);
 
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
+  const resolvedConfig = {
+    ...eventConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
+    domainContext: buildCombinedDomainContext(eventConfig, selectedProjectKeys),
+    domainRoles: getCombinedPersonaRoles(eventConfig, selectedProjectKeys).map((row) => row.role).filter(Boolean),
+    tier: getEffectiveTier(eventConfig, context),
+  };
+
+  let finalSufficiency = payload?.clarifyFinalSufficiency;
+  let sufficiencyWarning: string | undefined;
+  const hasReadySufficiency = finalSufficiency?.evaluated === true
+    && (finalSufficiency?.status === 'ready_to_generate' || finalSufficiency?.status === 'ready_with_open_decisions');
+
+  if (!hasReadySufficiency) {
+    const { result } = await runStoryAssistantSufficiencyStage({
+      requirement: payload.requirement,
+      attachmentText: payload.attachmentText as string | undefined,
+      answers: (payload.clarifyAnswers ?? []) as ClarifyAnswer[],
+      askedQuestions: payload.clarifyQuestionsAsked as Array<string | { categoryKey?: string; intent?: string; question?: string }> | undefined,
+      config: resolvedConfig,
+      projectKey: authorizedProjects.projectKey,
+      projectKeys: selectedProjectKeys,
+    });
+
+    finalSufficiency = {
+      evaluated: true,
+      sufficient: result.sufficient,
+      status: result.status,
+      roundEvaluated: 1,
+      missingCategoryKeys: result.missingCategoryKeys,
+      reasonCodes: result.reasonCodes,
+    };
+    sufficiencyWarning = result.warning;
+
+    if (result.status === 'ask_followup' && Array.isArray(result.questions) && result.questions.length > 0) {
+      return {
+        success: false,
+        needsClarification: true,
+        ...result,
+      };
+    }
+  }
 
   const qualityMode = payload?.qualityMode === 'quality' ? 'quality' : 'speed';
   const resolvedModelOverrides =
     payload?.modelOverrides
-    ?? resolveQualityGenerationOverrides(config.generatorConfig, qualityMode);
+    ?? resolveQualityGenerationOverrides(eventConfig.generatorConfig, qualityMode);
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
     accountId,
     requirement: payload.requirement,
     clarifyAnswers: payload.clarifyAnswers ?? [],
     attachmentText: payload.attachmentText ?? '',
-    config,
+    config: eventConfig,
     license: context?.license,
     outputProfileOverride: payload?.outputProfileOverride,
     pauseForDraftReview: undefined,
@@ -517,6 +556,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
     clarifySizingContract: payload.clarifySizingContract ?? undefined,
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage ?? undefined,
+    clarifyFinalSufficiency: finalSufficiency ?? undefined,
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
     qualityMode,
@@ -534,7 +574,8 @@ resolver.define('startGeneration', async ({ payload, context }) => {
 
   const generationQueue = new Queue({ key: 'generation-queue' });
   await generationQueue.push({ body: event });
-  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+  const warning = [check.reason, sufficiencyWarning].filter(Boolean).join(' ').trim() || undefined;
+  return { success: true, sessionId: payload.sessionId, warning };
 });
 
 /** @deprecated Draft review pause has been removed — pipeline flows straight through. */
@@ -772,75 +813,43 @@ resolver.define('evaluateSufficiency', async ({ payload, context }) => {
 
   const runSufficiency = async () => {
     getPipelineAuditWriter()?.setPhase('clarify.sufficiency');
-    let result: Awaited<ReturnType<typeof evaluateSufficiency>> | Awaited<ReturnType<typeof evaluateStoryAssistantDefaultSufficiency>>;
-    if (useStoryAssistantDefaultPipeline(config)) {
-      try {
-        result = await withResolverBudget((async () => {
-          const { result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
-            requirement: input.requirement,
-            attachmentText: input.attachmentText,
-            answers: input.answers,
-            askedQuestions: payload.askedQuestions as Array<string | { categoryKey?: string; intent?: string; question?: string }> | undefined,
-            config,
-            projectKey: payload?.projectKey as string | undefined,
-            projectKeys: payload?.projectKeys as string[] | undefined,
-          });
-          return sufficiencyResult;
-        })(), 20000);
-      } catch (err) {
-        console.warn('[evaluateSufficiency] Story Assistant sufficiency failed:', err);
-        result = {
-          sufficient: false,
-          status: 'ready_with_open_decisions',
-          missingCategoryKeys: [],
-          reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
-          warning: 'Sufficiency evaluation failed; proceeding with explicit open decisions instead of silently marking discovery complete.',
-          tokenUsage: {
-            input: 0,
-            output: 0,
-            total: 0,
-            byStage: {},
-          },
-          durationMs: 0,
-          coverageArtifact: {
-            mustResolveThemes: [],
-            plannedQuestionBudget: input.totalQuestionBudget ?? input.initialQuestionCount ?? input.answers.length,
-            actualQuestionsAsked: input.askedQuestions?.length ?? input.answers.length,
-            actualAnswersReceived: input.answers.length,
-            openNonBlockingDecisions: ['SUFFICIENCY_EVAL_FAILED'],
-          },
-        };
-      }
-    } else {
-      const failOpen = {
-        sufficient: true,
+    let result;
+    try {
+      result = await withResolverBudget((async () => {
+        const { result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
+          requirement: input.requirement,
+          attachmentText: input.attachmentText,
+          answers: input.answers,
+          askedQuestions: payload.askedQuestions as Array<string | { categoryKey?: string; intent?: string; question?: string }> | undefined,
+          config,
+          projectKey: payload?.projectKey as string | undefined,
+          projectKeys: payload?.projectKeys as string[] | undefined,
+        });
+        return sufficiencyResult;
+      })(), 20000);
+    } catch (err) {
+      console.warn('[evaluateSufficiency] Story Assistant sufficiency failed:', err);
+      result = {
+        sufficient: false,
+        status: 'ready_with_open_decisions',
         missingCategoryKeys: [],
         reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
-        durationMs: 0,
+        warning: 'Sufficiency evaluation failed; proceeding with explicit open decisions instead of silently marking discovery complete.',
         tokenUsage: {
           input: 0,
           output: 0,
           total: 0,
           byStage: {},
         },
-      } as const;
-      try {
-        result = await withResolverBudget(evaluateSufficiency(input), 20000);
-      } catch (firstErr) {
-        console.warn('[evaluateSufficiency] First attempt failed; retrying once:', firstErr);
-        const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr);
-        const isBudgetFailure = /resolver budget/i.test(firstMessage);
-        if (isBudgetFailure) {
-          result = failOpen;
-        } else {
-          try {
-            result = await withResolverBudget(evaluateSufficiency(input), 10000);
-          } catch (retryErr) {
-            console.error('[evaluateSufficiency] Retry failed; continuing without extra discovery:', retryErr);
-            result = failOpen;
-          }
-        }
-      }
+        durationMs: 0,
+        coverageArtifact: {
+          mustResolveThemes: [],
+          plannedQuestionBudget: input.totalQuestionBudget ?? input.initialQuestionCount ?? input.answers.length,
+          actualQuestionsAsked: input.askedQuestions?.length ?? input.answers.length,
+          actualAnswersReceived: input.answers.length,
+          openNonBlockingDecisions: ['SUFFICIENCY_EVAL_FAILED'],
+        },
+      };
     }
 
     const w = getPipelineAuditWriter();

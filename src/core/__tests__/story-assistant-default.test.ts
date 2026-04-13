@@ -107,6 +107,60 @@ test('extractActorSets preserves multiple eligible actors while filtering non-ro
   assert.equal(actorSets.viewerActors, undefined);
 });
 
+test('extractRoles splits multi-role answers joined with "or" and rejects approval-state phrases', () => {
+  const roles = extractRoles('', [
+    {
+      question: 'Which roles can perform this activity?',
+      answer: 'TSS, SSS or PM Specialist',
+      selectedSuggestions: [],
+      customAnswer: 'TSS, SSS or PM Specialist',
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who approves this?',
+      answer: 'No formal approval is typically needed',
+      selectedSuggestions: ['No formal approval is typically needed'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.deepEqual(roles, ['TSS', 'SSS', 'PM Specialist']);
+});
+
+test('extractActorSets resolves referential actor phrases back to canonical roles', () => {
+  const actorSets = extractActorSets('', [
+    {
+      question: 'Who creates the plan?',
+      answer: 'Service Support Specialist',
+      selectedSuggestions: ['Service Support Specialist'],
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who can modify an active plan?',
+      answer: 'The same person who created the plan',
+      selectedSuggestions: ['The same person who created the plan'],
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who can view the case status?',
+      answer: 'The case owner',
+      selectedSuggestions: ['The case owner'],
+      customAnswer: 'Customer Success Manager',
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who is the case owner?',
+      answer: 'Customer Success Manager',
+      selectedSuggestions: ['Customer Success Manager'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.deepEqual(actorSets.eligibleActors, ['Service Support Specialist', 'Customer Success Manager']);
+  assert.deepEqual(actorSets.viewerActors, ['Customer Success Manager']);
+  assert.deepEqual(actorSets.mentionedActors, ['Service Support Specialist', 'Customer Success Manager']);
+});
+
 test('parseStoryAssistantQuestionCandidates splits numbered prompts into separate cards without rewriting the meaning', () => {
   const questions = parseStoryAssistantQuestionCandidates([
     {

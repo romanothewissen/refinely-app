@@ -138,12 +138,6 @@ export interface ProjectDomainContext {
   personaRoles?: ProjectPersonaRole[];
 }
 
-export interface PipelineFlags {
-  storyAssistantDefaultPipeline?: boolean;
-  legacyLlmLedPipeline?: boolean;
-  advancedGroundingEnabled?: boolean;
-}
-
 export interface TenantConfig {
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
@@ -176,7 +170,6 @@ export interface TenantConfig {
   domainContexts?: ProjectDomainContext[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
-  pipelineFlags?: PipelineFlags;
   developerTools?: {
     pipelineAuditEnabled?: boolean;
   };
@@ -262,11 +255,6 @@ export const DEFAULT_CONFIG: TenantConfig = {
   ],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
-  pipelineFlags: {
-    storyAssistantDefaultPipeline: true,
-    legacyLlmLedPipeline: false,
-    advancedGroundingEnabled: false,
-  },
   developerTools: {
     pipelineAuditEnabled: false,
   },
@@ -689,6 +677,7 @@ export interface ContextSourceMeta {
   projectKey: string;
   projectKeys?: string[];
   projectCount?: number;
+  pipelineMode?: 'story_assistant_default';
   domainRolesUsed: string[];
   domainContextApplied?: boolean;
   attachmentIncluded?: boolean;
@@ -790,6 +779,8 @@ export interface GenerationStageDurationsMs {
 export interface GenerationContextMeta extends ContextSourceMeta {
   pass2BatchWiChunkCount?: number;
   pass2ArPatternStoryKeys?: string[];
+  sufficiencyStatus?: DiscoverySufficiencyResult['status'];
+  sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
   outputProfile?: OutputProfile;
@@ -1096,6 +1087,7 @@ export interface GenerationEvent {
   clarifyDiscoveryProfile?: DiscoveryProfile;
   clarifySizingContract?: EffectiveSizingContract;
   clarifyAdvisoryTriage?: AdvisoryTriageContract;
+  clarifyFinalSufficiency?: DiscoverySufficiencyResult;
   reviewedTriageSizingContract?: EffectiveSizingContract;
   reviewedAdvisoryTriage?: AdvisoryTriageContract;
   priorStageDurationsMs?: GenerationStageDurationsMs;
