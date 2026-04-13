@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  extractRoles,
   parseStoryAssistantQuestionCandidates,
   splitClearlyNumberedStoryAssistantQuestion,
 } from '../story-assistant-default';
@@ -18,7 +19,7 @@ test('splitClearlyNumberedStoryAssistantQuestion splits clearly numbered grouped
   ]);
 });
 
-test('parseStoryAssistantQuestionCandidates preserves simple story assistant questions with exact suggestion count', () => {
+test('parseStoryAssistantQuestionCandidates preserves simple story assistant questions with grounded suggestions', () => {
   const questions = parseStoryAssistantQuestionCandidates([
     {
       category: 'Roles & Personas',
@@ -31,6 +32,50 @@ test('parseStoryAssistantQuestionCandidates preserves simple story assistant que
   assert.equal(questions[0]?.categoryKey, 'user_personas');
   assert.equal(questions[0]?.question, 'Who is responsible for creating the consolidated plan?');
   assert.deepEqual(questions[0]?.suggestions, ['Coordinator', 'Manager', 'Dispatcher']);
+});
+
+test('parseStoryAssistantQuestionCandidates keeps up to four grounded suggestions', () => {
+  const questions = parseStoryAssistantQuestionCandidates([
+    {
+      category: 'Functional Flow',
+      question: 'What details must be captured for each planned activity?',
+      suggestions: [
+        'Planned location and service type',
+        'Required parts and labor estimate',
+        'Sequence dependencies on earlier activities',
+        'Any customer-facing commitments to honor',
+        'This extra suggestion should be dropped',
+      ],
+    },
+  ]);
+
+  assert.equal(questions.length, 1);
+  assert.deepEqual(questions[0]?.suggestions, [
+    'Planned location and service type',
+    'Required parts and labor estimate',
+    'Sequence dependencies on earlier activities',
+    'Any customer-facing commitments to honor',
+  ]);
+});
+
+test('extractRoles prefers structured clarify answers and ignores negative placeholders', () => {
+  const roles = extractRoles('', [
+    {
+      question: 'Who approves the completed plan?',
+      answer: 'Chosen answer:\n- Nobody',
+      selectedSuggestions: [],
+      customAnswer: 'Nobody',
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who receives the quote?',
+      answer: 'Chosen answer:\n- Service Sales and Billing Team',
+      selectedSuggestions: ['Service Sales and Billing Team'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.deepEqual(roles, ['Service Sales and Billing Team']);
 });
 
 test('parseStoryAssistantQuestionCandidates splits numbered prompts into separate cards without rewriting the meaning', () => {

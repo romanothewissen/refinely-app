@@ -267,6 +267,8 @@ RULES:
 - Be conceptual, not example-based. Describe behavior patterns, not made-up example values.
 - Use concrete business facts, not vague placeholders like "is processed" or "configured mode".
 - Each AR should test one distinct thing.
+- Mention a specific role in GIVEN or WHEN only when that role changes the business responsibility, approval path, or outcome. Avoid repeating the same role label in every AR when the trigger is already clear.
+- Keep broad use-case narration and business-benefit phrasing out of ARs. Put the testable rule, dependency, gate, exception, or outcome in the AR instead.
 - Prefer real business triggers, sequencing dependencies, gates, and exception behavior over generic lifecycle filler.
 - Do NOT use configuration or setup language in GIVEN clauses. The GIVEN must describe a real business situation, not a system setting.
 - Avoid abstract umbrella terms that hide meaning. Replace them with the actual business fact when one is available from the requirement or evidence.
@@ -325,7 +327,8 @@ RULES:
 - Do NOT ask anything already clearly answered in the requirement or supplied evidence.
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
 - Keep each question focused on one business decision.
-- For each question, provide exactly 3 short grounded suggestions under 10 words each.
+- For each question, provide 3 or 4 grounded suggestions.
+- Suggestions may be short phrases or brief clauses, but they must be specific enough to help the user answer without collapsing important business meaning.
 - Return ONLY a JSON array.
 
 OUTPUT FORMAT:
@@ -349,7 +352,8 @@ RULES:
 - Ask follow-up questions only when a specific unresolved gap would materially change what gets built or how ARs are written.
 - Ask exactly 1 or 2 follow-up questions when discovery is insufficient.
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
-- Each follow-up question must include exactly 3 short suggestions under 10 words each.
+- Each follow-up question must include 2 to 4 grounded suggestions.
+- Suggestions may be short phrases or brief clauses, but they must stay in business language and avoid implementation wording.
 - If the current answers are sufficient, return {"sufficient": true}.
 - If the evaluator cannot confidently prove sufficiency, prefer explicit open decisions over pretending the requirement is complete.
 

@@ -180,13 +180,15 @@ function formatClarifyAnswers(answers: ClarifyAnswer[]): string {
     .join('\n\n');
 }
 
-function extractRoles(requirement: string, answers: ClarifyAnswer[] = []): string[] {
+export function extractRoles(requirement: string, answers: ClarifyAnswer[] = []): string[] {
   const seen = new Set<string>();
   const roles: string[] = [];
+  const negativeRoleSignals = /^(?:none|no one|nobody|not applicable|n\/a|na|never|unknown)$/i;
 
   const addRole = (value: string) => {
     const cleaned = cleanText(value).replace(/\.$/, '');
     if (cleaned.length < 3 || cleaned.length > 80) return;
+    if (negativeRoleSignals.test(cleaned)) return;
     const key = cleaned.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -196,8 +198,18 @@ function extractRoles(requirement: string, answers: ClarifyAnswer[] = []): strin
   answers.forEach((answer) => {
     const question = `${answer.categoryKey ?? ''} ${answer.question}`.toLowerCase();
     if (!/role|persona|who\b|actor/.test(question)) return;
-    cleanText(answer.answer)
-      .split(/\s*(?:,|;|\band\b)\s*/i)
+    const structuredRoleValues = [
+      ...(answer.selectedSuggestions ?? []),
+      String(answer.customAnswer ?? '').trim(),
+    ]
+      .map((value) => cleanText(value))
+      .filter(Boolean);
+    const fallbackValues = structuredRoleValues.length
+      ? structuredRoleValues
+      : [cleanText(answer.answer)];
+
+    fallbackValues
+      .flatMap((value) => value.split(/\s*(?:,|;)\s*/i))
       .filter(Boolean)
       .forEach(addRole);
   });
@@ -327,7 +339,7 @@ function normalizeSuggestions(values: unknown[]): string[] {
   return uniqueStrings(values)
     .map((value) => cleanText(value).replace(/[?.!]+$/g, ''))
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, 4);
 }
 
 function extractQuestionCandidates(rawData: unknown): RawQuestionCandidate[] {
@@ -379,7 +391,8 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
 function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
   if (questions.length < 4) return true;
   return questions.some((question) => (
-    question.suggestions.length !== 3
+    question.suggestions.length < 2
+    || question.suggestions.length > 4
     || question.question.length > 240
   ));
 }
@@ -461,7 +474,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
             requirement: opts.requirement,
             attachmentText: opts.attachmentText,
             wiContextText: opts.wiContextText,
-          })}\n\nIMPORTANT: Re-run discovery and return a richer question set. Keep each question focused on one business decision, and give every question exactly 3 short suggestions.`,
+          })}\n\nIMPORTANT: Re-run discovery and return a richer question set. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
       maxTokens: 4096,
       reasoningEffort: 'low',
       ...providerOpts,

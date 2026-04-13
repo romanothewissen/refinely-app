@@ -25,6 +25,7 @@ import {
   buildSizingAssessmentSystemPrompt,
   buildSizingRepairSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
+  buildStoryAssistantArSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
   buildTriageSystemPrompt,
 } from '../prompts';
@@ -642,7 +643,8 @@ test('story assistant clarify prompt asks every genuinely ambiguous question wit
   assert.match(prompt, /Roles & Personas/i);
   assert.match(prompt, /Trigger & Context/i);
   assert.match(prompt, /Business Rules & Exceptions/i);
-  assert.match(prompt, /exactly 3 short grounded suggestions/i);
+  assert.match(prompt, /provide 3 or 4 grounded suggestions/i);
+  assert.match(prompt, /specific enough to help the user answer/i);
   assert.match(prompt, /Return ONLY a JSON array/i);
   assert.doesNotMatch(prompt, /intentionally small/i);
   assert.doesNotMatch(prompt, /first screen/i);
@@ -656,8 +658,19 @@ test('story assistant sufficiency prompt limits follow-up discovery to one small
   });
 
   assert.match(prompt, /Ask exactly 1 or 2 follow-up questions/i);
+  assert.match(prompt, /Each follow-up question must include 2 to 4 grounded suggestions/i);
   assert.match(prompt, /If the current answers are sufficient, return \{"sufficient": true\}/i);
   assert.match(prompt, /Return ONLY valid JSON/i);
+});
+
+test('story assistant ar prompt avoids mechanical role repetition and use-case filler', () => {
+  const prompt = buildStoryAssistantArSystemPrompt({
+    domainContext: '',
+    domainRoles: [],
+  });
+
+  assert.match(prompt, /Avoid repeating the same role label in every AR/i);
+  assert.match(prompt, /Keep broad use-case narration and business-benefit phrasing out of ARs/i);
 });
 
 test('story assistant default pipeline flag is enabled unless legacy mode is explicitly forced', () => {
