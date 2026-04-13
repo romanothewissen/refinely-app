@@ -402,7 +402,8 @@ async function saveClarifyTurn(
 ) {
   const convKey = KEYS.userConversations(accountId, sessionId);
   const conversation = await entityGet<{ turns?: Array<Record<string, unknown>> }>(convKey);
-  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const existingTurns = conversation?.turns;
+  const turns = Array.isArray(existingTurns) ? existingTurns : [];
   const now = new Date().toISOString();
   const nextTurns = [
     ...turns,
