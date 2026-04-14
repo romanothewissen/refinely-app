@@ -290,17 +290,19 @@ function questionComparator(left: ClarifyQuestion, right: ClarifyQuestion): numb
   return left.question.localeCompare(right.question);
 }
 
-/** Budget for the first discovery screen: triage hint wins when present; always capped at MAX_INITIAL_DISCOVERY_QUESTIONS. */
+/** Budget for the first discovery screen: clarify model's own count governs; triage is a minimum floor, not a ceiling. */
 export function computeInitialQuestionBudget(
   profile: DiscoveryProfile,
   triageRecommendedInitial?: number | null,
 ): number {
   const cap = MAX_INITIAL_DISCOVERY_QUESTIONS;
-  if (typeof triageRecommendedInitial === 'number' && triageRecommendedInitial > 0) {
-    return Math.min(cap, Math.round(triageRecommendedInitial));
-  }
+  const fromTriage = typeof triageRecommendedInitial === 'number' && triageRecommendedInitial > 0
+    ? Math.round(triageRecommendedInitial)
+    : 0;
   const fromProfile = Math.round(profile.recommendedInitialCount || 0);
-  return Math.min(cap, Math.max(1, fromProfile || cap));
+  // Clarify model's self-reported count governs; triage is a minimum floor only.
+  const budget = fromProfile > 0 ? fromProfile : (fromTriage > 0 ? fromTriage : cap);
+  return Math.min(cap, Math.max(fromTriage, budget));
 }
 
 /**

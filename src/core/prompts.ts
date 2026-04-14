@@ -552,76 +552,48 @@ ${platformContextBlock(opts.domainContext)}
 For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that capture:
 - The primary business scenario (happy path)
 - Key business rules that must hold true
-- Practical failure or edge cases a real tester would run
+- Practical failure or edge cases that would actually be tested (not every hypothetical — only ones a real tester would run)
+
+If a ROLE CONSTRAINT is specified in the user message, apply it strictly — use the listed role(s) verbatim, no paraphrasing, abbreviation, or synonyms.
 
 RULES:
 - Every AR MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
-- Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - No system-specific terms: no product names, module names, system object names
 - Write as if describing business outcomes to someone who has never seen the system
-- Translate technical event wording into plain business language. Prefer business objects, active records, approvals, routing, and outcomes over intake-source names, metadata fields, identifiers, matching logic, append operations, parsing steps, or generic system actions.
-- BAD: "GIVEN a message arrives from intake source A with identifier metadata WHEN the system matches the payload THEN the source content is appended to the existing record"
-- GOOD: "GIVEN an incoming update clearly relates to an active record WHEN the update is reviewed THEN the record history includes that update"
-- Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
+- Be CONCEPTUAL, not example-based — describe the behavior pattern, not a specific instance. Never use made-up example values (e.g., do NOT write "when the weighting is 20" — write "when a weighting is configured")
+- Verifiable means the outcome can be confirmed in any real scenario — not just one invented example
 - Each AR tests one distinct thing
-- Treat the feature description role as the default actor anchor for that feature.
-- If an AR refers to the same actor named in the feature description, use that exact same role label.
-- Only upgrade to a more specific role when that role is directly supported by the requirement, clarified answers, or other provided evidence. If you do upgrade, use that same specific role consistently across the feature instead of mixing generic and specific labels.
-- Do not replace the feature role with synonyms like user, worker, technician, operator, specialist, or agent unless the feature description itself uses that term
-- When multiple ARs for the same feature share the same actor, do not restate the full role label in every WHEN clause. After the role is established, role-neutral phrasing ("they attempt to", "a record is created") is preferred over mechanical repetition of the label.
-- When a requirement names two closely related object types subject to the same rule, prefer one WHEN clause that covers both ("WHEN a [role] attempts to create either linked record type") over four near-identical ARs that repeat the same scenario for each type separately.
-- If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
-- When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
-- Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
-- Concise is good only when the business condition, trigger, and outcome remain concrete. Do not make an AR short by replacing real business meaning with generic wording.
-- Avoid vague placeholders such as "is processed", "is reviewed", "criteria are met", "specific key", "rules are applied", or "cannot be applied". Name the actual business condition, business trigger, and business outcome instead.
-- When the requirement or discovery names classification, routing, linkage, carryover, exclusion, fallback, or manual-review obligations, preserve them in business language instead of flattening them into generic processing steps.
-- If ambiguity remains in the supplied evidence, describe the explicit business fallback or manual-review outcome when it is supported. Do not invent product-specific rules to make the AR sound complete.
-- CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
-- Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
-- When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
-- When sibling features are listed, do not write ARs that duplicate another sibling's likely scope. If a sibling feature's description covers the same enforcement rule, lifecycle gate, or authorization check, let that sibling own the AR. Each business rule should be tested exactly once across the entire feature set.
-- scopeBoundaries in AR OBLIGATIONS define what is OUT OF SCOPE for the feature set. Do NOT write ARs that test these boundaries by creating "WHEN ... attempts ... THEN ... is prevented" scenarios for out-of-scope items. Instead, treat them as context that narrows what the feature covers. Only write enforcement ARs when the boundary represents an active business rule the system must check at runtime (authorization, eligibility, contractual coverage), not when it simply marks something the system does not handle.
-- When the requirement or discovery answers list multiple examples of the same category, do NOT enumerate all of them in a single THEN clause. Write the AR at the capability level — what the system does with items of that type — not as an inventory of every named variant. Write separate ARs for specific variants ONLY when their business behavior genuinely diverges.
-- Treat any unresolved decisions from discovery as explicitly out of scope for AR generation. Do not invent rules that were left open.
+- Do not write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses.
+- When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature.
 
-SCENARIO DEPTH — go beyond status gates:
-- Do NOT default to the pattern: happy path + "not in right status" guard + "not included" guard. This produces structurally identical ARs across features and misses real business logic.
-- For each feature, ask: What would a REAL TESTER verify beyond the obvious status checks? What compound scenarios involve multiple preconditions? What cross-feature or cross-activity interactions create interesting test cases?
-- Probe for: compound preconditions (e.g., "GIVEN a plan includes both billable and covered items AND customer authorization has been recorded"), financial consequences of actions, downstream impacts on related records, behavior when dependencies are partially met.
-- When a feature covers multiple activity types or variants, write ARs that name the specific scenario (e.g., "GIVEN a plan requires parts at one location AND equipment at another") rather than generic ARs about "activities."
-- When a feature involves sequencing or dependencies, write ARs that test the dependency enforcement (e.g., "GIVEN a preceding activity has not been completed WHEN the subsequent activity is scheduled THEN scheduling is prevented").
-- When the requirement and evidence imply materially different branches or ordering, name them in distinct ARs (or record unresolved items in open_decisions). Use vocabulary from the supplied inputs only—do not add domain-specific examples the user did not provide.
+ROLE REPETITION — after the role is established in the first WHEN clause for a feature, prefer role-neutral phrasing in subsequent ARs:
 
-ORDERING:
-- List acceptance_requirements in a coherent narrative flow for the capability (e.g. initiating context, main path, materially different branches, completion). Each AR must still test one distinct thing; ordering serves readability for testers, not padding.
+BAD — role repeated in every WHEN clause:
+  AR 1: GIVEN an order exists WHEN a Service Support Specialist creates a service plan THEN a plan record is established
+  AR 2: GIVEN the plan is active WHEN the Service Support Specialist adds a required part THEN the part is associated with the plan
+  AR 3: GIVEN the plan is complete WHEN the Service Support Specialist submits it THEN the plan enters review
 
-ACTOR ASSIGNMENT:
-- Use the actor from the feature description as the default anchor.
-- GIVEN clauses describe business state — they rarely need to name a role. Roles belong in WHEN (who performs the action), not GIVEN (what conditions exist).
-- When the feature description names multiple actors ("As a RoleA, RoleB, or RoleC"), do not default to the first-listed role in every AR. Reason about which actor is specifically relevant to the action in this AR's WHEN clause. When any of the named roles could perform the action interchangeably, prefer a functional description drawn from the requirement text (e.g., "the plan creator", "the requesting party") over mechanically repeating one job title.
-- After the acting role is established for a feature, role-neutral phrasing in subsequent WHEN clauses ("they attempt to", "a plan is updated") is strongly preferred over restating the full role label.
-- When a DIFFERENT actor performs an action (e.g., customer acceptance, manager approval), name that actor explicitly in the WHEN clause only.
+GOOD — role established once, then neutral phrasing:
+  AR 1: GIVEN an order exists WHEN a Service Support Specialist creates a service plan THEN a plan record is established
+  AR 2: GIVEN a service plan is active WHEN a required part is added THEN the part is associated with the plan
+  AR 3: GIVEN a service plan is complete WHEN it is submitted for approval THEN the plan enters review
 
 COMMON MISTAKES TO AVOID:
-- BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN an agreement is linked to an item that has already been received"
-- BAD GIVEN: "GIVEN an item's eligibility date is today or in the past" → GOOD: "GIVEN an item has passed its eligibility date"
-- BAD GIVEN: "GIVEN the contract start date is before today" → GOOD: "GIVEN a contract has become active"
-- Translate literal field comparisons (date is X, status equals Y, count is greater than Z) into business-state language (has expired, is active, exceeds the threshold). Write what is true about the business situation, not what a database field contains.
-- Never reference internal system concepts or admin configurations as preconditions
-- Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
-- CRITICAL — never confuse the actor role with the business object. The actor (from "As a [role]") is a human who performs actions. The GIVEN describes the state of a business object, not the state of the actor. BAD: "GIVEN an Operations Manager has expired" — the Operations Manager is the human role; the thing that expires is the agreement. CORRECT: "GIVEN an agreement has expired". The actor belongs in WHEN ("WHEN the Operations Manager triggers the process"), never as the subject of an expired/completed/failed state in GIVEN.
-- CLASSIFICATION OUTCOMES must name the business state or category, not the detection mechanism that produces it. BAD: "GIVEN a record contains the required keywords THEN it is classified as eligible" — "contains keywords" names the algorithm, not the business situation. GOOD: "GIVEN a record meets the eligibility criteria THEN it is marked as eligible". Never write: keywords, keyword matching, pattern matching, contains [word] or phrase, keyword detection, rules engine, classifier, scoring threshold, match score. Write what is true about the business situation — not how the system detects or tests for it.
-- CLASSIFICATION FRAMING must use the positive category name when the requirement provides one. BAD: "THEN the record is marked as not eligible" or "THEN the request is classified as not a priority type" — these name absence, not outcome. GOOD: "THEN the record is marked as standard" or "THEN the request is routed as a general inquiry". When a requirement explicitly names two or more classification categories, every AR that assigns or routes to a category must use that exact category name, never its negation.
+- Do NOT use configuration/setup language in GIVEN clauses. BAD: "GIVEN a contract is configured for shipment-based activation". GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
+- Do NOT reference internal system concepts as preconditions. BAD: "GIVEN the defined trigger event is met". GOOD: "GIVEN the equipment's shipment has been recorded"
+- The GIVEN must describe a real-world business situation, not a system setting or admin configuration
+- Avoid abstract umbrella terms that hide meaning: "activation type", "trigger event", "configured mode". Replace with the actual business fact
+- CRITICAL — never confuse the actor role with the business object. The actor is a human who performs actions. BAD: "GIVEN an Operations Manager has expired". CORRECT: "GIVEN an agreement has expired". The actor belongs in WHEN, never as the subject of an expired/completed/failed state in GIVEN.
+- BAD — prescribes UI/system mechanism: "THEN the user is alerted to missing information", "THEN the user is prevented from proceeding and prompted to confirm", "THEN a record is automatically initiated"
+- GOOD — states the business constraint or outcome: "THEN the plan cannot be finalised until the missing information is provided", "THEN the activity cannot be initiated without customer payment authorization"
 ${arGuidance ? `\n${arGuidance}` : ''}
 
 OUTPUT FORMAT (strict):
 - Return a single JSON object: {"features":[...]} — same number of features as input, same order and same "summary" strings.
-- Within each feature, order acceptance_requirements strings in the narrative flow described under ORDERING above.
 - Each feature MUST include the key "acceptance_requirements" (snake_case, array of strings). Do NOT use "acceptanceRequirements" (camelCase).
 - Each string MUST be one full requirement in the form: GIVEN ... WHEN ... THEN ... (you may use line breaks inside the string for readability).
-- Write as many acceptance_requirements as needed for the requested depth and no more. One focused feature may need only a few. A broad or risky feature may need many.
+- Write as many acceptance_requirements as needed for the requested depth and no more.
 
 Output JSON: same features array with acceptance_requirements arrays filled in. Keep summary, description, suggested_story_points, and process_code unchanged from the input unless you must fix a typo.`;
 }
@@ -912,7 +884,12 @@ export function buildArPerFeatureUserMessage(opts: {
   }
 
   if (opts.discoveredRoles && opts.discoveredRoles.length > 0) {
-    parts.push(`DISCOVERED ROLES (use the most appropriate role as the actor for this feature's ARs):\n${opts.discoveredRoles.join(', ')}`);
+    const roleList = opts.discoveredRoles.map(r => `"${r}"`).join(', ');
+    if (opts.discoveredRoles.length === 1) {
+      parts.push(`ROLE CONSTRAINT: Every feature description must use exactly ${roleList} as the role — verbatim, no paraphrasing or abbreviation.`);
+    } else {
+      parts.push(`ROLE CONSTRAINT: Feature descriptions may only use roles from this exact list: ${roleList}. Use these names verbatim — do not invent, paraphrase, or combine role names. Assign whichever role fits each feature best.`);
+    }
   }
 
   if (opts.arObligations) {
@@ -951,11 +928,11 @@ ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
 YOUR MISSION:
-Work through each of the six discovery areas below IN ORDER. For each area, ask the highest-value questions that are genuinely ambiguous for THIS requirement — prefer fewer sharp questions over long checklists. Skip an area or a probe when the requirement, attachment, or work-instruction context already makes the answer clear.
+Surface every ambiguity that would change what gets built or how acceptance requirements are written. Ask as many questions as needed to cover the genuinely unresolved ambiguity for THIS requirement — a business analyst spending a few extra minutes answering now prevents hours of rework later.
 
-INITIAL ROUND SIZE: The first discovery screen is intentionally small (typically within the advisory question budget from triage). Add at most one focused question per taxonomy category before adding a second question in any category. Put additional depth into follow-ups: set discoveryProfile.recommendedInitialCount to the number of questions you actually return in "questions", and use followupCap for how many more rounds may add after answers. Do not emit large question sets "just in case" — the pipeline can ask follow-ups when answers reveal new gaps.
+Work through each of the six discovery areas below IN ORDER. For each area, ask every question that is genuinely ambiguous for THIS requirement. Skip a question only if the requirement text or supplied evidence already makes the answer unambiguous. For a complex multi-step workflow with multiple actors and unclear business rules, 10–15 questions across all six areas is normal. Do not hold questions back for follow-ups. Set discoveryProfile.recommendedInitialCount to the number of questions you actually return in "questions", and followupCap to how many additional questions could still add value after answers are received.
 
-Reuse concrete nouns from the requirement and supporting evidence when they make a question sharper. Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
+Reuse concrete nouns from the requirement and supporting evidence when they make a question sharper. Anchor each question to the specific roles, process steps, constraints, and outcomes named in the requirement — if a question can be reused unchanged for a different requirement, rewrite it to be more specific. Never invent company-specific internal terms, role taxonomies, product names, or workflow labels that are not already present in the request, supporting evidence, or known domain roles.
 
 ─── DISCOVERY AREAS ─── Evaluate each area against the requirement:
 
@@ -1000,6 +977,8 @@ Reuse concrete nouns from the requirement and supporting evidence when they make
 
 ────────────────────────────────────────────────────────────────────────
 
+COVERAGE MINIMUM: For a requirement with standard or high complexity, your question set MUST include at least 2 questions in Business Rules & Exceptions and at least 1 question in Success & Measurement. Work instructions describe operational steps — they do not tell you what governs whether an action is allowed, what happens when the happy path fails, or how a tester would verify the outcome. Always ask these regardless of how much operational context is supplied.
+
 INTERNAL TAXONOMY — map each question to exactly one fixed categoryKey:
   - context_trigger (maps to area 1 above)
   - user_personas (maps to area 2 above)
@@ -1022,7 +1001,7 @@ RULES:
 - Each question must cover exactly one business decision. Do not bundle multiple sub-questions using numbers, letters, semicolons, bullets, or "and also" constructions.
 - Never write questions in first person. Do not use I, my, me, we, our phrasing in question text or suggestions.
 - Reuse concrete nouns from the requirement when they make the question sharper. Do not genericize domain-rich wording into vague terms like capability, process, system, item, thing, or record when a better business noun is available.
-- Include up to 3 short, grounded answer suggestions per question. Omit suggestions only when no grounded starter answer exists.
+- For each question, provide exactly 3 answer suggestions representing the most likely stakeholder responses. Each suggestion must be a complete, natural phrase a stakeholder could read and say "yes, that describes our process" — not a comma-separated list. Aim for 5–14 words. Omit suggestions only when no grounded starter answer exists.
 - The question field should be short and plain-language. Use an optional details field when extra context is needed to preserve meaning.
 - Do not use quotation marks around terms, values, or phrases.
 
@@ -1105,6 +1084,7 @@ RULES:
 - Before generating any follow-up question, check DISCOVERY QUESTIONS ALREADY ASKED. You MUST NOT ask a question that covers the same category and business gap as one already asked, even if the wording would differ. A category is only "still open" if its Q&A answer is vague, contradictory, or explicitly deferred — not merely because it could have been answered more thoroughly.
 - If all 6 categories already have a specific, actionable answer in the DISCOVERY ANSWERS, return {"sufficient": true}.
 - Ask however many follow-up questions are materially needed to close the remaining gaps. Zero is correct when the current answers are sufficient.
+- Each follow-up question must cover exactly one business decision. Do not bundle decisions using "and who", "and then", semicolons, or numbered sub-parts. A question like "who initiates the quote, and who then authorizes follow-up actions?" contains two distinct questions — split them.
 - Keep follow-up questions specific, high leverage, and grounded in the actual business object or actor.
 - For a small, well-bounded rule or workflow, do not force extra follow-up questions about adjacent categories if the actor, object, and core behavior are already clear enough to write acceptance requirements.
 - Prefer one visible follow-up question per remaining business gap, even when the wording is richer than a terse prompt.
