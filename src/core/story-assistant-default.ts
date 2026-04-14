@@ -25,7 +25,7 @@ import {
   buildStoryAssistantSufficiencySystemPrompt,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
-import { buildDiscoveryCoverageArtifact } from './discovery';
+import { buildDiscoveryCoverageArtifact, selectDiverseInitialQuestions } from './discovery';
 import { formatSimilarStoriesText } from './similar-stories';
 import {
   annotateFailedAcceptanceRequirementFeatures,
@@ -106,6 +106,32 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
   'success': 'success_measurement',
 };
 
+type GenericDiscoveryCoverageKey =
+  | 'scope_trigger'
+  | 'actors_handoffs'
+  | 'flow_dependencies'
+  | 'rules_exceptions'
+  | 'state_progress'
+  | 'success_validation';
+
+const GENERIC_DISCOVERY_COVERAGE_ORDER: GenericDiscoveryCoverageKey[] = [
+  'scope_trigger',
+  'actors_handoffs',
+  'flow_dependencies',
+  'rules_exceptions',
+  'state_progress',
+  'success_validation',
+];
+
+const GENERIC_DISCOVERY_COVERAGE_LABELS: Record<GenericDiscoveryCoverageKey, string> = {
+  scope_trigger: 'scope or trigger',
+  actors_handoffs: 'actors or handoffs',
+  flow_dependencies: 'flow or dependencies',
+  rules_exceptions: 'rules or exceptions',
+  state_progress: 'state or progress',
+  success_validation: 'success or validation',
+};
+
 function buildProviderOpts(config: TenantConfig) {
   return {
     provider: config.generatorConfig.provider,
@@ -161,6 +187,14 @@ function isLikelyTruncatedQuestion(value: string): boolean {
   if (trimmed.length < 12) return true;
   if (!/[?.!]$/.test(trimmed)) return true;
   return /\b(and|or|to|for|with|about|when|where|must|should)\?$/.test(trimmed.toLowerCase());
+}
+
+function isLikelyTruncatedSuggestion(value: string): boolean {
+  const trimmed = cleanText(value);
+  if (!trimmed) return true;
+  if (trimmed.length < 2) return true;
+  if (!/[a-z]/i.test(trimmed)) return true;
+  return /\b(of|to|for|with|from|by|when|where|if|and|or|the|a|an)$/i.test(trimmed);
 }
 
 function uniqueStrings(values: unknown[]): string[] {
@@ -606,37 +640,73 @@ export function splitClearlyNumberedStoryAssistantQuestion(question: string): st
   return segments.length >= 2 ? segments : [normalized];
 }
 
-function normalizeSuggestions(values: unknown[], min = 0, max = 4): string[] {
+function normalizeSuggestions(values: unknown[], min = 0, max = 3): string[] {
   return uniqueStrings(values)
     .map((value) => cleanText(value).replace(/[?.!]+$/g, ''))
+    .filter((value) => !isLikelyTruncatedSuggestion(value))
     .filter(Boolean)
     .slice(0, Math.max(min, max));
 }
 
-const DISCOVERY_DEPTH_ORDER: Record<DiscoveryDepth, number> = {
-  light: 1,
-  standard: 2,
-  deep: 3,
-};
+function questionMatchesRegex(question: ClarifyQuestion, pattern: RegExp): boolean {
+  return pattern.test(`${question.question} ${(question.details ?? '')} ${(question.suggestions ?? []).join(' ')}`.toLowerCase());
+}
 
-const OBLIGATION_CATEGORY_MAP: Record<string, ClarifyCategoryKey[]> = {
-  ownership: ['user_personas'],
-  actors: ['user_personas'],
-  approvals: ['user_personas', 'business_rules'],
-  prerequisites: ['context_trigger'],
-  trigger: ['context_trigger'],
-  sequencing: ['functional_flow'],
-  dependencies: ['functional_flow', 'business_rules'],
-  downstream_initiation: ['functional_flow', 'state_lifecycle'],
-  quote_and_billing: ['business_rules'],
-  entitlement_and_contract: ['business_rules'],
-  disruption_and_exceptions: ['business_rules', 'state_lifecycle'],
-  validation: ['business_rules'],
-  status_visibility: ['success_measurement', 'state_lifecycle'],
-  active_change_handling: ['state_lifecycle', 'business_rules'],
-  success_measurement: ['success_measurement'],
-  linked_assets: ['functional_flow'],
-};
+function questionMatchesGenericCoverage(question: ClarifyQuestion, coverageKey: GenericDiscoveryCoverageKey): boolean {
+  switch (coverageKey) {
+    case 'scope_trigger':
+      return question.categoryKey === 'context_trigger'
+        || questionMatchesRegex(question, /\b(trigger|start|begin|when should|what makes|precondition|must already|before.*act|scope|in scope|out of scope|applies)\b/);
+    case 'actors_handoffs':
+      return question.categoryKey === 'user_personas'
+        || questionMatchesRegex(question, /\b(who|role|team|actor|approval|approve|handoff|escalation|notification|consult|input from|responsible|authorized)\b/);
+    case 'flow_dependencies':
+      return question.categoryKey === 'functional_flow'
+        || question.categoryKey === 'state_lifecycle'
+        || questionMatchesRegex(question, /\b(sequence|dependency|dependent|order|before|after|step|branch|path|triggered as|all at once|preceding|downstream)\b/);
+    case 'rules_exceptions':
+      return question.categoryKey === 'business_rules'
+        || questionMatchesRegex(question, /\b(rule|validation|allowed|prevent|warning|constraint|exception|unavailable|blocked|hold|contract|entitlement|covered|billable|mixed)\b/);
+    case 'state_progress':
+      return question.categoryKey === 'state_lifecycle'
+        || questionMatchesRegex(question, /\b(status|progress|track|visibility|visible|stage|lifecycle|reopen|retry|reverse)\b/);
+    case 'success_validation':
+      return question.categoryKey === 'success_measurement'
+        || questionMatchesRegex(question, /\b(success|tester|uat|working correctly|measure|metric|improvement|confirm)\b/);
+    default:
+      return false;
+  }
+}
+
+function requiredGenericCoverageKeys(assessment: DiscoveryAssessment): GenericDiscoveryCoverageKey[] {
+  const required = new Set<GenericDiscoveryCoverageKey>();
+  if (assessment.ambiguityLevel !== 'low' || assessment.discoveryDepth !== 'light') required.add('scope_trigger');
+  if (assessment.actorComplexity !== 'low' || assessment.discoveryDepth === 'deep') required.add('actors_handoffs');
+  if (assessment.workflowComplexity !== 'low' || assessment.lifecycleComplexity !== 'low') required.add('flow_dependencies');
+  if (assessment.ruleDensity !== 'low' || assessment.exceptionDensity !== 'low') required.add('rules_exceptions');
+  if (assessment.lifecycleComplexity !== 'low') required.add('state_progress');
+  if (assessment.discoveryDepth !== 'light' || assessment.ambiguityLevel !== 'low') required.add('success_validation');
+  return GENERIC_DISCOVERY_COVERAGE_ORDER.filter((key) => required.has(key));
+}
+
+function missingGenericCoverageKeys(
+  questions: ClarifyQuestion[],
+  assessment: DiscoveryAssessment,
+): GenericDiscoveryCoverageKey[] {
+  const required = requiredGenericCoverageKeys(assessment);
+  return required.filter((coverageKey) => !questions.some((question) => questionMatchesGenericCoverage(question, coverageKey)));
+}
+
+export function finalizeStoryAssistantDiscoveryQuestions(
+  questions: ClarifyQuestion[],
+  assessment: DiscoveryAssessment,
+): ClarifyQuestion[] {
+  const hardCap = 25;
+  const softMax = Math.max(1, assessment.recommendedQuestionRange.max);
+  const keepUpTo = Math.min(hardCap, softMax + 2);
+  if (questions.length <= keepUpTo) return questions;
+  return selectDiverseInitialQuestions(questions, keepUpTo);
+}
 
 function normalizeDiscoveryDepth(value: unknown): DiscoveryDepth {
   const normalized = normalizeKey(value);
@@ -657,17 +727,17 @@ function normalizeRecommendedQuestionRange(
   depth: DiscoveryDepth,
 ): { min: number; max: number } {
   const fallback = depth === 'light'
-    ? { min: 5, max: 7 }
+    ? { min: 3, max: 5 }
     : depth === 'deep'
-      ? { min: 12, max: 16 }
-      : { min: 8, max: 12 };
+      ? { min: 10, max: 20 }
+      : { min: 6, max: 12 };
   if (!value || typeof value !== 'object') return fallback;
   const candidate = value as { min?: unknown; max?: unknown };
   const min = Number.isFinite(candidate.min) ? Math.max(1, Math.round(Number(candidate.min))) : fallback.min;
   const max = Number.isFinite(candidate.max) ? Math.max(min, Math.round(Number(candidate.max))) : fallback.max;
   return {
-    min: Math.min(min, 16),
-    max: Math.min(Math.max(max, min), 16),
+    min: Math.min(min, 25),
+    max: Math.min(Math.max(max, min), 25),
   };
 }
 
@@ -757,32 +827,6 @@ export function buildHeuristicDiscoveryAssessment(input: {
   };
 }
 
-export function mergeDiscoveryAssessments(
-  llmAssessment: DiscoveryAssessment | null,
-  heuristicAssessment: DiscoveryAssessment,
-): DiscoveryAssessment {
-  if (!llmAssessment) return heuristicAssessment;
-  const discoveryDepth = DISCOVERY_DEPTH_ORDER[heuristicAssessment.discoveryDepth] > DISCOVERY_DEPTH_ORDER[llmAssessment.discoveryDepth]
-    ? heuristicAssessment.discoveryDepth
-    : llmAssessment.discoveryDepth;
-  const reasoningLevel = DISCOVERY_DEPTH_ORDER[heuristicAssessment.reasoningLevel] > DISCOVERY_DEPTH_ORDER[llmAssessment.reasoningLevel]
-    ? heuristicAssessment.reasoningLevel
-    : llmAssessment.reasoningLevel;
-  return {
-    ...llmAssessment,
-    discoveryDepth,
-    reasoningLevel,
-    coverageObligations: uniqueStrings([
-      ...llmAssessment.coverageObligations,
-      ...heuristicAssessment.coverageObligations,
-    ]),
-    recommendedQuestionRange: {
-      min: Math.max(llmAssessment.recommendedQuestionRange.min, heuristicAssessment.recommendedQuestionRange.min),
-      max: Math.max(llmAssessment.recommendedQuestionRange.max, heuristicAssessment.recommendedQuestionRange.max),
-    },
-  };
-}
-
 export function parseDiscoveryAssessment(rawData: unknown): DiscoveryAssessment | null {
   if (!rawData || typeof rawData !== 'object') return null;
   const payload = rawData as Record<string, unknown>;
@@ -811,43 +855,45 @@ export function evaluateClarifyQuestionSetQuality(
   const questionText = questions
     .map((question) => `${question.categoryKey} ${question.question} ${(question.suggestions ?? []).join(' ')}`.toLowerCase())
     .join('\n');
-  const categoryKeys = new Set(questions.map((question) => question.categoryKey));
+  const normalizedQuestions = questions.map((question) => normalizeKey(`${question.categoryKey} ${question.question}`)).filter(Boolean);
+  const duplicateQuestionCount = normalizedQuestions.length - new Set(normalizedQuestions).size;
   const missingObligations = assessment.coverageObligations.filter((obligation) => {
-    const requiredCategories = OBLIGATION_CATEGORY_MAP[obligation] ?? [];
-    if (requiredCategories.some((categoryKey) => categoryKeys.has(categoryKey))) return false;
-    return !new RegExp(obligation.replace(/_/g, '[ _-]?'), 'i').test(questionText);
+    const obligationPattern = new RegExp(obligation.replace(/_/g, '[ _-]?'), 'i');
+    return !obligationPattern.test(questionText);
   });
+  const missingGenericCoverage = missingGenericCoverageKeys(questions, assessment);
 
   let score = 100;
   if (questions.length < assessment.recommendedQuestionRange.min) {
-    score -= 25;
+    score -= 30;
     reasons.push('Returned fewer questions than the assessed discovery range suggests.');
   }
-  if (missingObligations.length) {
-    score -= Math.min(40, missingObligations.length * 8);
-    reasons.push(`Missing discovery obligation coverage: ${missingObligations.join(', ')}.`);
+  if (missingGenericCoverage.length) {
+    score -= Math.min(18, missingGenericCoverage.length * 4);
+    reasons.push(`Missing generic discovery coverage: ${missingGenericCoverage.map((key) => GENERIC_DISCOVERY_COVERAGE_LABELS[key]).join(', ')}.`);
   }
-  const weakSuggestions = questions.filter((question) => question.suggestions.length < 3).length;
+  const weakSuggestions = questions.filter((question) => question.suggestions.length < 2).length;
   if (weakSuggestions > 0) {
-    score -= Math.min(15, weakSuggestions * 4);
+    score -= Math.min(12, weakSuggestions * 4);
     reasons.push('Some questions did not provide enough grounded suggestions.');
+  }
+  const truncatedSuggestions = questions.filter((question) => question.suggestions.some((suggestion) => isLikelyTruncatedSuggestion(suggestion))).length;
+  if (truncatedSuggestions > 0) {
+    score -= Math.min(18, truncatedSuggestions * 6);
+    reasons.push('Some answer suggestions appear truncated or incomplete.');
   }
   const longQuestions = questions.filter((question) => question.question.length > 220).length;
   if (longQuestions > 0) {
     score -= Math.min(10, longQuestions * 2);
     reasons.push('Some discovery questions were too broad or overpacked.');
   }
-  const sequencingRequired = assessment.coverageObligations.includes('sequencing') || assessment.coverageObligations.includes('dependencies');
-  if (sequencingRequired && !/sequence|dependency|order|before|after|prerequisite/.test(questionText)) {
-    score -= 12;
-    reasons.push('No explicit sequencing or dependency question was asked for a workflow that implies ordering.');
+  if (duplicateQuestionCount > 0) {
+    score -= Math.min(12, duplicateQuestionCount * 6);
+    reasons.push('Some discovery questions are repetitive.');
   }
-  const gatesRequired = assessment.coverageObligations.includes('quote_and_billing')
-    || assessment.coverageObligations.includes('entitlement_and_contract')
-    || assessment.coverageObligations.includes('approvals');
-  if (gatesRequired && !/quote|bill|contract|entitlement|approval|authori[sz]|covered/.test(questionText)) {
-    score -= 12;
-    reasons.push('No explicit gate, billing, entitlement, or approval question was asked where one is implied.');
+  if (questions.length > assessment.recommendedQuestionRange.max + 5) {
+    score -= 8;
+    reasons.push('The question set is materially larger than the assessed range.');
   }
 
   return {
@@ -888,7 +934,7 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
           : 'State & Lifecycle');
       const intent = cleanText(candidate.intent).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48)
         || `story_assistant_${categoryKey}`;
-      const suggestions = normalizeSuggestions(Array.isArray(candidate.suggestions) ? candidate.suggestions : []);
+      const suggestions = normalizeSuggestions(Array.isArray(candidate.suggestions) ? candidate.suggestions : [], 0, 3);
       const details = cleanText(candidate.details);
 
       return splitClearlyNumberedStoryAssistantQuestion(rawQuestion).map((segment, index) => ({
@@ -900,7 +946,8 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
         suggestions,
       }));
     })
-    .filter((question) => question.question.length > 0);
+    .filter((question) => question.question.length > 0)
+    .filter((question) => !isLikelyTruncatedQuestion(question.question));
 }
 
 function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestion[] {
@@ -919,10 +966,10 @@ function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestio
 }
 
 function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
-  if (questions.length < 4) return true;
+  if (questions.length < 2) return true;
   return questions.some((question) => (
     question.suggestions.length < 2
-    || question.suggestions.length > 4
+    || question.suggestions.some((suggestion) => isLikelyTruncatedSuggestion(suggestion))
     || question.question.length > 240
   ));
 }
@@ -1133,7 +1180,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     );
     promptAssemblyMs += Date.now() - promptAssemblyStartedAt;
     const assessmentResult = await callLlmJsonWithUsage<unknown>({
-      model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      model: getTierModel(opts.config.generatorConfig.triageModel, opts.config.tier),
       systemPrompt: buildStoryAssistantDiscoveryAssessmentSystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
@@ -1145,11 +1192,12 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     });
     usageByStage.discoveryAssessment = assessmentResult.usage;
     const parsed = parseDiscoveryAssessment(assessmentResult.data);
-    discoveryAssessment = mergeDiscoveryAssessments(parsed, heuristicAssessment);
+    if (!parsed) throw new Error('Discovery assessment returned malformed data.');
+    discoveryAssessment = parsed;
   } catch {
     discoveryAssessment = {
       ...heuristicAssessment,
-      rationale: 'LLM assessment unavailable; using heuristic evidence-driven discovery depth.',
+      rationale: 'Assessment fallback used after LLM assessment failed or returned malformed data.',
     };
   }
 
@@ -1171,29 +1219,25 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       systemPrompt: buildStoryAssistantClarifySystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
-        questionPlan: {
-          min: discoveryAssessment.recommendedQuestionRange.min,
-          max: discoveryAssessment.recommendedQuestionRange.max,
-          target: discoveryAssessment.recommendedQuestionRange.max,
-        },
-        discoveryDepth: discoveryAssessment.discoveryDepth,
-        reasoningLevel: discoveryAssessment.reasoningLevel,
-        coverageObligations: discoveryAssessment.coverageObligations,
-        recommendedQuestionRange: discoveryAssessment.recommendedQuestionRange,
       }),
       userMessage: attempt === 1
         ? baseUserMessage
-        : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and deepen the question set. Cover these missing or under-covered themes explicitly: ${qualityReasons.join(' ') || discoveryAssessment.coverageObligations.join(', ')}. Keep each question focused on one business decision, and give every question 3 or 4 grounded suggestions with enough detail to help the user choose.`,
+        : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and improve the initial question set. The previous output was weak or incomplete. Cover the missing or weak areas called out here: ${qualityReasons.join(' ') || missingGenericCoverageKeys(questions, discoveryAssessment).map((key) => GENERIC_DISCOVERY_COVERAGE_LABELS[key]).join(', ') || 'general discovery coverage'}. Keep each question focused on one business decision and use grounded answer suggestions.`,
       maxTokens: 4600,
       reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
       ...providerOpts,
     });
     usageByStage[attempt === 1 ? 'clarify' : 'clarifyRetry'] = result.usage;
-    questions = parseStoryAssistantQuestionCandidates(result.data);
+    questions = finalizeStoryAssistantDiscoveryQuestions(
+      parseStoryAssistantQuestionCandidates(result.data),
+      discoveryAssessment,
+    );
     const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
     coverageQualityScore = quality.score;
     qualityReasons = quality.reasons;
-    const shouldRetry = shouldRetryDiscoveryQuestions(questions) || quality.score < 70;
+    const shouldRetry = questions.length < discoveryAssessment.recommendedQuestionRange.min
+      || shouldRetryDiscoveryQuestions(questions)
+      || quality.score < 65;
     if (!shouldRetry || attempt === 2) break;
     coverageRetryTriggered = true;
   }

@@ -6,7 +6,7 @@ import {
   evaluateClarifyQuestionSetQuality,
   extractActorSets,
   extractRoles,
-  mergeDiscoveryAssessments,
+  finalizeStoryAssistantDiscoveryQuestions,
   parseStoryAssistantQuestionCandidates,
   parseDiscoveryAssessment,
   splitClearlyNumberedStoryAssistantQuestion,
@@ -39,7 +39,7 @@ test('parseStoryAssistantQuestionCandidates preserves simple story assistant que
   assert.deepEqual(questions[0]?.suggestions, ['Coordinator', 'Manager', 'Dispatcher']);
 });
 
-test('parseStoryAssistantQuestionCandidates keeps up to four grounded suggestions', () => {
+test('parseStoryAssistantQuestionCandidates keeps exactly three grounded suggestions for discovery', () => {
   const questions = parseStoryAssistantQuestionCandidates([
     {
       category: 'Functional Flow',
@@ -59,7 +59,26 @@ test('parseStoryAssistantQuestionCandidates keeps up to four grounded suggestion
     'Planned location and service type',
     'Required parts and labor estimate',
     'Sequence dependencies on earlier activities',
-    'Any customer-facing commitments to honor',
+  ]);
+});
+
+test('parseStoryAssistantQuestionCandidates drops truncated suggestions', () => {
+  const questions = parseStoryAssistantQuestionCandidates([
+    {
+      category: 'Success & Measurement',
+      question: 'How will users track progress across the full workflow?',
+      suggestions: [
+        'A shared progress view',
+        'Status updates from',
+        'Milestone notifications',
+      ],
+    },
+  ]);
+
+  assert.equal(questions.length, 1);
+  assert.deepEqual(questions[0]?.suggestions, [
+    'A shared progress view',
+    'Milestone notifications',
   ]);
 });
 
@@ -208,21 +227,8 @@ test('heuristic discovery assessment keeps long but focused asks light', () => {
   assert.equal(assessment.reasoningLevel, 'light');
 });
 
-test('parse and merge discovery assessments preserve deeper heuristic signals', () => {
-  const llmAssessment = parseDiscoveryAssessment({
-    discoveryDepth: 'standard',
-    reasoningLevel: 'standard',
-    workflowComplexity: 'medium',
-    actorComplexity: 'medium',
-    ruleDensity: 'medium',
-    exceptionDensity: 'low',
-    lifecycleComplexity: 'medium',
-    ambiguityLevel: 'medium',
-    coverageObligations: ['ownership'],
-    recommendedQuestionRange: { min: 8, max: 12 },
-    rationale: 'Moderate workflow ambiguity.',
-  });
-  const merged = mergeDiscoveryAssessments(llmAssessment, {
+test('parseDiscoveryAssessment preserves wide LLM-led discovery ranges', () => {
+  const parsed = parseDiscoveryAssessment({
     discoveryDepth: 'deep',
     reasoningLevel: 'deep',
     workflowComplexity: 'high',
@@ -232,14 +238,12 @@ test('parse and merge discovery assessments preserve deeper heuristic signals', 
     lifecycleComplexity: 'high',
     ambiguityLevel: 'high',
     coverageObligations: ['sequencing', 'status_visibility'],
-    recommendedQuestionRange: { min: 12, max: 18 },
-    rationale: 'Heuristics found deeper workflow signals.',
+    recommendedQuestionRange: { min: 12, max: 25 },
+    rationale: 'Very complex workflow ambiguity.',
   });
 
-  assert.equal(merged.discoveryDepth, 'deep');
-  assert.equal(merged.reasoningLevel, 'deep');
-  assert.deepEqual(merged.coverageObligations, ['ownership', 'sequencing', 'status_visibility']);
-  assert.deepEqual(merged.recommendedQuestionRange, { min: 12, max: 18 });
+  assert.ok(parsed);
+  assert.deepEqual(parsed?.recommendedQuestionRange, { min: 12, max: 25 });
 });
 
 test('clarify quality evaluator flags missing deep-workflow obligation coverage', () => {
@@ -273,6 +277,164 @@ test('clarify quality evaluator flags missing deep-workflow obligation coverage'
   });
 
   assert.ok(quality.score < 70);
-  assert.match(quality.missingObligations.join(','), /sequencing/);
-  assert.match(quality.missingObligations.join(','), /quote_and_billing/);
+  assert.match(quality.reasons.join(' '), /generic discovery coverage/i);
+});
+
+test('clarify quality evaluator penalizes generic admin questions when key ambiguity remains', () => {
+  const quality = evaluateClarifyQuestionSetQuality([
+    {
+      categoryKey: 'user_personas',
+      category: 'Roles & Personas',
+      intent: 'owner',
+      question: 'Who is responsible for the workflow?',
+      suggestions: ['Coordinator', 'Manager', 'Ops lead'],
+    },
+    {
+      categoryKey: 'user_personas',
+      category: 'Roles & Personas',
+      intent: 'approval',
+      question: 'Who approves the workflow?',
+      suggestions: ['Manager', 'Operations lead', 'No approval needed'],
+    },
+    {
+      categoryKey: 'context_trigger',
+      category: 'Trigger & Context',
+      intent: 'trigger',
+      question: 'When should the workflow begin?',
+      suggestions: ['After intake', 'After review', 'When criteria are met'],
+    },
+  ], {
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'high',
+    actorComplexity: 'medium',
+    ruleDensity: 'high',
+    exceptionDensity: 'medium',
+    lifecycleComplexity: 'high',
+    ambiguityLevel: 'high',
+    coverageObligations: ['sequencing', 'status_visibility'],
+    recommendedQuestionRange: { min: 6, max: 8 },
+    rationale: 'Workflow ambiguity remains.',
+  });
+
+  assert.ok(quality.score < 90);
+  assert.match(quality.reasons.join(' '), /generic discovery coverage|fewer questions/i);
+});
+
+test('finalizeStoryAssistantDiscoveryQuestions trims materially oversized sets with category spread', () => {
+  const finalized = finalizeStoryAssistantDiscoveryQuestions([
+    {
+      categoryKey: 'user_personas',
+      category: 'Roles & Personas',
+      intent: 'owner',
+      question: 'Who initiates the workflow?',
+      suggestions: ['Coordinator', 'Manager', 'Operator'],
+    },
+    {
+      categoryKey: 'context_trigger',
+      category: 'Trigger & Context',
+      intent: 'trigger',
+      question: 'What starts the workflow?',
+      suggestions: ['New request', 'Threshold reached', 'Manual escalation'],
+    },
+    {
+      categoryKey: 'functional_flow',
+      category: 'Functional Flow',
+      intent: 'flow',
+      question: 'How is the workflow sequenced?',
+      suggestions: ['Manual sequence', 'System order', 'Rules-based order'],
+    },
+    {
+      categoryKey: 'business_rules',
+      category: 'Business Rules & Exceptions',
+      intent: 'rules',
+      question: 'What rules block invalid workflow steps?',
+      suggestions: ['Validation rules', 'Warnings only', 'Hard stop'],
+    },
+    {
+      categoryKey: 'state_lifecycle',
+      category: 'State & Lifecycle',
+      intent: 'status',
+      question: 'How is progress tracked?',
+      suggestions: ['Status stages', 'Milestones', 'Single state'],
+    },
+    {
+      categoryKey: 'success_measurement',
+      category: 'Success & Measurement',
+      intent: 'success',
+      question: 'How would a tester confirm the workflow works?',
+      suggestions: ['Outcome visible', 'Statuses match', 'Dependencies enforced'],
+    },
+  ], {
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'high',
+    actorComplexity: 'medium',
+    ruleDensity: 'high',
+    exceptionDensity: 'medium',
+    lifecycleComplexity: 'medium',
+    ambiguityLevel: 'high',
+    coverageObligations: ['sequencing'],
+    recommendedQuestionRange: { min: 3, max: 3 },
+    rationale: 'Moderate ambiguity.',
+  });
+
+  assert.equal(finalized.length, 5);
+  assert.ok(finalized.some((question) => question.categoryKey === 'context_trigger'));
+  assert.ok(finalized.some((question) => question.categoryKey === 'user_personas'));
+  assert.ok(finalized.some((question) => question.categoryKey === 'functional_flow' || question.categoryKey === 'business_rules'));
+});
+
+test('finalizeStoryAssistantDiscoveryQuestions allows slight overage above assessed max before trimming', () => {
+  const finalized = finalizeStoryAssistantDiscoveryQuestions([
+    {
+      categoryKey: 'context_trigger',
+      category: 'Trigger & Context',
+      intent: 'q1',
+      question: 'What starts the workflow?',
+      suggestions: ['New request', 'Scheduled event', 'Manual trigger'],
+    },
+    {
+      categoryKey: 'user_personas',
+      category: 'Roles & Personas',
+      intent: 'q2',
+      question: 'Who performs the workflow?',
+      suggestions: ['Coordinator', 'Operator', 'Manager'],
+    },
+    {
+      categoryKey: 'functional_flow',
+      category: 'Functional Flow',
+      intent: 'q3',
+      question: 'How is the workflow sequenced?',
+      suggestions: ['Manual order', 'Default order', 'Rules-based order'],
+    },
+    {
+      categoryKey: 'business_rules',
+      category: 'Business Rules & Exceptions',
+      intent: 'q4',
+      question: 'What rules block invalid steps?',
+      suggestions: ['Validation rules', 'Warnings only', 'Hard stop'],
+    },
+    {
+      categoryKey: 'state_lifecycle',
+      category: 'State & Lifecycle',
+      intent: 'q5',
+      question: 'How is progress tracked?',
+      suggestions: ['Status stages', 'Milestones', 'Single state'],
+    },
+  ], {
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'medium',
+    actorComplexity: 'medium',
+    ruleDensity: 'medium',
+    exceptionDensity: 'low',
+    lifecycleComplexity: 'medium',
+    ambiguityLevel: 'medium',
+    coverageObligations: ['sequencing'],
+    recommendedQuestionRange: { min: 3, max: 3 },
+    rationale: 'Moderate workflow ambiguity.',
+  });
+
+  assert.equal(finalized.length, 5);
 });

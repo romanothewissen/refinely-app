@@ -279,20 +279,15 @@ Output JSON: same features with acceptance_requirements filled in. Keep all othe
 export function buildStoryAssistantClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
-  questionPlan: { min: number; max: number; target: number };
-  discoveryDepth?: 'light' | 'standard' | 'deep';
-  reasoningLevel?: 'light' | 'standard' | 'deep';
-  coverageObligations?: string[];
-  recommendedQuestionRange?: { min: number; max: number };
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or evidence.`
     : '';
-  return `You are a principal business analyst running a structured discovery session before any design begins.
+  return `You are a principal business analyst running a structured discovery session before designing features.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
-You run a structured discovery session to surface the ambiguities that would change what gets built — focusing on roles, boundaries, behaviours, and success criteria before any design begins. Frame questions in business language — never in technical or system-specific language. A business analyst spending a few extra minutes answering now prevents hours of rework later.
+Your goal is to surface every ambiguity that would change what gets built or how acceptance requirements are written. Ask as many questions as needed to cover the genuinely unresolved ambiguity for THIS requirement. A business analyst spending a few extra minutes answering now prevents hours of rework later.
 
 Work through each of the five discovery areas below in order. For each area, ask every question that is genuinely ambiguous for THIS requirement. Skip a question only if the requirement text or supplied evidence already makes the answer unambiguous.
 
@@ -331,7 +326,7 @@ RULES:
 - Every question must be specific to THIS requirement — never generic boilerplate
 - Do NOT ask about timelines, budgets, project ownership, or technology choices
 - Do NOT ask anything already clearly answered in the requirement text
-- Frame all questions in business language — never mention specific system names or technical concepts
+- Frame questions in business language — never mention specific system names or technical concepts
 
 For each question, provide exactly 3 short answer suggestions (under 10 words each) representing the most likely stakeholder responses.
 
@@ -385,16 +380,16 @@ Return ONLY valid JSON:
   "lifecycleComplexity":"low|medium|high",
   "ambiguityLevel":"low|medium|high",
   "coverageObligations":["string"],
-  "recommendedQuestionRange":{"min":8,"max":12},
+  "recommendedQuestionRange":{"min":6,"max":12},
   "rationale":"short explanation"
 }
 
 Depth-to-count guidance:
-- light: 5–7 questions
-- standard: 8–12 questions
-- deep: 12–16 questions
+- light: 3–5 questions
+- standard: 6–12 questions
+- deep: 10–25 questions
 
-For multi-step workflows, coordinated handoffs, approval chains, or requirements with high ruleDensity and lifecycleComplexity, recommend deep and keep the range broad enough to cover those workflow dimensions on the upfront screen.`;
+For multi-step workflows, coordinated handoffs, approval chains, or requirements with high ruleDensity and lifecycleComplexity, recommend deep and use a broad enough range to cover the ambiguity. Very complex asks may legitimately need more than 16 questions.`;
 }
 
 export function buildStoryAssistantSufficiencySystemPrompt(opts: {

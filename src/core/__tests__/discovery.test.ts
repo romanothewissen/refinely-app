@@ -638,11 +638,6 @@ test('story assistant clarify prompt uses the five-area legacy discovery structu
   const prompt = buildStoryAssistantClarifySystemPrompt({
     domainContext: '',
     domainRoles: [],
-    questionPlan: { min: 8, max: 12, target: 10 },
-    discoveryDepth: 'deep',
-    reasoningLevel: 'deep',
-    coverageObligations: ['sequencing', 'quote_and_billing', 'status_visibility'],
-    recommendedQuestionRange: { min: 12, max: 18 },
   });
 
   assert.match(prompt, /structured discovery session/i);
@@ -674,6 +669,7 @@ test('story assistant discovery assessment prompt evaluates semantic complexity 
   assert.match(prompt, /coverageObligations/i);
   assert.match(prompt, /Short prompts can still be deep/i);
   assert.match(prompt, /Long prompts can still be light/i);
+  assert.match(prompt, /Very complex asks may legitimately need more than 16 questions/i);
   assert.match(prompt, /Return ONLY valid JSON/i);
 });
 
