@@ -634,7 +634,7 @@ test('decomposition prompt treats features as independently valuable and keeps s
   assert.doesNotMatch(prompt, /Output exactly/i);
 });
 
-test('story assistant clarify prompt asks every genuinely ambiguous question without small-screen budgeting language', () => {
+test('story assistant clarify prompt uses the five-area legacy discovery structure without budgeting scaffolding', () => {
   const prompt = buildStoryAssistantClarifySystemPrompt({
     domainContext: '',
     domainRoles: [],
@@ -645,23 +645,22 @@ test('story assistant clarify prompt asks every genuinely ambiguous question wit
     recommendedQuestionRange: { min: 12, max: 18 },
   });
 
-  assert.match(prompt, /Ask enough questions up front to cover the material gaps/i);
-  assert.match(prompt, /domain-aware and process-grounded, but system-agnostic/i);
-  assert.match(prompt, /For each area, ask the strongest questions that are genuinely ambiguous/i);
-  assert.match(prompt, /DISCOVERY DEPTH: DEEP/i);
-  assert.match(prompt, /REASONING DEPTH: DEEP/i);
-  assert.match(prompt, /QUESTION TARGET: Aim for 12 to 18 questions on the upfront discovery screen/i);
-  assert.match(prompt, /Coverage obligations for this requirement/i);
-  assert.match(prompt, /sequencing/i);
-  assert.match(prompt, /Roles & Personas/i);
-  assert.match(prompt, /Trigger & Context/i);
-  assert.match(prompt, /Business Rules & Exceptions/i);
-  assert.match(prompt, /provide 3 or 4 grounded suggestions/i);
-  assert.match(prompt, /specific enough to help the user answer/i);
+  assert.match(prompt, /structured discovery session/i);
+  assert.match(prompt, /Frame questions in business language/i);
+  assert.match(prompt, /DISCOVERY AREAS/);
+  assert.match(prompt, /ROLES & PERSONAS/);
+  assert.match(prompt, /TRIGGER & CONTEXT/);
+  assert.match(prompt, /FUNCTIONAL FLOW/);
+  assert.match(prompt, /BUSINESS RULES & EXCEPTIONS/);
+  assert.match(prompt, /SUCCESS & MEASUREMENT/);
+  assert.match(prompt, /exactly 3 short answer suggestions/i);
   assert.match(prompt, /Return ONLY a JSON array/i);
-  assert.doesNotMatch(prompt, /intentionally small/i);
-  assert.doesNotMatch(prompt, /first screen/i);
+  assert.doesNotMatch(prompt, /DISCOVERY DEPTH:/i);
+  assert.doesNotMatch(prompt, /REASONING DEPTH:/i);
+  assert.doesNotMatch(prompt, /QUESTION TARGET:/i);
+  assert.doesNotMatch(prompt, /Coverage obligations for this requirement/i);
   assert.doesNotMatch(prompt, /QUESTION VOLUME GUIDANCE/i);
+  assert.doesNotMatch(prompt, /plannedQuestionBudget/i);
 });
 
 test('story assistant discovery assessment prompt evaluates semantic complexity rather than prompt length', () => {
@@ -692,16 +691,22 @@ test('story assistant sufficiency prompt limits follow-up discovery to one small
   assert.match(prompt, /Return ONLY valid JSON/i);
 });
 
-test('story assistant ar prompt avoids mechanical role repetition and use-case filler', () => {
+test('story assistant ar prompt mirrors the legacy GIVEN/WHEN/THEN contract without Refinely-specific actor bloat', () => {
   const prompt = buildStoryAssistantArSystemPrompt({
     domainContext: '',
     domainRoles: [],
   });
 
-  assert.match(prompt, /Avoid repeating the same role label in every AR/i);
-  assert.match(prompt, /Keep broad use-case narration and business-benefit phrasing out of ARs/i);
-  assert.match(prompt, /Ground GIVEN clauses in a real business situation/i);
-  assert.doesNotMatch(prompt, /Be conceptual, not example-based/i);
+  assert.match(prompt, /GIVEN \[precondition\] WHEN \[action or trigger\] THEN \[single, verifiable outcome\]/);
+  assert.match(prompt, /No solution language/i);
+  assert.match(prompt, /No system-specific terms/i);
+  assert.match(prompt, /Be CONCEPTUAL, not example-based/);
+  assert.match(prompt, /COMMON MISTAKES TO AVOID/);
+  assert.match(prompt, /real-world business situation/i);
+  assert.doesNotMatch(prompt, /EXACT ACTOR VOCABULARY/i);
+  assert.doesNotMatch(prompt, /DEFAULT TO ROLE-NEUTRAL TRIGGERS/i);
+  assert.doesNotMatch(prompt, /Avoid repeating the same role label in every AR/i);
+  assert.doesNotMatch(prompt, /No first person/i);
 });
 
 test('ar prompt uses range guidance without exact-count pressure', () => {

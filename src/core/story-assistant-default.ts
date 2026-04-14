@@ -395,30 +395,11 @@ function buildRoleHint(
 
   if (!roleVocabulary.length) return '';
 
-  const lines = [
-    `EXACT ACTOR VOCABULARY: ${roleVocabulary.join(', ')}`,
-    extractedRoles.length
-      ? 'Use only these actor labels verbatim in feature descriptions unless the requirement itself names a different exact role.'
-      : 'If you use a configured workspace role, use it verbatim and do not paraphrase or combine role labels.',
-    'Choose exactly one actor label per feature description unless the exact label is already collective.',
-    'Never use referential phrases like "the plan creator" or non-actor answers like approval states as role labels.',
-  ];
-
-  return lines.join('\n');
-}
-
-function buildActorSetHints(actorSets: ActorSetGrounding): string[] {
-  const lines: string[] = [];
-  if (actorSets.eligibleActors?.length) {
-    lines.push(`ELIGIBLE ACTORS: ${actorSets.eligibleActors.join(', ')}`);
+  const quoted = roleVocabulary.map((role) => `"${role}"`).join(', ');
+  if (roleVocabulary.length === 1) {
+    return `ROLE CONSTRAINT: Every feature description must use exactly ${quoted} as the role — verbatim, no paraphrasing or abbreviation.`;
   }
-  if (actorSets.approverActors?.length) {
-    lines.push(`APPROVER ACTORS: ${actorSets.approverActors.join(', ')}`);
-  }
-  if (actorSets.viewerActors?.length) {
-    lines.push(`VIEWER ACTORS: ${actorSets.viewerActors.join(', ')}`);
-  }
-  return lines;
+  return `ROLE CONSTRAINT: Assign the most appropriate role to each feature from this exact list: ${quoted}. Use these names verbatim — do not invent, paraphrase, or combine role names. Different features may use different roles from this list.`;
 }
 
 function formatWiEvidence(
@@ -479,21 +460,17 @@ function buildDiscoveryHandoff(input: {
   discoveryProfile?: DiscoveryProfile;
 }): string {
   const coverageArtifact = input.discoveryProfile?.coverageArtifact;
-  const parts = ['DISCOVERY HANDOFF:'];
-  if (coverageArtifact?.askedThemes?.length) {
-    parts.push(`- Discovery themes actually asked: ${coverageArtifact.askedThemes.join(', ')}`);
-  }
-  buildActorSetHints(input.actorSets).forEach((line) => parts.push(`- ${line}`));
+  const parts: string[] = [];
   const mustCarryRules = extractMustCarryRules(input.answers);
   if (mustCarryRules.length) {
-    parts.push('- Must-carry rules and workflow details from answered discovery:');
-    mustCarryRules.forEach((rule) => parts.push(`  - ${rule}`));
+    parts.push('Must-carry rules and workflow details from answered discovery:');
+    mustCarryRules.forEach((rule) => parts.push(`- ${rule}`));
   }
   if (coverageArtifact?.openNonBlockingDecisions?.length) {
-    parts.push('- Explicit open decisions that must remain open rather than silently assumed:');
-    coverageArtifact.openNonBlockingDecisions.slice(0, 6).forEach((decision) => parts.push(`  - ${decision}`));
+    parts.push('Open decisions that must remain open rather than silently assumed:');
+    coverageArtifact.openNonBlockingDecisions.slice(0, 6).forEach((decision) => parts.push(`- ${decision}`));
   }
-  return parts.length > 1 ? parts.join('\n') : '';
+  return parts.length ? parts.join('\n') : '';
 }
 
 function buildClarifyUserMessage(input: {
@@ -1398,7 +1375,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       discoveryProfile: opts.discoveryProfile,
       actorSets,
       similarStoriesText,
-    })}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
+    })}\n\nDecompose the following requirement into the distinct features needed to deliver it. Think through the decomposition framework and return the right set of features with accurate descriptions. Leave acceptance_requirements as empty arrays in this pass.`;
     promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
       model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
@@ -1451,7 +1428,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       ...feature,
       acceptance_requirements: [],
     })),
-  })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
+  })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements. For each feature, consider:\n- What is the primary business scenario? (this always gets an AR)\n- What key business rules must hold? (each distinct rule gets an AR)\n- What is the most likely failure or edge case a tester would actually run?\n\nKeep all other fields (summary, description, process_code, suggested_story_points) unchanged.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
     model: getTierModel(opts.config.generatorConfig.arModel, opts.config.tier),

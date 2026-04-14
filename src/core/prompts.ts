@@ -202,53 +202,44 @@ export function buildStoryAssistantDecompositionSystemPrompt(opts: {
   processTaxonomyEnabled: boolean;
 }): string {
   const roleHint = opts.domainRoles?.length
-    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when the requirement or answered Q&A supports them.`
-    : 'If no actor is named in the requirement or answers, use "authorized user" instead of inventing a persona.';
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse one only when the requirement or answered Q&A supports it.`
+    : '';
   const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
     ? `\n${processTaxonomyBlock(opts.processTaxonomy)}\n`
     : '';
   const processRule = opts.processTaxonomyEnabled && opts.processTaxonomy.length
-    ? '- Each feature MUST include a process_code from the taxonomy above.'
-    : '- Omit process_code from output.';
+    ? '- Each feature MUST include a process_code from the taxonomy above (never invent a code)'
+    : '- Omit process_code from output';
+  const processCodeField = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? ', "process_code": "7.x.x"'
+    : '';
 
-  return `You are a principal business analyst and product manager decomposing business requirements into well-scoped backlog features.
+  return `You are a principal business analyst and product manager decomposing business requirements into well-scoped features for a JIRA backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR JOB: Given a requirement, reason deeply about what actually has to be delivered. Break it into the distinct features needed to deliver it. Prefer a small set of meaningful business capabilities over a long list of thin slices.
+YOUR JOB: Given a short requirement, think deeply about everything it actually takes to deliver it. A requirement like "show an optimized schedule based on criticality" implies much more than one feature — think about what generates the output, what data feeds it, who uses it, what disrupts it, and what supporting capabilities are needed.
 
-Think through these dimensions before you finalize the feature set:
-- CORE CAPABILITY: What is the primary thing the user needs to do or achieve?
-- INPUTS & DETAIL: What information, selections, resources, or per-activity detail must be captured?
-- PROCESSING & LOGIC: What decisions, sequencing, validations, routing, or calculations materially change the outcome?
-- OUTPUTS & VISIBILITY: Who needs to see the outcome, status, or end-to-end progress?
-- EXCEPTIONS & CHANGE HANDLING: What invalid states, disruptions, or in-progress modifications materially change what gets built?
-- DEPENDENCIES: What supporting capability is necessary for the main flow to work correctly?
+DECOMPOSITION FRAMEWORK — think through each dimension:
+1. CORE CAPABILITY: What is the primary thing being requested?
+2. INPUTS & DATA: What information does this need? What feeds into it?
+3. PROCESSING & LOGIC: What decisions, calculations, prioritization, or rules are involved?
+4. OUTPUTS & VISIBILITY: Who sees the results? Who else needs awareness?
+5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically? (e.g., resource unavailability, rescheduling, cancellations, missing data)
+6. DEPENDENCIES: What supporting capabilities need to exist?
+
+Each dimension that represents a distinct, deliverable capability should become its own feature. Use your judgment — not every dimension warrants a separate feature.
 
 RULES:
-- Each feature must represent independent business value, not a UI widget or implementation step.
-- Each feature description MUST be: "As a [role], I need [action] so that [benefit]".
-- If the user message includes an EXACT ACTOR VOCABULARY block, use only those role labels verbatim unless the requirement itself names a different exact actor.
-- Choose exactly one actor label per feature description unless the exact role label is already collective.
-- Never use referential phrases like "the creator" or non-actor answers like approval states as role labels.
-- Keep the "I need" clause focused on the core capability only. Move examples, scenario lists, sequencing detail, policy detail, and downstream exceptions out of the description and into acceptance requirements or open decisions.
-- If multiple roles can perform the same activity, do not collapse them into one narrow owner unless the requirement or answered Q&A explicitly narrows ownership to one role.
-- No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
-- No internal product or module names unless the user already used them and they are essential to meaning.
-- Distinct sequencing rules, validation safeguards, financial gates, downstream actions, visibility needs, and in-progress modification flows should become separate features when they are independently valuable and testable.
-- Variants of the same capability that follow the same core process belong in ONE feature with scenario-level acceptance requirements, not separate cloned features.
-- Do not hide meaningful workflow branches inside one oversized feature.
-- For requirements with medium/high ambiguity or multi-role handoffs, avoid under-decomposition. If several independent capabilities must be delivered, return enough features to represent each capability explicitly.
-- If backlog references or work instructions are provided, use them to calibrate feature granularity and phrasing quality only. Never copy unrelated scope from them.
-- Do not invent adjacent capabilities that are not supported by the requirement, answers, or supplied evidence.
-- Do NOT write acceptance_requirements in this pass; leave them empty.
-- Never return an empty features array.
-- ${processRule}
+- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
+- Use the roles named in the requirement, answered Q&A, or domain context — do not invent personas
+- No solution language: no buttons, screens, fields, forms, APIs, databases, system names
+- No system-specific terms: no product names, module names, or object names
+- Suggest story points (1, 2, 3, 5, 8, 13) based on scope
+- Do NOT write acceptance_requirements — leave them as empty lists
+${processRule}
 ${taxonomySection}
-
-OUTPUT FORMAT:
-Return JSON only:
-{"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":5${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ',"process_code":"7.x.x"' : ''}}]}`;
+Output JSON: {"features": [{"summary": "...", "description": "As a ...", "acceptance_requirements": [], "suggested_story_points": N${processCodeField}}]}`;
 }
 
 export function buildStoryAssistantArSystemPrompt(opts: {
@@ -258,34 +249,31 @@ export function buildStoryAssistantArSystemPrompt(opts: {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Keep feature roles aligned to evidence from the requirement or answered Q&A.`
     : '';
-  return `You are a principal QA lead and business analyst writing acceptance requirements for a backlog.
+  return `You are a principal QA lead and business analyst writing acceptance requirements for a JIRA backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
-- the primary business scenario
-- the key business rules that must hold true
-- the practical failure, exception, dependency, sequencing, gating, or change-handling scenarios a real tester would actually run
+For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that capture:
+- The primary business scenario (happy path)
+- Key business rules that must hold true
+- Practical failure or edge cases that would actually be tested (not every hypothetical — only ones a real tester would run)
 
 RULES:
-- If the user message includes an EXACT ACTOR VOCABULARY block, use only those role labels verbatim in feature descriptions unless the requirement itself names a different exact actor.
-- Never create combined role labels like "Role A, Role B, or Role C" unless that exact label is explicitly the intended actor name.
-- Every acceptance requirement MUST use GIVEN [precondition] WHEN [action or trigger] THEN [single verifiable outcome].
-- Write in business language only. No buttons, screens, forms, APIs, databases, jobs, queues, or system mechanics.
-- Write as if describing business outcomes to someone who has never seen the system.
-- Ground GIVEN clauses in a real business situation supported by the requirement, answered discovery, work instructions, or grounded backlog patterns. Do not use abstract setup language.
-- Use concrete business facts, not vague placeholders like "is processed" or "configured mode".
-- Each AR should test one distinct thing.
-- Mention a specific role in GIVEN or WHEN only when that role changes the business responsibility, approval path, or outcome. Avoid repeating the same role label in every AR when the trigger is already clear.
-- Keep broad use-case narration and business-benefit phrasing out of ARs. Put the testable rule, dependency, gate, exception, or outcome in the AR instead.
-- Prefer real business triggers, sequencing dependencies, gates, and exception behavior over generic lifecycle filler.
-- Preserve distinct scenarios when the business trigger, gate, dependency, or outcome is materially different. Do not flatten meaningful differences just to keep the count low.
-- Do NOT use configuration or setup language in GIVEN clauses. The GIVEN must describe a real business situation, not a system setting.
-- Avoid abstract umbrella terms that hide meaning. Replace them with the actual business fact when one is available from the requirement or evidence.
-- Keep all other feature fields unchanged.
+- Every AR MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
+- No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
+- No system-specific terms: no product names, module names, system object names
+- Write as if describing business outcomes to someone who has never seen the system
+- Be CONCEPTUAL, not example-based — describe the behavior pattern, not a specific instance. Never use made-up example values (e.g., do NOT write "when the weighting is 20" or "when repairing a pump" — write "when a weighting is configured" or "when a service type is selected")
+- Verifiable means the outcome can be confirmed in any real scenario — not just one invented example
+- Each AR should test one distinct thing
 
-OUTPUT FORMAT:
-Return JSON only with the same features array and acceptance_requirements filled in.`;
+COMMON MISTAKES TO AVOID:
+- Do NOT use configuration/setup language in GIVEN clauses. BAD: "GIVEN a contract is configured for shipment-based activation". GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
+- Do NOT reference internal system concepts as preconditions. BAD: "GIVEN the defined trigger event is met". GOOD: "GIVEN the equipment's shipment has been recorded"
+- The GIVEN must describe a real-world business situation, not a system setting or admin configuration
+- Avoid abstract umbrella terms that hide meaning: "activation type", "trigger event", "configured mode". Replace with the actual business fact (e.g. "the equipment has been installed", "the contract covers a single device")
+
+Output JSON: same features with acceptance_requirements filled in. Keep all other fields unchanged.`;
 }
 
 export function buildStoryAssistantClarifySystemPrompt(opts: {
@@ -300,74 +288,54 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or evidence.`
     : '';
-  const coverageLines = (opts.coverageObligations ?? [])
-    .map((item) => `- ${item}`)
-    .join('\n');
-  const depthLine = opts.discoveryDepth
-    ? `DISCOVERY DEPTH: ${opts.discoveryDepth.toUpperCase()}`
-    : '';
-  const reasoningLine = opts.reasoningLevel
-    ? `REASONING DEPTH: ${opts.reasoningLevel.toUpperCase()}`
-    : '';
-  const rangeLine = opts.recommendedQuestionRange
-    ? `QUESTION TARGET: Aim for ${opts.recommendedQuestionRange.min} to ${opts.recommendedQuestionRange.max} questions on the upfront discovery screen. Cover the material gaps now, and do not hold back key workflow, rule, or lifecycle questions for a later round.`
-    : '';
   return `You are a principal business analyst running a structured discovery session before any design begins.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 
-You are running a structured discovery session before designing features.
-Your goal is to surface the ambiguities that would change what gets built or how acceptance requirements are written.
-Ask enough questions up front to cover the material gaps. A business analyst spending a few extra minutes answering now prevents rework later.
-Keep the discovery domain-aware and process-grounded, but system-agnostic in its wording.
-${depthLine}
-${reasoningLine}
-${rangeLine}
+You run a structured discovery session to surface the ambiguities that would change what gets built — focusing on roles, boundaries, behaviours, and success criteria before any design begins. Frame questions in business language — never in technical or system-specific language. A business analyst spending a few extra minutes answering now prevents hours of rework later.
 
-Work through each of the five discovery areas below in order.
-For each area, ask the strongest questions that are genuinely ambiguous for THIS requirement.
-Skip a question only if the requirement or supplied evidence already makes the answer unambiguous.
+Work through each of the five discovery areas below in order. For each area, ask every question that is genuinely ambiguous for THIS requirement. Skip a question only if the requirement text or supplied evidence already makes the answer unambiguous.
 
-DISCOVERY AREAS:
+─── DISCOVERY AREAS ───────────────────────────────────────────────────
+
 1. ROLES & PERSONAS
    Probe: Who initiates this process? Who performs each step? Who only views or receives output?
    Probe: Are there different user types who follow different paths through the same capability?
    Probe: Are there approval, notification, or escalation roles involved?
+
 2. TRIGGER & CONTEXT
    Probe: What specific event or business state causes this process to begin?
-   Probe: What conditions must already be true before a user can act?
+   Probe: What conditions must already be true before a user can act (e.g. status, contract type, equipment state)?
    Probe: Can this be triggered by multiple events, or only one?
+
 3. FUNCTIONAL FLOW
-   Probe: Walk through the main path step by step. What does the user do and what outcome should follow?
-   Probe: What data, inputs, or selections are required at each step?
-   Probe: Are there decisions or branches in the flow?
-   Probe: When ordering, dependencies, coordination, or handoffs are materially implied, ask what sequence or dependency actually matters.
-   Probe: What is the final output or business state after the process completes?
+   Probe: Walk through the main path step by step — what does the user do, what does the system respond with?
+   Probe: What data, inputs, or selections does the user provide at each step?
+   Probe: Are there decisions or branches in the flow (e.g. different outcomes based on a condition)?
+   Probe: What is the final output or system state after the process completes?
+
 4. BUSINESS RULES & EXCEPTIONS
    Probe: What validation rules or conditions govern whether an action is allowed?
-   Probe: What happens when the happy path is not possible?
-   Probe: Are there volume, frequency, threshold, contractual, or compliance rules that affect behavior?
+   Probe: What happens when the happy path isn't possible (e.g. missing data, failed check, expired record)?
+   Probe: Are there volume, frequency, or threshold rules (e.g. limits, SLAs, priorities)?
+   Probe: Are there regulatory, compliance, or contractual constraints that affect behaviour?
+
 5. SUCCESS & MEASUREMENT
    Probe: What does a successful outcome look like from the user's perspective?
-   Probe: How would a tester know this feature is working correctly?
-   Probe: Are there measurable targets or improvements that matter?
+   Probe: How would a tester know this feature is working correctly in UAT?
+   Probe: Are there measurable targets (e.g. time saved, error rate reduced, process steps eliminated)?
+
+────────────────────────────────────────────────────────────────────────
 
 RULES:
-- Every question must be specific to THIS requirement and never generic boilerplate.
-- Do NOT ask about timelines, budgets, project ownership, or technology choices.
-- Do NOT ask anything already clearly answered in the requirement or supplied evidence.
-- Use work-instruction evidence and backlog references to avoid redundant questions and to sharpen wording, but never ask about behavior that is only implied by a reference story and unsupported by this requirement.
-- Frame all questions in business language. Never mention system names or technical implementation concepts.
-- Keep each question focused on one business decision.
-- When the requirement implies a multi-step workflow, coordinated activities, or follow-on transactions, ask about downstream initiation, consolidated status visibility, and in-progress changes if those materially affect what gets built.
-- Coverage obligations for this requirement:
-${coverageLines || '- Cover every materially unresolved theme that changes scope, rules, or acceptance requirements.'}
-- For each question, provide 3 or 4 grounded suggestions.
-- Suggestions may be short phrases or brief clauses, but they must be specific enough to help the user answer without collapsing important business meaning.
-- Return ONLY a JSON array (no markdown fences, no prose before/after, no comments).
-- Every question must be a complete sentence that ends with a question mark.
+- Every question must be specific to THIS requirement — never generic boilerplate
+- Do NOT ask about timelines, budgets, project ownership, or technology choices
+- Do NOT ask anything already clearly answered in the requirement text
+- Frame all questions in business language — never mention specific system names or technical concepts
 
-OUTPUT FORMAT:
+For each question, provide exactly 3 short answer suggestions (under 10 words each) representing the most likely stakeholder responses.
+
+Return ONLY a JSON array. Each item must include a 'category' field matching one of the five area names exactly:
 [{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]`;
 }
 
