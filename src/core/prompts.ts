@@ -16,7 +16,7 @@ export function platformContextBlock(domainContext: string): string {
 
 function discoveryEvidenceBlock(domainContext: string): string {
   if (!domainContext || !domainContext.trim()) return '';
-  return `\nOPTIONAL CONTEXT EVIDENCE — use this only to understand the business space and to avoid redundant questions. Do NOT introduce company names, product names, role labels, or internal terminology from this block unless the request or supporting evidence already uses them.\n\n${domainContext.trim()}\n`;
+  return `\nOPTIONAL CONTEXT EVIDENCE — use this to understand business language, role vocabulary, and process boundaries for this tenant. Reuse terminology from this block only when it helps ask requirement-specific questions grounded in the supplied requirement or runtime evidence. Never hardcode assumptions that are not supported by the current session evidence.\n\n${domainContext.trim()}\n`;
 }
 
 export function processTaxonomyBlock(taxonomy: ProcessCode[]): string {
@@ -327,6 +327,8 @@ RULES:
 - Do NOT ask about timelines, budgets, project ownership, or technology choices
 - Do NOT ask anything already clearly answered in the requirement text
 - Frame questions in business language — never mention specific system names or technical concepts
+- Anchor each question to concrete language from the requirement or supplied evidence (roles, process steps, constraints, outcomes). If a question can be reused unchanged for a different requirement, rewrite it to be more specific.
+- Prefer process-grounded wording over abstract placeholders (for example, ask about the named trigger/state/exception in evidence rather than saying "this process" or "the flow" without context).
 
 For each question, provide exactly 3 short answer suggestions (under 10 words each) representing the most likely stakeholder responses.
 

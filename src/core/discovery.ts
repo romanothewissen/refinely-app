@@ -286,6 +286,7 @@ function questionComparator(left: ClarifyQuestion, right: ClarifyQuestion): numb
   const leftIndex = CLARIFY_CATEGORY_ORDER.indexOf(left.categoryKey);
   const rightIndex = CLARIFY_CATEGORY_ORDER.indexOf(right.categoryKey);
   if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+  if (left.question.length !== right.question.length) return right.question.length - left.question.length;
   return left.question.localeCompare(right.question);
 }
 

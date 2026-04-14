@@ -147,6 +147,15 @@ function buildProviderOpts(config: TenantConfig) {
   } as const;
 }
 
+function resolveClarifyModel(config: TenantConfig, assessment: DiscoveryAssessment): string {
+  const requested = getTierModel(config.generatorConfig.clarifyModel, config.tier);
+  const deepNeedsStrongerModel = assessment.discoveryDepth === 'deep'
+    && config.tier !== 'free'
+    && /\b(flash|mini|haiku)\b/i.test(requested);
+  if (!deepNeedsStrongerModel) return requested;
+  return getTierModel(config.generatorConfig.decompositionModel, config.tier);
+}
+
 function toStageUsage(usage: { input: number; output: number }) {
   return {
     input: usage.input,
@@ -216,6 +225,45 @@ function trimPromptText(text: string, maxChars: number): string {
   if (!normalized) return '';
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars).trimEnd()}\n...[truncated for speed]`;
+}
+
+function trimPromptTextAtBoundary(text: string, maxChars: number): string {
+  const normalized = String(text ?? '').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  const sliced = normalized.slice(0, maxChars);
+  const boundary = Math.max(
+    sliced.lastIndexOf('\n\n'),
+    sliced.lastIndexOf('. '),
+    sliced.lastIndexOf('? '),
+    sliced.lastIndexOf('! '),
+  );
+  if (boundary > Math.floor(maxChars * 0.6)) {
+    return `${sliced.slice(0, boundary + 1).trimEnd()}\n...[truncated for speed]`;
+  }
+  return `${sliced.trimEnd()}\n...[truncated for speed]`;
+}
+
+function normalizeEvidenceMultiline(text: string): string {
+  const cleaned = String(text ?? '')
+    .replace(/\r/g, '')
+    .replace(/-\n\s*/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!cleaned) return '';
+  const seen = new Set<string>();
+  const lines = cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const key = normalizeKey(line);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return lines.join('\n');
 }
 
 function mergeRequirementAndAttachment(requirement: string, attachmentText: string): string {
@@ -440,6 +488,7 @@ function formatWiEvidence(
   wiInsightsArtifact: WorkInstructionInsightArtifact | null | undefined,
   wiContextText: string,
 ): string {
+  const normalizedContext = normalizeEvidenceMultiline(wiContextText);
   const insightSections = wiInsightsArtifact
     ? ([
         ['Workflow signals', wiInsightsArtifact.workflowSteps],
@@ -450,7 +499,7 @@ function formatWiEvidence(
       ] as Array<[string, WorkInstructionInsightArtifact['workflowSteps']]>)
         .map(([label, items]) => {
           const lines = items
-            .slice(0, 3)
+            .slice(0, 5)
             .map((item) => cleanText(item.text))
             .filter(Boolean);
           return lines.length ? `${label}:\n- ${lines.join('\n- ')}` : '';
@@ -458,16 +507,29 @@ function formatWiEvidence(
         .filter(Boolean)
     : [];
 
+  const parts: string[] = [];
   if (insightSections.length) {
-    return trimPromptText(insightSections.join('\n\n'), 3600);
+    parts.push(insightSections.join('\n\n'));
   }
-  return trimPromptText(wiContextText, 3600);
+  if (normalizedContext) {
+    parts.push(`Source excerpts from Work Instructions:\n${trimPromptTextAtBoundary(normalizedContext, 5200)}`);
+  }
+  if (!parts.length) return '';
+  return trimPromptTextAtBoundary(parts.join('\n\n'), 8200);
 }
 
 function formatDiscoveryBacklogEvidence(similarStories: SimilarStory[] = []): string {
   if (!similarStories.length) return '';
-  const formatted = formatSimilarStoriesText(similarStories, 3);
-  return trimPromptText(formatted, 3200);
+  const deduped: SimilarStory[] = [];
+  const seen = new Set<string>();
+  for (const story of similarStories) {
+    const key = normalizeKey(`${story.summary} ${story.description ?? ''}`);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(story);
+  }
+  const formatted = formatSimilarStoriesText(deduped, 4);
+  return trimPromptTextAtBoundary(normalizeEvidenceMultiline(formatted), 4200);
 }
 
 function formatGenerationBacklogEvidence(similarStories: SimilarStory[] = []): string {
@@ -512,9 +574,14 @@ function buildClarifyUserMessage(input: {
   attachmentText: string;
   wiEvidenceText: string;
   similarStoriesText?: string;
+  domainRoles?: string[];
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
   const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
+  const roleVocabulary = uniqueStrings(input.domainRoles ?? []).slice(0, 10);
+  if (roleVocabulary.length) {
+    parts.push(`Runtime role vocabulary (reuse these labels verbatim when relevant): ${roleVocabulary.join(', ')}`);
+  }
   if (input.wiEvidenceText.trim()) {
     parts.push(`Operational evidence from Work Instructions (use to ask sharper, process-grounded questions):\n${input.wiEvidenceText}`);
   }
@@ -760,13 +827,13 @@ function buildEvidenceThemeSummary(
     `Requirement: ${trimPromptText(mergeRequirementAndAttachment(requirement, attachmentText), 6000)}`,
   ];
   if (wiEvidenceText.trim()) {
-    parts.push(`Work instruction evidence summary:\n${trimPromptText(wiEvidenceText, 2400)}`);
+    parts.push(`Work instruction evidence summary:\n${trimPromptTextAtBoundary(wiEvidenceText, 3600)}`);
   }
   if (similarStoriesText.trim()) {
-    parts.push(`Backlog theme summary:\n${trimPromptText(similarStoriesText, 1800)}`);
+    parts.push(`Backlog theme summary:\n${trimPromptTextAtBoundary(similarStoriesText, 2600)}`);
   }
   if (domainContext.trim()) {
-    parts.push(`Business context:\n${trimPromptText(domainContext, 1200)}`);
+    parts.push(`Business context:\n${trimPromptTextAtBoundary(domainContext, 1600)}`);
   }
   return parts.join('\n\n');
 }
@@ -869,7 +936,7 @@ export function evaluateClarifyQuestionSetQuality(
     reasons.push('Returned fewer questions than the assessed discovery range suggests.');
   }
   if (missingGenericCoverage.length) {
-    score -= Math.min(18, missingGenericCoverage.length * 4);
+    score -= Math.min(10, missingGenericCoverage.length * 2);
     reasons.push(`Missing generic discovery coverage: ${missingGenericCoverage.map((key) => GENERIC_DISCOVERY_COVERAGE_LABELS[key]).join(', ')}.`);
   }
   const weakSuggestions = questions.filter((question) => question.suggestions.length < 2).length;
@@ -962,7 +1029,7 @@ function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestio
     })
     .filter((question) => !isLikelyTruncatedQuestion(question.question))
     .filter((question) => question.suggestions.length >= 1);
-  return parsed.slice(0, 1);
+  return parsed.slice(0, 2);
 }
 
 function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
@@ -1210,12 +1277,14 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     attachmentText: opts.attachmentText,
     wiEvidenceText,
     similarStoriesText,
+    domainRoles: opts.config.domainRoles,
   });
   promptAssemblyMs += Date.now() - baseUserMessageStartedAt;
 
   for (const attempt of [1, 2]) {
+    const clarifyModel = resolveClarifyModel(opts.config, discoveryAssessment);
     const result = await callLlmJsonWithUsage<unknown>({
-      model: getTierModel(opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      model: clarifyModel,
       systemPrompt: buildStoryAssistantClarifySystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
@@ -1237,7 +1306,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     qualityReasons = quality.reasons;
     const shouldRetry = questions.length < discoveryAssessment.recommendedQuestionRange.min
       || shouldRetryDiscoveryQuestions(questions)
-      || quality.score < 65;
+      || quality.score < 55;
     if (!shouldRetry || attempt === 2) break;
     coverageRetryTriggered = true;
   }
