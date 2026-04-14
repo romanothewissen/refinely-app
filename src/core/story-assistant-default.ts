@@ -1032,15 +1032,6 @@ function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestio
   return parsed.slice(0, 2);
 }
 
-function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
-  if (questions.length < 2) return true;
-  return questions.some((question) => (
-    question.suggestions.length < 2
-    || question.suggestions.some((suggestion) => isLikelyTruncatedSuggestion(suggestion))
-    || question.question.length > 240
-  ));
-}
-
 function buildMinimalDiscoveryProfile(
   questions: ClarifyQuestion[],
   assessment?: DiscoveryAssessment,
@@ -1281,35 +1272,26 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   });
   promptAssemblyMs += Date.now() - baseUserMessageStartedAt;
 
-  for (const attempt of [1, 2]) {
-    const clarifyModel = resolveClarifyModel(opts.config, discoveryAssessment);
-    const result = await callLlmJsonWithUsage<unknown>({
-      model: clarifyModel,
-      systemPrompt: buildStoryAssistantClarifySystemPrompt({
-        domainContext: opts.config.domainContext,
-        domainRoles: opts.config.domainRoles,
-      }),
-      userMessage: attempt === 1
-        ? baseUserMessage
-        : `${baseUserMessage}\n\nIMPORTANT: Re-run discovery and improve the initial question set. The previous output was weak or incomplete. Cover the missing or weak areas called out here: ${qualityReasons.join(' ') || missingGenericCoverageKeys(questions, discoveryAssessment).map((key) => GENERIC_DISCOVERY_COVERAGE_LABELS[key]).join(', ') || 'general discovery coverage'}. Keep each question focused on one business decision and use grounded answer suggestions.`,
-      maxTokens: 4600,
-      reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
-      ...providerOpts,
-    });
-    usageByStage[attempt === 1 ? 'clarify' : 'clarifyRetry'] = result.usage;
-    questions = finalizeStoryAssistantDiscoveryQuestions(
-      parseStoryAssistantQuestionCandidates(result.data),
-      discoveryAssessment,
-    );
-    const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
-    coverageQualityScore = quality.score;
-    qualityReasons = quality.reasons;
-    const shouldRetry = questions.length < discoveryAssessment.recommendedQuestionRange.min
-      || shouldRetryDiscoveryQuestions(questions)
-      || quality.score < 55;
-    if (!shouldRetry || attempt === 2) break;
-    coverageRetryTriggered = true;
-  }
+  const clarifyModel = resolveClarifyModel(opts.config, discoveryAssessment);
+  const result = await callLlmJsonWithUsage<unknown>({
+    model: clarifyModel,
+    systemPrompt: buildStoryAssistantClarifySystemPrompt({
+      domainContext: opts.config.domainContext,
+      domainRoles: opts.config.domainRoles,
+    }),
+    userMessage: baseUserMessage,
+    maxTokens: 4600,
+    reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
+    ...providerOpts,
+  });
+  usageByStage.clarify = result.usage;
+  questions = finalizeStoryAssistantDiscoveryQuestions(
+    parseStoryAssistantQuestionCandidates(result.data),
+    discoveryAssessment,
+  );
+  const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
+  coverageQualityScore = quality.score;
+  qualityReasons = quality.reasons;
 
   const discoveryProfile = buildMinimalDiscoveryProfile(questions, discoveryAssessment);
   const ambiguityAssessment = buildClarifyAmbiguityAssessment(
