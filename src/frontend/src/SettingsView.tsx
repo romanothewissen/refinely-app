@@ -7,26 +7,21 @@ import {
 import { motion } from 'framer-motion';
 import { api } from './hooks/useForge';
 import type {
-  GeneratorModelStrategy,
   InferProjectPersonaRolesResult,
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
   LlmProvider,
   OutputProfile,
+  PipelineProfile,
   ProjectActivitySummaryRow,
   ProjectPersonaRoleSuggestion,
 } from './types';
 import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
 import {
-  DEFAULT_BUCKET_CLASSES,
-  GENERATOR_ROLE_ORDER,
   getCatalogEntriesForProvider,
-  MODEL_STRATEGY_VERSION,
-  resolveUiGeneratorStrategyState,
-  SIMPLE_BUCKET_DESCRIPTIONS,
-  SIMPLE_BUCKET_LABELS,
-  type SimpleBucketModels,
+  normalizePipelineProfile,
+  resolveProfileModelAssignments,
 } from './modelStrategy';
 interface JiraProject { key: string; name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
@@ -141,10 +136,6 @@ interface PiiPreviewResult {
 const WI_ACCEPT = '.pdf,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
 type UiProvider = Exclude<LlmProvider, 'forge_llms'>;
-const DEFAULT_STRATEGY_STATE = resolveUiGeneratorStrategyState({
-  provider: 'anthropic',
-  modelStrategy: 'simple',
-});
 
 function getDisplayProvider(provider: LlmProvider): UiProvider {
   return provider === 'forge_llms' ? 'anthropic' : provider;
@@ -310,30 +301,17 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // Models State
   const [provider, setProvider] = useState<LlmProvider>('anthropic');
-  const [modelStrategy, setModelStrategy] = useState<GeneratorModelStrategy>('simple');
-  const [simpleBucketModels, setSimpleBucketModels] = useState<SimpleBucketModels>(DEFAULT_STRATEGY_STATE.resolvedBucketModels);
-  const [decompositionModel, setDecompositionModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.decompositionModel);
-  const [arModel, setArModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.arModel);
-  const [clarifyModel, setClarifyModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.clarifyModel);
-  const [evaluateModel, setEvaluateModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.evaluateModel);
-  const [triageModel, setTriageModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.triageModel);
-  const [refineModel, setRefineModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.refineModel);
-  const [themeModel, setThemeModel] = useState(DEFAULT_STRATEGY_STATE.resolvedModels.themeModel);
+  const [pipelineProfile, setPipelineProfile] = useState<PipelineProfile>('balanced');
+  const [decompositionModel, setDecompositionModel] = useState('');
+  const [arModel, setArModel] = useState('');
+  const [clarifyModel, setClarifyModel] = useState('');
+  const [refineModel, setRefineModel] = useState('');
+  const [themeModel, setThemeModel] = useState('');
   const roleModelValues = {
-    triageModel,
-    clarifyModel,
-    evaluateModel,
-    decompositionModel,
-    arModel,
     themeModel,
     refineModel,
   };
   const roleModelSetters = {
-    triageModel: setTriageModel,
-    clarifyModel: setClarifyModel,
-    evaluateModel: setEvaluateModel,
-    decompositionModel: setDecompositionModel,
-    arModel: setArModel,
     themeModel: setThemeModel,
     refineModel: setRefineModel,
   };
@@ -539,11 +517,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         const gc = existingConfig.generatorConfig || {};
         const loadedProvider = gc.provider ? getDisplayProvider(gc.provider) : 'anthropic';
         setProvider(loadedProvider);
+        setPipelineProfile(normalizePipelineProfile(gc.pipelineProfile));
         if (gc.decompositionModel) setDecompositionModel(gc.decompositionModel);
         if (gc.arModel) setArModel(gc.arModel);
         if (gc.clarifyModel) setClarifyModel(gc.clarifyModel);
-        if (gc.evaluateModel) setEvaluateModel(gc.evaluateModel);
-        if (gc.triageModel) setTriageModel(gc.triageModel);
         if (gc.refineModel) setRefineModel(gc.refineModel);
         if (gc.themeModel) setThemeModel(gc.themeModel);
 
@@ -565,19 +542,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             };
           }
           setModelCatalogs(nextCatalogs);
-          const strategyState = resolveUiGeneratorStrategyState({
-            config: gc,
-            provider: loadedProvider,
-          });
-          setModelStrategy(strategyState.modelStrategy);
-          setSimpleBucketModels(strategyState.resolvedBucketModels);
-        } else {
-          const strategyState = resolveUiGeneratorStrategyState({
-            config: gc,
-            provider: loadedProvider,
-          });
-          setModelStrategy(strategyState.modelStrategy);
-          setSimpleBucketModels(strategyState.resolvedBucketModels);
         }
 
         if (existingConfig.tier) setTier(existingConfig.tier);
@@ -841,20 +805,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         alert('Personal settings saved successfully!');
         return;
       }
-      const generatorModels = strategyState.resolvedModels;
       await api.saveConfig({
         generatorConfig: {
           provider,
-          modelStrategy: strategyState.modelStrategy,
-          bucketClasses: DEFAULT_BUCKET_CLASSES,
-          modelStrategyVersion: MODEL_STRATEGY_VERSION,
-          decompositionModel: generatorModels.decompositionModel,
-          arModel: generatorModels.arModel,
-          clarifyModel: generatorModels.clarifyModel,
-          refineModel: generatorModels.refineModel,
-          evaluateModel: generatorModels.evaluateModel,
-          triageModel: generatorModels.triageModel,
-          themeModel: generatorModels.themeModel,
+          pipelineProfile,
+          decompositionModel: profileModels.decompositionModel,
+          arModel: profileModels.arModel,
+          clarifyModel: profileModels.clarifyModel,
+          refineModel,
+          themeModel,
           maxTokens: 8192,
           anthropicApiKey: provider === 'anthropic' ? (anthropicApiKey.trim() || existingAnthropicApiKey || undefined) : undefined,
           anthropicBaseUrl: provider === 'anthropic' ? (anthropicBaseUrl.trim() || undefined) : undefined,
@@ -905,7 +864,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   async function testLlmConnection() {
     setIsTestingLlm(true); setLlmTestResult(null);
     try {
-      const resolvedTestModel = strategyState.resolvedModels.clarifyModel.trim();
+      const resolvedTestModel = (profileModels.clarifyModel || clarifyModel).trim();
       if (!resolvedTestModel) {
         throw new Error(provider === 'azure_openai'
           ? 'No Azure OpenAI deployment is available yet. Refresh models and choose a concrete deployment first.'
@@ -1007,39 +966,25 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     return [...catalogEntries].sort((a, b) => collator.compare(a.displayName || a.id, b.displayName || b.id));
   }, [catalogEntries]);
 
-  const strategyState = useMemo(() => resolveUiGeneratorStrategyState({
-    config: {
-      provider,
-      modelStrategy,
-      modelStrategyVersion: MODEL_STRATEGY_VERSION,
-      decompositionModel,
-      arModel,
-      clarifyModel,
-      refineModel,
-      evaluateModel,
-      triageModel,
-      themeModel,
-      maxTokens: 8192,
-    },
-    provider,
-    modelStrategy,
-    bucketModels: simpleBucketModels,
-  }), [
-    provider,
-    modelStrategy,
-    simpleBucketModels,
+  const profileModels = useMemo(() => resolveProfileModelAssignments(provider, pipelineProfile, {
+    clarifyModel,
     decompositionModel,
     arModel,
-    clarifyModel,
-    refineModel,
-    evaluateModel,
-    triageModel,
-    themeModel,
-  ]);
+  }), [provider, pipelineProfile, clarifyModel, decompositionModel, arModel]);
 
   useEffect(() => {
-    if (strategyState.modelStrategy !== 'advanced') return;
-    const proModel = getPreferredFamilyModel(currentCatalogEntries, 'pro');
+    if (profileModels.clarifyModel && profileModels.clarifyModel !== clarifyModel) {
+      setClarifyModel(profileModels.clarifyModel);
+    }
+    if (profileModels.decompositionModel && profileModels.decompositionModel !== decompositionModel) {
+      setDecompositionModel(profileModels.decompositionModel);
+    }
+    if (profileModels.arModel && profileModels.arModel !== arModel) {
+      setArModel(profileModels.arModel);
+    }
+  }, [profileModels, clarifyModel, decompositionModel, arModel]);
+
+  useEffect(() => {
     const flashModel = getPreferredFamilyModel(currentCatalogEntries, 'flash');
     const liteModel = getPreferredFamilyModel(currentCatalogEntries, 'lite');
     const liteOrFlashModel = liteModel || flashModel;
@@ -1051,23 +996,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         || modelId.startsWith('gpt-')
         || modelId.startsWith('o')
         || modelId.startsWith('claude-');
-      if (shouldResetAzureModel(decompositionModel) && proModel) setDecompositionModel(proModel);
-      if (shouldResetAzureModel(arModel) && proModel) setArModel(proModel);
-      if (shouldResetAzureModel(clarifyModel) && flashModel) setClarifyModel(flashModel);
-      if (shouldResetAzureModel(evaluateModel) && liteOrFlashModel) setEvaluateModel(liteOrFlashModel);
-      if (shouldResetAzureModel(triageModel) && liteOrFlashModel) setTriageModel(liteOrFlashModel);
       if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
       if (shouldResetAzureModel(themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     } else {
-      if (!isProviderModel(provider, decompositionModel) && proModel) setDecompositionModel(proModel);
-      if (!isProviderModel(provider, arModel) && proModel) setArModel(proModel);
-      if (!isProviderModel(provider, clarifyModel) && flashModel) setClarifyModel(flashModel);
-      if (!isProviderModel(provider, evaluateModel) && liteOrFlashModel) setEvaluateModel(liteOrFlashModel);
-      if (!isProviderModel(provider, triageModel) && liteOrFlashModel) setTriageModel(liteOrFlashModel);
       if (!isProviderModel(provider, refineModel) && flashModel) setRefineModel(flashModel);
       if (!isProviderModel(provider, themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     }
-  }, [provider, strategyState.modelStrategy, currentCatalogEntries, decompositionModel, arModel, clarifyModel, evaluateModel, triageModel, refineModel, themeModel]);
+  }, [provider, currentCatalogEntries, refineModel, themeModel]);
 
   const availableModels = useMemo(() => {
     const options: Array<{ id: string; label: string }> = [];
@@ -1084,17 +1019,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       clarifyModel,
       decompositionModel,
       arModel,
-      evaluateModel,
-      triageModel,
       refineModel,
       themeModel,
-      strategyState.resolvedModels.clarifyModel,
-      strategyState.resolvedModels.decompositionModel,
-      strategyState.resolvedModels.arModel,
-      strategyState.resolvedModels.evaluateModel,
-      strategyState.resolvedModels.triageModel,
-      strategyState.resolvedModels.refineModel,
-      strategyState.resolvedModels.themeModel,
+      profileModels.clarifyModel,
+      profileModels.decompositionModel,
+      profileModels.arModel,
     ].forEach(modelId => {
       if (modelId && !options.some(option => option.id === modelId)) {
         options.push({ id: modelId, label: modelId });
@@ -1102,7 +1031,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     });
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
     return options.sort((left, right) => collator.compare(left.label, right.label));
-  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, evaluateModel, triageModel, refineModel, themeModel, strategyState]);
+  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, refineModel, themeModel, profileModels]);
 
   const showComplianceTab = true;
   const settingsNav = [
@@ -1307,109 +1236,101 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
 
                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Strategy</div>
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Story Assistant Profile</div>
                     <div className="mt-1.5 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                      Simple keeps setup lightweight with one model for each workflow bucket. Advanced exposes all 7 internal model roles when a team wants full control.
+                      Story Assistant now uses one fixed, deterministic profile. The profile controls discovery depth and the clarify/decomposition/AR model route for this workflow.
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Mode</div>
-                    <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
-                      {(['simple', 'advanced'] as const).map((nextStrategy) => {
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Profile</div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {[
+                        {
+                          id: 'fast' as const,
+                          label: 'Fast',
+                          summary: 'Flash-style models for discovery and generation.',
+                          range: 'Discovery: 4-8 questions, hard cap 10',
+                          tradeoff: 'Lowest latency and cost, least depth on ambiguous asks.',
+                        },
+                        {
+                          id: 'balanced' as const,
+                          label: 'Balanced',
+                          summary: 'Flash-style clarify, stronger decomposition and AR generation.',
+                          range: 'Discovery: 6-12 questions, hard cap 14',
+                          tradeoff: 'Default profile for predictable speed and richer output.',
+                        },
+                        {
+                          id: 'quality' as const,
+                          label: 'Quality',
+                          summary: 'Stronger models across clarify, decomposition, and ARs.',
+                          range: 'Discovery: 8-14 questions, hard cap 16',
+                          tradeoff: 'Highest output richness with the highest latency and cost.',
+                        },
+                      ].map((item) => {
+                        const selected = pipelineProfile === item.id;
                         return (
                           <button
-                            key={nextStrategy}
-                            onClick={() => {
-                              if (nextStrategy === 'advanced' && strategyState.modelStrategy !== 'advanced') {
-                                setDecompositionModel(strategyState.resolvedModels.decompositionModel);
-                                setArModel(strategyState.resolvedModels.arModel);
-                                setClarifyModel(strategyState.resolvedModels.clarifyModel);
-                                setEvaluateModel(strategyState.resolvedModels.evaluateModel);
-                                setTriageModel(strategyState.resolvedModels.triageModel);
-                                setRefineModel(strategyState.resolvedModels.refineModel);
-                                setThemeModel(strategyState.resolvedModels.themeModel);
-                              }
-                              if (nextStrategy === 'simple' && strategyState.modelStrategy !== 'simple') {
-                                setSimpleBucketModels(strategyState.resolvedBucketModels);
-                              }
-                              setModelStrategy(nextStrategy);
-                            }}
-                            className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${
-                              strategyState.modelStrategy === nextStrategy
-                                ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50'
-                                : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'
-                            }`}
+                            key={item.id}
+                            type="button"
+                            onClick={() => setPipelineProfile(item.id)}
+                            disabled={!isAdmin}
+                            className={`rounded-xl border px-3.5 py-3 text-left transition ${selected ? 'border-[var(--rf-brand)] bg-white shadow-sm' : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] hover:bg-white'} disabled:opacity-60`}
                           >
-                            {nextStrategy}
+                            <div className="text-[12px] font-bold uppercase tracking-wide text-[var(--rf-brand)]">{item.label}</div>
+                            <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{item.summary}</div>
+                            <div className="mt-2 text-[11px] font-semibold text-[var(--rf-text-secondary)]">{item.range}</div>
+                            <div className="mt-1 text-[11px] leading-relaxed text-[var(--rf-text-tertiary)]">{item.tradeoff}</div>
                           </button>
                         );
                       })}
                     </div>
                   </div>
 
-                  {strategyState.modelStrategy === 'advanced' ? (
-                    <div className="divide-y divide-[var(--rf-border-subtle)]">
-                      {GENERATOR_ROLE_ORDER.map((item) => (
-                        <div key={item.field} className="flex items-center justify-between gap-4 py-2.5">
-                          <div>
-                            <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
-                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.description}</div>
-                            <div className="mt-1 text-[11px] font-semibold text-[var(--rf-brand)]">{item.recommendationClass}</div>
-                            <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5 max-w-[320px]">{item.rationale}</div>
-                          </div>
-                          <div className="relative w-[220px] shrink-0">
-                            <select value={roleModelValues[item.field]} disabled={availableModels.length === 0 || !isAdmin} onChange={e => roleModelSetters[item.field](e.target.value)} className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60">
-                              {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                            </select>
-                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="divide-y divide-[var(--rf-border-subtle)]">
-                        {[
-                          { key: 'discovery' as const, label: SIMPLE_BUCKET_LABELS.discovery, sub: SIMPLE_BUCKET_DESCRIPTIONS.discovery, resolved: strategyState.resolvedBucketModels.discovery },
-                          { key: 'generation' as const, label: SIMPLE_BUCKET_LABELS.generation, sub: SIMPLE_BUCKET_DESCRIPTIONS.generation, resolved: strategyState.resolvedBucketModels.generation },
-                          { key: 'refinement' as const, label: SIMPLE_BUCKET_LABELS.refinement, sub: SIMPLE_BUCKET_DESCRIPTIONS.refinement, resolved: strategyState.resolvedBucketModels.refinement },
-                        ].map((item) => (
-                          <div key={item.key} className="flex items-center justify-between gap-4 py-2.5">
-                            <div>
-                              <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
-                              <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.sub}</div>
-                              <div className="text-[12px] text-[var(--rf-brand)] mt-1 font-semibold">{item.resolved || 'No model selected'}</div>
-                            </div>
-                            <div className="relative w-[220px] shrink-0">
-                              <select
-                                value={simpleBucketModels[item.key]}
-                                disabled={!isAdmin || availableModels.length === 0}
-                                onChange={e => setSimpleBucketModels(prev => ({ ...prev, [item.key]: e.target.value }))}
-                                className="appearance-none pr-7 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60"
-                              >
-                                {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                              </select>
-                              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                            </div>
-                          </div>
-                        ))}
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      { label: 'Clarify', value: profileModels.clarifyModel || clarifyModel, note: 'Profile-controlled' },
+                      { label: 'Decomposition', value: profileModels.decompositionModel || decompositionModel, note: 'Profile-controlled' },
+                      { label: 'Acceptance Requirements', value: profileModels.arModel || arModel, note: 'Profile-controlled' },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
+                        <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{item.value || 'No model selected'}</div>
+                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">{item.note}</div>
                       </div>
+                    ))}
+                  </div>
 
-                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3 space-y-2">
-                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced role breakdown</div>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {GENERATOR_ROLE_ORDER.map((item) => (
-                            <div key={item.field} className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
-                              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
-                              <div className="mt-1 text-[11px] font-semibold text-[var(--rf-brand)]">{item.recommendationClass}</div>
-                              <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{strategyState.resolvedModels[item.field]}</div>
-                            </div>
-                          ))}
-                        </div>
+                  <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3 space-y-3">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced Models</div>
+                      <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
+                        These models are still configurable because they support workflows outside the main story assistant pipeline.
                       </div>
                     </div>
-                  )}
+                    {[
+                      { field: 'refineModel' as const, label: 'Refinement', description: 'Interactive edits on existing features' },
+                      { field: 'themeModel' as const, label: 'Theme Analysis', description: 'Tagging, titles, and support analysis' },
+                    ].map((item) => (
+                      <div key={item.field} className="flex items-center justify-between gap-4 py-1">
+                        <div>
+                          <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.description}</div>
+                        </div>
+                        <div className="relative w-[220px] shrink-0">
+                          <select
+                            value={roleModelValues[item.field]}
+                            disabled={availableModels.length === 0 || !isAdmin}
+                            onChange={e => roleModelSetters[item.field](e.target.value)}
+                            className="appearance-none pr-7 w-full bg-white border border-[var(--rf-border)] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60"
+                          >
+                            {availableModels.length === 0 ? <option>Select provider…</option> : availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
 
                   <div className="pt-2 border-t border-[var(--rf-border-subtle)] flex items-center gap-3">
                     <motion.button

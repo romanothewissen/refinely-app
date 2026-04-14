@@ -41,6 +41,7 @@ import type {
   FeatureConfidence,
   GenerationContextMeta,
   OutputProfile,
+  PipelineProfile,
   RestructureScope,
   StructuralFeatureProposal,
   StructuralRestructureProposal,
@@ -54,15 +55,12 @@ import {
   formatGenerationFeatureTarget,
   generationTriageFeatureFootnote,
   getApprovedDraftStructureNote,
-  getDiscoveryDisplayComplexity,
-  getDiscoveryProfileHeadline,
   getDraftFeatureHeading,
   getDraftFeatureNote,
   getGenerationFeatureTargetLabel,
   getSizingRunContextNote,
   getSourceContextChips,
   pickAdvisoryDiscoveryQuestionForecast,
-  pickFirstRoundQuestionCount,
 } from './generation-progress-copy';
 import type { SourceContextChip } from './generation-progress-copy';
 
@@ -153,8 +151,30 @@ function formatOutputProfileLabel(value?: OutputProfile): string {
   return 'Business-first';
 }
 
+function formatPipelineProfileLabel(value?: PipelineProfile): string {
+  switch (value) {
+    case 'fast':
+      return 'Profile: Fast';
+    case 'quality':
+      return 'Profile: Quality';
+    default:
+      return 'Profile: Balanced';
+  }
+}
+
+function getPipelineProfileQuestionBand(value?: PipelineProfile): string {
+  switch (value) {
+    case 'fast':
+      return '4-8';
+    case 'quality':
+      return '8-14';
+    default:
+      return '6-12';
+  }
+}
+
 type GenerationProgressMeta = {
-  stage?: 'context' | 'triage' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
+  stage?: 'context' | 'decomposition' | 'draft_review' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
@@ -182,13 +202,13 @@ type GenerationProgressMeta = {
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };
   outputProfile?: OutputProfile;
+  pipelineProfile?: PipelineProfile;
 };
 
 type DiscoveryProgressMeta = ClarifyProgressPayload;
 
 const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: string; shortLabel: string }> = [
   { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
-  { key: 'triage', label: 'Assessing scope', shortLabel: 'Triage' },
   { key: 'decomposition', label: 'Sketching features', shortLabel: 'Features' },
   { key: 'draft_review', label: 'Reviewing drafted features', shortLabel: 'Review' },
   { key: 'acceptance_requirements', label: 'Writing acceptance requirements', shortLabel: 'ARs' },
@@ -196,10 +216,8 @@ const GENERATION_STEPS: Array<{ key: GenerationProgressMeta['stage']; label: str
 
 const DISCOVERY_STEPS: Array<{ key: NonNullable<DiscoveryProgressMeta['stage']>; label: string; shortLabel: string }> = [
   { key: 'context', label: 'Gathering context', shortLabel: 'Context' },
-  { key: 'assessment', label: 'Assessing the ask', shortLabel: 'Assess' },
-  { key: 'question_generation', label: 'Planning discovery questions', shortLabel: 'Plan' },
+  { key: 'question_generation', label: 'Writing discovery questions', shortLabel: 'Questions' },
   { key: 'finalize', label: 'Finalizing the first round', shortLabel: 'Round 1' },
-  { key: 'sufficiency', label: 'Checking sufficiency', shortLabel: 'Check' },
   { key: 'followup', label: 'Preparing follow-up', shortLabel: 'Follow-up' },
 ];
 
@@ -209,24 +227,21 @@ function getGenerationStageIndex(meta: GenerationProgressMeta | null, progress?:
     if (idx >= 0) return idx;
   }
   const text = (progress || '').toLowerCase();
-  if (text.includes('acceptance requirement')) return 4;
-  if (text.includes('scope') || text.includes('complexity') || text.includes('targeting')) return 1;
-  if (text.includes('planning feature') || text.includes('feature structure')) return 2;
+  if (text.includes('acceptance requirement')) return 3;
+  if (text.includes('planning feature') || text.includes('feature structure')) return 1;
   return 0;
 }
 
 function getDiscoveryStageIndex(meta: DiscoveryProgressMeta | null, workflowStage?: string, progress?: string) {
   if (workflowStage === 'clarify_round_2') return DISCOVERY_STEPS.findIndex((step) => step.key === 'followup');
-  if (workflowStage === 'sufficiency_check') return DISCOVERY_STEPS.findIndex((step) => step.key === 'sufficiency');
   if (meta?.stage) {
     const idx = DISCOVERY_STEPS.findIndex((step) => step.key === meta.stage);
     if (idx >= 0) return idx;
   }
   const text = (progress || '').toLowerCase();
-  if (text.includes('sufficiency') || text.includes('covered well enough') || text.includes('follow-up questions are still needed')) return 4;
-  if (text.includes('targeting about') || text.includes('question budget')) return 2;
-  if (text.includes('finalizing')) return 3;
-  if (text.includes('assessing scope') || text.includes('ambiguity')) return 1;
+  if (text.includes('follow-up questions')) return 3;
+  if (text.includes('finalizing')) return 2;
+  if (text.includes('question')) return 1;
   return 0;
 }
 
@@ -724,36 +739,27 @@ function DiscoveryScoreCard({
   context?: ClarifyContextMeta | null;
 }) {
   const discoveryProfile = meta?.discoveryProfile ?? context?.discoveryProfile;
-  const advisoryTriage = meta?.advisoryTriage ?? context?.advisoryTriage;
   const ambiguityAssessment = meta?.ambiguityAssessment ?? context?.ambiguityAssessment;
-  const assessment = meta?.assessment ?? null;
-  const sizingContract = meta?.sizingContract ?? context?.sizingContract;
-  const advisoryQuestionForecast = pickAdvisoryDiscoveryQuestionForecast({
-    advisoryForecast: advisoryTriage?.discoveryForecast,
-    sizingEstimatedQuestions: sizingContract?.estimatedQuestions,
-    assessmentEstimatedQuestions: assessment?.estimatedQuestions,
-  });
-  const firstRoundQuestionCount = pickFirstRoundQuestionCount({
-    initialQuestionCount: context?.initialQuestionCount,
-    discoveryProfile,
-    ambiguityGeneratedQuestions: ambiguityAssessment?.generatedQuestions,
-  });
-  const plannedQuestionsFallback =
-    coerceNonNegativeQuestionCount(ambiguityAssessment?.questionPlan?.target)
-    ?? advisoryQuestionForecast;
-  const plannedQuestionsDisplay =
-    discoveryProfile && firstRoundQuestionCount != null
-      ? firstRoundQuestionCount
-      : advisoryQuestionForecast ?? plannedQuestionsFallback;
-  const complexityKey = getDiscoveryDisplayComplexity({
-    discoveryProfile,
-    advisoryForecast: advisoryTriage?.discoveryForecast,
-    plannedQuestions: plannedQuestionsDisplay,
-  });
-  const discoveryHeadline = getDiscoveryProfileHeadline(discoveryProfile);
-  const isFinalProfile = Boolean(discoveryProfile);
+  const pipelineProfile = meta?.pipelineProfile ?? context?.pipelineProfile ?? 'balanced';
+  const firstRoundQuestionCount =
+    context?.initialQuestionCount
+    ?? ambiguityAssessment?.generatedQuestions
+    ?? coerceNonNegativeQuestionCount(ambiguityAssessment?.questionPlan?.target);
+  const plannedQuestionsDisplay = firstRoundQuestionCount ?? getPipelineProfileQuestionBand(pipelineProfile);
+  const followupCapDisplay = typeof discoveryProfile?.followupCap === 'number'
+    ? discoveryProfile.followupCap
+    : '1';
+  const scopeLabel = discoveryProfile
+    ? (DISCOVERY_SCOPE_LABELS[discoveryProfile.scope] ?? discoveryProfile.scope)
+    : 'LLM-led';
+  const ambiguityLabel = discoveryProfile
+    ? (DISCOVERY_AMBIGUITY_LABELS[discoveryProfile.ambiguity] ?? discoveryProfile.ambiguity)
+    : 'LLM-led';
+  const complexityKey = discoveryProfile?.complexity ?? 'medium';
+  const discoveryHeadline = formatPipelineProfileLabel(pipelineProfile);
+  const profileLabel = discoveryHeadline.replace('Profile: ', '');
 
-  if (!discoveryProfile && !assessment && !ambiguityAssessment && !sizingContract) {
+  if (!discoveryProfile && !ambiguityAssessment) {
     return (
       <div>
         <div className="flex items-center justify-between mb-2.5">
@@ -782,66 +788,34 @@ function DiscoveryScoreCard({
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="flex items-center justify-between mb-2.5">
         <span className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Discovery Profile</span>
-        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{isFinalProfile ? discoveryHeadline : 'Advisory forecast'}</span>
+        <span className="text-[12px] font-bold text-[var(--rf-brand)] uppercase tracking-wide">{discoveryHeadline}</span>
       </div>
       <ComplexityBar current={complexityKey} />
-      {!isFinalProfile && advisoryTriage?.discoveryForecast && (
-        <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
-          Early forecast: {getDiscoveryProfileHeadline({
-            ...advisoryTriage.discoveryForecast,
-            missingCategoryKeys: [],
-          } as ClarifyProgressPayload['discoveryProfile'])}
-        </div>
-      )}
+      <div className="mt-2 text-[12px] text-[var(--rf-text-tertiary)]">
+        Clarify depth is LLM-led within the {profileLabel.toLowerCase()} profile band.
+      </div>
 
       <div className="mt-3 h-px bg-[rgba(0,0,0,0.05)]" />
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Scope</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {discoveryProfile
-              ? (DISCOVERY_SCOPE_LABELS[discoveryProfile.scope] ?? discoveryProfile.scope)
-              : advisoryTriage?.discoveryForecast
-                ? (DISCOVERY_SCOPE_LABELS[advisoryTriage.discoveryForecast.scope] ?? advisoryTriage.discoveryForecast.scope)
-                : 'Assessing'}
-          </div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{scopeLabel}</div>
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Ambiguity</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {discoveryProfile
-              ? (DISCOVERY_AMBIGUITY_LABELS[discoveryProfile.ambiguity] ?? discoveryProfile.ambiguity)
-              : advisoryTriage?.discoveryForecast
-                ? (DISCOVERY_AMBIGUITY_LABELS[advisoryTriage.discoveryForecast.ambiguity] ?? advisoryTriage.discoveryForecast.ambiguity)
-                : 'Assessing'}
-          </div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{ambiguityLabel}</div>
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Questions planned</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {plannedQuestionsDisplay != null
-              ? (discoveryProfile && firstRoundQuestionCount != null ? firstRoundQuestionCount : `~${plannedQuestionsDisplay}`)
-              : 'Assessing'}
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{plannedQuestionsDisplay}</div>
+          <div className="text-[10px] text-[var(--rf-text-tertiary)] mt-0.5 leading-snug">
+            Expected band for this profile: {getPipelineProfileQuestionBand(pipelineProfile)} questions.
           </div>
-          {discoveryProfile
-            && advisoryQuestionForecast != null
-            && firstRoundQuestionCount != null
-            && advisoryQuestionForecast !== firstRoundQuestionCount ? (
-            <div className="text-[10px] text-[var(--rf-text-tertiary)] mt-0.5 leading-snug">
-              Advisory suggested ~{advisoryQuestionForecast}; first screen shows {firstRoundQuestionCount} for speed.
-            </div>
-            ) : null}
         </div>
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Follow-up cap</div>
-          <div className="text-[14px] font-black text-[var(--rf-text)]">
-            {typeof discoveryProfile?.followupCap === 'number'
-              ? discoveryProfile.followupCap
-              : typeof advisoryTriage?.discoveryForecast.followupCap === 'number'
-                ? advisoryTriage.discoveryForecast.followupCap
-                : 'Pending'}
-          </div>
+          <div className="text-[14px] font-black text-[var(--rf-text)]">{followupCapDisplay}</div>
         </div>
       </div>
     </motion.div>
@@ -989,8 +963,8 @@ function GeneratingPipeline({
   const draftFeatureNote = getDraftFeatureNote();
   const sourceChips = getSourceContextChips(meta?.sources ?? null);
 
-  // Anchored progress: context=5%, triage=25%, features=50%, ARs=72→100%
-  const STAGE_PCT = [5, 25, 50, 72];
+  // Anchored progress: context=5%, features=50%, ARs=72→100%
+  const STAGE_PCT = [5, 50, 72];
   const pct = stageIndex < 3
     ? STAGE_PCT[stageIndex]
     : Math.round(72 + liveArRatio * 28);
@@ -1139,7 +1113,7 @@ function GeneratingPipeline({
         {/* Triage scores + Context */}
         <div className="rounded-xl border border-[var(--rf-border)] bg-white/60 px-4 py-3.5 backdrop-blur-sm">
           <TriageScoreCard advisoryTriage={meta?.advisoryTriage} sizingContract={triage} phase="generation" />
-          {typeof meta?.draftFeatureCount === 'number' && meta.stage !== 'triage' && (
+          {typeof meta?.draftFeatureCount === 'number' && (
             <div className="mt-3 pt-3 border-t border-[var(--rf-border)] flex items-center gap-4">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Draft features</div>
@@ -1656,7 +1630,7 @@ interface MainContentProps {
   generationProgressMeta?: GenerationProgressMeta | null;
   clarifyContext?: ClarifyContextMeta | null;
   clarifyProgressMeta?: DiscoveryProgressMeta | null;
-  workflowStage?: 'idle' | 'clarify_round_1' | 'sufficiency_check' | 'clarify_round_2' | 'generation' | 'blocked';
+  workflowStage?: 'idle' | 'clarify_round_1' | 'clarify_round_2' | 'generation' | 'blocked';
   projectKey: string;
   workflowTokenUsage?: { input: number; output: number; total: number } | null;
   onWorkflowTokenUsage?: (usage: { input: number; output: number; total: number }) => void;
@@ -2726,9 +2700,9 @@ export function MainContent({
                             Domain guidance
                           </span>
                         )}
-                        {generationContext.qualityMode && (
+                        {generationContext.pipelineProfile && (
                           <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
-                            {generationContext.qualityMode === 'quality' ? 'Quality mode' : 'Speed mode'}
+                            {formatPipelineProfileLabel(generationContext.pipelineProfile)}
                           </span>
                         )}
                         {generationContext.outputProfile && (

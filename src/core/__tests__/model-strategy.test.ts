@@ -5,8 +5,10 @@ import { getTierModel } from '../../services/billing';
 import {
   DEFAULT_BUCKET_CLASSES,
   MODEL_STRATEGY_VERSION,
+  buildStoryAssistantModelRoute,
   resolveEffectiveGeneratorConfig,
   resolveGeneratorStrategyState,
+  resolveStoryAssistantPipelineProfile,
 } from '../../services/model-strategy';
 
 test('uses the saved explicit role models for simple mode', () => {
@@ -26,7 +28,8 @@ test('uses the saved explicit role models for simple mode', () => {
   });
 
   assert.equal(resolved.modelStrategy, 'simple');
-  assert.equal(resolved.decompositionModel, 'gpt-5.4');
+  assert.equal(resolved.pipelineProfile, 'balanced');
+  assert.equal(resolved.decompositionModel, 'gpt-4o');
   assert.equal(resolved.clarifyModel, 'gpt-4o');
   assert.equal(resolved.refineModel, 'gpt-4o-mini');
 });
@@ -58,6 +61,7 @@ test('normalizes legacy strategy values into simple or advanced', () => {
 test('applies free-tier downgrades after explicit user model selection', () => {
   const resolved = resolveEffectiveGeneratorConfig({
     provider: 'openai',
+    pipelineProfile: 'quality',
     modelStrategy: 'advanced',
     bucketClasses: DEFAULT_BUCKET_CLASSES,
     modelStrategyVersion: MODEL_STRATEGY_VERSION,
@@ -71,6 +75,51 @@ test('applies free-tier downgrades after explicit user model selection', () => {
     maxTokens: 8192,
   });
 
-  assert.equal(getTierModel(resolved.decompositionModel, 'free'), 'gpt-5.4-mini');
+  assert.equal(getTierModel(resolved.decompositionModel, 'free'), 'gpt-4o-mini');
   assert.equal(getTierModel(resolved.refineModel, 'free'), 'gpt-4o-mini');
+});
+
+test('defaults story assistant pipeline profile to balanced and resolves a deterministic mixed route', () => {
+  const resolved = resolveEffectiveGeneratorConfig({
+    provider: 'anthropic',
+    modelStrategy: 'simple',
+    bucketClasses: DEFAULT_BUCKET_CLASSES,
+    modelStrategyVersion: MODEL_STRATEGY_VERSION,
+    refineModel: 'claude-sonnet-4-6',
+    themeModel: 'claude-haiku-4-5',
+    maxTokens: 8192,
+  });
+
+  assert.equal(resolved.pipelineProfile, 'balanced');
+  assert.equal(resolveStoryAssistantPipelineProfile(resolved), 'balanced');
+
+  const route = buildStoryAssistantModelRoute(resolved);
+  assert.equal(route.clarify, resolved.clarifyModel);
+  assert.equal(route.decomposition, resolved.decompositionModel);
+  assert.equal(route.ar, resolved.arModel);
+  assert.notEqual(route.clarify, route.decomposition);
+});
+
+test('infers quality and fast profiles from saved story assistant model families', () => {
+  const qualityState = resolveGeneratorStrategyState({
+    provider: 'openai',
+    clarifyModel: 'gpt-5.4',
+    decompositionModel: 'gpt-5.4',
+    arModel: 'gpt-5.4',
+    refineModel: 'gpt-4o-mini',
+    themeModel: 'gpt-4o-mini',
+    maxTokens: 8192,
+  });
+  const fastState = resolveGeneratorStrategyState({
+    provider: 'anthropic',
+    clarifyModel: 'claude-sonnet-4-6',
+    decompositionModel: 'claude-sonnet-4-6',
+    arModel: 'claude-haiku-4-5',
+    refineModel: 'claude-sonnet-4-6',
+    themeModel: 'claude-haiku-4-5',
+    maxTokens: 8192,
+  });
+
+  assert.equal(qualityState.pipelineProfile, 'quality');
+  assert.equal(fastState.pipelineProfile, 'fast');
 });

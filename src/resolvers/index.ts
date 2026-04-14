@@ -28,7 +28,6 @@ import {
 import { getProjectActivitySummary, recordProjectActivity } from '../services/project-activity';
 import {
   resolveEffectiveGeneratorConfig,
-  resolveQualityGenerationOverrides,
 } from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
@@ -488,13 +487,6 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const selectedProjectKeys = authorizedProjects.projectKeys;
   const finalSufficiency = payload?.clarifyFinalSufficiency;
 
-  // Sufficiency is now seamlessly evaluated asynchronously inside generation-queue
-  // if not already evaluated (e.g., fast path generation).
-
-  const qualityMode = payload?.qualityMode === 'quality' ? 'quality' : 'speed';
-  const resolvedModelOverrides =
-    payload?.modelOverrides
-    ?? resolveQualityGenerationOverrides(eventConfig.generatorConfig, qualityMode);
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -514,8 +506,6 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     clarifyQuestionsAsked: payload.clarifyQuestionsAsked,
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
-    qualityMode,
-    modelOverrides: resolvedModelOverrides,
     enqueuedAt: Date.now(),
   };
 
@@ -559,8 +549,6 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
   });
 
-  const priorQualityMode = latestGenerateTurn?.generationContext?.qualityMode === 'quality' ? 'quality' : 'speed';
-  const resolvedModelOverrides = resolveQualityGenerationOverrides(config.generatorConfig, priorQualityMode);
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -576,8 +564,6 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     retryFeatureId: retryFeature.id,
     retryFeature,
     retryBaseFeatures,
-    qualityMode: priorQualityMode,
-    modelOverrides: resolvedModelOverrides,
     enqueuedAt: Date.now(),
   };
 

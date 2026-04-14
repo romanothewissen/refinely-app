@@ -1,5 +1,6 @@
 import { GeneratorConfig, ProjectDomainContext, ProjectPersonaRole, TenantConfig, DEFAULT_CONFIG } from '../types';
 import { entityDeleteSecret, entityGet, entityGetSecret, entitySet, entitySetSecret, KEYS } from './cache';
+import { resolveEffectiveGeneratorConfig } from './model-strategy';
 
 const GENERATOR_SECRET_FIELDS = [
   { field: 'anthropicApiKey', provider: 'anthropic' },
@@ -134,6 +135,7 @@ function normalizeConfig(config: TenantConfig): TenantConfig {
   const normalizedContexts = normalizeDomainContexts(withoutLegacy);
   return {
     ...withoutLegacy,
+    generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
     generationPreferences: {
       outputProfile: config.generationPreferences?.outputProfile === 'balanced' || config.generationPreferences?.outputProfile === 'technical_first'
         ? config.generationPreferences.outputProfile

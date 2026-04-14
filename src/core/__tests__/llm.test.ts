@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractJson } from '../json';
+import { extractJson, extractJsonWithMetadata } from '../json';
 import { mapReasoningDepthToEffort } from '../llm';
 
 test('extractJson parses markdown-fenced JSON objects', () => {
@@ -66,6 +66,22 @@ test('extractJson repairs truncated fenced JSON when the model stops mid-string'
   assert.equal(parsed.features.length, 1);
   assert.equal(parsed.features[0]?.summary, 'Work Order Criticality and Due Date Definition');
   assert.match(parsed.features[0]?.description ?? '', /customer tier\/contract$/);
+});
+
+test('extractJsonWithMetadata reports clean parses for complete JSON blocks', () => {
+  const parsed = extractJsonWithMetadata<{ ok: boolean }>('{"ok":true}');
+
+  assert.equal(parsed.parseMode, 'clean_parse');
+  assert.equal(parsed.data.ok, true);
+});
+
+test('extractJsonWithMetadata reports repaired parses for truncated JSON blocks', () => {
+  const parsed = extractJsonWithMetadata<{ items: Array<{ label: string }> }>(
+    '{"items":[{"label":"partial value"}',
+  );
+
+  assert.equal(parsed.parseMode, 'repaired_parse');
+  assert.equal(parsed.data.items[0]?.label, 'partial value');
 });
 
 test('mapReasoningDepthToEffort translates provider-neutral reasoning levels', () => {

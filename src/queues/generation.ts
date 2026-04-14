@@ -23,7 +23,7 @@ import { formatSimilarStoriesText } from '../core/similar-stories';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
-import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
+import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import { recordProjectActivity } from '../services/project-activity';
 import {
@@ -48,14 +48,14 @@ interface RealtimeEvent {
 }
 
 interface GenerationProgressPayload {
-  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  stage?: 'context' | 'decomposition' | 'acceptance_requirements';
   outputProfile?: GenerationContextMeta['outputProfile'];
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   latencyMs?: GenerationContextMeta['latencyMs'];
   modelRoute?: GenerationContextMeta['modelRoute'];
-  qualityMode?: GenerationContextMeta['qualityMode'];
+  pipelineProfile?: GenerationContextMeta['pipelineProfile'];
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>>;
   draftFeatureCount?: number;
@@ -119,7 +119,7 @@ export function buildGenerationStartProgressUpdate(opts: {
   outputProfile?: GenerationContextMeta['outputProfile'];
   advisorySizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
-  qualityMode?: GenerationContextMeta['qualityMode'];
+  pipelineProfile?: GenerationContextMeta['pipelineProfile'];
   modelRoute?: GenerationContextMeta['modelRoute'];
   sources?: GenerationProgressPayload['sources'];
 }): { message: string; payload: GenerationProgressPayload } {
@@ -129,7 +129,7 @@ export function buildGenerationStartProgressUpdate(opts: {
     outputProfile,
     advisorySizingContract,
     advisoryTriage,
-    qualityMode,
+    pipelineProfile,
     modelRoute,
     sources,
   } = opts;
@@ -148,7 +148,7 @@ export function buildGenerationStartProgressUpdate(opts: {
       triage: advisorySizingContract,
       sizingContract: advisorySizingContract,
       advisoryTriage,
-      qualityMode,
+      pipelineProfile,
       modelRoute,
       ...(seededDraftFeatures.length
         ? {
@@ -184,7 +184,6 @@ export async function handler(event: { body: GenerationEvent }) {
     retryBaseFeatures,
     pipelineAudit,
     auditRunId,
-    qualityMode = 'speed',
     modelOverrides,
     enqueuedAt,
   } = event.body;
@@ -204,7 +203,8 @@ export async function handler(event: { body: GenerationEvent }) {
       ...(modelOverrides ?? {}),
     },
   };
-  const modelRoute = buildGenerationModelRoute(config.generatorConfig, modelOverrides);
+  const modelRoute = buildStoryAssistantModelRoute(runConfig.generatorConfig);
+  const pipelineProfile = resolveStoryAssistantPipelineProfile(runConfig.generatorConfig);
   const auditMeta = isPipelineAuditRequested(config, pipelineAudit, auditRunId)
     ? { sessionId, auditRunId: auditRunId!, accountId }
     : null;
@@ -242,70 +242,7 @@ export async function handler(event: { body: GenerationEvent }) {
       };
       const advisorySizingContract = clarifySizingContract;
       const advisoryTriage = clarifyAdvisoryTriage;
-      let clarifyFinalSufficiency = preEvaluatedSufficiency;
-      let preloadedSharedContext: SharedPipelineContext | undefined;
-
-      if (!clarifyFinalSufficiency?.evaluated && !retryFeatureId) {
-        await updateProgress(`Evaluating requirement sufficiency…`, 1, {
-          stage: 'context',
-          sources: baseSources,
-        });
-        getPipelineAuditWriter()?.setPhase('clarify.sufficiency');
-
-        const { runStoryAssistantSufficiencyStage } = await import('../services/story-assistant-pipeline');
-        const { sharedContext: sufficiencyShared, result: sufficiencyResult } = await runStoryAssistantSufficiencyStage({
-          requirement: maskedRequirement.text,
-          attachmentText: maskedAttachment.text,
-          answers: maskedAnswers.answers,
-          askedQuestions: clarifyQuestionsAsked,
-          config: runConfig,
-          projectKey,
-          projectKeys,
-          loadEvidence: false,
-        });
-
-        if (sufficiencyResult.status === 'ask_followup' && Array.isArray(sufficiencyResult.questions) && sufficiencyResult.questions.length > 0) {
-          await entitySetSmall(KEYS.generationProgress(sessionId), {
-            type: 'needs_clarification',
-            sessionId,
-            message: 'Discovery evaluation determined follow-up questions are required.',
-            questions: sufficiencyResult.questions,
-            sufficiencyResult,
-            updatedAt: Date.now(),
-          } as RealtimeEvent);
-          const w = getPipelineAuditWriter();
-          if (w) {
-            await w.flushMerge({
-              accountId,
-              sufficiency: { evaluation: sufficiencyResult as any, completedAt: new Date().toISOString() },
-              completePhase: 'sufficiency',
-            });
-          }
-          return;
-        }
-
-        if (sufficiencyShared) {
-          preloadedSharedContext = sufficiencyShared;
-        }
-
-        clarifyFinalSufficiency = {
-          evaluated: true,
-          sufficient: sufficiencyResult.sufficient,
-          status: sufficiencyResult.status,
-          roundEvaluated: 1,
-          missingCategoryKeys: sufficiencyResult.missingCategoryKeys,
-          reasonCodes: sufficiencyResult.reasonCodes,
-        };
-
-        const w = getPipelineAuditWriter();
-        if (w) {
-          await w.flushMerge({
-            accountId,
-            sufficiency: { evaluation: sufficiencyResult as any, completedAt: new Date().toISOString() },
-            completePhase: 'sufficiency',
-          });
-        }
-      }
+      const clarifyFinalSufficiency = preEvaluatedSufficiency;
 
       await updateProgress(`Reading shared evidence context for ${projectLabel}…`, 1, {
         stage: 'context',
@@ -314,7 +251,7 @@ export async function handler(event: { body: GenerationEvent }) {
       getPipelineAuditWriter()?.setPhase('generate.pipeline');
 
       const maxGenAttempts = retryFeatureId ? 1 : MAX_FULL_GENERATION_ATTEMPTS;
-      let evidenceReuse: SharedPipelineContext | undefined = preloadedSharedContext;
+      let evidenceReuse: SharedPipelineContext | undefined;
       let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> = [];
       let genOutcome: { sharedContext: SharedPipelineContext; result: GenerationResult } | null = null;
 
@@ -362,7 +299,7 @@ export async function handler(event: { body: GenerationEvent }) {
                   advisoryTriage,
                   draftFeatures: liveDraftFeatures,
                   draftFeatureCount: liveDraftFeatures.length,
-                  qualityMode,
+                  pipelineProfile,
                   modelRoute,
                   sources: {
                     ...baseSources,
@@ -389,7 +326,7 @@ export async function handler(event: { body: GenerationEvent }) {
                   draftFeatures: liveDraftFeatures,
                   draftFeatureCount: liveDraftFeatures.length,
                   arProgress: { completed: 0, total: drafts.length, phase: 'initial' },
-                  qualityMode,
+                  pipelineProfile,
                   modelRoute,
                   sources: {
                     ...baseSources,
@@ -454,7 +391,7 @@ export async function handler(event: { body: GenerationEvent }) {
         outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
         advisorySizingContract,
         advisoryTriage,
-        qualityMode,
+        pipelineProfile,
         modelRoute,
         sources: progressSources,
       });
@@ -499,7 +436,7 @@ export async function handler(event: { body: GenerationEvent }) {
         similarStoriesCount: sharedContext.sources.similarStoriesCount,
         referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
         outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
-        qualityMode,
+        pipelineProfile,
         sizingContract: advisorySizingContract,
         advisoryTriage,
         pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,

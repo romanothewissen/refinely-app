@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
 import type { PipelineAuditClientPollingStats } from '../../../types';
-import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationModelRoute, GenerationQualityMode, OutputProfile, PipelineLatencyBreakdown } from '../types';
+import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationContextMeta, GenerationModelRoute, OutputProfile, PipelineLatencyBreakdown } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review' | 'needs_clarification';
@@ -13,13 +13,13 @@ export interface GenerationProgress {
 }
 
 export interface GenerationProgressPayload {
-  stage?: 'context' | 'triage' | 'decomposition' | 'acceptance_requirements';
+  stage?: 'context' | 'decomposition' | 'acceptance_requirements';
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
-  qualityMode?: GenerationQualityMode;
+  pipelineProfile?: GenerationContextMeta['pipelineProfile'];
   arProgress?: { completed: number; total: number; phase?: 'initial' | 'backfill' };
   draftFeatures?: Array<{ id: string; summary: string; description: string; storyPoints?: number; featureClass?: FeatureClass; confidence?: FeatureConfidence; actorSource?: FeatureActorSource }>;
   draftFeatureCount?: number;
@@ -48,7 +48,6 @@ export interface GenerationProgressPayload {
 
 const GENERATION_STAGE_ORDER: Array<NonNullable<GenerationProgressPayload['stage']>> = [
   'context',
-  'triage',
   'decomposition',
   'acceptance_requirements',
 ];
@@ -104,7 +103,7 @@ function mergeGenerationPayload(
     outputProfile: next.outputProfile ?? previous.outputProfile,
     latencyMs: next.latencyMs ?? previous.latencyMs,
     modelRoute: next.modelRoute ?? previous.modelRoute,
-    qualityMode: next.qualityMode ?? previous.qualityMode,
+    pipelineProfile: next.pipelineProfile ?? previous.pipelineProfile,
   };
 }
 
@@ -185,6 +184,7 @@ function mergeClarifyPayload(
     ambiguityAssessment: next.ambiguityAssessment ?? previous.ambiguityAssessment,
     latencyMs: next.latencyMs ?? previous.latencyMs,
     modelRoute: next.modelRoute ?? previous.modelRoute,
+    pipelineProfile: next.pipelineProfile ?? previous.pipelineProfile,
     sources: next.sources ?? previous.sources,
   };
 }

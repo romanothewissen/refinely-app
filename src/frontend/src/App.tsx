@@ -24,7 +24,6 @@ import type {
   FeatureClass,
   FeatureConfidence,
   GenerationContextMeta,
-  GenerationQualityMode,
   OutputProfile,
   TokenUsageSummary,
   UndoableAiChange,
@@ -95,7 +94,6 @@ interface RunAttachment {
 type WorkflowStage =
   | 'idle'
   | 'clarify_round_1'
-  | 'sufficiency_check'
   | 'clarify_round_2'
   | 'generation'
   | 'blocked';
@@ -198,13 +196,6 @@ function buildClarifyLoadingMeta(
         }
     : null;
 
-  if (workflowStage === 'sufficiency_check') {
-    return {
-      ...basePayload,
-      stage: 'sufficiency',
-    };
-  }
-
   if (workflowStage === 'clarify_round_2') {
     return {
       ...basePayload,
@@ -213,22 +204,6 @@ function buildClarifyLoadingMeta(
   }
 
   return basePayload;
-}
-
-function buildSufficiencyProgressMessage(
-  tick: number,
-  context: ClarifyContextMeta | null,
-): string {
-  const answered = context?.initialQuestionCount ?? 0;
-  const followupCap = context?.discoveryProfile?.followupCap;
-  const messages = [
-    `Reviewing the ${answered || 'current'} discovery answers against the requirement…`,
-    'Checking which business dimensions are now covered well enough…',
-    followupCap
-      ? `Deciding whether any focused follow-up questions are still needed, up to ${followupCap} more…`
-      : 'Deciding whether any focused follow-up questions are still needed…',
-  ];
-  return messages[tick % messages.length] ?? messages[0];
 }
 
 function sumWorkflowTokenUsage(conversation: any): WorkflowTokenUsage | null {
@@ -449,7 +424,6 @@ function LegacyApp({
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
   const [clarifyEvaluationError, setClarifyEvaluationError] = useState<string | null>(null);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
-  const [sufficiencyProgressTick, setSufficiencyProgressTick] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(initialViewMode !== 'settings');
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
@@ -505,7 +479,6 @@ function LegacyApp({
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
   const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
-  const [runQualityMode, setRunQualityMode] = useState<GenerationQualityMode>('speed');
   const [reviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
@@ -1038,19 +1011,6 @@ function LegacyApp({
     }
   );
 
-  useEffect(() => {
-    if (workflowStage !== 'sufficiency_check') {
-      setSufficiencyProgressTick(0);
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setSufficiencyProgressTick((tick) => tick + 1);
-    }, 2400);
-
-    return () => window.clearInterval(timer);
-  }, [workflowStage]);
-
   const isCanvasLoading = Boolean(
     !retryingFeatureId
     && (
@@ -1058,29 +1018,24 @@ function LegacyApp({
       || pendingSessionId
       || isClarifying
       || isGenerating
-      || workflowStage === 'sufficiency_check'
       || workflowStage === 'generation'
     ),
   );
 
-  const loadingTitle = workflowStage === 'sufficiency_check'
-    ? 'Checking discovery sufficiency'
-    : workflowStage === 'generation'
-      ? 'Crafting features'
-      : 'Exploring the requirement';
+  const loadingTitle = workflowStage === 'generation'
+    ? 'Crafting features'
+    : 'Exploring the requirement';
 
   const clarifyLoadingMeta = useMemo(
     () => buildClarifyLoadingMeta(liveClarifyPayload, clarifyContext, workflowStage),
     [liveClarifyPayload, clarifyContext, workflowStage],
   );
 
-  const loadingProgress = workflowStage === 'sufficiency_check'
-    ? buildSufficiencyProgressMessage(sufficiencyProgressTick, clarifyContext)
-    : workflowStage === 'clarify_round_2'
-      ? (clarifyProgress || 'Preparing follow-up discovery questions…')
-      : workflowStage === 'generation'
-        ? (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'))
-        : (clarifyProgress || 'Analyzing requirement and gathering context…');
+  const loadingProgress = workflowStage === 'clarify_round_2'
+    ? (clarifyProgress || 'Preparing follow-up discovery questions…')
+    : workflowStage === 'generation'
+      ? (generationProgress || (pendingSessionId ? 'Starting generation…' : 'Preparing generation…'))
+      : (clarifyProgress || 'Analyzing requirement and gathering context…');
 
   const applyDiscoveryEvaluationToContext = (
     baseContext: ClarifyContextMeta | null,
@@ -1405,7 +1360,6 @@ function LegacyApp({
         clarifyFinalSufficiency: clarifyContext?.finalSufficiency ?? undefined,
         attachmentText,
         outputProfileOverride: runOutputProfileOverride,
-        qualityMode: runQualityMode,
         projectKey: effectiveProjectKey,
         projectKeys: effectiveProjectKeys,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
@@ -1709,8 +1663,6 @@ function LegacyApp({
               usage={usage}
               limits={limits}
               brandingLogoUrl={brandingLogoUrl}
-              runQualityMode={runQualityMode}
-              setRunQualityMode={setRunQualityMode}
               reviewBeforeARs={reviewBeforeARs}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}

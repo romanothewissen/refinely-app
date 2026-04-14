@@ -6,6 +6,7 @@ import type {
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
   LlmProvider,
+  PipelineProfile,
 } from './types';
 import strategyCatalog from './modelStrategyCatalog.json';
 
@@ -126,10 +127,58 @@ export interface UiGeneratorStrategyState {
   provider: LlmProvider;
   modelStrategy: 'simple' | 'advanced';
   bucketClasses: GeneratorBucketClasses;
+  pipelineProfile: PipelineProfile;
   resolvedModels: Record<GeneratorRoleModelField, string>;
   resolvedBucketModels: SimpleBucketModels;
   inferredFromLegacyModels: boolean;
   matchedPreset: boolean;
+}
+
+export function normalizePipelineProfile(value?: string): PipelineProfile {
+  if (value === 'fast' || value === 'quality') return value;
+  return 'balanced';
+}
+
+export function inferPipelineProfileFromModels(config?: Partial<GeneratorConfig>): PipelineProfile {
+  const savedModels = getSavedModels(config);
+  const families = [
+    inferModelFamily(savedModels.clarifyModel),
+    inferModelFamily(savedModels.decompositionModel),
+    inferModelFamily(savedModels.arModel),
+  ];
+  if (families.every((family) => family === 'pro')) return 'quality';
+  if (families.every((family) => family === 'flash' || family === 'lite')) return 'fast';
+  return 'balanced';
+}
+
+export function resolveProfileModelAssignments(
+  provider: LlmProvider,
+  pipelineProfile: PipelineProfile,
+  fallback?: Partial<Record<GeneratorRoleModelField, string>>,
+): Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'> {
+  const providerCatalog = getProviderCatalogData(provider);
+  const pick = (family: 'pro' | 'flash', legacy?: string) =>
+    providerCatalog?.presets?.stable?.[family]?.[0] || legacy || '';
+
+  if (pipelineProfile === 'fast') {
+    return {
+      clarifyModel: pick('flash', fallback?.clarifyModel),
+      decompositionModel: pick('flash', fallback?.decompositionModel),
+      arModel: pick('flash', fallback?.arModel),
+    };
+  }
+  if (pipelineProfile === 'quality') {
+    return {
+      clarifyModel: pick('pro', fallback?.clarifyModel),
+      decompositionModel: pick('pro', fallback?.decompositionModel),
+      arModel: pick('pro', fallback?.arModel),
+    };
+  }
+  return {
+    clarifyModel: pick('flash', fallback?.clarifyModel),
+    decompositionModel: pick('pro', fallback?.decompositionModel),
+    arModel: pick('pro', fallback?.arModel),
+  };
 }
 
 function normalizeProvider(provider?: LlmProvider): LlmProvider {
@@ -184,10 +233,11 @@ function getBucketModelsFromSavedModels(savedModels: Record<GeneratorRoleModelFi
 
 export function inferModelFamily(modelId: string): ConcreteModelFamily | undefined {
   const normalized = modelId.trim().toLowerCase();
+  const hasToken = (token: string) => new RegExp(`(^|[^a-z])${token}([^a-z]|$)`).test(normalized);
   if (normalized.includes('flash')) return 'flash';
-  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4') || normalized.includes('sonnet')) return normalized.includes('mini') ? 'lite' : 'flash';
-  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano') || normalized.includes('haiku')) return 'lite';
-  if (normalized.includes('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
+  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4') || normalized.includes('sonnet')) return hasToken('mini') ? 'lite' : 'flash';
+  if (hasToken('lite') || hasToken('mini') || hasToken('nano') || normalized.includes('haiku')) return 'lite';
+  if (hasToken('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
   return undefined;
 }
 
@@ -230,6 +280,9 @@ export function resolveUiGeneratorStrategyState(opts: {
   const provider = normalizeProvider(opts.provider ?? opts.config?.provider);
   const savedModels = getSavedModels(opts.config);
   const modelStrategy = normalizeStrategy(opts.modelStrategy ?? opts.config?.modelStrategy);
+  const pipelineProfile = normalizePipelineProfile(
+    opts.config?.pipelineProfile ?? inferPipelineProfileFromModels(opts.config),
+  );
   const bucketClasses = normalizeBucketClasses(opts.config?.bucketClasses);
   const fallbackBuckets = getBucketModelsFromSavedModels(savedModels);
   const resolvedBucketModels: SimpleBucketModels = {
@@ -237,13 +290,18 @@ export function resolveUiGeneratorStrategyState(opts: {
     generation: opts.bucketModels?.generation ?? fallbackBuckets.generation,
     refinement: opts.bucketModels?.refinement ?? fallbackBuckets.refinement,
   };
+  const profileModels = resolveProfileModelAssignments(provider, pipelineProfile, savedModels);
 
   return {
     provider,
     modelStrategy,
+    pipelineProfile,
     bucketClasses,
     resolvedBucketModels,
-    resolvedModels: modelStrategy === 'advanced' ? savedModels : buildResolvedModelsFromBuckets(resolvedBucketModels),
+    resolvedModels: {
+      ...(modelStrategy === 'advanced' ? savedModels : buildResolvedModelsFromBuckets(resolvedBucketModels)),
+      ...profileModels,
+    },
     inferredFromLegacyModels: Boolean(opts.config?.modelStrategy && ['stable', 'latest', 'custom'].includes(String(opts.config.modelStrategy))),
     matchedPreset: false,
   };

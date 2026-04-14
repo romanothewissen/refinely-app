@@ -10,6 +10,7 @@ import type {
   Feature,
   GenerationResult,
   GenerationStageDurationsMs,
+  PipelineProfile,
   TenantConfig,
   TokenUsageSummary,
   SimilarStory,
@@ -19,13 +20,13 @@ import { getTierModel } from '../services/billing';
 import { callLlmJsonWithUsage, mapReasoningDepthToEffort } from './llm';
 import {
   buildStoryAssistantArSystemPrompt,
-  buildStoryAssistantDiscoveryAssessmentSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantDecompositionSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 import { buildDiscoveryCoverageArtifact, selectDiverseInitialQuestions } from './discovery';
+import { buildStoryAssistantModelRoute, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { formatSimilarStoriesText } from './similar-stories';
 import {
   annotateFailedAcceptanceRequirementFeatures,
@@ -106,6 +107,17 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
   'success': 'success_measurement',
 };
 
+function storyAssistantQuestionRange(pipelineProfile: PipelineProfile): { targetMin: number; targetMax: number; lowerBound: number; hardCap: number } {
+  switch (pipelineProfile) {
+    case 'fast':
+      return { targetMin: 4, targetMax: 8, lowerBound: 3, hardCap: 10 };
+    case 'quality':
+      return { targetMin: 8, targetMax: 14, lowerBound: 6, hardCap: 16 };
+    default:
+      return { targetMin: 6, targetMax: 12, lowerBound: 4, hardCap: 14 };
+  }
+}
+
 type GenericDiscoveryCoverageKey =
   | 'scope_trigger'
   | 'actors_handoffs'
@@ -145,15 +157,6 @@ function buildProviderOpts(config: TenantConfig) {
     modelCatalogs: config.generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
-}
-
-function resolveClarifyModel(config: TenantConfig, assessment: DiscoveryAssessment): string {
-  const requested = getTierModel(config.generatorConfig.clarifyModel, config.tier);
-  const deepNeedsStrongerModel = assessment.discoveryDepth === 'deep'
-    && config.tier !== 'free'
-    && /\b(flash|mini|haiku)\b/i.test(requested);
-  if (!deepNeedsStrongerModel) return requested;
-  return getTierModel(config.generatorConfig.decompositionModel, config.tier);
 }
 
 function toStageUsage(usage: { input: number; output: number }) {
@@ -1215,50 +1218,23 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   const usageByStage: Record<string, { input: number; output: number }> = {};
   let questions: ClarifyQuestion[] = [];
   let promptAssemblyMs = 0;
+  const pipelineProfile = resolveStoryAssistantPipelineProfile(opts.config.generatorConfig);
+  const modelRoute = buildStoryAssistantModelRoute(opts.config.generatorConfig);
+  const questionRange = storyAssistantQuestionRange(pipelineProfile);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
-  const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
   const heuristicAssessment = buildHeuristicDiscoveryAssessment({
     requirement: opts.requirement,
     attachmentText: opts.attachmentText,
     wiEvidenceText,
-    similarStoriesText,
+    similarStoriesText: '',
   });
-  let discoveryAssessment: DiscoveryAssessment = {
+  const discoveryAssessment: DiscoveryAssessment = {
     ...heuristicAssessment,
-    rationale: 'LLM assessment unavailable; using heuristic evidence-driven discovery depth.',
+    discoveryDepth: pipelineProfile === 'quality' ? 'deep' : pipelineProfile === 'fast' ? 'light' : 'standard',
+    reasoningLevel: pipelineProfile === 'quality' ? 'deep' : pipelineProfile === 'fast' ? 'light' : 'standard',
+    recommendedQuestionRange: { min: questionRange.targetMin, max: questionRange.targetMax },
+    rationale: 'Question volume is bounded by the selected pipeline profile; the clarifier judges semantic ambiguity directly, and heuristics validate structural coverage only.',
   };
-
-  try {
-    const promptAssemblyStartedAt = Date.now();
-    const assessmentUserMessage = buildEvidenceThemeSummary(
-      opts.requirement,
-      opts.attachmentText,
-      wiEvidenceText,
-      similarStoriesText,
-      opts.config.domainContext,
-    );
-    promptAssemblyMs += Date.now() - promptAssemblyStartedAt;
-    const assessmentResult = await callLlmJsonWithUsage<unknown>({
-      model: getTierModel(opts.config.generatorConfig.triageModel, opts.config.tier),
-      systemPrompt: buildStoryAssistantDiscoveryAssessmentSystemPrompt({
-        domainContext: opts.config.domainContext,
-        domainRoles: opts.config.domainRoles,
-      }),
-      userMessage: assessmentUserMessage,
-      maxTokens: 2200,
-      reasoningEffort: mapReasoningDepthToEffort('light'),
-      ...providerOpts,
-    });
-    usageByStage.discoveryAssessment = assessmentResult.usage;
-    const parsed = parseDiscoveryAssessment(assessmentResult.data);
-    if (!parsed) throw new Error('Discovery assessment returned malformed data.');
-    discoveryAssessment = parsed;
-  } catch {
-    discoveryAssessment = {
-      ...heuristicAssessment,
-      rationale: 'Assessment fallback used after LLM assessment failed or returned malformed data.',
-    };
-  }
 
   let coverageQualityScore = 0;
   let coverageRetryTriggered = false;
@@ -1268,29 +1244,40 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     requirement: opts.requirement,
     attachmentText: opts.attachmentText,
     wiEvidenceText,
-    similarStoriesText,
     domainRoles: opts.config.domainRoles,
   });
   promptAssemblyMs += Date.now() - baseUserMessageStartedAt;
 
-  const clarifyModel = resolveClarifyModel(opts.config, discoveryAssessment);
-  const result = await callLlmJsonWithUsage<unknown>({
+  const clarifyModel = getTierModel(modelRoute.clarify ?? opts.config.generatorConfig.clarifyModel, opts.config.tier);
+  const runClarify = async (extraInstruction?: string) => callLlmJsonWithUsage<unknown>({
     model: clarifyModel,
     systemPrompt: buildStoryAssistantClarifySystemPrompt({
       domainContext: opts.config.domainContext,
       domainRoles: opts.config.domainRoles,
+      pipelineProfile,
+      questionRange,
     }),
-    userMessage: baseUserMessage,
-    maxTokens: 4600,
+    userMessage: extraInstruction ? `${baseUserMessage}\n\n${extraInstruction}` : baseUserMessage,
+    maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 8192),
     reasoningEffort: mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel),
     ...providerOpts,
   });
+  let result = await runClarify();
   usageByStage.clarify = result.usage;
-  questions = finalizeStoryAssistantDiscoveryQuestions(
-    parseStoryAssistantQuestionCandidates(result.data),
-    discoveryAssessment,
-  );
-  const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
+  questions = finalizeStoryAssistantDiscoveryQuestions(parseStoryAssistantQuestionCandidates(result.data), discoveryAssessment);
+  let quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
+  const shouldRetryClarify = result.parseOutcome === 'repaired_parse'
+    || questions.length < questionRange.lowerBound
+    || quality.score < 72;
+  if (shouldRetryClarify) {
+    coverageRetryTriggered = true;
+    result = await runClarify(
+      `Your previous output was too thin or structurally unreliable. Return a requirement-specific JSON array only. Cover the unresolved ambiguity that materially affects feature boundaries or acceptance requirements. Stay within a healthy range of ${questionRange.targetMin}-${questionRange.targetMax} questions for this run, and never exceed ${questionRange.hardCap}.`,
+    );
+    usageByStage.clarifyRetry = result.usage;
+    questions = finalizeStoryAssistantDiscoveryQuestions(parseStoryAssistantQuestionCandidates(result.data), discoveryAssessment);
+    quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
+  }
   coverageQualityScore = quality.score;
   qualityReasons = quality.reasons;
 
@@ -1442,6 +1429,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   shouldCancel?: () => Promise<boolean> | boolean;
 }): Promise<GenerationResult> {
   const providerOpts = buildProviderOpts(opts.config);
+  const pipelineProfile = resolveStoryAssistantPipelineProfile(opts.config.generatorConfig);
+  const modelRoute = buildStoryAssistantModelRoute(opts.config.generatorConfig);
   const stageDurationsMs = { ...(opts.priorStageDurationsMs ?? {}) } as Record<string, number>;
   const stageUsage: Record<string, { input: number; output: number }> = {};
   const actorSets = extractActorSets(opts.requirement, opts.clarifyAnswers);
@@ -1452,7 +1441,6 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   };
   const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers, actorSets);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
-  const similarStoriesText = formatGenerationBacklogEvidence(opts.similarStories ?? []);
   let promptAssemblyMs = 0;
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];
@@ -1470,11 +1458,10 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       roleHint,
       discoveryProfile: opts.discoveryProfile,
       actorSets,
-      similarStoriesText,
     })}\n\nDecompose the following requirement into the distinct features needed to deliver it. Think through the decomposition framework and return the right set of features with accurate descriptions. Leave acceptance_requirements as empty arrays in this pass.`;
     promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
-      model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
+      model: getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier),
       systemPrompt: buildStoryAssistantDecompositionSystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
@@ -1482,7 +1469,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
       }),
       userMessage: decompositionUserMessage,
-      maxTokens: opts.config.generatorConfig.maxTokens,
+      maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 12288),
       reasoningEffort: 'medium',
       ...providerOpts,
     });
@@ -1517,7 +1504,6 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     roleHint,
     discoveryProfile: opts.discoveryProfile,
     actorSets,
-    similarStoriesText,
     arPatternLibraryText: opts.arPatternLibraryText,
   })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
     features: pass1Raw.map((feature) => ({
@@ -1526,33 +1512,74 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     })),
   })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements. For each feature, consider:\n- What is the primary business scenario? (this always gets an AR)\n- What key business rules must hold? (each distinct rule gets an AR)\n- What is the most likely failure or edge case a tester would actually run?\n\nKeep all other fields (summary, description, process_code, suggested_story_points) unchanged.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
-  const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
-    model: getTierModel(opts.config.generatorConfig.arModel, opts.config.tier),
+  const arModel = getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier);
+  const runArPass = async (extraInstruction?: string) => callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+    model: arModel,
     systemPrompt: buildStoryAssistantArSystemPrompt({
       domainContext: opts.config.domainContext,
       domainRoles: opts.config.domainRoles,
     }),
-    userMessage: arUserMessage,
-    maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
-    reasoningEffort: 'medium',
+    userMessage: extraInstruction ? `${arUserMessage}\n\n${extraInstruction}` : arUserMessage,
+    maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 24576),
+    reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
     ...providerOpts,
   });
+  let pass2Result = await runArPass();
   stageUsage.acceptanceRequirements = pass2Result.usage;
   stageDurationsMs.acceptanceRequirements = Date.now() - pass2StartedAt;
 
-  const pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
-  const mergedRaw = mergePass2IntoPass1(pass1Raw, pass2Raw);
+  let pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
+  let mergedRaw = mergePass2IntoPass1(pass1Raw, pass2Raw);
   let features = mergedRaw.map((feature) => normaliseFeature(feature, roleGrounding));
-  const repairedOutput = dedupeExactAcceptanceRequirements(features);
-  const pass2CoverageNotes = pass2Raw.length === 0
+  let repairedOutput = dedupeExactAcceptanceRequirements(features);
+  let pass2CoverageNotes = pass2Raw.length === 0
     ? ['Acceptance requirements pass returned no feature array; preserved pass-1 features for targeted retries.']
     : pass2Raw.length < pass1Raw.length
       ? ['Acceptance requirements pass returned fewer features than decomposition; merged by id/summary and index fallback.']
       : [];
   features = repairedOutput.features;
-  const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
-  const failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
-  if (failedIds.size > 0) {
+  let failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
+  let failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
+
+  const shouldRetryArPass = pass2Result.parseOutcome === 'repaired_parse'
+    || pass2Raw.length === 0
+    || pass2Raw.length < pass1Raw.length
+    || failedIds.size > 0;
+  if (shouldRetryArPass) {
+    const retry = await runArPass(
+      'Your previous output was incomplete or structurally unreliable. Return strict JSON only. Preserve the same feature count, order, summaries, descriptions, process codes, and story points from the input. Fill every feature with complete GIVEN/WHEN/THEN acceptance requirements.',
+    );
+    stageUsage.acceptanceRequirementsRetry = retry.usage;
+    pass2Result = retry;
+    pass2Raw = extractRawFeaturesFromPayload(retry.data);
+    mergedRaw = mergePass2IntoPass1(pass1Raw, pass2Raw);
+    features = mergedRaw.map((feature) => normaliseFeature(feature, roleGrounding));
+    repairedOutput = dedupeExactAcceptanceRequirements(features);
+    pass2CoverageNotes = pass2Raw.length === 0
+      ? ['Acceptance requirements retry returned no feature array; preserved pass-1 features.']
+      : pass2Raw.length < pass1Raw.length
+        ? ['Acceptance requirements retry returned fewer features than decomposition; preserved pass-1 features.']
+        : [];
+    features = repairedOutput.features;
+    failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
+    failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
+  }
+
+  const preservePass1Only = pass2Result.parseOutcome === 'repaired_parse'
+    || pass2Raw.length === 0
+    || pass2Raw.length < pass1Raw.length
+    || failedIds.size > 0;
+  if (preservePass1Only) {
+    features = pass1Features.map((feature) => ({
+      ...feature,
+      acceptanceRequirements: [],
+    }));
+    failedIds = new Set(features.map((feature) => feature.id).filter(Boolean));
+    pass2CoverageNotes = uniqueStrings([
+      ...pass2CoverageNotes,
+      'Acceptance requirements could not be completed reliably after retry; preserved pass-1 features instead of mixing partial AR output into the final result.',
+    ]);
+  } else if (failedIds.size > 0) {
     features = annotateFailedAcceptanceRequirementFeatures(features, failedIds) as Feature[];
   }
 
@@ -1574,6 +1601,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         acceptanceRequirements: stageDurationsMs.acceptanceRequirements,
         total: stageDurationsMs.total,
       },
+      pipelineProfile,
       failedFeatureIds: [...failedIds],
       partialSuccess: failedIds.size > 0,
       partialSuccessMessage: failedIds.size > 0

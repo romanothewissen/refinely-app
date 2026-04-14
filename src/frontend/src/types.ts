@@ -12,6 +12,7 @@ export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
 export type GeneratorModelStrategy = 'simple' | 'advanced' | 'stable' | 'latest' | 'custom';
 export type GeneratorBucketClass = 'pro' | 'flash' | 'lite';
+export type PipelineProfile = 'fast' | 'balanced' | 'quality';
 
 export interface GeneratorBucketClasses {
   discovery: GeneratorBucketClass;
@@ -46,6 +47,7 @@ export interface GeneratorConfig {
   modelStrategy: GeneratorModelStrategy;
   bucketClasses: GeneratorBucketClasses;
   modelStrategyVersion: string;
+  pipelineProfile: PipelineProfile;
   decompositionModel: string;   // e.g. claude-opus-4-6, gpt-4o
   arModel: string;              // e.g. claude-opus-4-6, gpt-4o
   clarifyModel: string;         // e.g. claude-sonnet-4-6, gpt-4o-mini
@@ -190,6 +192,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
       refinement: 'flash',
     },
     modelStrategyVersion: strategyCatalog.version,
+    pipelineProfile: 'balanced',
     decompositionModel: DEFAULT_ANTHROPIC_STABLE.pro[0],
     arModel: DEFAULT_ANTHROPIC_STABLE.pro[0],
     clarifyModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
@@ -623,7 +626,7 @@ export interface ClarifyAssessmentSummary {
 }
 
 export interface ClarifyProgressPayload {
-  stage?: 'context' | 'assessment' | 'question_generation' | 'finalize' | 'sufficiency' | 'followup';
+  stage?: 'context' | 'question_generation' | 'finalize' | 'followup';
   assessment?: ClarifyAssessmentSummary;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
@@ -634,6 +637,7 @@ export interface ClarifyProgressPayload {
   ambiguityAssessment?: ClarifyContextMeta['ambiguityAssessment'];
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
+  pipelineProfile?: PipelineProfile;
   sources?: {
     projectKey: string;
     projectCount?: number;
@@ -749,6 +753,7 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   actorSets?: ActorSetGrounding;
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
+  pipelineProfile?: PipelineProfile;
 }
 
 export type SizingAssessmentArchetype = 'guard_rule' | 'focused_capability' | 'workflow_area' | 'broad_platform';
@@ -843,6 +848,7 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   actorSets?: ActorSetGrounding;
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
+  pipelineProfile?: PipelineProfile;
   qualityMode?: GenerationQualityMode;
 }
 

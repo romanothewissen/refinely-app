@@ -13,7 +13,7 @@ import type {
 } from '../types';
 import { maskPiiText } from '../services/compliance';
 import { getPipelineAuditWriter } from '../services/pipeline-audit-context';
-import { extractJson } from './json';
+import { extractJsonWithMetadata } from './json';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
 export interface LlmResponse {
@@ -845,7 +845,12 @@ export async function callLlmJsonWithUsage<T>(opts: {
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
-}): Promise<{ data: T; usage: { input: number; output: number }; piiMasking?: PiiMaskingStats }> {
+}): Promise<{
+  data: T;
+  usage: { input: number; output: number };
+  piiMasking?: PiiMaskingStats;
+  parseOutcome: 'clean_parse' | 'repaired_parse';
+}> {
   let lastError: Error | null = null;
   let lastParseShape = '';
   let totalInput = 0;
@@ -866,12 +871,13 @@ export async function callLlmJsonWithUsage<T>(opts: {
       });
     }
     try {
-      const data = extractJson<T>(res.text);
-      getPipelineAuditWriter()?.annotateLastJsonParse('ok');
+      const parsed = extractJsonWithMetadata<T>(res.text);
+      getPipelineAuditWriter()?.annotateLastJsonParse(parsed.parseMode);
       return {
-        data,
+        data: parsed.data,
         usage: { input: totalInput, output: totalOutput },
         piiMasking: piiMaskingTotals,
+        parseOutcome: parsed.parseMode,
       };
     } catch (err) {
       lastError = err as Error;

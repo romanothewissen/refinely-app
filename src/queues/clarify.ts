@@ -17,7 +17,7 @@ import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
-import { buildGenerationModelRoute, resolveEffectiveGeneratorConfig } from '../services/model-strategy';
+import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import { recordProjectActivity } from '../services/project-activity';
 import {
@@ -62,7 +62,8 @@ export async function handler(event: { body: ClarifyEvent }) {
   const exec = async () => {
     const workflowStartedAt = Date.now();
     const queueWaitMs = Math.max(0, workflowStartedAt - Number(event.body.enqueuedAt ?? workflowStartedAt));
-    const modelRoute = buildGenerationModelRoute(config.generatorConfig);
+    const modelRoute = buildStoryAssistantModelRoute(config.generatorConfig);
+    const pipelineProfile = resolveStoryAssistantPipelineProfile(config.generatorConfig);
     let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
     let stopHeartbeat: (() => void) | null = null;
     let firstProgressSentAt: number | null = null;
@@ -143,6 +144,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
         },
         modelRoute,
+        pipelineProfile,
         sources: {
           projectKey: sharedContext.projectKey,
           projectCount: sharedContext.projectCount,
@@ -202,6 +204,7 @@ export async function handler(event: { body: ClarifyEvent }) {
           firstProgressEventMs: firstProgressSentAt == null ? undefined : Math.max(0, firstProgressSentAt - workflowStartedAt),
         },
         modelRoute,
+        pipelineProfile,
         wiDocsCount: sharedContext.sources.wiDocsCount,
         linkedWiDocCount: sharedContext.sources.linkedWiDocCount,
         retrievedWiDocCount: sharedContext.sources.retrievedWiDocCount,

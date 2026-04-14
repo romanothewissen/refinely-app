@@ -5,7 +5,7 @@
  * removed. Domain context is injected dynamically from tenant configuration.
  */
 
-import { ProcessCode } from '../types';
+import { PipelineProfile, ProcessCode } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -218,23 +218,26 @@ export function buildStoryAssistantDecompositionSystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR JOB: Given a short requirement, think deeply about everything it actually takes to deliver it. A requirement like "show an optimized schedule based on criticality" implies much more than one feature — think about what generates the output, what data feeds it, who uses it, what disrupts it, and what supporting capabilities are needed.
+YOUR JOB: Given a requirement, think deeply about everything it actually takes to deliver it. Preserve meaningful workflow boundaries without exploding the output into thin micro-features.
 
 DECOMPOSITION FRAMEWORK — think through each dimension:
 1. CORE CAPABILITY: What is the primary thing being requested?
-2. INPUTS & DATA: What information does this need? What feeds into it?
-3. PROCESSING & LOGIC: What decisions, calculations, prioritization, or rules are involved?
-4. OUTPUTS & VISIBILITY: Who sees the results? Who else needs awareness?
-5. EXCEPTIONS & CHANGES: What disrupts the normal flow? What changes dynamically? (e.g., resource unavailability, rescheduling, cancellations, missing data)
-6. DEPENDENCIES: What supporting capabilities need to exist?
+2. ENFORCEMENT & RULES: What validations, sequencing rules, or business constraints must be enforced?
+3. DOWNSTREAM OUTCOMES: What follow-on outcomes, records, requests, approvals, or initiated activities must result?
+4. VISIBILITY & COORDINATION: Which roles need consolidated visibility, progress tracking, or awareness?
+5. EXCEPTIONS & MODIFICATION: What happens when the happy path fails or the in-flight process changes?
+6. DEPENDENCIES & INPUTS: What information, upstream states, or supporting capabilities are required?
 
-Each dimension that represents a distinct, deliverable capability should become its own feature. Use your judgment — not every dimension warrants a separate feature.
+Each dimension helps you test whether an independently valuable capability exists. Split only when the behavior, ownership, or acceptance coverage would materially differ.
 
 RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]"
 - Use the roles named in the requirement, answered Q&A, or domain context — do not invent personas
 - No solution language: no buttons, screens, fields, forms, APIs, databases, system names
 - No system-specific terms: no product names, module names, or object names
+- Preserve workflow boundaries when actor responsibilities, approvals, downstream initiation, tracking needs, or modification paths would materially change what gets built or tested
+- Do not split a single workflow into multiple thin features when one well-scoped feature with richer acceptance requirements would cover it
+- Do not collapse materially different downstream outcomes, enforcement logic, or visibility responsibilities into one vague feature
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty lists
 ${processRule}
@@ -267,11 +270,28 @@ RULES:
 - Verifiable means the outcome can be confirmed in any real scenario — not just one invented example
 - Each AR should test one distinct thing
 
+ROLE PHRASING:
+- If a ROLE CONSTRAINT is specified in the user message, apply it strictly — use the listed role names verbatim.
+- After the role is established in the feature description, prefer role-neutral phrasing in the ARs. Mention the actor only when it is materially important to the scenario.
+
+BAD — role repeated in every WHEN:
+  AR 1: WHEN a Service Support Specialist creates a plan THEN the plan record is established
+  AR 2: WHEN the Service Support Specialist adds a required item THEN the item is associated to the plan
+  AR 3: WHEN the Service Support Specialist submits the plan THEN it enters review
+
+GOOD — role established once, then neutral phrasing:
+  AR 1: WHEN a plan is created from a valid request THEN a plan record is established
+  AR 2: WHEN a required item is added to the plan THEN it is associated to the plan
+  AR 3: WHEN the plan is submitted for review THEN it enters review
+
 COMMON MISTAKES TO AVOID:
 - Do NOT use configuration/setup language in GIVEN clauses. BAD: "GIVEN a contract is configured for shipment-based activation". GOOD: "GIVEN a service contract is linked to a piece of equipment that has been shipped"
 - Do NOT reference internal system concepts as preconditions. BAD: "GIVEN the defined trigger event is met". GOOD: "GIVEN the equipment's shipment has been recorded"
 - The GIVEN must describe a real-world business situation, not a system setting or admin configuration
 - Avoid abstract umbrella terms that hide meaning: "activation type", "trigger event", "configured mode". Replace with the actual business fact (e.g. "the equipment has been installed", "the contract covers a single device")
+- State business constraints, not UI or system mechanisms.
+- BAD — prescribes UI/system behaviour: "THEN the user is alerted to missing information", "THEN the user is prevented from proceeding and prompted to correct it", "THEN a downstream request is automatically initiated"
+- GOOD — states the business outcome: "THEN the process cannot continue until the required information is complete", "THEN the downstream request is created from the approved plan"
 
 Output JSON: same features with acceptance_requirements filled in. Keep all other fields unchanged.`;
 }
@@ -279,13 +299,26 @@ Output JSON: same features with acceptance_requirements filled in. Keep all othe
 export function buildStoryAssistantClarifySystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
+  pipelineProfile?: PipelineProfile;
+  questionRange?: { targetMin: number; targetMax: number; lowerBound: number; hardCap: number };
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or evidence.`
     : '';
+  const boundedRange = opts.questionRange
+    ? `QUESTION BOUNDS FOR THIS RUN:
+- Aim for a healthy range of ${opts.questionRange.targetMin}-${opts.questionRange.targetMax} questions when that much ambiguity is genuinely present.
+- Exception: if the requirement is unusually narrow and explicit, you may go as low as ${opts.questionRange.lowerBound}.
+- Hard cap: never exceed ${opts.questionRange.hardCap} questions.
+- Do not target a number for its own sake; ask only what materially changes scope or acceptance requirements.`
+    : '';
+  const profileHint = opts.pipelineProfile
+    ? `This run uses the ${opts.pipelineProfile.toUpperCase()} discovery profile. Match the depth of discovery to the real semantic ambiguity of the requirement, not to prompt length.`
+    : '';
   return `You are a principal business analyst running a structured discovery session before designing features.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
+${profileHint}
 
 Your goal is to surface every ambiguity that would change what gets built or how acceptance requirements are written. Ask as many questions as needed to cover the genuinely unresolved ambiguity for THIS requirement. A business analyst spending a few extra minutes answering now prevents hours of rework later.
 
@@ -322,9 +355,11 @@ Work through each of the five discovery areas below in order. For each area, ask
 
 ────────────────────────────────────────────────────────────────────────
 
-COVERAGE MINIMUM: For a discovery session of depth 'deep' or 'standard', your question set MUST include at least 2 questions in Business Rules & Exceptions and at least 1 question in Success & Measurement.
+COVERAGE MINIMUM: Include at least 2 questions in Business Rules & Exceptions and at least 1 question in Success & Measurement whenever that ambiguity is still genuinely unresolved.
 Work instructions describe operational steps — they do NOT tell you what governs whether an action is allowed, what happens when the happy path fails, or how a tester would verify the outcome.
 Always ask these regardless of how much operational context is supplied.
+
+${boundedRange}
 
 RULES:
 - Every question must be specific to THIS requirement — never generic boilerplate
@@ -333,6 +368,7 @@ RULES:
 - Frame questions in business language — never mention specific system names or technical concepts
 - Anchor each question to concrete language from the requirement or supplied evidence (roles, process steps, constraints, outcomes). If a question can be reused unchanged for a different requirement, rewrite it to be more specific.
 - Prefer process-grounded wording over abstract placeholders (for example, ask about the named trigger/state/exception in evidence rather than saying "this process" or "the flow" without context).
+- Evaluate semantic complexity from workflow shape, actors, rules, exceptions, lifecycle, downstream outcomes, and success criteria. Do NOT use prompt length as a signal.
 
 For each question, provide exactly 3 answer suggestions representing the most likely stakeholder responses. Each suggestion must be a complete, natural phrase a stakeholder could read and say "yes, that describes our process" — not a comma-separated list of attributes. Aim for 5–14 words. Avoid clipped fragments.
 

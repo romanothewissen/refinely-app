@@ -46,7 +46,7 @@ class PipelineAuditWriter {
   }
 
   /** Updates parseOutcome on the most recent LLM call (from callLlmJsonWithUsage). */
-  annotateLastJsonParse(outcome: 'ok' | 'parse_failed' | 'parse_failed_after_retry'): void {
+  annotateLastJsonParse(outcome: 'clean_parse' | 'repaired_parse' | 'parse_failed' | 'parse_failed_after_retry'): void {
     if (this.calls.length === 0) return;
     const row = this.calls[this.calls.length - 1];
     row.parseOutcome = outcome;

@@ -5,6 +5,7 @@ import type {
   GeneratorBucketClasses,
   GeneratorConfig,
   LlmProvider,
+  PipelineProfile,
 } from '../types';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
@@ -36,11 +37,66 @@ const DEFAULT_RESOLVED_MODELS: Pick<GeneratorConfig, GeneratorRoleModelField> = 
   themeModel: strategyCatalog.providers.anthropic.presets.stable.flash[0],
 };
 
+function normalizePipelineProfile(value?: string): PipelineProfile {
+  if (value === 'fast' || value === 'quality') return value;
+  return 'balanced';
+}
+
+function inferPipelineProfileFromModels(
+  models: Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'>,
+): PipelineProfile {
+  const families = [
+    inferModelFamily(models.clarifyModel),
+    inferModelFamily(models.decompositionModel),
+    inferModelFamily(models.arModel),
+  ];
+  if (families.every((family) => family === 'pro')) return 'quality';
+  if (families.every((family) => family === 'flash' || family === 'lite')) return 'fast';
+  return 'balanced';
+}
+
+function pickPresetFamilyModel(
+  provider: LlmProvider,
+  family: 'pro' | 'flash' | 'lite',
+  fallback?: string,
+): string {
+  const providerCatalog = strategyCatalog.providers[getPresetProvider(provider)];
+  const preset = providerCatalog?.presets?.stable?.[family]?.[0];
+  return preset || fallback || DEFAULT_RESOLVED_MODELS.decompositionModel;
+}
+
+function resolveStoryAssistantProfileModels(
+  provider: LlmProvider,
+  pipelineProfile: PipelineProfile,
+  savedModels: Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'>,
+): Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'> {
+  if (pipelineProfile === 'fast') {
+    return {
+      clarifyModel: pickPresetFamilyModel(provider, 'flash', savedModels.clarifyModel),
+      decompositionModel: pickPresetFamilyModel(provider, 'flash', savedModels.decompositionModel),
+      arModel: pickPresetFamilyModel(provider, 'flash', savedModels.arModel),
+    };
+  }
+  if (pipelineProfile === 'quality') {
+    return {
+      clarifyModel: pickPresetFamilyModel(provider, 'pro', savedModels.clarifyModel),
+      decompositionModel: pickPresetFamilyModel(provider, 'pro', savedModels.decompositionModel),
+      arModel: pickPresetFamilyModel(provider, 'pro', savedModels.arModel),
+    };
+  }
+  return {
+    clarifyModel: pickPresetFamilyModel(provider, 'flash', savedModels.clarifyModel),
+    decompositionModel: pickPresetFamilyModel(provider, 'pro', savedModels.decompositionModel),
+    arModel: pickPresetFamilyModel(provider, 'pro', savedModels.arModel),
+  };
+}
+
 export interface ResolvedGeneratorStrategyState {
   provider: LlmProvider;
   modelStrategy: 'simple' | 'advanced';
   bucketClasses: GeneratorBucketClasses;
   resolvedModels: Pick<GeneratorConfig, GeneratorRoleModelField>;
+  pipelineProfile: PipelineProfile;
   inferredFromLegacyModels: boolean;
   matchedPreset: boolean;
 }
@@ -85,12 +141,21 @@ export function resolveGeneratorStrategyState(generatorConfig: Partial<Generator
   const bucketClasses = normalizeBucketClasses(generatorConfig?.bucketClasses);
   const resolvedModels = getSavedResolvedModels(generatorConfig ?? {});
   const incomingStrategy = generatorConfig?.modelStrategy;
+  const pipelineProfile = normalizePipelineProfile(
+    generatorConfig?.pipelineProfile
+      ?? inferPipelineProfileFromModels({
+        clarifyModel: resolvedModels.clarifyModel,
+        decompositionModel: resolvedModels.decompositionModel,
+        arModel: resolvedModels.arModel,
+      }),
+  );
 
   return {
     provider,
     modelStrategy: normalizeModelStrategy(incomingStrategy),
     bucketClasses,
     resolvedModels,
+    pipelineProfile,
     inferredFromLegacyModels: Boolean(incomingStrategy && ['stable', 'latest', 'custom'].includes(String(incomingStrategy))),
     matchedPreset: false,
   };
@@ -99,12 +164,18 @@ export function resolveGeneratorStrategyState(generatorConfig: Partial<Generator
 export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<GeneratorConfig> | undefined): GeneratorConfig {
   const state = resolveGeneratorStrategyState(generatorConfig);
   const savedModels = getSavedResolvedModels(generatorConfig ?? {});
+  const storyAssistantModels = resolveStoryAssistantProfileModels(state.provider, state.pipelineProfile, {
+    clarifyModel: savedModels.clarifyModel,
+    decompositionModel: savedModels.decompositionModel,
+    arModel: savedModels.arModel,
+  });
 
   return {
     provider: state.provider,
     modelStrategy: state.modelStrategy,
     bucketClasses: state.bucketClasses,
     modelStrategyVersion: MODEL_STRATEGY_VERSION,
+    pipelineProfile: state.pipelineProfile,
     maxTokens: generatorConfig?.maxTokens ?? 8192,
     anthropicApiKey: generatorConfig?.anthropicApiKey,
     anthropicBaseUrl: generatorConfig?.anthropicBaseUrl,
@@ -116,13 +187,30 @@ export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<Generat
     azureOpenAIBaseUrl: generatorConfig?.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: generatorConfig?.azureOpenAIApiVersion,
     modelCatalogs: generatorConfig?.modelCatalogs,
-    decompositionModel: state.resolvedModels.decompositionModel || savedModels.decompositionModel,
-    arModel: state.resolvedModels.arModel || savedModels.arModel,
-    clarifyModel: state.resolvedModels.clarifyModel || savedModels.clarifyModel,
+    decompositionModel: storyAssistantModels.decompositionModel,
+    arModel: storyAssistantModels.arModel,
+    clarifyModel: storyAssistantModels.clarifyModel,
     refineModel: state.resolvedModels.refineModel || savedModels.refineModel,
     evaluateModel: state.resolvedModels.evaluateModel || savedModels.evaluateModel,
     triageModel: state.resolvedModels.triageModel || savedModels.triageModel,
     themeModel: state.resolvedModels.themeModel || savedModels.themeModel,
+  };
+}
+
+export function resolveStoryAssistantPipelineProfile(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+): PipelineProfile {
+  return resolveEffectiveGeneratorConfig(generatorConfig).pipelineProfile;
+}
+
+export function buildStoryAssistantModelRoute(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+): GenerationModelRoute {
+  const effective = resolveEffectiveGeneratorConfig(generatorConfig);
+  return {
+    clarify: effective.clarifyModel,
+    decomposition: effective.decompositionModel,
+    ar: effective.arModel,
   };
 }
 
@@ -135,11 +223,12 @@ export function resolveGeneratorModelForRole(
 
 function inferModelFamily(modelId?: string): 'pro' | 'flash' | 'lite' | undefined {
   const normalized = String(modelId ?? '').trim().toLowerCase();
+  const hasToken = (token: string) => new RegExp(`(^|[^a-z])${token}([^a-z]|$)`).test(normalized);
   if (!normalized) return undefined;
   if (normalized.includes('flash')) return 'flash';
-  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano') || normalized.includes('haiku')) return 'lite';
-  if (normalized.includes('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
-  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.includes('sonnet')) return normalized.includes('mini') ? 'lite' : 'flash';
+  if (hasToken('lite') || hasToken('mini') || hasToken('nano') || normalized.includes('haiku')) return 'lite';
+  if (hasToken('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
+  if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.includes('sonnet')) return hasToken('mini') ? 'lite' : 'flash';
   return undefined;
 }
 

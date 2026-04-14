@@ -6,6 +6,8 @@ function tryParseJson<T>(text: string): T | null {
   }
 }
 
+export type JsonExtractParseMode = 'clean_parse' | 'repaired_parse';
+
 function extractBalancedJsonCandidate(text: string): string | null {
   for (let start = 0; start < text.length; start++) {
     const open = text[start];
@@ -144,11 +146,18 @@ function repairTruncatedJsonCandidate(text: string): string | null {
  * Parse JSON from LLM output, tolerating Markdown fences and leading/trailing prose.
  */
 export function extractJson<T = unknown>(text: string): T {
+  return extractJsonWithMetadata<T>(text).data;
+}
+
+export function extractJsonWithMetadata<T = unknown>(text: string): {
+  data: T;
+  parseMode: JsonExtractParseMode;
+} {
   const normalized = text.trim().replace(/^\uFEFF/, '');
 
   const direct = tryParseJson<T>(normalized);
   if (direct !== null) {
-    return direct;
+    return { data: direct, parseMode: 'clean_parse' };
   }
 
   const strippedFence = normalized
@@ -157,13 +166,13 @@ export function extractJson<T = unknown>(text: string): T {
     .trim();
   const strippedFenceParsed = tryParseJson<T>(strippedFence);
   if (strippedFenceParsed !== null) {
-    return strippedFenceParsed;
+    return { data: strippedFenceParsed, parseMode: 'clean_parse' };
   }
   const strippedFenceRepaired = repairTruncatedJsonCandidate(strippedFence);
   if (strippedFenceRepaired) {
     const parsedStrippedFenceRepaired = tryParseJson<T>(strippedFenceRepaired);
     if (parsedStrippedFenceRepaired !== null) {
-      return parsedStrippedFenceRepaired;
+      return { data: parsedStrippedFenceRepaired, parseMode: 'repaired_parse' };
     }
   }
 
@@ -175,20 +184,20 @@ export function extractJson<T = unknown>(text: string): T {
     }
     const parsedBlock = tryParseJson<T>(block);
     if (parsedBlock !== null) {
-      return parsedBlock;
+      return { data: parsedBlock, parseMode: 'clean_parse' };
     }
     const balancedBlock = extractBalancedJsonCandidate(block);
     if (balancedBlock) {
       const parsedBalancedBlock = tryParseJson<T>(balancedBlock);
       if (parsedBalancedBlock !== null) {
-        return parsedBalancedBlock;
+        return { data: parsedBalancedBlock, parseMode: 'clean_parse' };
       }
     }
     const repairedBlock = repairTruncatedJsonCandidate(block);
     if (repairedBlock) {
       const parsedRepairedBlock = tryParseJson<T>(repairedBlock);
       if (parsedRepairedBlock !== null) {
-        return parsedRepairedBlock;
+        return { data: parsedRepairedBlock, parseMode: 'repaired_parse' };
       }
     }
   }
@@ -197,7 +206,7 @@ export function extractJson<T = unknown>(text: string): T {
   if (balanced) {
     const parsedBalanced = tryParseJson<T>(balanced);
     if (parsedBalanced !== null) {
-      return parsedBalanced;
+      return { data: parsedBalanced, parseMode: 'clean_parse' };
     }
   }
 
@@ -205,7 +214,7 @@ export function extractJson<T = unknown>(text: string): T {
   if (repaired) {
     const parsedRepaired = tryParseJson<T>(repaired);
     if (parsedRepaired !== null) {
-      return parsedRepaired;
+      return { data: parsedRepaired, parseMode: 'repaired_parse' };
     }
   }
 
