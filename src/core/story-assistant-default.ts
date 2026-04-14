@@ -310,6 +310,7 @@ function looksLikeRolePhrase(value: string): boolean {
   const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
   if (!cleaned || cleaned.length < 3 || cleaned.length > 80) return false;
   if (/[?!]/.test(cleaned)) return false;
+  if (/^(?:just|only|simply|merely|primarily|mainly|n\/a|na|not needed|nothing|no\s)/i.test(cleaned)) return false;
   if (isNegativeRolePhrase(cleaned)) return false;
   if (isReferentialRolePhrase(cleaned)) return false;
   if (/^(?:only if|if |when |unless |because |after |before |during |while |depends\b)/i.test(cleaned)) return false;
@@ -637,7 +638,7 @@ function buildGenerationContextMessage(input: {
     parts.push(discoveryHandoff);
   }
   if (input.clarifyAnswers.length) {
-    parts.push(`Clarification answers:\n${formatClarifyAnswers(input.clarifyAnswers)}`);
+    parts.push(`Stakeholder clarifications — use these to sharpen feature scope and user roles. Translate answers into business capabilities; do not copy answer text verbatim into descriptions or acceptance requirements:\n${formatClarifyAnswers(input.clarifyAnswers)}`);
   }
   if (input.wiEvidenceText.trim()) {
     parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);

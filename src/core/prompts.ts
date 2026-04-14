@@ -322,6 +322,10 @@ Work through each of the five discovery areas below in order. For each area, ask
 
 ────────────────────────────────────────────────────────────────────────
 
+COVERAGE MINIMUM: For a discovery session of depth 'deep' or 'standard', your question set MUST include at least 2 questions in Business Rules & Exceptions and at least 1 question in Success & Measurement.
+Work instructions describe operational steps — they do NOT tell you what governs whether an action is allowed, what happens when the happy path fails, or how a tester would verify the outcome.
+Always ask these regardless of how much operational context is supplied.
+
 RULES:
 - Every question must be specific to THIS requirement — never generic boilerplate
 - Do NOT ask about timelines, budgets, project ownership, or technology choices
@@ -330,7 +334,7 @@ RULES:
 - Anchor each question to concrete language from the requirement or supplied evidence (roles, process steps, constraints, outcomes). If a question can be reused unchanged for a different requirement, rewrite it to be more specific.
 - Prefer process-grounded wording over abstract placeholders (for example, ask about the named trigger/state/exception in evidence rather than saying "this process" or "the flow" without context).
 
-For each question, provide exactly 3 short answer suggestions (under 10 words each) representing the most likely stakeholder responses.
+For each question, provide exactly 3 answer suggestions representing the most likely stakeholder responses. Each suggestion must be a complete, natural phrase a stakeholder could read and say "yes, that describes our process" — not a comma-separated list of attributes. Aim for 5–14 words. Avoid clipped fragments.
 
 Return ONLY a JSON array. Each item must include a 'category' field matching one of the five area names exactly:
 [{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]`;
@@ -414,7 +418,7 @@ RULES:
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
 - If sufficient is false and you ask a follow-up, suggestions are REQUIRED and must include 1 to 3 grounded suggestions.
 - If you include suggestions, include only 1 to 3 grounded suggestions.
-- Suggestions may be short phrases or brief clauses, but they must stay in business language and avoid implementation wording.
+- Each suggestion must be a complete, natural phrase a stakeholder could read and say "yes, that describes our process" — not a comma-separated list of attributes. Aim for 5–14 words. Stay in business language, avoid implementation wording.
 - The follow-up question must be one complete sentence ending in "?" and must not be truncated.
 - There is only one follow-up round. If the remaining uncertainty can be carried as an explicit open decision, prefer "ready_with_open_decisions" over asking more questions.
 - If workflow order, dependencies, handoffs, or actor coordination still materially affect what gets built, ask about that explicitly or return it as an open decision instead of pretending discovery is complete.
