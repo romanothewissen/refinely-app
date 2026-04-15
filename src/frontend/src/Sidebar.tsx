@@ -1,7 +1,7 @@
 import React from 'react';
 import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { OutputProfile } from './types';
+import type { PipelineProfile } from './types';
 
 interface SidebarProps {
   viewMode: 'generate' | 'settings';
@@ -21,13 +21,9 @@ interface SidebarProps {
   usage: { currentMonth: number } | null;
   limits: { generationsPerMonth: number } | null;
   brandingLogoUrl?: string | null;
-  /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
-  workspaceOutputProfile?: OutputProfile;
-  /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
-  runOutputProfileOverride?: OutputProfile;
-  /** @deprecated Output profile removed — capability-based decomposition handles style automatically */
-  setRunOutputProfileOverride?: (value: OutputProfile) => void;
   reviewBeforeARs?: boolean;
+  pipelineProfile: PipelineProfile;
+  onPipelineProfileChange: (value: PipelineProfile) => void;
   width?: number;
   originIssueKey?: string | null;
   projectKeys: string[];
@@ -58,9 +54,6 @@ const fadeUp = {
   }),
 };
 
-/** @deprecated Output profile removed — capability-based decomposition handles style automatically */
-const _OUTPUT_PROFILE_OPTIONS = null; void _OUTPUT_PROFILE_OPTIONS;
-
 export function Sidebar({
   viewMode,
   setViewMode,
@@ -79,10 +72,9 @@ export function Sidebar({
   usage,
   limits,
   brandingLogoUrl,
-  workspaceOutputProfile: _workspaceOutputProfile,
-  runOutputProfileOverride: _runOutputProfileOverride,
-  setRunOutputProfileOverride: _setRunOutputProfileOverride,
   reviewBeforeARs,
+  pipelineProfile,
+  onPipelineProfileChange,
   width,
   originIssueKey,
   projectKeys,
@@ -484,6 +476,49 @@ export function Sidebar({
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="rf-sidebar-card"
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={1.5}
+        >
+          <div className="px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Performance</div>
+                <div className="mt-1 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                  Choose the speed and depth for your next run.
+                </div>
+              </div>
+              <div className="inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
+                {[
+                  { id: 'fast' as const, label: 'Fast' },
+                  { id: 'balanced' as const, label: 'Balanced' },
+                  { id: 'quality' as const, label: 'Quality' },
+                ].map((option) => {
+                  const selected = pipelineProfile === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => onPipelineProfileChange(option.id)}
+                      disabled={isWorking}
+                      className={`rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition ${
+                        selected
+                          ? 'bg-[var(--rf-brand)] text-white shadow-sm'
+                          : 'text-[var(--rf-text-secondary)] hover:bg-white hover:text-[var(--rf-text)]'
+                      } disabled:opacity-50`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </motion.div>
 

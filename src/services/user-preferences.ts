@@ -20,6 +20,9 @@ export async function saveUserPreferences(accountId: string, patch: Partial<User
   if (!next.defaultProjectKey || next.defaultProjectKey === '*') {
     delete next.defaultProjectKey;
   }
+  if (next.pipelineProfile !== 'fast' && next.pipelineProfile !== 'balanced' && next.pipelineProfile !== 'quality') {
+    delete next.pipelineProfile;
+  }
   if (next.quickRefineModelByProvider) {
     Object.entries(next.quickRefineModelByProvider).forEach(([provider, model]) => {
       if (!model?.trim()) {

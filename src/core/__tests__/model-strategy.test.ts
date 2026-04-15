@@ -29,9 +29,11 @@ test('uses the saved explicit role models for simple mode', () => {
 
   assert.equal(resolved.modelStrategy, 'simple');
   assert.equal(resolved.pipelineProfile, 'balanced');
-  assert.equal(resolved.decompositionModel, 'gpt-4o');
+  assert.equal(resolved.decompositionModel, 'gpt-5.4');
   assert.equal(resolved.clarifyModel, 'gpt-4o');
   assert.equal(resolved.refineModel, 'gpt-4o-mini');
+  assert.equal(resolved.storyAssistantModelAssignments?.openai?.lightModel, 'gpt-4o');
+  assert.equal(resolved.storyAssistantModelAssignments?.openai?.heavyModel, 'gpt-5.4');
 });
 
 test('normalizes legacy strategy values into simple or advanced', () => {
@@ -75,7 +77,7 @@ test('applies free-tier downgrades after explicit user model selection', () => {
     maxTokens: 8192,
   });
 
-  assert.equal(getTierModel(resolved.decompositionModel, 'free'), 'gpt-4o-mini');
+  assert.equal(getTierModel(resolved.decompositionModel, 'free'), 'gpt-5.4-mini');
   assert.equal(getTierModel(resolved.refineModel, 'free'), 'gpt-4o-mini');
 });
 
@@ -122,4 +124,29 @@ test('infers quality and fast profiles from saved story assistant model families
 
   assert.equal(qualityState.pipelineProfile, 'quality');
   assert.equal(fastState.pipelineProfile, 'fast');
+});
+
+test('honors explicit light and heavy story assistant assignments', () => {
+  const resolved = resolveEffectiveGeneratorConfig({
+    provider: 'anthropic',
+    pipelineProfile: 'quality',
+    modelStrategy: 'simple',
+    bucketClasses: DEFAULT_BUCKET_CLASSES,
+    modelStrategyVersion: MODEL_STRATEGY_VERSION,
+    clarifyModel: 'claude-sonnet-4-6',
+    decompositionModel: 'claude-opus-4-6',
+    arModel: 'claude-opus-4-6',
+    storyAssistantModelAssignments: {
+      anthropic: {
+        lightModel: 'claude-haiku-4-5',
+        heavyModel: 'claude-opus-4-6',
+      },
+    },
+    maxTokens: 8192,
+  });
+
+  assert.equal(resolved.clarifyModel, 'claude-opus-4-6');
+  assert.equal(resolved.decompositionModel, 'claude-opus-4-6');
+  assert.equal(resolved.arModel, 'claude-opus-4-6');
+  assert.equal(resolved.storyAssistantModelAssignments?.anthropic?.lightModel, 'claude-haiku-4-5');
 });

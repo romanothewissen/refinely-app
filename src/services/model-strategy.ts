@@ -6,6 +6,7 @@ import type {
   GeneratorConfig,
   LlmProvider,
   PipelineProfile,
+  StoryAssistantModelAssignment,
 } from '../types';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
@@ -68,26 +69,29 @@ function pickPresetFamilyModel(
 function resolveStoryAssistantProfileModels(
   provider: LlmProvider,
   pipelineProfile: PipelineProfile,
+  assignments: StoryAssistantModelAssignment,
   savedModels: Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'>,
 ): Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'> {
+  const lightModel = assignments.lightModel || pickPresetFamilyModel(provider, 'flash', savedModels.clarifyModel);
+  const heavyModel = assignments.heavyModel || pickPresetFamilyModel(provider, 'pro', savedModels.decompositionModel || savedModels.arModel);
   if (pipelineProfile === 'fast') {
     return {
-      clarifyModel: pickPresetFamilyModel(provider, 'flash', savedModels.clarifyModel),
-      decompositionModel: pickPresetFamilyModel(provider, 'flash', savedModels.decompositionModel),
-      arModel: pickPresetFamilyModel(provider, 'flash', savedModels.arModel),
+      clarifyModel: lightModel,
+      decompositionModel: lightModel,
+      arModel: lightModel,
     };
   }
   if (pipelineProfile === 'quality') {
     return {
-      clarifyModel: pickPresetFamilyModel(provider, 'pro', savedModels.clarifyModel),
-      decompositionModel: pickPresetFamilyModel(provider, 'pro', savedModels.decompositionModel),
-      arModel: pickPresetFamilyModel(provider, 'pro', savedModels.arModel),
+      clarifyModel: heavyModel,
+      decompositionModel: heavyModel,
+      arModel: heavyModel,
     };
   }
   return {
-    clarifyModel: pickPresetFamilyModel(provider, 'flash', savedModels.clarifyModel),
-    decompositionModel: pickPresetFamilyModel(provider, 'pro', savedModels.decompositionModel),
-    arModel: pickPresetFamilyModel(provider, 'pro', savedModels.arModel),
+    clarifyModel: lightModel,
+    decompositionModel: heavyModel,
+    arModel: heavyModel,
   };
 }
 
@@ -136,6 +140,32 @@ function getSavedResolvedModels(generatorConfig: Partial<GeneratorConfig>): Pick
   };
 }
 
+function deriveStoryAssistantAssignments(
+  provider: LlmProvider,
+  savedModels: Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'>,
+  existing?: StoryAssistantModelAssignment,
+): StoryAssistantModelAssignment {
+  const lightFallback = savedModels.clarifyModel || pickPresetFamilyModel(provider, 'flash');
+  const heavyFallback = savedModels.decompositionModel || savedModels.arModel || pickPresetFamilyModel(provider, 'pro');
+  return {
+    lightModel: existing?.lightModel || lightFallback,
+    heavyModel: existing?.heavyModel || heavyFallback,
+  };
+}
+
+function normalizeStoryAssistantModelAssignments(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+  provider: LlmProvider,
+  savedModels: Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'>,
+): Partial<Record<LlmProvider, StoryAssistantModelAssignment>> {
+  const rawAssignments = generatorConfig?.storyAssistantModelAssignments ?? {};
+  const normalizedProvider = normalizeProvider(provider);
+  const normalizedAssignments: Partial<Record<LlmProvider, StoryAssistantModelAssignment>> = { ...rawAssignments };
+  const existing = normalizedAssignments[normalizedProvider];
+  normalizedAssignments[normalizedProvider] = deriveStoryAssistantAssignments(normalizedProvider, savedModels, existing);
+  return normalizedAssignments;
+}
+
 export function resolveGeneratorStrategyState(generatorConfig: Partial<GeneratorConfig> | undefined): ResolvedGeneratorStrategyState {
   const provider = normalizeProvider(generatorConfig?.provider);
   const bucketClasses = normalizeBucketClasses(generatorConfig?.bucketClasses);
@@ -164,7 +194,27 @@ export function resolveGeneratorStrategyState(generatorConfig: Partial<Generator
 export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<GeneratorConfig> | undefined): GeneratorConfig {
   const state = resolveGeneratorStrategyState(generatorConfig);
   const savedModels = getSavedResolvedModels(generatorConfig ?? {});
+  const storyAssistantModelAssignments = normalizeStoryAssistantModelAssignments(
+    generatorConfig,
+    state.provider,
+    {
+      clarifyModel: savedModels.clarifyModel,
+      decompositionModel: savedModels.decompositionModel,
+      arModel: savedModels.arModel,
+    },
+  );
+  const activeStoryAssistantAssignments = storyAssistantModelAssignments[state.provider] ?? deriveStoryAssistantAssignments(
+    state.provider,
+    {
+      clarifyModel: savedModels.clarifyModel,
+      decompositionModel: savedModels.decompositionModel,
+      arModel: savedModels.arModel,
+    },
+  );
   const storyAssistantModels = resolveStoryAssistantProfileModels(state.provider, state.pipelineProfile, {
+    lightModel: activeStoryAssistantAssignments.lightModel,
+    heavyModel: activeStoryAssistantAssignments.heavyModel,
+  }, {
     clarifyModel: savedModels.clarifyModel,
     decompositionModel: savedModels.decompositionModel,
     arModel: savedModels.arModel,
@@ -187,6 +237,7 @@ export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<Generat
     azureOpenAIBaseUrl: generatorConfig?.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: generatorConfig?.azureOpenAIApiVersion,
     modelCatalogs: generatorConfig?.modelCatalogs,
+    storyAssistantModelAssignments,
     decompositionModel: storyAssistantModels.decompositionModel,
     arModel: storyAssistantModels.arModel,
     clarifyModel: storyAssistantModels.clarifyModel,

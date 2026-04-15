@@ -43,7 +43,7 @@ import {
   refineSingleFeature,
   checkRefineFeedbackSufficiency,
   askQuestion,
-} from '../core/story-generator';
+} from '../core/refine-operations';
 import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } from '../core/jira-creator';
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { extractDocumentText } from '../core/document-parser';
@@ -72,6 +72,19 @@ import {
 } from '../types';
 import { handleInferProjectPersonaRoles } from './project-persona-role-inference';
 import { deletePipelineAuditBundle, loadPipelineAuditBundle, mergePipelineAuditBundle } from '../services/pipeline-audit-store';
+
+function applyPreferredPipelineProfile(config: any, pipelineProfile?: string) {
+  if (pipelineProfile !== 'fast' && pipelineProfile !== 'balanced' && pipelineProfile !== 'quality') {
+    return config;
+  }
+  return {
+    ...config,
+    generatorConfig: {
+      ...(config?.generatorConfig ?? {}),
+      pipelineProfile,
+    },
+  };
+}
 
 // ─── Security Helpers ────────────────────────────────────────────────────────
 
@@ -316,7 +329,12 @@ resolver.define('getConfig', async ({ context }) => {
     if (gc.azureOpenAIApiKey) gc.azureOpenAIApiKey = REDACTED;
   }
   
-  return { ...config, isAdmin, defaultProjectKey: userPreferences.defaultProjectKey };
+  return {
+    ...config,
+    isAdmin,
+    defaultProjectKey: userPreferences.defaultProjectKey,
+    pipelineProfile: userPreferences.pipelineProfile ?? config.generatorConfig?.pipelineProfile,
+  };
 });
 
 resolver.define('saveConfig', async ({ payload, context }) => {
@@ -338,7 +356,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   await saveConfig(payload);
 
   const actorAccountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const modelFields = ['modelStrategy', 'bucketClasses', 'modelStrategyVersion', 'decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'triageModel', 'themeModel'];
+  const modelFields = ['modelStrategy', 'bucketClasses', 'modelStrategyVersion', 'decompositionModel', 'arModel', 'clarifyModel', 'refineModel', 'evaluateModel', 'triageModel', 'themeModel', 'storyAssistantModelAssignments'];
   const changedModelFields = modelFields.filter((field) => {
     return ngc[field] !== undefined && ngc[field] !== egc[field];
   });
@@ -394,6 +412,9 @@ resolver.define('saveUserPreferences', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const preferences = await saveUserPreferences(accountId, {
     defaultProjectKey: typeof payload?.defaultProjectKey === 'string' ? payload.defaultProjectKey : undefined,
+    pipelineProfile: payload?.pipelineProfile === 'fast' || payload?.pipelineProfile === 'balanced' || payload?.pipelineProfile === 'quality'
+      ? payload.pipelineProfile
+      : undefined,
     quickRefineModelByProvider: payload?.quickRefineModelByProvider && typeof payload.quickRefineModelByProvider === 'object'
       ? payload.quickRefineModelByProvider
       : undefined,
@@ -479,10 +500,11 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
 // ─── Generation (queue dispatch) ─────────────────────────────────────────────
 
 resolver.define('startGeneration', async ({ payload, context }) => {
-  const eventConfig = await getConfig();
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const userPreferences = await getUserPreferences(accountId);
+  const eventConfig = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
   const check = await checkGenerationAllowed(eventConfig, context);
 
-  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
   const finalSufficiency = payload?.clarifyFinalSufficiency;
@@ -542,7 +564,8 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     return { success: false, error: 'No retryable generated feature was found for this session.' };
   }
 
-  const config = await getConfig();
+  const userPreferences = await getUserPreferences(accountId);
+  const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
   const check = await checkGenerationAllowed(config, context);
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
     projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
@@ -571,6 +594,65 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     type: 'progress',
     sessionId: payload.sessionId,
     message: 'Retrying acceptance requirements for the selected feature…',
+    updatedAt: Date.now(),
+  });
+
+  const generationQueue = new Queue({ key: 'generation-queue' });
+  await generationQueue.push({ body: event });
+  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+});
+
+resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const featureIds = [...new Set((Array.isArray(payload?.featureIds) ? payload.featureIds : [])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean))];
+  if (!featureIds.length) {
+    return { success: false, error: 'No retryable generated features were selected.' };
+  }
+
+  const convKey = KEYS.userConversations(accountId, payload.sessionId);
+  const conversation = await entityGet<{ turns?: Array<Record<string, any>> }>(convKey);
+  const turns = Array.isArray(conversation?.turns) ? conversation.turns : [];
+  const latestGenerateTurn = [...turns].reverse().find((turn) => Array.isArray(turn?.features) && turn.features.length > 0);
+  const retryContext = latestGenerateTurn?.retryContext;
+  const retryBaseFeatures = Array.isArray(latestGenerateTurn?.features) ? latestGenerateTurn.features as Feature[] : [];
+  const retryFeatures = retryBaseFeatures.filter((feature) => featureIds.includes(String(feature?.id ?? '')));
+
+  if (!latestGenerateTurn || !retryFeatures.length) {
+    return { success: false, error: 'No retryable generated features were found for this session.' };
+  }
+
+  const userPreferences = await getUserPreferences(accountId);
+  const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
+  const check = await checkGenerationAllowed(config, context);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
+    projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
+    projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
+  });
+
+  const event: GenerationEvent = {
+    sessionId: payload.sessionId,
+    accountId,
+    requirement: latestGenerateTurn.requirement ?? '',
+    clarifyAnswers: retryContext?.clarifyAnswers ?? [],
+    attachmentText: retryContext?.attachmentText ?? '',
+    config,
+    license: context?.license,
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: authorizedProjects.projectKeys,
+    clarifySizingContract: retryContext?.sizingContract,
+    clarifyAdvisoryTriage: retryContext?.advisoryTriage,
+    retryFeatureIds: retryFeatures.map((feature) => feature.id),
+    retryFeatures,
+    retryBaseFeatures,
+    enqueuedAt: Date.now(),
+  };
+
+  await entitySetSmall(KEYS.generationProgress(payload.sessionId), {
+    type: 'progress',
+    sessionId: payload.sessionId,
+    message: `Retrying acceptance requirements for ${retryFeatures.length} selected feature${retryFeatures.length === 1 ? '' : 's'}…`,
     updatedAt: Date.now(),
   });
 
@@ -617,9 +699,10 @@ async function enqueueClarifyWorkflow(
   },
   context: any,
 ) {
-  const config = await getConfig();
-  const clarifyQueue = new Queue({ key: 'clarify-queue' });
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const userPreferences = await getUserPreferences(accountId);
+  const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
+  const clarifyQueue = new Queue({ key: 'clarify-queue' });
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
   const event: ClarifyEvent = {

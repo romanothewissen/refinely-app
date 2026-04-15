@@ -11,7 +11,11 @@ export const api = {
   saveConfig: (config: unknown) => invoke('saveConfig', p(config)),
   saveProjectConfig: (payload: any) => invoke('saveProjectConfig', payload),
   getUserPreferences: () => invoke('getUserPreferences'),
-  saveUserPreferences: (payload: { defaultProjectKey?: string; quickRefineModelByProvider?: Partial<Record<LlmProvider, string>> }) => invoke('saveUserPreferences', payload),
+  saveUserPreferences: (payload: {
+    defaultProjectKey?: string;
+    pipelineProfile?: 'fast' | 'balanced' | 'quality';
+    quickRefineModelByProvider?: Partial<Record<LlmProvider, string>>;
+  }) => invoke('saveUserPreferences', payload),
   patchConfig: (patch: unknown) => invoke('patchConfig', p(patch)),
 
   // Generation progress (polling)
@@ -39,6 +43,10 @@ export const api = {
     sessionId: string;
     featureId: string;
   }) => invoke('retryFailedFeatureGeneration', payload),
+  retryFailedFeatureGenerations: (payload: {
+    sessionId: string;
+    featureIds: string[];
+  }) => invoke('retryFailedFeatureGenerations', payload),
 
   // Clarify (async queue)
   startClarify: (payload: {

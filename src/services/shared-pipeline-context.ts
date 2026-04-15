@@ -64,6 +64,7 @@ export async function loadSharedPipelineContext(input: {
   projectKey?: string;
   projectKeys?: string[];
   pipelineMode?: 'story_assistant_default';
+  includeSimilarStories?: boolean;
 }): Promise<SharedPipelineContext> {
   const retrievalStartedAt = Date.now();
   const selectedProjectKeys = normalizeProjectKeys(input.projectKey, input.projectKeys);
@@ -77,6 +78,7 @@ export async function loadSharedPipelineContext(input: {
     input.attachmentText ?? '',
     input.clarifyAnswers ?? [],
   );
+  const includeSimilarStories = input.includeSimilarStories !== false;
   const [wiContext, similarStories] = await Promise.all([
     input.config.wiConfig.enabled
       ? retrieveScopedWiContext(
@@ -86,14 +88,16 @@ export async function loadSharedPipelineContext(input: {
           selectedProjectKeys,
         )
       : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
-    retrieveScopedSimilarStories({
-      requirement: retrievalQuery,
-      attachmentText: input.attachmentText,
-      clarifyAnswers: input.clarifyAnswers,
-      config: input.config,
-      projectKeys: selectedProjectKeys,
-      maxResults: 5,
-    }),
+    includeSimilarStories
+      ? retrieveScopedSimilarStories({
+          requirement: retrievalQuery,
+          attachmentText: input.attachmentText,
+          clarifyAnswers: input.clarifyAnswers,
+          config: input.config,
+          projectKeys: selectedProjectKeys,
+          maxResults: 5,
+        })
+      : Promise.resolve([]),
   ]);
   const retrievalMs = Date.now() - retrievalStartedAt;
   const wiInsightStartedAt = Date.now();

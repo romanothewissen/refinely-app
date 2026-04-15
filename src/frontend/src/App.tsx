@@ -19,12 +19,12 @@ import type {
   ClarifyFailureReasonCode,
   ClarifyProgressPayload,
   ClarifyQuestion,
-  DraftReviewDecision,
   FeatureActorSource,
   FeatureClass,
   FeatureConfidence,
   GenerationContextMeta,
   OutputProfile,
+  PipelineProfile,
   TokenUsageSummary,
   UndoableAiChange,
 } from './types';
@@ -418,7 +418,7 @@ function LegacyApp({
   const [workflowRunId, setWorkflowRunId] = useState(0);
   const [isWorking, setIsWorking] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [retryingFeatureId, setRetryingFeatureId] = useState<string | null>(null);
+  const [retryingFeatureIds, setRetryingFeatureIds] = useState<string[]>([]);
   const [generationWarning, setGenerationWarning] = useState<string | null>(null);
   const [lastAiChange, setLastAiChange] = useState<UndoableAiChange | null>(null);
   const [clarifyBlockingError, setClarifyBlockingError] = useState<{ message: string; reasonCode?: ClarifyFailureReasonCode } | null>(null);
@@ -477,8 +477,8 @@ function LegacyApp({
   const [workspaceSelectionVersion, setWorkspaceSelectionVersion] = useState(0);
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
-  const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
+  const [pipelineProfile, setPipelineProfile] = useState<PipelineProfile>('balanced');
   const [reviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
@@ -631,9 +631,11 @@ function LegacyApp({
     api.getConfig()
       .then((res: any) => {
         setBrandingLogoUrl(res?.branding?.logoUrl || null);
+        if (res?.pipelineProfile === 'fast' || res?.pipelineProfile === 'balanced' || res?.pipelineProfile === 'quality') {
+          setPipelineProfile(res.pipelineProfile);
+        }
         const profile = res?.generationPreferences?.outputProfile;
         const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
-        setWorkspaceOutputProfile(normalizedProfile);
         setRunOutputProfileOverride(normalizedProfile);
         setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
       })
@@ -750,9 +752,11 @@ function LegacyApp({
       if (res.tier) setTier(res.tier);
       if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
       setBrandingLogoUrl(res?.branding?.logoUrl || null);
+      if (res?.pipelineProfile === 'fast' || res?.pipelineProfile === 'balanced' || res?.pipelineProfile === 'quality') {
+        setPipelineProfile(res.pipelineProfile);
+      }
       const profile = res?.generationPreferences?.outputProfile;
       const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
-      setWorkspaceOutputProfile(normalizedProfile);
       setRunOutputProfileOverride(normalizedProfile);
       setSavedDefaultProjectKey(typeof res.defaultProjectKey === 'string' ? res.defaultProjectKey : null);
       setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
@@ -817,7 +821,7 @@ function LegacyApp({
       setGenerationWarning(payload.generationContext?.partialSuccessMessage ?? null);
       setWorkflowTokenUsage(prev => addTokenUsage(prev, payload.generationContext?.tokenUsage ?? null));
       setPendingSessionId(null);
-      setRetryingFeatureId(null);
+      setRetryingFeatureIds([]);
       setIsWorking(false);
       setWorkflowStage('idle');
       if (pipelineAuditActiveRef.current && pipelineAuditRunIdRef.current) {
@@ -844,7 +848,7 @@ function LegacyApp({
       setGenerationError(errMsg);
       setGenerationProgressMeta(null);
       setPendingSessionId(null);
-      setRetryingFeatureId(null);
+      setRetryingFeatureIds([]);
       setIsWorking(false);
       restoreWorkflowAfterGenerationFailure();
     }
@@ -859,7 +863,7 @@ function LegacyApp({
       );
       setPendingSessionId(null);
       setGenerationProgressMeta(null);
-      setRetryingFeatureId(null);
+      setRetryingFeatureIds([]);
       setIsWorking(false);
       setWorkflowStage('idle');
     },
@@ -1012,7 +1016,7 @@ function LegacyApp({
   );
 
   const isCanvasLoading = Boolean(
-    !retryingFeatureId
+    retryingFeatureIds.length === 0
     && (
       pendingClarifySessionId
       || pendingSessionId
@@ -1025,6 +1029,9 @@ function LegacyApp({
   const loadingTitle = workflowStage === 'generation'
     ? 'Crafting features'
     : 'Exploring the requirement';
+  const failedArFeatureIds = features
+    .filter((feature) => feature.arGenerationStatus === 'failed')
+    .map((feature) => feature.id);
 
   const clarifyLoadingMeta = useMemo(
     () => buildClarifyLoadingMeta(liveClarifyPayload, clarifyContext, workflowStage),
@@ -1404,15 +1411,21 @@ function LegacyApp({
   };
 
   const retryFailedFeatureGeneration = async (featureId: string) => {
+    return retryFailedFeatureGenerations([featureId]);
+  };
+
+  const retryFailedFeatureGenerations = async (featureIds: string[]) => {
+    const normalizedIds = [...new Set(featureIds.map((value) => String(value ?? '').trim()).filter(Boolean))];
+    if (!normalizedIds.length) return;
     const sid = sessionIdRef.current;
-    setRetryingFeatureId(featureId);
+    setRetryingFeatureIds(normalizedIds);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
     setGenerationWarning(null);
     setPendingClarifySessionId(null);
 
     setFeatures((prev) => prev.map((feature) => (
-      feature.id === featureId
+      normalizedIds.includes(feature.id)
         ? {
             ...feature,
             arGenerationStatus: 'retrying',
@@ -1422,23 +1435,35 @@ function LegacyApp({
     )));
 
     try {
-      const res = await api.retryFailedFeatureGeneration({
-        sessionId: sid,
-        featureId,
-      }) as any;
+      const res = normalizedIds.length === 1
+        ? await api.retryFailedFeatureGeneration({
+            sessionId: sid,
+            featureId: normalizedIds[0],
+          }) as any
+        : await api.retryFailedFeatureGenerations({
+            sessionId: sid,
+            featureIds: normalizedIds,
+          }) as any;
       if (res?.success) {
         setPendingSessionId(sid);
       } else {
         setGenerationError(`Generation blocked: ${res?.error || JSON.stringify(res)}`);
         setPendingSessionId(null);
-        setRetryingFeatureId(null);
+        setRetryingFeatureIds([]);
       }
     } catch (err: any) {
       setGenerationError(`Generation error: ${err?.message ?? String(err)}`);
       setPendingSessionId(null);
-      setRetryingFeatureId(null);
+      setRetryingFeatureIds([]);
     }
   };
+
+  const handlePipelineProfileChange = useCallback((nextProfile: PipelineProfile) => {
+    setPipelineProfile(nextProfile);
+    void api.saveUserPreferences({ pipelineProfile: nextProfile }).catch((error) => {
+      console.error('Failed to save pipeline profile preference', error);
+    });
+  }, []);
 
   const handleCreateJiraFeature = async (formData: any) => {
     if (formData && formData.key && activePushFeatureIdx !== null) {
@@ -1664,6 +1689,8 @@ function LegacyApp({
               limits={limits}
               brandingLogoUrl={brandingLogoUrl}
               reviewBeforeARs={reviewBeforeARs}
+              pipelineProfile={pipelineProfile}
+              onPipelineProfileChange={handlePipelineProfileChange}
               width={resolvedSidebarWidth}
               originIssueKey={originIssueKey}
               projectKeys={projectKeys}
@@ -1715,9 +1742,11 @@ function LegacyApp({
                 setBrandingLogoUrl(res?.branding?.logoUrl || null);
                 if (res.tier) setTier(res.tier);
                 if (res.isAdmin !== undefined) setIsAdmin(!!res.isAdmin);
+                if (res?.pipelineProfile === 'fast' || res?.pipelineProfile === 'balanced' || res?.pipelineProfile === 'quality') {
+                  setPipelineProfile(res.pipelineProfile);
+                }
                 const profile = res?.generationPreferences?.outputProfile;
                 const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
-                setWorkspaceOutputProfile(normalizedProfile);
                 setRunOutputProfileOverride(normalizedProfile);
                 setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
               })
@@ -1791,6 +1820,15 @@ function LegacyApp({
                 transition={{ duration: 0.2 }}
               >
                 <span className="flex-1">{generationWarning}</span>
+                {failedArFeatureIds.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => void retryFailedFeatureGenerations(failedArFeatureIds)}
+                    className="shrink-0 rounded-lg border border-[var(--rf-warning)]/25 bg-white/70 px-3 py-1.5 text-[12px] font-bold text-[var(--rf-warning)] hover:bg-white transition"
+                  >
+                    Retry failed ARs
+                  </button>
+                )}
                 <button onClick={() => setGenerationWarning(null)} className="text-[var(--rf-warning)] hover:text-[var(--rf-text)] font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition">&times;</button>
               </motion.div>
             )}
@@ -1857,7 +1895,8 @@ function LegacyApp({
                   isAdmin={isAdmin}
                   onOpenSettings={openSettings}
                   onRetryFailedFeature={retryFailedFeatureGeneration}
-                  retryingFeatureId={retryingFeatureId}
+                  onRetryFailedFeatures={retryFailedFeatureGenerations}
+                  retryingFeatureIds={retryingFeatureIds}
                   onUndoLastAiChange={handleUndoLastAiChange}
                   undoActionLabel={lastAiChange?.label || null}
                   onRegenerate={(feedback) => {

@@ -116,6 +116,8 @@ function mapDraftFeatures(features: Feature[]): Array<Pick<Feature, 'id' | 'summ
 export function buildGenerationStartProgressUpdate(opts: {
   retryFeatureId?: string;
   retryFeature?: Feature;
+  retryFeatureIds?: string[];
+  retryFeatures?: Feature[];
   outputProfile?: GenerationContextMeta['outputProfile'];
   advisorySizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
@@ -126,6 +128,8 @@ export function buildGenerationStartProgressUpdate(opts: {
   const {
     retryFeatureId,
     retryFeature,
+    retryFeatureIds,
+    retryFeatures,
     outputProfile,
     advisorySizingContract,
     advisoryTriage,
@@ -134,10 +138,16 @@ export function buildGenerationStartProgressUpdate(opts: {
     sources,
   } = opts;
 
-  const seededDraftFeatures = retryFeature ? mapDraftFeatures([retryFeature]) : [];
-  const stage: GenerationProgressPayload['stage'] = retryFeatureId ? 'acceptance_requirements' : 'decomposition';
-  const message = retryFeatureId
-    ? 'Retrying acceptance requirements for the selected feature…'
+  const targetedRetryFeatures = retryFeatures?.length
+    ? retryFeatures
+    : retryFeature
+      ? [retryFeature]
+      : [];
+  const seededDraftFeatures = targetedRetryFeatures.length ? mapDraftFeatures(targetedRetryFeatures) : [];
+  const stage: GenerationProgressPayload['stage'] = retryFeatureId || retryFeatureIds?.length ? 'acceptance_requirements' : 'decomposition';
+  const retryCount = retryFeatureIds?.length ?? (retryFeatureId ? 1 : 0);
+  const message = retryCount > 0
+    ? `Retrying acceptance requirements for ${retryCount} selected feature${retryCount === 1 ? '' : 's'}…`
     : 'Planning feature structure from gathered context…';
 
   return {
@@ -181,6 +191,8 @@ export async function handler(event: { body: GenerationEvent }) {
     outputProfileOverride,
     retryFeatureId,
     retryFeature,
+    retryFeatureIds,
+    retryFeatures,
     retryBaseFeatures,
     pipelineAudit,
     auditRunId,
@@ -250,7 +262,17 @@ export async function handler(event: { body: GenerationEvent }) {
       });
       getPipelineAuditWriter()?.setPhase('generate.pipeline');
 
-      const maxGenAttempts = retryFeatureId ? 1 : MAX_FULL_GENERATION_ATTEMPTS;
+      const targetedRetryFeatures = retryFeatures?.length
+        ? retryFeatures
+        : retryFeature
+          ? [retryFeature]
+          : [];
+      const retryTargetIds = retryFeatureIds?.length
+        ? retryFeatureIds
+        : retryFeatureId
+          ? [retryFeatureId]
+          : [];
+      const maxGenAttempts = retryTargetIds.length ? 1 : MAX_FULL_GENERATION_ATTEMPTS;
       let evidenceReuse: SharedPipelineContext | undefined;
       let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> = [];
       let genOutcome: { sharedContext: SharedPipelineContext; result: GenerationResult } | null = null;
@@ -282,7 +304,7 @@ export async function handler(event: { body: GenerationEvent }) {
             config: runConfig,
             projectKey,
             projectKeys,
-            precomputedDraftFeatures: retryFeature ? [retryFeature] : undefined,
+            precomputedDraftFeatures: targetedRetryFeatures.length ? targetedRetryFeatures : undefined,
             priorStageDurationsMs,
             preloadedSharedContext: evidenceReuse,
             shouldCancel: () => isWorkflowCancelled(sessionId),
@@ -388,6 +410,8 @@ export async function handler(event: { body: GenerationEvent }) {
       const startProgress = buildGenerationStartProgressUpdate({
         retryFeatureId,
         retryFeature,
+        retryFeatureIds: retryTargetIds,
+        retryFeatures: targetedRetryFeatures,
         outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
         advisorySizingContract,
         advisoryTriage,
@@ -401,10 +425,24 @@ export async function handler(event: { body: GenerationEvent }) {
 
       result.similarStories = sharedContext.similarStories;
       result.sessionId = sessionId;
-      if (retryFeatureId && retryBaseFeatures?.length) {
-        const replacementFeature = result.features[0] ?? retryFeature;
+      if (retryTargetIds.length && retryBaseFeatures?.length) {
+        const replacementsById = new Map(
+          result.features
+            .filter((feature) => retryTargetIds.includes(feature.id))
+            .map((feature) => [feature.id, feature] as const),
+        );
+        targetedRetryFeatures.forEach((feature, index) => {
+          if (!feature?.id || replacementsById.has(feature.id)) return;
+          const replacement = result.features[index];
+          if (replacement) {
+            replacementsById.set(feature.id, {
+              ...replacement,
+              id: feature.id,
+            });
+          }
+        });
         const mergedFeatures = retryBaseFeatures.map((feature) => (
-          feature.id === retryFeatureId ? replacementFeature : feature
+          replacementsById.get(feature.id) ?? feature
         ));
         result.features = mergedFeatures;
         const failedFeatureIds = mergedFeatures

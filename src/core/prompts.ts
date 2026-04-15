@@ -437,10 +437,12 @@ For multi-step workflows, coordinated handoffs, approval chains, or requirements
 export function buildStoryAssistantSufficiencySystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
+  followupCap?: number;
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are supported by the requirement or answered Q&A.`
     : '';
+  const followupCap = Math.max(1, Math.min(5, Math.round(opts.followupCap ?? 3)));
   return `You are a senior business analyst deciding whether the current discovery answers are sufficient to write specific, testable acceptance requirements.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
@@ -450,7 +452,7 @@ Keep the evaluation domain-aware and process-grounded, but system-agnostic in it
 
 RULES:
 - Ask a follow-up question only when a specific unresolved gap would materially change what gets built or how ARs are written.
-- Ask at most 1 follow-up question when discovery is insufficient.
+- Ask at most ${followupCap} follow-up question${followupCap === 1 ? '' : 's'} when discovery is insufficient, and only use more than one when multiple material gaps remain.
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
 - If sufficient is false and you ask a follow-up, suggestions are REQUIRED and must include 1 to 3 grounded suggestions.
 - If you include suggestions, include only 1 to 3 grounded suggestions.

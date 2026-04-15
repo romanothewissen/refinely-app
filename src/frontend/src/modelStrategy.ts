@@ -7,6 +7,7 @@ import type {
   LlmModelCatalogEntry,
   LlmProvider,
   PipelineProfile,
+  StoryAssistantModelAssignment,
 } from './types';
 import strategyCatalog from './modelStrategyCatalog.json';
 
@@ -134,6 +135,11 @@ export interface UiGeneratorStrategyState {
   matchedPreset: boolean;
 }
 
+export interface ResolvedStoryAssistantAssignments {
+  lightModel: string;
+  heavyModel: string;
+}
+
 export function normalizePipelineProfile(value?: string): PipelineProfile {
   if (value === 'fast' || value === 'quality') return value;
   return 'balanced';
@@ -154,30 +160,33 @@ export function inferPipelineProfileFromModels(config?: Partial<GeneratorConfig>
 export function resolveProfileModelAssignments(
   provider: LlmProvider,
   pipelineProfile: PipelineProfile,
+  storyAssistantAssignments?: StoryAssistantModelAssignment,
   fallback?: Partial<Record<GeneratorRoleModelField, string>>,
 ): Pick<GeneratorConfig, 'clarifyModel' | 'decompositionModel' | 'arModel'> {
   const providerCatalog = getProviderCatalogData(provider);
   const pick = (family: 'pro' | 'flash', legacy?: string) =>
     providerCatalog?.presets?.stable?.[family]?.[0] || legacy || '';
+  const lightModel = storyAssistantAssignments?.lightModel || pick('flash', fallback?.clarifyModel);
+  const heavyModel = storyAssistantAssignments?.heavyModel || pick('pro', fallback?.decompositionModel || fallback?.arModel);
 
   if (pipelineProfile === 'fast') {
     return {
-      clarifyModel: pick('flash', fallback?.clarifyModel),
-      decompositionModel: pick('flash', fallback?.decompositionModel),
-      arModel: pick('flash', fallback?.arModel),
+      clarifyModel: lightModel,
+      decompositionModel: lightModel,
+      arModel: lightModel,
     };
   }
   if (pipelineProfile === 'quality') {
     return {
-      clarifyModel: pick('pro', fallback?.clarifyModel),
-      decompositionModel: pick('pro', fallback?.decompositionModel),
-      arModel: pick('pro', fallback?.arModel),
+      clarifyModel: heavyModel,
+      decompositionModel: heavyModel,
+      arModel: heavyModel,
     };
   }
   return {
-    clarifyModel: pick('flash', fallback?.clarifyModel),
-    decompositionModel: pick('pro', fallback?.decompositionModel),
-    arModel: pick('pro', fallback?.arModel),
+    clarifyModel: lightModel,
+    decompositionModel: heavyModel,
+    arModel: heavyModel,
   };
 }
 
@@ -208,6 +217,23 @@ function getSavedModels(config?: Partial<GeneratorConfig>): Record<GeneratorRole
     evaluateModel: config?.evaluateModel || DEFAULT_MODELS.evaluateModel,
     triageModel: config?.triageModel || DEFAULT_MODELS.triageModel,
     themeModel: config?.themeModel || DEFAULT_MODELS.themeModel,
+  };
+}
+
+export function resolveStoryAssistantAssignments(
+  provider: LlmProvider,
+  config?: Partial<GeneratorConfig>,
+  fallback?: StoryAssistantModelAssignment,
+): ResolvedStoryAssistantAssignments {
+  const normalizedProvider = normalizeProvider(provider);
+  const savedModels = getSavedModels(config);
+  const providerCatalog = getProviderCatalogData(normalizedProvider);
+  const pick = (family: 'pro' | 'flash', legacy?: string) =>
+    providerCatalog?.presets?.stable?.[family]?.[0] || legacy || '';
+  const stored = config?.storyAssistantModelAssignments?.[normalizedProvider];
+  return {
+    lightModel: fallback?.lightModel || stored?.lightModel || savedModels.clarifyModel || pick('flash'),
+    heavyModel: fallback?.heavyModel || stored?.heavyModel || savedModels.decompositionModel || savedModels.arModel || pick('pro'),
   };
 }
 
@@ -290,7 +316,8 @@ export function resolveUiGeneratorStrategyState(opts: {
     generation: opts.bucketModels?.generation ?? fallbackBuckets.generation,
     refinement: opts.bucketModels?.refinement ?? fallbackBuckets.refinement,
   };
-  const profileModels = resolveProfileModelAssignments(provider, pipelineProfile, savedModels);
+  const storyAssistantAssignments = resolveStoryAssistantAssignments(provider, opts.config);
+  const profileModels = resolveProfileModelAssignments(provider, pipelineProfile, storyAssistantAssignments, savedModels);
 
   return {
     provider,

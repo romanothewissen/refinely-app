@@ -1,5 +1,5 @@
 import { CanvasEditIntent, Feature, RefineEvent, StructuralRestructureProposal } from '../types';
-import { addFeaturesFromFeedback, addRequirementsFromFeedback, refineFeatures, restructureFeatures } from '../core/story-generator';
+import { addFeaturesFromFeedback, addRequirementsFromFeedback, refineFeatures, restructureFeatures } from '../core/refine-operations';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';

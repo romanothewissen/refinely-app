@@ -29,6 +29,7 @@ export async function runStoryAssistantClarifyStage(input: {
     projectKey: input.projectKey,
     projectKeys: input.projectKeys,
     pipelineMode: 'story_assistant_default',
+    includeSimilarStories: false,
   });
 
   const result = await generateStoryAssistantDefaultClarifyingQuestions({

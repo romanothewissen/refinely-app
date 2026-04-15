@@ -15,6 +15,7 @@ import type {
   PipelineProfile,
   ProjectActivitySummaryRow,
   ProjectPersonaRoleSuggestion,
+  StoryAssistantModelAssignment,
 } from './types';
 import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
@@ -22,6 +23,7 @@ import {
   getCatalogEntriesForProvider,
   normalizePipelineProfile,
   resolveProfileModelAssignments,
+  resolveStoryAssistantAssignments,
 } from './modelStrategy';
 interface JiraProject { key: string; name: string }
 interface JiraStatus { name: string; statusCategory?: { name: string } }
@@ -307,6 +309,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [clarifyModel, setClarifyModel] = useState('');
   const [refineModel, setRefineModel] = useState('');
   const [themeModel, setThemeModel] = useState('');
+  const [storyAssistantModelAssignments, setStoryAssistantModelAssignments] = useState<Partial<Record<LlmProvider, StoryAssistantModelAssignment>>>({});
   const roleModelValues = {
     themeModel,
     refineModel,
@@ -542,6 +545,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             };
           }
           setModelCatalogs(nextCatalogs);
+        }
+        if (gc.storyAssistantModelAssignments) {
+          setStoryAssistantModelAssignments(gc.storyAssistantModelAssignments);
         }
 
         if (existingConfig.tier) setTier(existingConfig.tier);
@@ -812,6 +818,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           decompositionModel: profileModels.decompositionModel,
           arModel: profileModels.arModel,
           clarifyModel: profileModels.clarifyModel,
+          storyAssistantModelAssignments,
           refineModel,
           themeModel,
           maxTokens: 8192,
@@ -966,11 +973,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     return [...catalogEntries].sort((a, b) => collator.compare(a.displayName || a.id, b.displayName || b.id));
   }, [catalogEntries]);
 
-  const profileModels = useMemo(() => resolveProfileModelAssignments(provider, pipelineProfile, {
+  const storyAssistantAssignments = useMemo(() => resolveStoryAssistantAssignments(provider, {
     clarifyModel,
     decompositionModel,
     arModel,
-  }), [provider, pipelineProfile, clarifyModel, decompositionModel, arModel]);
+    storyAssistantModelAssignments,
+  }), [provider, clarifyModel, decompositionModel, arModel, storyAssistantModelAssignments]);
+
+  const profileModels = useMemo(() => resolveProfileModelAssignments(provider, pipelineProfile, storyAssistantAssignments, {
+    clarifyModel,
+    decompositionModel,
+    arModel,
+  }), [provider, pipelineProfile, storyAssistantAssignments, clarifyModel, decompositionModel, arModel]);
 
   useEffect(() => {
     if (profileModels.clarifyModel && profileModels.clarifyModel !== clarifyModel) {
@@ -986,8 +1000,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   useEffect(() => {
     const flashModel = getPreferredFamilyModel(currentCatalogEntries, 'flash');
+    const proModel = getPreferredFamilyModel(currentCatalogEntries, 'pro');
     const liteModel = getPreferredFamilyModel(currentCatalogEntries, 'lite');
     const liteOrFlashModel = liteModel || flashModel;
+    const resolvedAssignments = resolveStoryAssistantAssignments(provider, {
+      clarifyModel,
+      decompositionModel,
+      arModel,
+      storyAssistantModelAssignments,
+    });
 
     if (provider === 'azure_openai') {
       const shouldResetAzureModel = (modelId: string) =>
@@ -1002,7 +1023,21 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (!isProviderModel(provider, refineModel) && flashModel) setRefineModel(flashModel);
       if (!isProviderModel(provider, themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     }
-  }, [provider, currentCatalogEntries, refineModel, themeModel]);
+    setStoryAssistantModelAssignments((prev) => {
+      const current = prev[provider];
+      const nextLight = current?.lightModel || resolvedAssignments.lightModel || flashModel;
+      const nextHeavy = current?.heavyModel || resolvedAssignments.heavyModel || proModel || decompositionModel || arModel;
+      if (!nextLight && !nextHeavy) return prev;
+      if (current?.lightModel === nextLight && current?.heavyModel === nextHeavy) return prev;
+      return {
+        ...prev,
+        [provider]: {
+          lightModel: nextLight,
+          heavyModel: nextHeavy,
+        },
+      };
+    });
+  }, [provider, currentCatalogEntries, refineModel, themeModel, clarifyModel, decompositionModel, arModel, storyAssistantModelAssignments]);
 
   const availableModels = useMemo(() => {
     const options: Array<{ id: string; label: string }> = [];
@@ -1024,6 +1059,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       profileModels.clarifyModel,
       profileModels.decompositionModel,
       profileModels.arModel,
+      storyAssistantAssignments.lightModel,
+      storyAssistantAssignments.heavyModel,
     ].forEach(modelId => {
       if (modelId && !options.some(option => option.id === modelId)) {
         options.push({ id: modelId, label: modelId });
@@ -1031,7 +1068,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     });
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
     return options.sort((left, right) => collator.compare(left.label, right.label));
-  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, refineModel, themeModel, profileModels]);
+  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, refineModel, themeModel, profileModels, storyAssistantAssignments]);
 
   const showComplianceTab = true;
   const settingsNav = [
@@ -1238,60 +1275,59 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Story Assistant Profile</div>
                     <div className="mt-1.5 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                      Story Assistant now uses one fixed, deterministic profile. The profile controls discovery depth and the clarify/decomposition/AR model route for this workflow.
+                      End users choose Fast, Balanced, or Quality in the sidebar. Configure the light and heavy model assignments here, and the runtime routes use those assignments automatically.
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Profile</div>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {[
-                        {
-                          id: 'fast' as const,
-                          label: 'Fast',
-                          summary: 'Flash-style models for discovery and generation.',
-                          range: 'Discovery: 4-8 questions, hard cap 10',
-                          tradeoff: 'Lowest latency and cost, least depth on ambiguous asks.',
-                        },
-                        {
-                          id: 'balanced' as const,
-                          label: 'Balanced',
-                          summary: 'Flash-style clarify, stronger decomposition and AR generation.',
-                          range: 'Discovery: 6-12 questions, hard cap 14',
-                          tradeoff: 'Default profile for predictable speed and richer output.',
-                        },
-                        {
-                          id: 'quality' as const,
-                          label: 'Quality',
-                          summary: 'Stronger models across clarify, decomposition, and ARs.',
-                          range: 'Discovery: 8-14 questions, hard cap 16',
-                          tradeoff: 'Highest output richness with the highest latency and cost.',
-                        },
-                      ].map((item) => {
-                        const selected = pipelineProfile === item.id;
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => setPipelineProfile(item.id)}
-                            disabled={!isAdmin}
-                            className={`rounded-xl border px-3.5 py-3 text-left transition ${selected ? 'border-[var(--rf-brand)] bg-white shadow-sm' : 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] hover:bg-white'} disabled:opacity-60`}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      {
+                        key: 'lightModel' as const,
+                        label: 'Light Model',
+                        description: 'Used for Fast across the full run, and for Clarify in Balanced.',
+                        value: storyAssistantAssignments.lightModel,
+                      },
+                      {
+                        key: 'heavyModel' as const,
+                        label: 'Heavy Model',
+                        description: 'Used for Decomposition + ARs in Balanced, and for all stages in Quality.',
+                        value: storyAssistantAssignments.heavyModel,
+                      },
+                    ].map((item) => (
+                      <div key={item.key} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
+                        <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)] leading-relaxed">{item.description}</div>
+                        <div className="relative mt-3">
+                          <select
+                            value={item.value}
+                            disabled={availableModels.length === 0 || !isAdmin}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setStoryAssistantModelAssignments((prev) => ({
+                                ...prev,
+                                [provider]: {
+                                  ...(prev[provider] ?? {}),
+                                  [item.key]: nextValue,
+                                },
+                              }));
+                            }}
+                            className="appearance-none pr-7 w-full bg-white border border-[var(--rf-border)] rounded-lg px-3 py-2 text-[13px] font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition disabled:opacity-60"
                           >
-                            <div className="text-[12px] font-bold uppercase tracking-wide text-[var(--rf-brand)]">{item.label}</div>
-                            <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{item.summary}</div>
-                            <div className="mt-2 text-[11px] font-semibold text-[var(--rf-text-secondary)]">{item.range}</div>
-                            <div className="mt-1 text-[11px] leading-relaxed text-[var(--rf-text-tertiary)]">{item.tradeoff}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                            {availableModels.map((model) => (
+                              <option key={`${item.key}-${model.id}`} value={model.id}>{model.label}</option>
+                            ))}
+                          </select>
+                          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--rf-sidebar-text-muted)] pointer-events-none" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
                     {[
-                      { label: 'Clarify', value: profileModels.clarifyModel || clarifyModel, note: 'Profile-controlled' },
-                      { label: 'Decomposition', value: profileModels.decompositionModel || decompositionModel, note: 'Profile-controlled' },
-                      { label: 'Acceptance Requirements', value: profileModels.arModel || arModel, note: 'Profile-controlled' },
+                      { label: 'Fast', value: `${storyAssistantAssignments.lightModel || 'No model selected'} for all story-assistant stages`, note: 'Clarify + Decomposition + ARs' },
+                      { label: 'Balanced', value: `${storyAssistantAssignments.lightModel || 'No model selected'} for Clarify, ${storyAssistantAssignments.heavyModel || 'No model selected'} for Decomposition + ARs`, note: 'Default mixed route' },
+                      { label: 'Quality', value: `${storyAssistantAssignments.heavyModel || 'No model selected'} for all story-assistant stages`, note: 'Deepest route' },
                     ].map((item) => (
                       <div key={item.label} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
                         <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>

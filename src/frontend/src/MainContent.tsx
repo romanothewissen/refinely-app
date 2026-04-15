@@ -165,11 +165,11 @@ function formatPipelineProfileLabel(value?: PipelineProfile): string {
 function getPipelineProfileQuestionBand(value?: PipelineProfile): string {
   switch (value) {
     case 'fast':
-      return '4-8';
+      return '4-7';
     case 'quality':
-      return '8-14';
+      return '14-18';
     default:
-      return '6-12';
+      return '8-12';
   }
 }
 
@@ -1637,7 +1637,8 @@ interface MainContentProps {
   isAdmin?: boolean;
   onOpenSettings?: () => void;
   onRetryFailedFeature?: (featureId: string) => void;
-  retryingFeatureId?: string | null;
+  onRetryFailedFeatures?: (featureIds: string[]) => void;
+  retryingFeatureIds?: string[];
   onUndoLastAiChange?: () => void;
   undoActionLabel?: string | null;
   onRegenerate?: (feedback: string) => void;
@@ -1648,7 +1649,7 @@ export function MainContent({
   features, setFeatures, onSetLastAiChange, onPushFeature, isGenerating, progress, loadingTitle, onCancelLoading, canCancelLoading,
   sidebarOpen, setSidebarOpen, sessionId, requirement,
   generationContext, generationProgressMeta, clarifyContext, clarifyProgressMeta, workflowStage, projectKey, workflowTokenUsage, onWorkflowTokenUsage,
-  isAdmin, onOpenSettings, onRetryFailedFeature, retryingFeatureId, onUndoLastAiChange, undoActionLabel, onRegenerate
+  isAdmin, onOpenSettings, onRetryFailedFeature, onRetryFailedFeatures, retryingFeatureIds = [], onUndoLastAiChange, undoActionLabel, onRegenerate
 }: MainContentProps) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Feature | null>(null);
@@ -1668,6 +1669,9 @@ export function MainContent({
 
   const hasFeatures = Array.isArray(features) && features.length > 0;
   const totalArCount = Array.isArray(features) ? features.reduce((acc, f) => acc + (f?.acceptanceRequirements?.length || 0), 0) : 0;
+  const failedArFeatureIds = Array.isArray(features)
+    ? features.filter((feature) => feature.arGenerationStatus === 'failed').map((feature) => feature.id)
+    : [];
   const sizingRunContextNote =
     generationContext?.draftReviewDecision === 'continue'
       ? getApprovedDraftStructureNote()
@@ -2611,7 +2615,7 @@ export function MainContent({
       {/* Content */}
       <div className="flex-1 overflow-y-auto w-full flex flex-col items-center relative custom-scrollbar p-6">
         <AnimatePresence mode="wait">
-          {isGenerating && !retryingFeatureId ? (
+          {isGenerating && retryingFeatureIds.length === 0 ? (
             workflowStage === 'generation' ? (
               <GeneratingPipeline
                 meta={generationProgressMeta || null}
@@ -2736,6 +2740,35 @@ export function MainContent({
                           ))}
                         </div>
                       ) : null}
+                      {failedArFeatureIds.length > 0 ? (
+                        <div className="rounded-xl border border-[rgba(160,81,30,0.12)] bg-[var(--rf-warning-subtle)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">Retryable AR gaps</div>
+                              <div className="mt-2">
+                                {failedArFeatureIds.length} feature{failedArFeatureIds.length === 1 ? '' : 's'} still need acceptance requirements.
+                              </div>
+                            </div>
+                            {failedArFeatureIds.length > 1 && onRetryFailedFeatures ? (
+                              <button
+                                type="button"
+                                onClick={() => onRetryFailedFeatures(failedArFeatureIds)}
+                                className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-[12px] font-bold text-[var(--rf-warning)] shadow-sm transition hover:bg-white/90"
+                              >
+                                Retry Failed ARs
+                              </button>
+                            ) : failedArFeatureIds.length === 1 && onRetryFailedFeature ? (
+                              <button
+                                type="button"
+                                onClick={() => onRetryFailedFeature(failedArFeatureIds[0])}
+                                className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-[12px] font-bold text-[var(--rf-warning)] shadow-sm transition hover:bg-white/90"
+                              >
+                                Retry ARs
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
                       {(generationContext.wiCoverageMisses?.length ?? 0) > 0 ? (
                         <div className="rounded-xl border border-[rgba(176,122,45,0.22)] bg-[rgba(255,248,235,0.95)] px-4 py-3 text-[13px] text-[var(--rf-text-secondary)]">
                           <div className="text-[12px] font-bold uppercase tracking-widest text-[rgb(176,122,45)]">Work instruction gaps</div>
@@ -2772,7 +2805,7 @@ export function MainContent({
               const draft = editDraft;
               const featureNeedsArRetry = feature.arGenerationStatus === 'failed';
               const featureRetrying = feature.arGenerationStatus === 'retrying';
-              const isThisFeatureRetrying = retryingFeatureId === feature.id;
+              const isThisFeatureRetrying = retryingFeatureIds.includes(feature.id);
 
               return (
                 <motion.div

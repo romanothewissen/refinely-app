@@ -110,11 +110,22 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
 function storyAssistantQuestionRange(pipelineProfile: PipelineProfile): { targetMin: number; targetMax: number; lowerBound: number; hardCap: number } {
   switch (pipelineProfile) {
     case 'fast':
-      return { targetMin: 4, targetMax: 8, lowerBound: 3, hardCap: 10 };
+      return { targetMin: 4, targetMax: 7, lowerBound: 3, hardCap: 8 };
     case 'quality':
-      return { targetMin: 8, targetMax: 14, lowerBound: 6, hardCap: 16 };
+      return { targetMin: 14, targetMax: 18, lowerBound: 10, hardCap: 20 };
     default:
-      return { targetMin: 6, targetMax: 12, lowerBound: 4, hardCap: 14 };
+      return { targetMin: 8, targetMax: 12, lowerBound: 6, hardCap: 14 };
+  }
+}
+
+function storyAssistantFollowupCap(pipelineProfile: PipelineProfile): number {
+  switch (pipelineProfile) {
+    case 'quality':
+      return 5;
+    case 'fast':
+      return 2;
+    default:
+      return 3;
   }
 }
 
@@ -933,15 +944,29 @@ export function evaluateClarifyQuestionSetQuality(
     return !obligationPattern.test(questionText);
   });
   const missingGenericCoverage = missingGenericCoverageKeys(questions, assessment);
+  const distinctCategoryCount = new Set(questions.map((question) => question.categoryKey)).size;
+  const minimumDistinctCategories = assessment.discoveryDepth === 'deep'
+    ? 4
+    : assessment.discoveryDepth === 'standard'
+      ? 3
+      : 2;
 
   let score = 100;
   if (questions.length < assessment.recommendedQuestionRange.min) {
     score -= 30;
     reasons.push('Returned fewer questions than the assessed discovery range suggests.');
   }
+  if (missingObligations.length) {
+    score -= Math.min(15, missingObligations.length * 5);
+    reasons.push(`Missing assessed ambiguity themes: ${missingObligations.join(', ')}.`);
+  }
   if (missingGenericCoverage.length) {
     score -= Math.min(10, missingGenericCoverage.length * 2);
     reasons.push(`Missing generic discovery coverage: ${missingGenericCoverage.map((key) => GENERIC_DISCOVERY_COVERAGE_LABELS[key]).join(', ')}.`);
+  }
+  if (questions.length > 0 && distinctCategoryCount < minimumDistinctCategories) {
+    score -= Math.min(12, (minimumDistinctCategories - distinctCategoryCount) * 4);
+    reasons.push('Question set did not spread across enough distinct discovery themes.');
   }
   const weakSuggestions = questions.filter((question) => question.suggestions.length < 2).length;
   if (weakSuggestions > 0) {
@@ -1021,7 +1046,7 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
     .filter((question) => !isLikelyTruncatedQuestion(question.question));
 }
 
-function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestion[] {
+function normalizeSufficiencyFollowupQuestions(rawData: unknown, maxQuestions: number): ClarifyQuestion[] {
   const parsed = parseStoryAssistantQuestionCandidates(rawData)
     .map((question) => {
       const suggestions = normalizeSuggestions(question.suggestions, 0, 3);
@@ -1033,7 +1058,7 @@ function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestio
     })
     .filter((question) => !isLikelyTruncatedQuestion(question.question))
     .filter((question) => question.suggestions.length >= 1);
-  return parsed.slice(0, 2);
+  return parsed.slice(0, Math.max(1, maxQuestions));
 }
 
 function buildMinimalDiscoveryProfile(
@@ -1060,7 +1085,13 @@ function buildMinimalDiscoveryProfile(
         ? 'medium'
         : 'low';
   const ambiguity = assessment?.ambiguityLevel ?? (questionCount >= 6 ? 'high' : questionCount >= 3 ? 'medium' : 'low');
-  const followupCap = 1;
+  const followupCap = storyAssistantFollowupCap(
+    assessment?.discoveryDepth === 'deep'
+      ? 'quality'
+      : assessment?.discoveryDepth === 'light'
+        ? 'fast'
+        : 'balanced',
+  );
   const plannedQuestionBudget = assessment
     ? assessment.recommendedQuestionRange.max + followupCap
     : questionCount + 2;
@@ -1147,6 +1178,23 @@ function mergePass2IntoPass1(pass1: RawFeature[], pass2: RawFeature[]): RawFeatu
       acceptance_requirements: next.acceptance_requirements ?? next.acceptanceRequirements ?? [],
     };
   });
+}
+
+function extractFeatureActor(description: string): string {
+  return cleanText(description.match(/^As an?\s+(.+?),\s*I need(?:\s+to)?\s+/i)?.[1] ?? '');
+}
+
+function findCoveredActors(features: Feature[], eligibleActors: string[]): string[] {
+  const eligibleKeys = new Set(eligibleActors.map((actor) => normalizeKey(actor)));
+  return uniqueStrings(features
+    .map((feature) => extractFeatureActor(feature.description))
+    .filter((role) => eligibleKeys.has(normalizeKey(role))));
+}
+
+function shouldRetryForActorCollapse(features: Feature[], actorSets: ActorSetGrounding): boolean {
+  const eligibleActors = uniqueStrings(actorSets.eligibleActors ?? actorSets.mentionedActors ?? []).filter(looksLikeRolePhrase);
+  if (eligibleActors.length < 2 || features.length < 2) return false;
+  return findCoveredActors(features, eligibleActors).length <= 1;
 }
 
 function featureToRaw(feature: Feature): RawFeature {
@@ -1319,6 +1367,8 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText ?? '');
   const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
   const promptAssemblyStartedAt = Date.now();
+  const pipelineProfile = resolveStoryAssistantPipelineProfile(opts.config.generatorConfig);
+  const followupCap = storyAssistantFollowupCap(pipelineProfile);
   const userMessage = buildSufficiencyUserMessage({
     requirement: opts.requirement,
     answers: opts.answers,
@@ -1333,6 +1383,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       systemPrompt: buildStoryAssistantSufficiencySystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
+        followupCap,
       }),
       userMessage: extraInstruction ? `${userMessage}\n\n${extraInstruction}` : userMessage,
       maxTokens: 2400,
@@ -1343,17 +1394,17 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
     let result = await evaluateOnce();
     usageByStage.clarifyEvaluate = result.usage;
     let payload = (result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {});
-    let parsedQuestions = normalizeSufficiencyFollowupQuestions(payload);
+    let parsedQuestions = normalizeSufficiencyFollowupQuestions(payload, followupCap);
     const looksMalformedFollowup = payload.sufficient === false
       && (!Array.isArray(payload.questions) || parsedQuestions.length === 0);
     if (looksMalformedFollowup) {
       const retry = await evaluateOnce(
-        'Your previous follow-up output was malformed. Return strict JSON only. If sufficient is false and you provide questions, include exactly one complete question with 1-3 grounded suggestions.',
+        `Your previous follow-up output was malformed. Return strict JSON only. If sufficient is false and you provide questions, include 1-${followupCap} complete follow-up questions with 1-3 grounded suggestions each.`,
       );
       result = retry;
       usageByStage.clarifyEvaluateRetry = retry.usage;
       payload = (retry.data && typeof retry.data === 'object' ? retry.data as Record<string, unknown> : {});
-      parsedQuestions = normalizeSufficiencyFollowupQuestions(payload);
+      parsedQuestions = normalizeSufficiencyFollowupQuestions(payload, followupCap);
     }
     const sufficient = payload.sufficient === true;
     const reasonCodes = Array.isArray(payload.reasonCodes)
@@ -1375,7 +1426,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       reasonCodes,
       coverageArtifact: buildDiscoveryCoverageArtifact({
         missingCategoryKeys,
-        plannedQuestionBudget: opts.answers.length + 2,
+        plannedQuestionBudget: opts.answers.length + followupCap,
         actualQuestionsAsked: opts.answers.length,
         actualAnswersReceived: opts.answers.length,
         askedCategoryKeys,
@@ -1393,7 +1444,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       reasonCodes: ['SUFFICIENCY_EVAL_FAILED'],
       coverageArtifact: buildDiscoveryCoverageArtifact({
         missingCategoryKeys: [],
-        plannedQuestionBudget: opts.answers.length + 2,
+        plannedQuestionBudget: opts.answers.length + followupCap,
         actualQuestionsAsked: opts.answers.length,
         actualAnswersReceived: opts.answers.length,
         askedCategoryKeys,
@@ -1458,7 +1509,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       roleHint,
       discoveryProfile: opts.discoveryProfile,
       actorSets,
-    })}\n\nDecompose the following requirement into the distinct features needed to deliver it. Think through the decomposition framework and return the right set of features with accurate descriptions. Leave acceptance_requirements as empty arrays in this pass.`;
+    })}\n\nDecompose the following requirement into the distinct features needed to deliver it. Think through the decomposition framework and return the right set of features with accurate descriptions. When multiple eligible roles genuinely own different parts of the workflow, preserve that role diversity across the feature set instead of defaulting every feature to one role. Leave acceptance_requirements as empty arrays in this pass.`;
     promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
       model: getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier),
@@ -1482,6 +1533,30 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       ...feature,
       acceptance_requirements: [],
     }, roleGrounding));
+    if (shouldRetryForActorCollapse(pass1Features, actorSets)) {
+      const decompositionRetry = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+        model: getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier),
+        systemPrompt: buildStoryAssistantDecompositionSystemPrompt({
+          domainContext: opts.config.domainContext,
+          domainRoles: opts.config.domainRoles,
+          processTaxonomy: opts.config.processTaxonomy,
+          processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
+        }),
+        userMessage: `${decompositionUserMessage}\n\nYour previous output collapsed multiple eligible creator roles into one. Re-run the decomposition and preserve role diversity where the workflow genuinely spans different creators. Keep role names verbatim from the discovered role list.`,
+        maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 12288),
+        reasoningEffort: 'medium',
+        ...providerOpts,
+      });
+      stageUsage.decompositionRetry = decompositionRetry.usage;
+      const retriedPass1Raw = extractRawFeaturesFromPayload(decompositionRetry.data);
+      if (retriedPass1Raw.length) {
+        pass1Raw = retriedPass1Raw;
+        pass1Features = pass1Raw.map((feature) => normaliseFeature({
+          ...feature,
+          acceptance_requirements: [],
+        }, roleGrounding));
+      }
+    }
     stageDurationsMs.decomposition = Date.now() - startedAt;
     if (opts.onPass1DraftFeatures) {
       await opts.onPass1DraftFeatures(pass1Features);
@@ -1510,7 +1585,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       ...feature,
       acceptance_requirements: [],
     })),
-  })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements. For each feature, consider:\n- What is the primary business scenario? (this always gets an AR)\n- What key business rules must hold? (each distinct rule gets an AR)\n- What is the most likely failure or edge case a tester would actually run?\n\nKeep all other fields (summary, description, process_code, suggested_story_points) unchanged.`;
+  })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements. Preserve the role wording already present in each feature description. For each feature, consider:\n- What is the primary business scenario? (this always gets an AR)\n- What key business rules must hold? (each distinct rule gets an AR)\n- What is the most likely failure or edge case a tester would actually run?\n\nKeep all other fields (summary, description, process_code, suggested_story_points) unchanged.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const arModel = getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier);
   const runArPass = async (extraInstruction?: string) => callLlmJsonWithUsage<{ features?: RawFeature[] }>({
@@ -1570,10 +1645,10 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     || pass2Raw.length < pass1Raw.length
     || failedIds.size > 0;
   if (preservePass1Only) {
-    features = pass1Features.map((feature) => ({
+    features = annotateFailedAcceptanceRequirementFeatures(pass1Features.map((feature) => ({
       ...feature,
       acceptanceRequirements: [],
-    }));
+    })), new Set(pass1Features.map((feature) => feature.id).filter(Boolean))) as Feature[];
     failedIds = new Set(features.map((feature) => feature.id).filter(Boolean));
     pass2CoverageNotes = uniqueStrings([
       ...pass2CoverageNotes,
@@ -1605,7 +1680,9 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       failedFeatureIds: [...failedIds],
       partialSuccess: failedIds.size > 0,
       partialSuccessMessage: failedIds.size > 0
-        ? `Acceptance requirements could not be completed for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}.`
+        ? preservePass1Only
+          ? `Acceptance requirements could not be completed reliably for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}. Draft features were preserved without ARs so you can retry them from the canvas.`
+          : `Acceptance requirements could not be completed for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}.`
         : undefined,
       autoRepairedIssues: repairedOutput.notes,
       ...(pass2CoverageNotes.length

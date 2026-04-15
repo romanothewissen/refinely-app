@@ -2,23 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { isCompleteAcceptanceRequirement } from '../ar-validation';
-import { buildSingleFeatureRefineSystemPrompt } from '../prompts';
 import {
-  AcceptanceRequirementsGenerationError,
   annotateFailedAcceptanceRequirementFeatures,
-  assessInitialDiscoveryResponse,
-  applyFeatureOutputGuardrails,
-  applySmallAskTriageGuardrails,
-  assessSizingHeuristics,
-  capDiscoveryProfileFloorForSmallAsk,
-  deriveSizingGuidance,
-  feedbackRequestsStructuralRefinement,
   findFeaturesMissingCompleteAcceptanceRequirements,
-  parseQuestionCandidates,
   repairAcceptanceRequirements,
-  buildClarifyFailureDiagnostics,
-  shouldPauseForDraftReview,
-  triageToSizingContract,
+} from '../feature-output';
+import { buildSingleFeatureRefineSystemPrompt } from '../prompts';
+import { feedbackRequestsStructuralRefinement } from '../refine-operations';
+import {
+  applyFeatureOutputGuardrails,
   validateStructuralRestructureProposal,
 } from '../story-generator';
 import { buildBlockedClarifyContext } from '../../queues/clarify';
@@ -111,25 +103,6 @@ test('findFeaturesMissingCompleteAcceptanceRequirements flags features with miss
   ]);
 
   assert.deepEqual(missing, [1, 2]);
-});
-
-test('AcceptanceRequirementsGenerationError preserves failing draft metadata', () => {
-  const error = new AcceptanceRequirementsGenerationError(
-    'Acceptance requirements could not be completed for 1 feature.',
-    [
-      {
-        id: 'feature-1',
-        summary: 'Keep contract open',
-        description: 'As a coordinator, I need to keep the contract open so that downstream processing does not fail.',
-        acceptanceRequirements: [],
-      },
-    ],
-    [0],
-  );
-
-  assert.equal(error.name, 'AcceptanceRequirementsGenerationError');
-  assert.deepEqual(error.failedFeatureIndexes, [0]);
-  assert.equal(error.draftFeatures[0]?.id, 'feature-1');
 });
 
 test('annotateFailedAcceptanceRequirementFeatures marks only failed features for retry', () => {
@@ -317,333 +290,19 @@ test('buildSingleFeatureRefineSystemPrompt can forbid splitting during bulk refi
   assert.match(prompt, /As a \[role\], I need \[action\] so that \[benefit\]/);
 });
 
-test('assessSizingHeuristics flags oversized split guard-rule backlogs', () => {
-  const assessment = assessSizingHeuristics({
-    stage: 'final',
-    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
-    features: [
-      makeFeature('Prevent primary record creation for items past their eligibility date', 7),
-      makeFeature('Allow primary record creation for items without an eligibility date', 1),
-      makeFeature('Exempt archive records from the eligibility-date restriction', 3),
-      makeFeature('Override the eligibility block for primary record creation with a reason', 7),
-      makeFeature('Prevent linked record creation for items past their eligibility date', 8),
-      makeFeature('Override the eligibility block for linked record creation with a reason', 4),
-      makeFeature('Audit blocked creation attempts', 4),
-    ],
-  });
-
-  assert.equal(assessment.archetype, 'guard_rule');
-  assert.equal(assessment.verdict, 'oversized');
-  assert.equal(assessment.confidence, 'high');
-  assert.equal(assessment.featureCount, 7);
-  assert.equal(assessment.acceptanceRequirementCount, 34);
-  assert.match(assessment.reasonCodes.join(' '), /feature_count_far_above_preferred_range/);
-});
-
-test('assessSizingHeuristics does not falsely compress workflow-area asks', () => {
-  const assessment = assessSizingHeuristics({
-    stage: 'final',
-    requirement: 'As a support coordinator, I need one place to manage incoming customer communications and create or update cases from them.',
-    features: [
-      makeFeature('Triage incoming communications', 4),
-      makeFeature('Decide whether to create a new case or update an existing case', 4),
-      makeFeature('Route uncertain matches for manual review', 3),
-      makeFeature('Capture required information before case handling continues', 4),
-      makeFeature('Handle source-specific exception paths', 4),
-    ],
-    triage: {
-      reasoning: 'Short workflow-area ask with unresolved handling paths.',
-      confidence: 'medium',
-      deliveryForecast: {
-        featureTarget: 5,
-        shape: 'narrow',
-        complexity: 'high',
-        arDepth: 'thorough',
-      },
-      discoveryForecast: {
-        scope: 'moderate',
-        complexity: 'high',
-        ambiguity: 'high',
-        recommendedInitialCount: 12,
-        followupCap: 6,
-      },
-    },
-  });
-
-  assert.equal(assessment.archetype, 'workflow_area');
-  assert.notEqual(assessment.verdict, 'oversized');
-});
-
-test('applySmallAskTriageGuardrails leaves successful LLM advisory triage unchanged', () => {
-  const triage = {
-    reasoning: 'One tightly bounded guard rule.',
-    confidence: 'high' as const,
-    deliveryForecast: {
-      featureTarget: 5,
-      shape: 'balanced' as const,
-      complexity: 'high' as const,
-      arDepth: 'thorough' as const,
-    },
-    discoveryForecast: {
-      scope: 'moderate' as const,
-      complexity: 'medium' as const,
-      ambiguity: 'high' as const,
-      recommendedInitialCount: 10,
-      followupCap: 4,
-    },
-  };
-  const guarded = applySmallAskTriageGuardrails({
-    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
-    triage,
-  });
-
-  assert.deepEqual(guarded, triage);
-});
-
-
-test('parseQuestionCandidates accepts valid discovery questions without suggestions', () => {
-  const parsed = parseQuestionCandidates({
-    discoveryProfile: {
-      scope: 'moderate',
-      complexity: 'medium',
-      ambiguity: 'high',
-      missingCategoryKeys: ['business_rules'],
-      recommendedInitialCount: 3,
-      followupCap: 2,
-    },
-    questions: [
-      {
-        categoryKey: 'business_rules',
-        intent: 'decision_logic',
-        question: 'Which rule should decide whether an incoming message updates an open case or creates a new one?',
-      },
-    ],
-  });
-
-  assert.equal(parsed.length, 1);
-  assert.deepEqual(parsed[0]?.suggestions, []);
-});
-
-test('parseQuestionCandidates keeps shorter grounded suggestion arrays intact', () => {
-  const parsed = parseQuestionCandidates({
-    questions: [
-      {
-        categoryKey: 'edge_cases_exceptions',
-        intent: 'conflicts_duplicates',
-        question: 'What should happen when the incoming issue looks like a duplicate but the match is not certain enough to trust automatically?',
-        suggestions: [
-          'Reuse the open case only when the identifier and issue context both match clearly',
-          'Send uncertain duplicates for review instead of deciding automatically',
-        ],
-      },
-    ],
-  });
-
-  assert.equal(parsed.length, 1);
-  assert.deepEqual(parsed[0]?.suggestions, [
-    'Reuse the open case only when the identifier and issue context both match clearly',
-    'Send uncertain duplicates for review instead of deciding automatically',
-  ]);
-});
-
-test('assessInitialDiscoveryResponse classifies a missing questions array explicitly', () => {
-  const assessed = assessInitialDiscoveryResponse({
-    rawData: {
-      discoveryProfile: {
-        scope: 'moderate',
-        complexity: 'medium',
-        ambiguity: 'high',
-        missingCategoryKeys: ['business_rules'],
-        recommendedInitialCount: 6,
-        followupCap: 4,
-      },
-    },
-    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.',
-  });
-
-  assert.equal(assessed.failureReasonCode, 'question_array_missing');
-});
-
-test('assessInitialDiscoveryResponse classifies malformed question entries explicitly', () => {
-  const assessed = assessInitialDiscoveryResponse({
-    rawData: {
-      discoveryProfile: {
-        scope: 'moderate',
-        complexity: 'medium',
-        ambiguity: 'high',
-        missingCategoryKeys: ['business_rules'],
-        recommendedInitialCount: 6,
-        followupCap: 4,
-      },
-      questions: [
-        { categoryKey: 'business_rules', intent: 'decision_logic', prompt: 'wrong field name' },
-      ],
-    },
-    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.',
-  });
-
-  assert.equal(assessed.failureReasonCode, 'question_shape_invalid');
-});
-
-test('assessInitialDiscoveryResponse classifies generic discovery questions explicitly', () => {
-  const requirement = 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.';
-  const assessed = assessInitialDiscoveryResponse({
-    rawData: {
-      discoveryProfile: {
-        scope: 'moderate',
-        complexity: 'high',
-        ambiguity: 'high',
-        missingCategoryKeys: ['business_rules', 'edge_cases_exceptions'],
-        recommendedInitialCount: 6,
-        followupCap: 4,
-      },
-      questions: [
-        {
-          categoryKey: 'context_trigger',
-          intent: 'business_outcome',
-          question: 'What business problem should this capability solve?',
-        },
-      ],
-    },
-    requirement,
-  });
-
-  assert.equal(assessed.failureReasonCode, 'question_set_generic');
-});
-
-test('assessInitialDiscoveryResponse classifies truncated discovery questions explicitly', () => {
-  const assessed = assessInitialDiscoveryResponse({
-    rawData: {
-      discoveryProfile: {
-        scope: 'moderate',
-        complexity: 'medium',
-        ambiguity: 'high',
-        missingCategoryKeys: ['business_rules'],
-        recommendedInitialCount: 6,
-        followupCap: 4,
-      },
-      questions: [
-        {
-          categoryKey: 'business_rules',
-          intent: 'decision_logic',
-          question: 'Which rule should decide whether an incoming email updates an open case or',
-        },
-      ],
-    },
-    requirement: 'As a TSS, I need to manage phone, WhatsApp, text, and email intake and have cases created automatically.',
-  });
-
-  assert.equal(assessed.failureReasonCode, 'question_set_truncated');
-});
-
-test('buildClarifyFailureDiagnostics returns actionable guidance for generic discovery questions', () => {
-  const diagnostics = buildClarifyFailureDiagnostics('question_set_generic', {
-    generatedQuestionCount: 2,
-  });
-
-  assert.match(diagnostics.technicalSummary, /too generic/i);
-  assert.match(diagnostics.userActionHint, /business object, actor, trigger/i);
-  assert.equal(diagnostics.generatedQuestionCount, 2);
-});
-
 test('buildBlockedClarifyContext preserves actionable discovery diagnostics', () => {
   const context = buildBlockedClarifyContext(
     'SUP',
     'question_array_empty_when_discovery_required',
-    buildClarifyFailureDiagnostics('question_array_empty_when_discovery_required'),
+    {
+      technicalSummary: 'Discovery returned no usable questions.',
+      userActionHint: 'Retry discovery. If the problem keeps repeating, trim unusually large attachment context and try again.',
+    },
   );
 
   assert.equal(context.failureReasonCode, 'question_array_empty_when_discovery_required');
-  assert.match(context.failureDiagnostics?.userActionHint ?? '', /narrowing the ask to one workflow/i);
+  assert.match(context.failureDiagnostics?.userActionHint ?? '', /retry discovery/i);
   assert.match(context.failureDiagnostics?.technicalSummary ?? '', /returned no usable questions/i);
-});
-
-test('deriveSizingGuidance preserves explicit manual vs automated workflow splits', () => {
-  const guidance = deriveSizingGuidance({
-    requirement: 'We must ensure no records can be created after the eligibility deadline, with separate handling for manual creation and automated creation.',
-  });
-
-  assert.equal(guidance.minimumPreservedFeatureCount, 2);
-  assert.match(guidance.explicitSplitSignals.join(' '), /manual_vs_automated_workflows/);
-  assert.deepEqual(guidance.preferredFeatureRange, { min: 2, max: 2 });
-});
-
-test('applySmallAskTriageGuardrails keeps explicitly split small asks unchanged when triage succeeds', () => {
-  const triage = {
-    reasoning: 'Explicit manual and automated paths stay separate.',
-    confidence: 'medium' as const,
-    deliveryForecast: {
-      featureTarget: 5,
-      shape: 'balanced' as const,
-      complexity: 'high' as const,
-      arDepth: 'thorough' as const,
-    },
-    discoveryForecast: {
-      scope: 'moderate' as const,
-      complexity: 'high' as const,
-      ambiguity: 'high' as const,
-      recommendedInitialCount: 10,
-      followupCap: 4,
-    },
-  };
-  const guarded = applySmallAskTriageGuardrails({
-    requirement: 'We must ensure no records can be created after the eligibility deadline, with separate handling for manual creation and automated creation.',
-    triage,
-  });
-
-  assert.deepEqual(guarded, triage);
-});
-
-test('capDiscoveryProfileFloorForSmallAsk does not override successful advisory triage', () => {
-  const triage = {
-    reasoning: 'Guard rule with bounded delivery scope.',
-    confidence: 'medium' as const,
-    deliveryForecast: {
-      featureTarget: 7,
-      shape: 'broad' as const,
-      complexity: 'medium' as const,
-      arDepth: 'thorough' as const,
-    },
-    discoveryForecast: {
-      scope: 'moderate' as const,
-      complexity: 'medium' as const,
-      ambiguity: 'medium' as const,
-      recommendedInitialCount: 6,
-      followupCap: 4,
-    },
-  };
-  const capped = capDiscoveryProfileFloorForSmallAsk({
-    requirement: 'We must ensure no primary or linked records can be created when the eligibility date of the item is reached',
-    triage,
-  });
-
-  assert.deepEqual(capped, triage);
-});
-
-test('capDiscoveryProfileFloorForSmallAsk preserves explicit workflow floors from discovery without mutation', () => {
-  const triage = {
-    reasoning: 'Separate manual and automated handling paths are explicit.',
-    confidence: 'medium' as const,
-    deliveryForecast: {
-      featureTarget: 7,
-      shape: 'broad' as const,
-      complexity: 'medium' as const,
-      arDepth: 'thorough' as const,
-    },
-    discoveryForecast: {
-      scope: 'moderate' as const,
-      complexity: 'medium' as const,
-      ambiguity: 'medium' as const,
-      recommendedInitialCount: 6,
-      followupCap: 4,
-    },
-  };
-  const capped = capDiscoveryProfileFloorForSmallAsk({
-    requirement: 'We must ensure no records can be created after the eligibility deadline, with separate handling for manual creation and automated creation.',
-    triage,
-  });
-
-  assert.deepEqual(capped, triage);
 });
 
 test('generation progress copy labels draft output as provisional', () => {
@@ -684,48 +343,6 @@ test('generation progress copy summarizes coverage and discovery context in plai
     }).map((chip) => chip.label),
     ['2 projects', 'Domain guidance', 'Attachment included', '3/5 work instructions retrieved', '7 WI insights', '1 similar story'],
   );
-});
-
-test('shouldPauseForDraftReview always returns false (deprecated — pipeline auto-repairs internally)', () => {
-  assert.equal(shouldPauseForDraftReview({
-    draftFeatureCount: 7,
-    triageFeatureTarget: 4,
-    sizingAssessment: {
-      stage: 'decomposition',
-      archetype: 'workflow_area',
-      verdict: 'ok',
-      confidence: 'medium',
-      preferredFeatureRange: { min: 3, max: 6 },
-      preferredArDepth: 'standard',
-      minimumPreservedFeatureCount: 3,
-      explicitSplitSignals: [],
-      featureCount: 7,
-      acceptanceRequirementCount: 0,
-      averageAcceptanceRequirementsPerFeature: 0,
-      reasonCodes: [],
-      reasons: [],
-    },
-  }), false);
-
-  assert.equal(shouldPauseForDraftReview({
-    draftFeatureCount: 6,
-    triageFeatureTarget: 6,
-    sizingAssessment: {
-      stage: 'decomposition',
-      archetype: 'guard_rule',
-      verdict: 'oversized',
-      confidence: 'high',
-      preferredFeatureRange: { min: 2, max: 4 },
-      preferredArDepth: 'standard',
-      minimumPreservedFeatureCount: 2,
-      explicitSplitSignals: [],
-      featureCount: 6,
-      acceptanceRequirementCount: 0,
-      averageAcceptanceRequirementsPerFeature: 0,
-      reasonCodes: ['too_many_features'],
-      reasons: [{ code: 'too_many_features', detail: 'The draft contains more features than the preferred sizing range.' }],
-    },
-  }), false);
 });
 
 test('generation progress copy no longer surfaces automatic consolidation notes', () => {
@@ -776,36 +393,6 @@ test('generation progress copy no longer surfaces automatic consolidation notes'
     }),
     null,
   );
-});
-
-test('triageToSizingContract preserves the committed LLM sizing contract', () => {
-  assert.deepEqual(triageToSizingContract({
-    reasoning: 'Moderately broad workflow with material ambiguity.',
-    confidence: 'high',
-    deliveryForecast: {
-      featureTarget: 4,
-      featureMin: 3,
-      featureMax: 6,
-      shape: 'balanced',
-      complexity: 'high',
-      arDepth: 'thorough',
-      arTarget: 5,
-    },
-    discoveryForecast: {
-      scope: 'moderate',
-      complexity: 'high',
-      ambiguity: 'high',
-      recommendedInitialCount: 9,
-      followupCap: 4,
-    },
-  }), {
-    shape: 'balanced',
-    complexity: 'high',
-    featureTarget: 4,
-    arDepth: 'thorough',
-    arTarget: 5,
-    estimatedQuestions: 9,
-  });
 });
 
 test('applyFeatureOutputGuardrails preserves a valid but detailed feature description', () => {

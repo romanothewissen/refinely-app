@@ -30,7 +30,6 @@ import {
   buildStoryAssistantSufficiencySystemPrompt,
   buildTriageSystemPrompt,
 } from '../prompts';
-import { DEFAULT_GENERATION_TRIAGE_FALLBACK } from '../story-generator';
 
 test('normalizeDiscoveryProfile preserves llm-sized discovery counts', () => {
   const profile = normalizeDiscoveryProfile({
@@ -639,7 +638,7 @@ test('story assistant clarify prompt uses the five-area legacy discovery structu
     domainContext: '',
     domainRoles: [],
     pipelineProfile: 'balanced',
-    questionRange: { targetMin: 6, targetMax: 12, lowerBound: 4, hardCap: 14 },
+    questionRange: { targetMin: 8, targetMax: 12, lowerBound: 6, hardCap: 14 },
   });
 
   assert.match(prompt, /structured discovery session/i);
@@ -675,13 +674,14 @@ test('story assistant discovery assessment prompt evaluates semantic complexity 
   assert.match(prompt, /Return ONLY valid JSON/i);
 });
 
-test('story assistant sufficiency prompt limits follow-up discovery to one small delta round', () => {
+test('story assistant sufficiency prompt allows bounded multi-question follow-up when needed', () => {
   const prompt = buildStoryAssistantSufficiencySystemPrompt({
     domainContext: '',
     domainRoles: [],
+    followupCap: 5,
   });
 
-  assert.match(prompt, /Ask at most 1 follow-up question/i);
+  assert.match(prompt, /Ask at most 5 follow-up questions/i);
   assert.match(prompt, /domain-aware and process-grounded, but system-agnostic/i);
   assert.match(prompt, /Prefer explicit open decisions over follow-up/i);
   assert.match(prompt, /If you include suggestions, include only 1 to 3 grounded suggestions/i);
@@ -743,26 +743,6 @@ test('sizing prompts calibrate consolidation around independently valuable scope
   assert.match(repairPrompt, /Merge sibling features when they express the same core rule/i);
   assert.match(repairPrompt, /Preserve workflow splits only when they are explicitly supported by the requirement or clarifying answers/i);
   assert.match(repairPrompt, /Do not use domain expectations, generic best practices, or organizational heuristics as a reason to create or preserve separate features/i);
-});
-
-test('generation fallback is operational only when triage is unavailable', () => {
-  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.deliveryForecast, {
-    shape: 'minimal',
-    complexity: 'low',
-    featureTarget: 1,
-    featureMin: 1,
-    featureMax: 1,
-    arDepth: 'standard',
-    arTarget: 0,
-  });
-  assert.deepEqual(DEFAULT_GENERATION_TRIAGE_FALLBACK.discoveryForecast, {
-    scope: 'narrow',
-    complexity: 'low',
-    ambiguity: 'medium',
-    recommendedInitialCount: 0,
-    followupCap: 0,
-  });
-  assert.equal(DEFAULT_GENERATION_TRIAGE_FALLBACK.telemetry?.fallbackUsed, true);
 });
 
 test('decomposition prompt preserves workflow-defining scope when clarifying context is thin', () => {

@@ -42,6 +42,11 @@ export interface LlmVendorModelCatalog {
 
 export type LlmModelCatalogByVendor = Partial<Record<LlmProvider, LlmVendorModelCatalog>>;
 
+export interface StoryAssistantModelAssignment {
+  lightModel?: string;
+  heavyModel?: string;
+}
+
 export interface GeneratorConfig {
   provider: LlmProvider;
   modelStrategy: GeneratorModelStrategy;
@@ -66,6 +71,7 @@ export interface GeneratorConfig {
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
   modelCatalogs?: LlmModelCatalogByVendor;
+  storyAssistantModelAssignments?: Partial<Record<LlmProvider, StoryAssistantModelAssignment>>;
 }
 
 export interface ProcessCode {
@@ -179,6 +185,7 @@ export interface TenantConfig {
 
 export interface UserPreferences {
   defaultProjectKey?: string;
+  pipelineProfile?: PipelineProfile;
   quickRefineModelByProvider?: Partial<Record<LlmProvider, string>>;
 }
 
@@ -1127,7 +1134,9 @@ export interface GenerationEvent {
   reviewedAdvisoryTriage?: AdvisoryTriageContract;
   priorStageDurationsMs?: GenerationStageDurationsMs;
   retryFeatureId?: string;
+  retryFeatureIds?: string[];
   retryFeature?: Feature;
+  retryFeatures?: Feature[];
   retryBaseFeatures?: Feature[];
   pipelineAudit?: boolean;
   auditRunId?: string;
