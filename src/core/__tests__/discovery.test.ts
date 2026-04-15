@@ -30,6 +30,7 @@ import {
   buildStoryAssistantSufficiencySystemPrompt,
   buildTriageSystemPrompt,
 } from '../prompts';
+import { buildPipelineAuditReviewerPack } from '../pipeline-audit-prompts';
 
 test('normalizeDiscoveryProfile preserves llm-sized discovery counts', () => {
   const profile = normalizeDiscoveryProfile({
@@ -816,4 +817,14 @@ test('add requirements prompt keeps canvas changes append-only and feature-local
   assert.match(prompt, /Do not create a new feature/i);
   assert.match(prompt, /Keep every existing acceptance requirement in the same relative order/i);
   assert.match(prompt, /Append only the additional acceptance requirements needed/i);
+});
+
+test('pipeline audit reviewer schema includes required quality assertions', () => {
+  const pack = buildPipelineAuditReviewerPack();
+  assert.match(pack.outputSchemaJson, /"assertions"/);
+  assert.match(pack.outputSchemaJson, /"clarifyOrder"/);
+  assert.match(pack.outputSchemaJson, /"arCompleteness"/);
+  assert.match(pack.outputSchemaJson, /"duplicateCapabilityControl"/);
+  assert.match(pack.outputSchemaJson, /"sharedEvidenceReuse"/);
+  assert.match(pack.systemPrompt, /required assertions/i);
 });

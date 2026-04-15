@@ -35,6 +35,12 @@ import {
 import { deriveRetrievalQuery } from '../services/retrieval-query';
 import { runStoryAssistantGenerationStage } from '../services/story-assistant-pipeline';
 import type { SharedPipelineContext } from '../services/shared-pipeline-context';
+import {
+  buildSharedPipelineEvidenceSignature,
+  fromSharedPipelineEvidenceBundle,
+  toSharedPipelineEvidenceBundle,
+  type SharedPipelineEvidenceBundle,
+} from '../services/shared-pipeline-context';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 interface RealtimeEvent {
@@ -187,6 +193,8 @@ export async function handler(event: { body: GenerationEvent }) {
     clarifyDiscoveryProfile,
     clarifyFinalSufficiency: preEvaluatedSufficiency,
     clarifyQuestionsAsked,
+    clarifyScopeContract,
+    sharedEvidenceSignature,
     priorStageDurationsMs,
     outputProfileOverride,
     retryFeatureId,
@@ -255,6 +263,19 @@ export async function handler(event: { body: GenerationEvent }) {
       const advisorySizingContract = clarifySizingContract;
       const advisoryTriage = clarifyAdvisoryTriage;
       const clarifyFinalSufficiency = preEvaluatedSufficiency;
+      const effectiveSharedEvidenceSignature = sharedEvidenceSignature
+        ?? buildSharedPipelineEvidenceSignature({
+          requirement: maskedRequirement.text,
+          attachmentText: maskedAttachment.text,
+          projectKey,
+          projectKeys: selectedProjectKeys,
+          pipelineMode: 'story_assistant_default',
+          includeSimilarStories: true,
+        });
+      const cachedSharedEvidence = await entityGet<SharedPipelineEvidenceBundle>(KEYS.sharedPipelineEvidence(sessionId));
+      const preloadedEvidence = cachedSharedEvidence?.signature === effectiveSharedEvidenceSignature
+        ? fromSharedPipelineEvidenceBundle(cachedSharedEvidence)
+        : undefined;
 
       await updateProgress(`Reading shared evidence context for ${projectLabel}…`, 1, {
         stage: 'context',
@@ -274,6 +295,9 @@ export async function handler(event: { body: GenerationEvent }) {
           : [];
       const maxGenAttempts = retryTargetIds.length ? 1 : MAX_FULL_GENERATION_ATTEMPTS;
       let evidenceReuse: SharedPipelineContext | undefined;
+      if (preloadedEvidence) {
+        evidenceReuse = preloadedEvidence;
+      }
       let liveDraftFeatures: Array<Pick<Feature, 'id' | 'summary' | 'description' | 'storyPoints' | 'featureClass' | 'confidence' | 'actorSource'>> = [];
       let genOutcome: { sharedContext: SharedPipelineContext; result: GenerationResult } | null = null;
 
@@ -301,6 +325,7 @@ export async function handler(event: { body: GenerationEvent }) {
             attachmentText: maskedAttachment.text,
             clarifyAnswers: maskedAnswers.answers,
             clarifyDiscoveryProfile,
+            clarifyScopeContract,
             config: runConfig,
             projectKey,
             projectKeys,
@@ -366,6 +391,10 @@ export async function handler(event: { body: GenerationEvent }) {
             },
           });
           evidenceReuse = genOutcome.sharedContext;
+          await entitySet(
+            KEYS.sharedPipelineEvidence(sessionId),
+            toSharedPipelineEvidenceBundle(genOutcome.sharedContext, effectiveSharedEvidenceSignature),
+          );
           break;
         } catch (genErr) {
           if (genErr instanceof GenerationCancelledError) {
@@ -503,6 +532,9 @@ export async function handler(event: { body: GenerationEvent }) {
         wiInsights: sharedContext.wiInsights,
         ...(clarifyFinalSufficiency?.status ? { sufficiencyStatus: clarifyFinalSufficiency.status } : {}),
         ...(clarifyFinalSufficiency?.reasonCodes?.length ? { sufficiencyReasonCodes: clarifyFinalSufficiency.reasonCodes } : {}),
+        ...(clarifyScopeContract ? { scopeContract: clarifyScopeContract } : {}),
+        sharedEvidenceSignature: effectiveSharedEvidenceSignature,
+        sharedEvidenceReused: Boolean(preloadedEvidence),
       };
       result.generationContext = generationContext;
 
@@ -524,6 +556,8 @@ export async function handler(event: { body: GenerationEvent }) {
           projectKeys: selectedProjectKeys,
           sizingContract: generationContext.sizingContract,
           advisoryTriage: generationContext.advisoryTriage,
+          scopeContract: clarifyScopeContract,
+          sharedEvidenceSignature: effectiveSharedEvidenceSignature,
         },
       );
       generationContext.latencyMs = {
@@ -701,6 +735,8 @@ async function saveConversationTurn(
     projectKeys: string[];
     sizingContract?: EffectiveSizingContract;
     advisoryTriage?: AdvisoryTriageContract;
+    scopeContract?: GenerationEvent['clarifyScopeContract'];
+    sharedEvidenceSignature?: string;
   },
 ) {
   try {

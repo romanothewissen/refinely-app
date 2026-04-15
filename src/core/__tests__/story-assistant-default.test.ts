@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildHeuristicDiscoveryAssessment,
+  buildScopeContract,
   evaluateClarifyQuestionSetQuality,
   extractActorSets,
   extractRoles,
@@ -182,6 +183,27 @@ test('extractActorSets resolves referential actor phrases back to canonical role
   assert.deepEqual(actorSets.eligibleActors, ['Service Support Specialist', 'Customer Success Manager']);
   assert.deepEqual(actorSets.viewerActors, ['Customer Success Manager']);
   assert.deepEqual(actorSets.mentionedActors, ['Service Support Specialist', 'Customer Success Manager']);
+});
+
+test('extractActorSets rejects sentence-like role clauses from free-text answers', () => {
+  const actorSets = extractActorSets('', [
+    {
+      question: 'Who performs this work?',
+      answer: 'The Field Service Engineer documents the persistent issues and then escalates to support',
+      selectedSuggestions: [],
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who ultimately owns the activity?',
+      answer: 'Service Coordinator',
+      selectedSuggestions: ['Service Coordinator'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.deepEqual(actorSets.eligibleActors, ['Service Coordinator']);
+  assert.deepEqual(actorSets.canonicalRoles, ['Service Coordinator']);
+  assert.equal(actorSets.roleConfidence, 'high');
 });
 
 test('parseStoryAssistantQuestionCandidates splits numbered prompts into separate cards without rewriting the meaning', () => {
@@ -437,4 +459,85 @@ test('finalizeStoryAssistantDiscoveryQuestions allows slight overage above asses
   });
 
   assert.equal(finalized.length, 5);
+});
+
+test('finalizeStoryAssistantDiscoveryQuestions enforces deterministic category order even below cap', () => {
+  const finalized = finalizeStoryAssistantDiscoveryQuestions([
+    {
+      categoryKey: 'success_measurement',
+      category: 'Success & Measurement',
+      intent: 'q1',
+      question: 'How is success measured?',
+      suggestions: ['Time saved', 'Error reduction', 'Cycle time'],
+    },
+    {
+      categoryKey: 'functional_flow',
+      category: 'Functional Flow',
+      intent: 'q2',
+      question: 'How is the workflow sequenced?',
+      suggestions: ['Manual order', 'Default order', 'Rules-based order'],
+    },
+    {
+      categoryKey: 'user_personas',
+      category: 'Roles & Personas',
+      intent: 'q3',
+      question: 'Who performs the workflow?',
+      suggestions: ['Coordinator', 'Operator', 'Manager'],
+    },
+    {
+      categoryKey: 'context_trigger',
+      category: 'Trigger & Context',
+      intent: 'q4',
+      question: 'What starts the workflow?',
+      suggestions: ['New request', 'Scheduled event', 'Manual trigger'],
+    },
+  ], {
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'medium',
+    actorComplexity: 'medium',
+    ruleDensity: 'medium',
+    exceptionDensity: 'low',
+    lifecycleComplexity: 'low',
+    ambiguityLevel: 'medium',
+    coverageObligations: ['sequencing'],
+    recommendedQuestionRange: { min: 3, max: 6 },
+    rationale: 'Moderate workflow ambiguity.',
+  });
+
+  assert.deepEqual(finalized.map((question) => question.categoryKey), [
+    'user_personas',
+    'context_trigger',
+    'functional_flow',
+    'success_measurement',
+  ]);
+});
+
+test('buildScopeContract classifies in-scope, out-of-scope, and assumptions from clarify answers', () => {
+  const contract = buildScopeContract([
+    {
+      question: 'What workflow should be covered in this release?',
+      answer: 'The multi-activity execution workflow is in scope',
+      selectedSuggestions: ['The multi-activity execution workflow is in scope'],
+      categoryKey: 'functional_flow',
+    },
+    {
+      question: 'Should finance reporting be included?',
+      answer: 'Finance reporting is out of scope for this capability',
+      selectedSuggestions: ['Finance reporting is out of scope for this capability'],
+      categoryKey: 'business_rules',
+    },
+    {
+      question: 'Who approves policy exceptions?',
+      answer: 'TBD based on regional governance',
+      selectedSuggestions: ['TBD based on regional governance'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.equal(contract.inScope.length, 1);
+  assert.equal(contract.outOfScope.length, 1);
+  assert.equal(contract.assumptions.length, 1);
+  assert.match(contract.outOfScope[0] ?? '', /out of scope/i);
+  assert.match(contract.assumptions[0] ?? '', /tbd/i);
 });

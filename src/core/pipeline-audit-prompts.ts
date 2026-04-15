@@ -5,6 +5,12 @@
 
 export const PIPELINE_AUDIT_REVIEWER_OUTPUT_SCHEMA = `{
   "summary": ["string — 5–10 bullets"],
+  "assertions": {
+    "clarifyOrder": { "status": "pass|fail|uncertain", "evidence": "string" },
+    "arCompleteness": { "status": "pass|fail|uncertain", "evidence": "string" },
+    "duplicateCapabilityControl": { "status": "pass|fail|uncertain", "evidence": "string" },
+    "sharedEvidenceReuse": { "status": "pass|fail|uncertain", "evidence": "string" }
+  },
   "scores": {
     "triageSizing": { "score": 1, "confidence": "low|medium|high", "rationale": "string" },
     "discoveryDepth": { "score": 1, "confidence": "low|medium|high", "rationale": "string" },
@@ -33,6 +39,11 @@ export const PIPELINE_AUDIT_REVIEWER_SYSTEM = `You are an expert product manager
 You will receive one JSON object: a "PipelineAuditBundle" with user inputs, retrieved discovery context (work instructions, similar stories, domain context), an ordered list of LLM calls (masked prompts and model responses), and structured outputs (clarify questions, optional sufficiency evaluation, generated features).
 
 Score each dimension from 1 (poor) to 5 (excellent). Be specific: cite feature ids, question text, or prompt phases when giving evidence.
+Additionally evaluate these required assertions:
+- clarifyOrder: Do clarify questions follow the intended discovery sequence (roles/personas -> trigger/context -> flow -> rules/exceptions -> success/measurement) with minimal drift?
+- arCompleteness: Are acceptance requirements complete for most generated features (not zeroed-out fallback for all)?
+- duplicateCapabilityControl: Does output avoid splitting the same capability into redundant role-variant features unless behavior materially differs?
+- sharedEvidenceReuse: Does generation appear to reuse clarify-stage shared evidence rather than re-building unrelated retrieval context?
 
 Respond with ONLY valid JSON matching the schema provided in the user message. No markdown fences or prose outside JSON.`;
 

@@ -4,6 +4,7 @@ import type {
   DiscoveryProfile,
   Feature,
   GenerationStageDurationsMs,
+  ScopeContract,
   TenantConfig,
 } from '../types';
 import {
@@ -29,7 +30,7 @@ export async function runStoryAssistantClarifyStage(input: {
     projectKey: input.projectKey,
     projectKeys: input.projectKeys,
     pipelineMode: 'story_assistant_default',
-    includeSimilarStories: false,
+    includeSimilarStories: true,
   });
 
   const result = await generateStoryAssistantDefaultClarifyingQuestions({
@@ -121,6 +122,7 @@ export async function runStoryAssistantGenerationStage(input: {
   attachmentText: string;
   clarifyAnswers: ClarifyAnswer[];
   clarifyDiscoveryProfile?: DiscoveryProfile;
+  clarifyScopeContract?: ScopeContract;
   config: TenantConfig;
   projectKey?: string;
   projectKeys?: string[];
@@ -151,6 +153,7 @@ export async function runStoryAssistantGenerationStage(input: {
     similarStories: sharedContext.similarStories,
     arPatternLibraryText: sharedContext.arPatternLibraryText,
     discoveryProfile: input.clarifyDiscoveryProfile,
+    scopeContract: input.clarifyScopeContract,
     config: {
         ...input.config,
         domainContext: sharedContext.domainContext,

@@ -217,6 +217,7 @@ export const KEYS = {
   conversationIndex: 'conv_index',
   generationProgress: (sessionId: string) => `gen_progress_${sessionId}`,
   generationInputSnapshot: (sessionId: string) => `gen_input_${sessionId}`,
+  sharedPipelineEvidence: (sessionId: string) => `shared_pipeline_evidence_${sessionId}`,
   clarifyProgress: (sessionId: string) => `clarify_progress_${sessionId}`,
   refineProgress: (sessionId: string) => `refine_progress_${sessionId}`,
   quickRefineSession: (sessionId: string) => `quick_refine_${sessionId}`,

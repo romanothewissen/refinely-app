@@ -238,7 +238,9 @@ RULES:
 - Preserve workflow boundaries when actor responsibilities, approvals, downstream initiation, tracking needs, or modification paths would materially change what gets built or tested
 - Do not split a single workflow into multiple thin features when one well-scoped feature with richer acceptance requirements would cover it
 - Do not collapse materially different downstream outcomes, enforcement logic, or visibility responsibilities into one vague feature
-- ACTOR UNIQUENESS: Each feature MUST have a single primary actor (the "As a [role]" role). When the evidence names multiple distinct creator or approver roles for the same capability, emit separate features per role rather than collapsing them into one. Example: if both a Service Coordinator and a Field Technician can initiate the same plan with different responsibilities, produce two features — not one feature saying "As a coordinator or technician".
+- CAPABILITY-FIRST SPLITTING: Split features by materially different business capability, rule surface, lifecycle state, or outcome — not merely because more than one role can perform the same capability.
+- ROLE SPLITTING RULE: Create separate features per role only when that role materially changes behavior, ownership rules, approvals, downstream outcomes, or acceptance coverage.
+- If multiple roles can execute the same behavior under the same rules, keep one feature and choose the most representative role label evidenced in the requirement/Q&A (or a validated umbrella role from evidence).
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty lists
 ${processRule}
@@ -376,9 +378,11 @@ RULES:
 - Do NOT ask about timelines, budgets, project ownership, or technology choices
 - Do NOT ask anything already clearly answered in the requirement text
 - Frame questions in business language — never mention specific system names or technical concepts
+- Default to role-discovery phrasing in Roles & Personas questions ("who performs/approves/views...") instead of assuming a specific role unless that role is explicitly evidenced and unambiguous.
 - Anchor each question to concrete language from the requirement or supplied evidence (roles, process steps, constraints, outcomes). If a question can be reused unchanged for a different requirement, rewrite it to be more specific.
 - Prefer process-grounded wording over abstract placeholders (for example, ask about the named trigger/state/exception in evidence rather than saying "this process" or "the flow" without context).
 - Evaluate semantic complexity from workflow shape, actors, rules, exceptions, lifecycle, downstream outcomes, and success criteria. Do NOT use prompt length as a signal.
+- Stay within scope: ask only ambiguities that directly change decomposition, role ownership, rules, lifecycle, or acceptance requirements for this requirement. Do not expand into adjacent capabilities unless explicitly implied by the requirement.
 
 For each question, provide exactly 3 answer suggestions representing the most likely stakeholder responses. Each suggestion must be a complete, natural phrase a stakeholder could read and say "yes, that describes our process" — not a comma-separated list of attributes. Aim for 5–14 words. Avoid clipped fragments.
 

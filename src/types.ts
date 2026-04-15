@@ -504,6 +504,14 @@ export interface ActorSetGrounding {
   approverActors?: string[];
   viewerActors?: string[];
   mentionedActors?: string[];
+  canonicalRoles?: string[];
+  roleConfidence?: 'high' | 'low';
+}
+
+export interface ScopeContract {
+  inScope: string[];
+  outOfScope: string[];
+  assumptions: string[];
 }
 
 export type GenerationQualityMode = 'speed' | 'quality';
@@ -768,6 +776,8 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
   pipelineProfile?: PipelineProfile;
+  scopeContract?: ScopeContract;
+  sharedEvidenceSignature?: string;
 }
 
 export type SizingAssessmentArchetype = 'guard_rule' | 'focused_capability' | 'workflow_area' | 'broad_platform';
@@ -866,6 +876,9 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   modelRoute?: GenerationModelRoute;
   pipelineProfile?: PipelineProfile;
   qualityMode?: GenerationQualityMode;
+  scopeContract?: ScopeContract;
+  sharedEvidenceSignature?: string;
+  sharedEvidenceReused?: boolean;
 }
 
 export interface GenerationResult {
@@ -1299,6 +1312,8 @@ export interface GenerationEvent {
   clarifyAdvisoryTriage?: AdvisoryTriageContract;
   clarifyFinalSufficiency?: DiscoverySufficiencyResult;
   clarifyQuestionsAsked?: Array<string | { categoryKey?: string; intent?: string; question?: string }>;
+  clarifyScopeContract?: ScopeContract;
+  sharedEvidenceSignature?: string;
   /** Resume generation from an already-reviewed pass-1 draft. */
   reviewedDraftFeatures?: Feature[];
   reviewedDraftReview?: DraftReviewMetadata;

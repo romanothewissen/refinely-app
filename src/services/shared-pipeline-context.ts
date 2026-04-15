@@ -56,6 +56,88 @@ export interface SharedPipelineContext {
   sources: SharedPipelineContextSources;
 }
 
+export interface SharedPipelineEvidenceBundle {
+  signature: string;
+  savedAt: number;
+  context: {
+    projectKey: string;
+    projectKeys: string[];
+    projectCount: number;
+    domainContext: string;
+    domainRoles: string[];
+    wiContextText: string;
+    wiInsights: WorkInstructionInsightArtifact;
+    similarStories: SimilarStory[];
+    arPatternLibraryText: string;
+    timings: SharedPipelineContext['timings'];
+    sources: SharedPipelineContextSources;
+  };
+}
+
+export function buildSharedPipelineEvidenceSignature(input: {
+  requirement: string;
+  attachmentText?: string;
+  projectKey?: string;
+  projectKeys?: string[];
+  pipelineMode?: 'story_assistant_default';
+  includeSimilarStories?: boolean;
+}): string {
+  const normalizedProjects = normalizeProjectKeys(input.projectKey, input.projectKeys).join('|');
+  const retrievalQuery = deriveRetrievalQuery(input.requirement, input.attachmentText ?? '', []);
+  return [
+    input.pipelineMode ?? 'story_assistant_default',
+    `projects:${normalizedProjects || '*'}`,
+    `similar:${input.includeSimilarStories !== false ? '1' : '0'}`,
+    retrievalQuery.toLowerCase(),
+  ].join('||');
+}
+
+export function toSharedPipelineEvidenceBundle(
+  context: SharedPipelineContext,
+  signature: string,
+): SharedPipelineEvidenceBundle {
+  return {
+    signature,
+    savedAt: Date.now(),
+    context: {
+      projectKey: context.projectKey,
+      projectKeys: context.projectKeys,
+      projectCount: context.projectCount,
+      domainContext: context.domainContext,
+      domainRoles: context.domainRoles,
+      wiContextText: context.wiContext.text,
+      wiInsights: context.wiInsights,
+      similarStories: context.similarStories,
+      arPatternLibraryText: context.arPatternLibraryText,
+      timings: context.timings,
+      sources: context.sources,
+    },
+  };
+}
+
+export function fromSharedPipelineEvidenceBundle(
+  bundle: SharedPipelineEvidenceBundle,
+): SharedPipelineContext {
+  return {
+    projectKey: bundle.context.projectKey,
+    projectKeys: bundle.context.projectKeys,
+    projectCount: bundle.context.projectCount,
+    domainContext: bundle.context.domainContext,
+    domainRoles: bundle.context.domainRoles,
+    wiContext: {
+      text: bundle.context.wiContextText,
+      docs: [],
+      chunks: [],
+      linkedDocs: [],
+    },
+    wiInsights: bundle.context.wiInsights,
+    similarStories: bundle.context.similarStories,
+    arPatternLibraryText: bundle.context.arPatternLibraryText,
+    timings: bundle.context.timings,
+    sources: bundle.context.sources,
+  };
+}
+
 export async function loadSharedPipelineContext(input: {
   requirement: string;
   attachmentText?: string;

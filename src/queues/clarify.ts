@@ -27,7 +27,9 @@ import {
   resolvePrimaryProjectKey,
 } from '../services/project-selection';
 import { deriveRetrievalQuery } from '../services/retrieval-query';
+import { buildScopeContract } from '../core/story-assistant-default';
 import { runStoryAssistantClarifyStage } from '../services/story-assistant-pipeline';
+import { buildSharedPipelineEvidenceSignature, toSharedPipelineEvidenceBundle } from '../services/shared-pipeline-context';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
@@ -213,7 +215,21 @@ export async function handler(event: { body: ClarifyEvent }) {
         referencedWiDocs: sharedContext.sources.referencedWiDocs,
         referencedWiSections: sharedContext.sources.referencedWiSections,
         wiInsights: sharedContext.wiInsights,
+        scopeContract: buildScopeContract(retrievalAnswers),
       };
+      const sharedEvidenceSignature = buildSharedPipelineEvidenceSignature({
+        requirement: maskedRequirement.text,
+        attachmentText: maskedAttachment.text,
+        projectKey: sharedContext.projectKey,
+        projectKeys: sharedContext.projectKeys,
+        pipelineMode: 'story_assistant_default',
+        includeSimilarStories: true,
+      });
+      clarifyContext.sharedEvidenceSignature = sharedEvidenceSignature;
+      await entitySet(
+        KEYS.sharedPipelineEvidence(sessionId),
+        toSharedPipelineEvidenceBundle(sharedContext, sharedEvidenceSignature),
+      );
 
       const persistenceStartedAt = Date.now();
       await saveClarifyTurn(sessionId, accountId, maskedRequirement.text, clarifyContext, inputSignature);

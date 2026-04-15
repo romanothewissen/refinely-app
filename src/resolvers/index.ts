@@ -52,6 +52,7 @@ import { getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stori
 import { inferProjectPersonaRolesFromBacklog } from '../core/persona-role-inference';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
+import { buildScopeContract } from '../core/story-assistant-default';
 import {
   applyQuickRefine,
   loadQuickRefineIssueContext,
@@ -59,6 +60,7 @@ import {
   resolveQuickRefineProjectMapping,
   submitQuickRefineAnswers,
 } from '../core/quick-refine';
+import { buildSharedPipelineEvidenceSignature } from '../services/shared-pipeline-context';
 import {
   CanvasEditIntent,
   CanvasEditScope,
@@ -508,6 +510,15 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
   const finalSufficiency = payload?.clarifyFinalSufficiency;
+  const scopeContract = payload?.clarifyScopeContract ?? buildScopeContract(payload.clarifyAnswers ?? []);
+  const sharedEvidenceSignature = buildSharedPipelineEvidenceSignature({
+    requirement: payload.requirement,
+    attachmentText: payload.attachmentText ?? '',
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: selectedProjectKeys,
+    pipelineMode: 'story_assistant_default',
+    includeSimilarStories: true,
+  });
 
   const event: GenerationEvent = {
     sessionId: payload.sessionId,
@@ -526,6 +537,8 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage ?? undefined,
     clarifyFinalSufficiency: finalSufficiency ?? undefined,
     clarifyQuestionsAsked: payload.clarifyQuestionsAsked,
+    clarifyScopeContract: scopeContract,
+    sharedEvidenceSignature,
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
     enqueuedAt: Date.now(),
@@ -540,13 +553,15 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     clarifyAnswers: payload.clarifyAnswers ?? [],
     attachmentText: payload.attachmentText ?? '',
     outputProfileOverride: payload?.outputProfileOverride,
-    projectKey: payload.projectKey,
-    projectKeys: payload.projectKeys,
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: selectedProjectKeys,
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile,
     clarifySizingContract: payload.clarifySizingContract,
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage,
     clarifyFinalSufficiency: payload.clarifyFinalSufficiency,
     clarifyQuestionsAsked: payload.clarifyQuestionsAsked,
+    clarifyScopeContract: scopeContract,
+    sharedEvidenceSignature,
     pipelineAudit: payload.pipelineAudit,
     auditRunId: payload.auditRunId,
     savedAt: Date.now(),
@@ -610,6 +625,8 @@ resolver.define('retryGeneration', async ({ payload, context }) => {
     clarifyAdvisoryTriage: snapshot.clarifyAdvisoryTriage,
     clarifyFinalSufficiency: snapshot.clarifyFinalSufficiency,
     clarifyQuestionsAsked: snapshot.clarifyQuestionsAsked,
+    clarifyScopeContract: snapshot.clarifyScopeContract,
+    sharedEvidenceSignature: snapshot.sharedEvidenceSignature,
     pipelineAudit: snapshot.pipelineAudit,
     auditRunId: snapshot.auditRunId,
     enqueuedAt: Date.now(),
@@ -667,6 +684,8 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     projectKeys: authorizedProjects.projectKeys,
     clarifySizingContract: retryContext?.sizingContract,
     clarifyAdvisoryTriage: retryContext?.advisoryTriage,
+    clarifyScopeContract: retryContext?.scopeContract,
+    sharedEvidenceSignature: retryContext?.sharedEvidenceSignature,
     retryFeatureId: retryFeature.id,
     retryFeature,
     retryBaseFeatures,
@@ -726,6 +745,8 @@ resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) =>
     projectKeys: authorizedProjects.projectKeys,
     clarifySizingContract: retryContext?.sizingContract,
     clarifyAdvisoryTriage: retryContext?.advisoryTriage,
+    clarifyScopeContract: retryContext?.scopeContract,
+    sharedEvidenceSignature: retryContext?.sharedEvidenceSignature,
     retryFeatureIds: retryFeatures.map((feature) => feature.id),
     retryFeatures,
     retryBaseFeatures,
