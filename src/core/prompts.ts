@@ -286,6 +286,7 @@ RULES:
 - GIVEN clauses must describe a real business situation, not a configuration/setup state.
 - Avoid abstract placeholders like "configured mode" or "trigger event"; state the actual business fact.
 - Keep role usage consistent with each feature description; only introduce a different actor when the scenario explicitly requires it.
+- Avoid mechanical role repetition in WHEN clauses. Once the acting role is established for a feature, prefer role-neutral continuation ("they attempt to", "the action is submitted") unless a different actor is semantically required.
 - Cover dependency and ordering behavior when the feature involves sequenced activities.
 - Cover exception outcomes where the happy path can fail in realistic testing.
 

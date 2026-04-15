@@ -125,6 +125,14 @@ export async function handler(event: { body: ClarifyEvent }) {
       } = result;
       const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
+      const shouldBlockEmptyDiscovery =
+        questions.length === 0
+        && (
+          discoveryAssessment.ambiguityLevel !== 'low'
+          || discoveryAssessment.discoveryDepth !== 'light'
+          || (coverageQualityScore ?? 100) < 70
+        );
+
       if (await isWorkflowCancelled(sessionId)) {
         await markCancelled(sessionId, inputSignature);
         return;
@@ -166,7 +174,22 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectCount: sharedContext.projectCount,
         pipelineMode: 'story_assistant_default',
         domainRolesUsed: sharedContext.domainRoles,
-        discoveryStatus: questions.length > 0 ? 'needs_clarification' : 'ready_for_generation',
+        discoveryStatus: shouldBlockEmptyDiscovery
+          ? 'discovery_failed'
+          : questions.length > 0
+            ? 'needs_clarification'
+            : 'ready_for_generation',
+        ...(shouldBlockEmptyDiscovery
+          ? {
+              failureReasonCode: 'question_array_empty_when_discovery_required' as const,
+              failureDiagnostics: {
+                technicalSummary: 'Clarify returned an empty question set despite high discovery ambiguity.',
+                userActionHint: 'Retry discovery. If this repeats, reduce noisy context and rerun to regenerate clarifying questions.',
+                generatedQuestionCount: ambiguityAssessment.generatedQuestions,
+                parseShape: 'empty_questions_after_retry',
+              },
+            }
+          : {}),
         domainContextApplied: sharedContext.sources.domainContextApplied,
         attachmentIncluded: sharedContext.sources.attachmentIncluded,
         similarStoriesCount: sharedContext.sources.similarStoriesCount,
@@ -246,7 +269,9 @@ export async function handler(event: { body: ClarifyEvent }) {
           projectKey,
           requirementExcerpt: maskedRequirement.text.slice(0, 240),
           decisionSummary: [
-            questions.length > 0
+            shouldBlockEmptyDiscovery
+              ? 'Discovery was blocked because no clarifying questions were produced despite high ambiguity.'
+              : questions.length > 0
               ? `Generated ${questions.length} discovery questions in the initial Story Assistant round.`
               : 'Discovery determined no clarifying questions were needed before generation.',
             `Loaded ${sharedContext.sources.retrievedWiDocCount} work instruction documents and ${sharedContext.sources.similarStoriesCount} related backlog references into the shared evidence bundle.`,
@@ -322,6 +347,18 @@ export async function handler(event: { body: ClarifyEvent }) {
         } catch (auditErr) {
           console.warn('[clarify-queue] pipeline audit merge failed:', auditErr);
         }
+      }
+
+      if (shouldBlockEmptyDiscovery) {
+        await entitySetSmall(KEYS.clarifyProgress(sessionId), {
+          type: 'blocked',
+          error: 'Discovery could not produce clarifying questions for a high-ambiguity requirement.',
+          reasonCode: 'question_array_empty_when_discovery_required',
+          contextMeta: clarifyContext,
+          ...(inputSignature ? { inputSignature } : {}),
+          updatedAt: Date.now(),
+        });
+        return;
       }
 
       await entitySetSmall(KEYS.clarifyProgress(sessionId), {

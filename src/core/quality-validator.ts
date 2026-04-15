@@ -84,6 +84,11 @@ function countWords(text: string): number {
     .length;
 }
 
+function extractActorRoleFromDescription(description: string): string {
+  const match = String(description ?? '').match(/^As an?\s+(.+?),\s*I need/i);
+  return (match?.[1] ?? '').trim().toLowerCase();
+}
+
 export function textLooksTruncated(text: string): boolean {
   return clauseEndsOnStopWord(String(text ?? ''));
 }
@@ -284,6 +289,9 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
       }
     }
 
+    const featureActorRole = extractActorRoleFromDescription(feature.description);
+    let repeatedWhenActorCount = 0;
+
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {
         violations.push({
@@ -323,6 +331,10 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         });
       }
 
+      if (featureActorRole && String(ar.when ?? '').toLowerCase().includes(featureActorRole)) {
+        repeatedWhenActorCount += 1;
+      }
+
       // Check for solution language in ARs
       const arText = combinedArText.toLowerCase();
       for (const term of SOLUTION_TERMS) {
@@ -347,6 +359,18 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         }
       }
 
+    }
+
+    if (
+      feature.acceptanceRequirements.length >= 4
+      && featureActorRole
+      && repeatedWhenActorCount >= feature.acceptanceRequirements.length - 1
+    ) {
+      violations.push({
+        featureId: feature.id,
+        field: 'acceptanceRequirements',
+        message: 'AR WHEN clauses over-repeat the same actor label; prefer role-neutral continuation where actor does not change',
+      });
     }
 
     // Check for near-duplicate ARs within the feature

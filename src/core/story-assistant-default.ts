@@ -581,6 +581,32 @@ function buildGenerationContextMessage(input: {
   return parts.join('\n\n');
 }
 
+function shouldUseHighArReasoning(input: {
+  pipelineProfile: PipelineProfile;
+  discoveryProfile?: DiscoveryProfile;
+  requirement: string;
+  clarifyAnswers: ClarifyAnswer[];
+  wiEvidenceText: string;
+}): boolean {
+  if (input.pipelineProfile === 'quality') return true;
+  if (input.discoveryProfile?.complexity === 'high') return true;
+
+  const corpus = [
+    input.requirement,
+    input.wiEvidenceText,
+    ...input.clarifyAnswers.map((answer) => `${answer.question} ${answer.answer}`),
+  ].join('\n').toLowerCase();
+
+  const signals = [
+    /\bsequence|dependency|prerequisite|before|after|ordered\b/.test(corpus),
+    /\bquote|billing|billable|contract|entitlement|approval|authorize\b/.test(corpus),
+    /\bexception|fail|hold|cancel|blocked|invalid\b/.test(corpus),
+    /\bwork order|shipment|downstream|follow[- ]?on|initiat(?:e|ion)\b/.test(corpus),
+  ].filter(Boolean).length;
+
+  return signals >= 2;
+}
+
 function inferCategoryKey(question: string): ClarifyCategoryKey {
   const normalized = cleanText(question).toLowerCase();
   if (/\bwho\b|\brole\b|\bpersona\b|\bowner\b|\bapproval\b|\bescalation\b/.test(normalized)) {
@@ -884,6 +910,18 @@ export function evaluateClarifyQuestionSetQuality(
   if (longQuestions > 0) {
     score -= Math.min(10, longQuestions * 2);
     reasons.push('Some discovery questions were too broad or overpacked.');
+  }
+  if (questions.length >= 8) {
+    const byCategory = questions.reduce<Map<ClarifyQuestion['categoryKey'], number>>((acc, question) => {
+      acc.set(question.categoryKey, (acc.get(question.categoryKey) ?? 0) + 1);
+      return acc;
+    }, new Map());
+    const dominantCategoryCount = Math.max(...Array.from(byCategory.values()));
+    const dominantRatio = dominantCategoryCount / questions.length;
+    if (dominantRatio > 0.55) {
+      score -= Math.min(18, Math.round((dominantRatio - 0.55) * 40));
+      reasons.push('Discovery questions were over-concentrated in one category, reducing obligation coverage balance.');
+    }
   }
   const sequencingRequired = assessment.coverageObligations.includes('sequencing') || assessment.coverageObligations.includes('dependencies');
   if (sequencingRequired && !/sequence|dependency|order|before|after|prerequisite/.test(questionText)) {
@@ -1442,6 +1480,13 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
 
   const pass2StartedAt = Date.now();
   const arPromptStartedAt = Date.now();
+  const arReasoningEffort = shouldUseHighArReasoning({
+    pipelineProfile,
+    discoveryProfile: opts.discoveryProfile,
+    requirement: opts.requirement,
+    clarifyAnswers: opts.clarifyAnswers,
+    wiEvidenceText,
+  }) ? 'high' : 'medium';
   const arUserMessage = `${buildGenerationContextMessage({
     requirement: opts.requirement,
     clarifyAnswers: opts.clarifyAnswers,
@@ -1467,7 +1512,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     }),
     userMessage: arUserMessage,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
-    reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
+    reasoningEffort: arReasoningEffort,
     ...providerOpts,
   });
   stageUsage.acceptanceRequirements = pass2Result.usage;
