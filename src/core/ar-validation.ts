@@ -1,9 +1,11 @@
-const TRUNCATION_TAIL = /\b(the|a|an|and|or|with|for|to|from|that|this|its|is|are|was|into|of|by|at|on|in)\s*\.?\s*$/i;
+const TRUNCATION_TAIL = /\b(and|or|with|for|to|from|that|this|its|into|of|by|at|on|in)\s*\.?\s*$/i;
 
 export function isTruncatedClause(text: string | undefined): boolean {
   if (!text) return true;
   const trimmed = text.trim();
   if (trimmed.length < 4) return true;
+  // Longer THEN clauses often end with valid business phrasing; avoid over-flagging.
+  if (trimmed.length >= 48) return false;
   return TRUNCATION_TAIL.test(trimmed);
 }
 

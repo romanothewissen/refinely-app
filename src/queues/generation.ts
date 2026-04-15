@@ -325,7 +325,6 @@ export async function handler(event: { body: GenerationEvent }) {
             attachmentText: maskedAttachment.text,
             clarifyAnswers: maskedAnswers.answers,
             clarifyDiscoveryProfile,
-            clarifyScopeContract,
             config: runConfig,
             projectKey,
             projectKeys,

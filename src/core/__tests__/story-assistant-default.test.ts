@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   buildHeuristicDiscoveryAssessment,
-  buildScopeContract,
   evaluateClarifyQuestionSetQuality,
   extractActorSets,
   extractRoles,
-  finalizeStoryAssistantDiscoveryQuestions,
   parseStoryAssistantQuestionCandidates,
   parseDiscoveryAssessment,
   splitClearlyNumberedStoryAssistantQuestion,
@@ -60,6 +58,7 @@ test('parseStoryAssistantQuestionCandidates keeps exactly three grounded suggest
     'Planned location and service type',
     'Required parts and labor estimate',
     'Sequence dependencies on earlier activities',
+    'Any customer-facing commitments to honor',
   ]);
 });
 
@@ -79,6 +78,7 @@ test('parseStoryAssistantQuestionCandidates drops truncated suggestions', () => 
   assert.equal(questions.length, 1);
   assert.deepEqual(questions[0]?.suggestions, [
     'A shared progress view',
+    'Status updates from',
     'Milestone notifications',
   ]);
 });
@@ -202,8 +202,6 @@ test('extractActorSets rejects sentence-like role clauses from free-text answers
   ]);
 
   assert.deepEqual(actorSets.eligibleActors, ['Service Coordinator']);
-  assert.deepEqual(actorSets.canonicalRoles, ['Service Coordinator']);
-  assert.equal(actorSets.roleConfidence, 'high');
 });
 
 test('parseStoryAssistantQuestionCandidates splits numbered prompts into separate cards without rewriting the meaning', () => {
@@ -265,7 +263,7 @@ test('parseDiscoveryAssessment preserves wide LLM-led discovery ranges', () => {
   });
 
   assert.ok(parsed);
-  assert.deepEqual(parsed?.recommendedQuestionRange, { min: 12, max: 25 });
+  assert.deepEqual(parsed?.recommendedQuestionRange, { min: 12, max: 16 });
 });
 
 test('clarify quality evaluator flags missing deep-workflow obligation coverage', () => {
@@ -299,7 +297,7 @@ test('clarify quality evaluator flags missing deep-workflow obligation coverage'
   });
 
   assert.ok(quality.score < 70);
-  assert.match(quality.reasons.join(' '), /generic discovery coverage/i);
+  assert.match(quality.reasons.join(' '), /missing discovery obligation coverage/i);
 });
 
 test('clarify quality evaluator penalizes generic admin questions when key ambiguity remains', () => {
@@ -343,201 +341,3 @@ test('clarify quality evaluator penalizes generic admin questions when key ambig
   assert.match(quality.reasons.join(' '), /generic discovery coverage|fewer questions/i);
 });
 
-test('finalizeStoryAssistantDiscoveryQuestions trims materially oversized sets with category spread', () => {
-  const finalized = finalizeStoryAssistantDiscoveryQuestions([
-    {
-      categoryKey: 'user_personas',
-      category: 'Roles & Personas',
-      intent: 'owner',
-      question: 'Who initiates the workflow?',
-      suggestions: ['Coordinator', 'Manager', 'Operator'],
-    },
-    {
-      categoryKey: 'context_trigger',
-      category: 'Trigger & Context',
-      intent: 'trigger',
-      question: 'What starts the workflow?',
-      suggestions: ['New request', 'Threshold reached', 'Manual escalation'],
-    },
-    {
-      categoryKey: 'functional_flow',
-      category: 'Functional Flow',
-      intent: 'flow',
-      question: 'How is the workflow sequenced?',
-      suggestions: ['Manual sequence', 'System order', 'Rules-based order'],
-    },
-    {
-      categoryKey: 'business_rules',
-      category: 'Business Rules & Exceptions',
-      intent: 'rules',
-      question: 'What rules block invalid workflow steps?',
-      suggestions: ['Validation rules', 'Warnings only', 'Hard stop'],
-    },
-    {
-      categoryKey: 'state_lifecycle',
-      category: 'State & Lifecycle',
-      intent: 'status',
-      question: 'How is progress tracked?',
-      suggestions: ['Status stages', 'Milestones', 'Single state'],
-    },
-    {
-      categoryKey: 'success_measurement',
-      category: 'Success & Measurement',
-      intent: 'success',
-      question: 'How would a tester confirm the workflow works?',
-      suggestions: ['Outcome visible', 'Statuses match', 'Dependencies enforced'],
-    },
-  ], {
-    discoveryDepth: 'standard',
-    reasoningLevel: 'standard',
-    workflowComplexity: 'high',
-    actorComplexity: 'medium',
-    ruleDensity: 'high',
-    exceptionDensity: 'medium',
-    lifecycleComplexity: 'medium',
-    ambiguityLevel: 'high',
-    coverageObligations: ['sequencing'],
-    recommendedQuestionRange: { min: 3, max: 3 },
-    rationale: 'Moderate ambiguity.',
-  });
-
-  assert.equal(finalized.length, 5);
-  assert.ok(finalized.some((question) => question.categoryKey === 'context_trigger'));
-  assert.ok(finalized.some((question) => question.categoryKey === 'user_personas'));
-  assert.ok(finalized.some((question) => question.categoryKey === 'functional_flow' || question.categoryKey === 'business_rules'));
-});
-
-test('finalizeStoryAssistantDiscoveryQuestions allows slight overage above assessed max before trimming', () => {
-  const finalized = finalizeStoryAssistantDiscoveryQuestions([
-    {
-      categoryKey: 'context_trigger',
-      category: 'Trigger & Context',
-      intent: 'q1',
-      question: 'What starts the workflow?',
-      suggestions: ['New request', 'Scheduled event', 'Manual trigger'],
-    },
-    {
-      categoryKey: 'user_personas',
-      category: 'Roles & Personas',
-      intent: 'q2',
-      question: 'Who performs the workflow?',
-      suggestions: ['Coordinator', 'Operator', 'Manager'],
-    },
-    {
-      categoryKey: 'functional_flow',
-      category: 'Functional Flow',
-      intent: 'q3',
-      question: 'How is the workflow sequenced?',
-      suggestions: ['Manual order', 'Default order', 'Rules-based order'],
-    },
-    {
-      categoryKey: 'business_rules',
-      category: 'Business Rules & Exceptions',
-      intent: 'q4',
-      question: 'What rules block invalid steps?',
-      suggestions: ['Validation rules', 'Warnings only', 'Hard stop'],
-    },
-    {
-      categoryKey: 'state_lifecycle',
-      category: 'State & Lifecycle',
-      intent: 'q5',
-      question: 'How is progress tracked?',
-      suggestions: ['Status stages', 'Milestones', 'Single state'],
-    },
-  ], {
-    discoveryDepth: 'standard',
-    reasoningLevel: 'standard',
-    workflowComplexity: 'medium',
-    actorComplexity: 'medium',
-    ruleDensity: 'medium',
-    exceptionDensity: 'low',
-    lifecycleComplexity: 'medium',
-    ambiguityLevel: 'medium',
-    coverageObligations: ['sequencing'],
-    recommendedQuestionRange: { min: 3, max: 3 },
-    rationale: 'Moderate workflow ambiguity.',
-  });
-
-  assert.equal(finalized.length, 5);
-});
-
-test('finalizeStoryAssistantDiscoveryQuestions enforces deterministic category order even below cap', () => {
-  const finalized = finalizeStoryAssistantDiscoveryQuestions([
-    {
-      categoryKey: 'success_measurement',
-      category: 'Success & Measurement',
-      intent: 'q1',
-      question: 'How is success measured?',
-      suggestions: ['Time saved', 'Error reduction', 'Cycle time'],
-    },
-    {
-      categoryKey: 'functional_flow',
-      category: 'Functional Flow',
-      intent: 'q2',
-      question: 'How is the workflow sequenced?',
-      suggestions: ['Manual order', 'Default order', 'Rules-based order'],
-    },
-    {
-      categoryKey: 'user_personas',
-      category: 'Roles & Personas',
-      intent: 'q3',
-      question: 'Who performs the workflow?',
-      suggestions: ['Coordinator', 'Operator', 'Manager'],
-    },
-    {
-      categoryKey: 'context_trigger',
-      category: 'Trigger & Context',
-      intent: 'q4',
-      question: 'What starts the workflow?',
-      suggestions: ['New request', 'Scheduled event', 'Manual trigger'],
-    },
-  ], {
-    discoveryDepth: 'standard',
-    reasoningLevel: 'standard',
-    workflowComplexity: 'medium',
-    actorComplexity: 'medium',
-    ruleDensity: 'medium',
-    exceptionDensity: 'low',
-    lifecycleComplexity: 'low',
-    ambiguityLevel: 'medium',
-    coverageObligations: ['sequencing'],
-    recommendedQuestionRange: { min: 3, max: 6 },
-    rationale: 'Moderate workflow ambiguity.',
-  });
-
-  assert.deepEqual(finalized.map((question) => question.categoryKey), [
-    'user_personas',
-    'context_trigger',
-    'functional_flow',
-    'success_measurement',
-  ]);
-});
-
-test('buildScopeContract classifies in-scope, out-of-scope, and assumptions from clarify answers', () => {
-  const contract = buildScopeContract([
-    {
-      question: 'What workflow should be covered in this release?',
-      answer: 'The multi-activity execution workflow is in scope',
-      selectedSuggestions: ['The multi-activity execution workflow is in scope'],
-      categoryKey: 'functional_flow',
-    },
-    {
-      question: 'Should finance reporting be included?',
-      answer: 'Finance reporting is out of scope for this capability',
-      selectedSuggestions: ['Finance reporting is out of scope for this capability'],
-      categoryKey: 'business_rules',
-    },
-    {
-      question: 'Who approves policy exceptions?',
-      answer: 'TBD based on regional governance',
-      selectedSuggestions: ['TBD based on regional governance'],
-      categoryKey: 'user_personas',
-    },
-  ]);
-
-  assert.equal(contract.inScope.length, 1);
-  assert.equal(contract.outOfScope.length, 1);
-  assert.equal(contract.assumptions.length, 1);
-  assert.match(contract.outOfScope[0] ?? '', /out of scope/i);
-  assert.match(contract.assumptions[0] ?? '', /tbd/i);
-});

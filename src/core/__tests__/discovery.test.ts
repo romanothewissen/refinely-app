@@ -484,9 +484,9 @@ test('buildArSystemPrompt explicitly pushes concrete business clauses over vague
     },
   });
 
-  assert.match(prompt, /Avoid abstract umbrella terms that hide meaning/i);
-  assert.match(prompt, /BAD — prescribes UI\/system mechanism/i);
-  assert.match(prompt, /The actor belongs in WHEN, never as the subject/i);
+  assert.match(prompt, /Avoid abstract umbrella terms/i);
+  assert.match(prompt, /BAD GIVEN:/i);
+  assert.match(prompt, /Roles belong in WHEN \(who performs the action\), not GIVEN/i);
 });
 
 test('buildArRepairSystemPrompt keeps AR repair scoped and meaning-preserving', () => {
@@ -582,7 +582,7 @@ test('discovery prompts enforce the fixed taxonomy and short-question contract w
   assert.match(clarifyPrompt, /The question field should be short and plain-language/i);
   assert.match(clarifyPrompt, /optional details field/i);
   assert.match(clarifyPrompt, /Do not genericize domain-rich wording into vague terms/i);
-  assert.match(clarifyPrompt, /For each question, provide exactly 3 answer suggestions/i);
+  assert.match(clarifyPrompt, /suggestions should be included for most questions \(up to 3 grounded options\)/i);
   assert.match(clarifyPrompt, /Reuse concrete nouns from the requirement when they make the question sharper/i);
   assert.match(clarifyPrompt, /Never write questions in first person/i);
   assert.match(clarifyPrompt, /Set discoveryProfile\.recommendedInitialCount to the number of questions you actually return/i);
@@ -643,20 +643,19 @@ test('story assistant clarify prompt uses the five-area legacy discovery structu
   });
 
   assert.match(prompt, /structured discovery session/i);
-  assert.match(prompt, /Frame questions in business language/i);
+  assert.match(prompt, /Frame all questions in business language/i);
   assert.match(prompt, /DISCOVERY AREAS/);
   assert.match(prompt, /ROLES & PERSONAS/);
   assert.match(prompt, /TRIGGER & CONTEXT/);
   assert.match(prompt, /FUNCTIONAL FLOW/);
   assert.match(prompt, /BUSINESS RULES & EXCEPTIONS/);
   assert.match(prompt, /SUCCESS & MEASUREMENT/);
-  assert.match(prompt, /For each question, provide exactly 3 answer suggestions/i);
+  assert.match(prompt, /For each question, provide exactly 3 grounded suggestions/i);
   assert.match(prompt, /Return ONLY a JSON array/i);
-  assert.match(prompt, /QUESTION BOUNDS FOR THIS RUN/i);
-  assert.match(prompt, /Do NOT use prompt length as a signal/i);
+  assert.match(prompt, /Aim for 8-12 questions/i);
   assert.doesNotMatch(prompt, /DISCOVERY DEPTH:/i);
   assert.doesNotMatch(prompt, /REASONING DEPTH:/i);
-  assert.doesNotMatch(prompt, /QUESTION TARGET:/i);
+  assert.doesNotMatch(prompt, /QUESTION BOUNDS FOR THIS RUN/i);
   assert.doesNotMatch(prompt, /plannedQuestionBudget/i);
 });
 
@@ -671,7 +670,7 @@ test('story assistant discovery assessment prompt evaluates semantic complexity 
   assert.match(prompt, /coverageObligations/i);
   assert.match(prompt, /Short prompts can still be deep/i);
   assert.match(prompt, /Long prompts can still be light/i);
-  assert.match(prompt, /Very complex asks may legitimately need more than 16 questions/i);
+  assert.match(prompt, /keep the range broad enough to cover those workflow dimensions on the upfront screen/i);
   assert.match(prompt, /Return ONLY valid JSON/i);
 });
 
@@ -685,7 +684,7 @@ test('story assistant sufficiency prompt allows bounded multi-question follow-up
   assert.match(prompt, /Ask at most 5 follow-up questions/i);
   assert.match(prompt, /domain-aware and process-grounded, but system-agnostic/i);
   assert.match(prompt, /Prefer explicit open decisions over follow-up/i);
-  assert.match(prompt, /If you include suggestions, include only 1 to 3 grounded suggestions/i);
+  assert.match(prompt, /suggestions are REQUIRED and must include 1 to 3 grounded suggestions/i);
   assert.match(prompt, /If the current answers are sufficient, return \{"sufficient": true\}/i);
   assert.match(prompt, /Return ONLY valid JSON/i);
 });
@@ -697,17 +696,11 @@ test('story assistant ar prompt mirrors the legacy GIVEN/WHEN/THEN contract with
   });
 
   assert.match(prompt, /GIVEN \[precondition\] WHEN \[action or trigger\] THEN \[single, verifiable outcome\]/);
-  assert.match(prompt, /No solution language/i);
-  assert.match(prompt, /No system-specific terms/i);
-  assert.match(prompt, /Be CONCEPTUAL, not example-based/);
-  assert.match(prompt, /COMMON MISTAKES TO AVOID/);
-  assert.match(prompt, /ROLE PHRASING/i);
-  assert.match(prompt, /prefer role-neutral phrasing in the ARs/i);
-  assert.match(prompt, /State business constraints, not UI or system mechanisms/i);
-  assert.match(prompt, /real-world business situation/i);
-  assert.doesNotMatch(prompt, /EXACT ACTOR VOCABULARY/i);
-  assert.doesNotMatch(prompt, /DEFAULT TO ROLE-NEUTRAL TRIGGERS/i);
-  assert.doesNotMatch(prompt, /No first person/i);
+  assert.match(prompt, /Write in business language only/i);
+  assert.match(prompt, /Do not invent one-off sample values/i);
+  assert.match(prompt, /real business situation/i);
+  assert.match(prompt, /Avoid abstract placeholders/i);
+  assert.match(prompt, /ROLE CONSTRAINT/i);
 });
 
 test('ar prompt uses range guidance without exact-count pressure', () => {

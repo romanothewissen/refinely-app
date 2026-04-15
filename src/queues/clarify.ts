@@ -27,7 +27,6 @@ import {
   resolvePrimaryProjectKey,
 } from '../services/project-selection';
 import { deriveRetrievalQuery } from '../services/retrieval-query';
-import { buildScopeContract } from '../core/story-assistant-default';
 import { runStoryAssistantClarifyStage } from '../services/story-assistant-pipeline';
 import { buildSharedPipelineEvidenceSignature, toSharedPipelineEvidenceBundle } from '../services/shared-pipeline-context';
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
@@ -215,7 +214,6 @@ export async function handler(event: { body: ClarifyEvent }) {
         referencedWiDocs: sharedContext.sources.referencedWiDocs,
         referencedWiSections: sharedContext.sources.referencedWiSections,
         wiInsights: sharedContext.wiInsights,
-        scopeContract: buildScopeContract(retrievalAnswers),
       };
       const sharedEvidenceSignature = buildSharedPipelineEvidenceSignature({
         requirement: maskedRequirement.text,

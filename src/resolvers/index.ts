@@ -52,7 +52,6 @@ import { getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stori
 import { inferProjectPersonaRolesFromBacklog } from '../core/persona-role-inference';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
-import { buildScopeContract } from '../core/story-assistant-default';
 import {
   applyQuickRefine,
   loadQuickRefineIssueContext,
@@ -510,7 +509,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
   const finalSufficiency = payload?.clarifyFinalSufficiency;
-  const scopeContract = payload?.clarifyScopeContract ?? buildScopeContract(payload.clarifyAnswers ?? []);
+  const scopeContract = payload?.clarifyScopeContract;
   const sharedEvidenceSignature = buildSharedPipelineEvidenceSignature({
     requirement: payload.requirement,
     attachmentText: payload.attachmentText ?? '',
