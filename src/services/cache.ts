@@ -216,6 +216,7 @@ export const KEYS = {
   conversations: (sessionId: string) => `conv_${sessionId}`,
   conversationIndex: 'conv_index',
   generationProgress: (sessionId: string) => `gen_progress_${sessionId}`,
+  generationInputSnapshot: (sessionId: string) => `gen_input_${sessionId}`,
   clarifyProgress: (sessionId: string) => `clarify_progress_${sessionId}`,
   refineProgress: (sessionId: string) => `refine_progress_${sessionId}`,
   quickRefineSession: (sessionId: string) => `quick_refine_${sessionId}`,

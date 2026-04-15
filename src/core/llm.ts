@@ -160,6 +160,34 @@ async function fetchWithTimeout(url: string, init: RequestInit | undefined, labe
   }
 }
 
+const LLM_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const LLM_RETRYABLE_MSG = /\b(overloaded|unavailable|rate[ _-]?limit|quota|high demand|resource exhausted|temporarily|try again)\b/i;
+const LLM_MAX_ATTEMPTS = 4;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchLlmWithRetry(
+  url: string,
+  init: RequestInit,
+  label: string,
+  timeoutMs = LLM_REQUEST_TIMEOUT_MS,
+): Promise<{ res: Response; rawBody: string }> {
+  for (let attempt = 0; attempt < LLM_MAX_ATTEMPTS; attempt++) {
+    const res = await fetchWithTimeout(url, init, label, timeoutMs);
+    const rawBody = await res.text();
+    const isTransient = !res.ok && (LLM_RETRY_STATUSES.has(res.status) || LLM_RETRYABLE_MSG.test(rawBody));
+    if (!isTransient || attempt === LLM_MAX_ATTEMPTS - 1) {
+      return { res, rawBody };
+    }
+    const backoffMs = 1000 * Math.pow(2, attempt) + Math.round(Math.random() * 400);
+    console.warn(`[llm] ${label} transient failure (status ${res.status}); retrying in ${backoffMs}ms (attempt ${attempt + 1}/${LLM_MAX_ATTEMPTS - 1})`);
+    await sleep(backoffMs);
+  }
+  throw new Error(`${label} exhausted retries unexpectedly`);
+}
+
 export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
   const maskedSystem = maskPiiText(opts.systemPrompt, !!opts.piiMaskingEnabled);
   const maskedUser = maskPiiText(opts.userMessage, !!opts.piiMaskingEnabled);
@@ -563,7 +591,7 @@ async function callGemini(opts: {
     generationConfig.thinkingConfig = thinkingConfig;
   }
 
-  const res = await fetchWithTimeout(url, {
+  const { res, rawBody } = await fetchLlmWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -580,7 +608,6 @@ async function callGemini(opts: {
     }),
   }, 'Gemini request');
 
-  const rawBody = await res.text();
   let payload: {
     error?: { message?: string };
     candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
@@ -647,7 +674,7 @@ async function callAnthropic(opts: {
     body.thinking = { type: 'enabled', budget_tokens: geminiThinkingBudget(opts.reasoningEffort) ?? 4096 };
   }
 
-  const res = await fetchWithTimeout(url, {
+  const { res, rawBody } = await fetchLlmWithRetry(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -657,7 +684,6 @@ async function callAnthropic(opts: {
     body: JSON.stringify(body),
   }, 'Anthropic request');
 
-  const rawBody = await res.text();
   if (!res.ok) {
     throw new Error(`Anthropic API error: ${rawBody}`);
   }
@@ -709,7 +735,7 @@ async function callOpenAI(opts: {
     body.reasoning = { effort: opts.reasoningEffort };
   }
 
-  const res = await fetchWithTimeout(url, {
+  const { res, rawBody } = await fetchLlmWithRetry(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -718,7 +744,6 @@ async function callOpenAI(opts: {
     body: JSON.stringify(body),
   }, 'OpenAI request');
 
-  const rawBody = await res.text();
   if (!res.ok) {
     throw new Error(`OpenAI API error: ${rawBody}`);
   }
@@ -768,7 +793,7 @@ async function callAzureOpenAI(opts: {
     body.reasoning = { effort: opts.reasoningEffort };
   }
 
-  const res = await fetchWithTimeout(url, {
+  const { res, rawBody } = await fetchLlmWithRetry(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -777,7 +802,6 @@ async function callAzureOpenAI(opts: {
     body: JSON.stringify(body),
   }, 'Azure OpenAI request');
 
-  const rawBody = await res.text();
   if (!res.ok) {
     throw new Error(`Azure OpenAI API error: ${rawBody}`);
   }

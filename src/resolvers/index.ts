@@ -531,6 +531,27 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     enqueuedAt: Date.now(),
   };
 
+  // Snapshot the user-provided inputs so a failed generation can be retried
+  // without re-running discovery. Config/license/authorized projects are
+  // re-derived on retry (they may have changed).
+  await entitySet(KEYS.generationInputSnapshot(payload.sessionId), {
+    sessionId: payload.sessionId,
+    requirement: payload.requirement,
+    clarifyAnswers: payload.clarifyAnswers ?? [],
+    attachmentText: payload.attachmentText ?? '',
+    outputProfileOverride: payload?.outputProfileOverride,
+    projectKey: payload.projectKey,
+    projectKeys: payload.projectKeys,
+    clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile,
+    clarifySizingContract: payload.clarifySizingContract,
+    clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage,
+    clarifyFinalSufficiency: payload.clarifyFinalSufficiency,
+    clarifyQuestionsAsked: payload.clarifyQuestionsAsked,
+    pipelineAudit: payload.pipelineAudit,
+    auditRunId: payload.auditRunId,
+    savedAt: Date.now(),
+  });
+
   // Overwrite any stale 'complete' from a previous run with a fresh 'progress' marker
   await entitySetSmall(KEYS.generationProgress(payload.sessionId), {
     type: 'progress',
@@ -543,6 +564,68 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   await generationQueue.push({ body: event });
   const warning = [check.reason].filter(Boolean).join(' ').trim() || undefined;
   return { success: true, sessionId: payload.sessionId, warning };
+});
+
+/**
+ * Re-enqueue generation for a session using the saved input snapshot.
+ * Used when a prior generation failed (e.g. provider outage) — the user can
+ * click "Retry" without re-running discovery or re-answering questions.
+ * Config, license, and authorized projects are re-resolved fresh.
+ */
+resolver.define('retryGeneration', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const sessionId = payload?.sessionId;
+  if (!sessionId) {
+    return { success: false, error: 'sessionId is required to retry generation.' };
+  }
+
+  const snapshot = await entityGet<Record<string, any>>(KEYS.generationInputSnapshot(sessionId));
+
+  if (!snapshot || !snapshot.requirement) {
+    return { success: false, error: 'No saved generation inputs were found for this session. Start a new generation from discovery.' };
+  }
+
+  const userPreferences = await getUserPreferences(accountId);
+  const eventConfig = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
+  const check = await checkGenerationAllowed(eventConfig, context);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
+    projectKey: snapshot.projectKey,
+    projectKeys: snapshot.projectKeys,
+  });
+
+  const event: GenerationEvent = {
+    sessionId,
+    accountId,
+    requirement: snapshot.requirement,
+    clarifyAnswers: snapshot.clarifyAnswers ?? [],
+    attachmentText: snapshot.attachmentText ?? '',
+    config: eventConfig,
+    license: context?.license,
+    outputProfileOverride: snapshot.outputProfileOverride,
+    pauseForDraftReview: undefined,
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: authorizedProjects.projectKeys,
+    clarifyDiscoveryProfile: snapshot.clarifyDiscoveryProfile,
+    clarifySizingContract: snapshot.clarifySizingContract,
+    clarifyAdvisoryTriage: snapshot.clarifyAdvisoryTriage,
+    clarifyFinalSufficiency: snapshot.clarifyFinalSufficiency,
+    clarifyQuestionsAsked: snapshot.clarifyQuestionsAsked,
+    pipelineAudit: snapshot.pipelineAudit,
+    auditRunId: snapshot.auditRunId,
+    enqueuedAt: Date.now(),
+  };
+
+  await entitySetSmall(KEYS.generationProgress(sessionId), {
+    type: 'progress',
+    sessionId,
+    message: 'Retrying generation…',
+    updatedAt: Date.now(),
+  });
+
+  const generationQueue = new Queue({ key: 'generation-queue' });
+  await generationQueue.push({ body: event });
+  const warning = [check.reason].filter(Boolean).join(' ').trim() || undefined;
+  return { success: true, sessionId, warning };
 });
 
 /** @deprecated Draft review pause has been removed — pipeline flows straight through. */

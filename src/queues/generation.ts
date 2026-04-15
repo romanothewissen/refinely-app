@@ -67,7 +67,7 @@ interface GenerationProgressPayload {
 }
 
 const PROGRESS_HEARTBEAT_MS = 15000;
-const MAX_FULL_GENERATION_ATTEMPTS = 3;
+const MAX_FULL_GENERATION_ATTEMPTS = 2;
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
   await entitySetSmall(KEYS.generationProgress(sessionId), {

@@ -6,6 +6,7 @@ import type {
   ClarifyQuestion,
   DiscoveryAssessment,
   DiscoveryDepth,
+  DiscoveryDimensionLevel,
   DiscoveryProfile,
   Feature,
   GenerationResult,
@@ -19,6 +20,8 @@ import type {
 import { getTierModel } from '../services/billing';
 import { callLlmJsonWithUsage, mapReasoningDepthToEffort } from './llm';
 import {
+  buildCoverageMapSystemPrompt,
+  buildPerFeatureArSystemPrompt,
   buildStoryAssistantArSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantDecompositionSystemPrompt,
@@ -107,15 +110,27 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
   'success': 'success_measurement',
 };
 
-function storyAssistantQuestionRange(pipelineProfile: PipelineProfile): { targetMin: number; targetMax: number; lowerBound: number; hardCap: number } {
-  switch (pipelineProfile) {
-    case 'fast':
-      return { targetMin: 4, targetMax: 7, lowerBound: 3, hardCap: 8 };
-    case 'quality':
-      return { targetMin: 14, targetMax: 18, lowerBound: 10, hardCap: 20 };
-    default:
-      return { targetMin: 8, targetMax: 12, lowerBound: 6, hardCap: 14 };
-  }
+function storyAssistantQuestionRange(
+  pipelineProfile: PipelineProfile,
+  complexity: DiscoveryDimensionLevel = 'medium',
+): { targetMin: number; targetMax: number; lowerBound: number; hardCap: number } {
+  const base = (() => {
+    switch (pipelineProfile) {
+      case 'fast':
+        return { targetMin: 4, targetMax: 7, lowerBound: 3, hardCap: 8 };
+      case 'quality':
+        return { targetMin: 14, targetMax: 18, lowerBound: 10, hardCap: 20 };
+      default:
+        return { targetMin: 8, targetMax: 12, lowerBound: 6, hardCap: 14 };
+    }
+  })();
+  const mult = complexity === 'high' ? 1.5 : complexity === 'low' ? 0.75 : 1.0;
+  return {
+    lowerBound: base.lowerBound,
+    targetMin: Math.round(base.targetMin * mult),
+    targetMax: Math.round(base.targetMax * mult),
+    hardCap: Math.min(24, Math.round(base.hardCap * mult)),
+  };
 }
 
 function storyAssistantFollowupCap(pipelineProfile: PipelineProfile): number {
@@ -502,7 +517,9 @@ function buildRoleHint(
 function formatWiEvidence(
   wiInsightsArtifact: WorkInstructionInsightArtifact | null | undefined,
   wiContextText: string,
+  maxChars = 8200,
 ): string {
+  const sourceExcerptCap = Math.min(5200, Math.max(1600, Math.floor(maxChars * 0.6)));
   const normalizedContext = normalizeEvidenceMultiline(wiContextText);
   const insightSections = wiInsightsArtifact
     ? ([
@@ -527,10 +544,10 @@ function formatWiEvidence(
     parts.push(insightSections.join('\n\n'));
   }
   if (normalizedContext) {
-    parts.push(`Source excerpts from Work Instructions:\n${trimPromptTextAtBoundary(normalizedContext, 5200)}`);
+    parts.push(`Source excerpts from Work Instructions:\n${trimPromptTextAtBoundary(normalizedContext, sourceExcerptCap)}`);
   }
   if (!parts.length) return '';
-  return trimPromptTextAtBoundary(parts.join('\n\n'), 8200);
+  return trimPromptTextAtBoundary(parts.join('\n\n'), maxChars);
 }
 
 function formatDiscoveryBacklogEvidence(similarStories: SimilarStory[] = []): string {
@@ -686,7 +703,15 @@ function inferCategoryKey(question: string): ClarifyCategoryKey {
   return 'context_trigger';
 }
 
+const STRONG_CATEGORY_SIGNALS: Array<[ClarifyCategoryKey, RegExp]> = [
+  ['success_measurement', /\b(success|successful|how (would|will) we know|measure|metric|uat|acceptance test|definition of done|kpi|validate( success)?)\b/i],
+  ['state_lifecycle', /\b(status|lifecycle|state (machine|transition)|reopen|resume|retry( logic)?)\b/i],
+];
+
 function mapCategoryKey(category: unknown, question: string): ClarifyCategoryKey {
+  for (const [key, re] of STRONG_CATEGORY_SIGNALS) {
+    if (re.test(question)) return key;
+  }
   const normalizedCategory = normalizeKey(category);
   if (normalizedCategory && STORY_ASSISTANT_CATEGORY_LABELS[normalizedCategory]) {
     return STORY_ASSISTANT_CATEGORY_LABELS[normalizedCategory];
@@ -1243,15 +1268,92 @@ function extractRawFeaturesFromPayload(payload: unknown): RawFeature[] {
     return payload.filter((feature): feature is RawFeature => Boolean(feature && typeof feature === 'object'));
   }
   if (typeof payload === 'object') {
-    const candidate = payload as { features?: unknown; items?: unknown };
+    const candidate = payload as { features?: unknown; items?: unknown; feature?: unknown };
     if (Array.isArray(candidate.features)) {
       return candidate.features.filter((feature): feature is RawFeature => Boolean(feature && typeof feature === 'object'));
     }
     if (Array.isArray(candidate.items)) {
       return candidate.items.filter((feature): feature is RawFeature => Boolean(feature && typeof feature === 'object'));
     }
+    if (candidate.feature && typeof candidate.feature === 'object') {
+      return [candidate.feature as RawFeature];
+    }
   }
   return [];
+}
+
+interface CoverageMapEntry {
+  id: string;
+  ownsRuleAreas: string[];
+  doesNotCover: string[];
+}
+
+function formatCoverageMapForPrompt(coverage: CoverageMapEntry[], focalId: string): string {
+  const lines = coverage.map((entry) => {
+    const marker = entry.id === focalId ? '→ FOCAL FEATURE' : 'sibling';
+    const owns = entry.ownsRuleAreas.length ? entry.ownsRuleAreas.join('; ') : '(none)';
+    const avoid = entry.doesNotCover.length ? entry.doesNotCover.join('; ') : '(none)';
+    return `- [${marker}] ${entry.id}\n  owns: ${owns}\n  does not cover: ${avoid}`;
+  });
+  return `Coverage map — sibling ownership for this requirement:\n${lines.join('\n')}`;
+}
+
+function jaccardSimilarity(a: string, b: string): number {
+  const toSet = (value: string) => new Set(value.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 3));
+  const sa = toSet(a);
+  const sb = toSet(b);
+  if (!sa.size || !sb.size) return 0;
+  let intersection = 0;
+  sa.forEach((token) => { if (sb.has(token)) intersection += 1; });
+  const union = sa.size + sb.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function measureCrossFeatureArOverlap(features: Feature[]): { overlapRate: number; duplicatePairs: number; totalPairs: number } {
+  const arsByFeature = features.map((feature) => feature.acceptanceRequirements.map((ar) => `${ar.given} ${ar.when} ${ar.then}`));
+  let duplicatePairs = 0;
+  let totalPairs = 0;
+  for (let i = 0; i < arsByFeature.length; i++) {
+    for (let j = i + 1; j < arsByFeature.length; j++) {
+      for (const arA of arsByFeature[i]) {
+        for (const arB of arsByFeature[j]) {
+          totalPairs += 1;
+          if (jaccardSimilarity(arA, arB) >= 0.7) duplicatePairs += 1;
+        }
+      }
+    }
+  }
+  return {
+    overlapRate: totalPairs === 0 ? 0 : duplicatePairs / totalPairs,
+    duplicatePairs,
+    totalPairs,
+  };
+}
+
+async function runWithConcurrencyLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const PARALLEL_AR_MIN_FEATURES = 4;
+const PARALLEL_AR_CONCURRENCY = 4;
+
+function isParallelArEnabled(): boolean {
+  const raw = (process.env.GENERATION_PARALLEL_AR_ENABLED ?? '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
 export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
@@ -1268,7 +1370,6 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   let promptAssemblyMs = 0;
   const pipelineProfile = resolveStoryAssistantPipelineProfile(opts.config.generatorConfig);
   const modelRoute = buildStoryAssistantModelRoute(opts.config.generatorConfig);
-  const questionRange = storyAssistantQuestionRange(pipelineProfile);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const heuristicAssessment = buildHeuristicDiscoveryAssessment({
     requirement: opts.requirement,
@@ -1276,12 +1377,14 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     wiEvidenceText,
     similarStoriesText: '',
   });
+  const complexity = heuristicAssessment.ambiguityLevel;
+  const questionRange = storyAssistantQuestionRange(pipelineProfile, complexity);
   const discoveryAssessment: DiscoveryAssessment = {
     ...heuristicAssessment,
     discoveryDepth: pipelineProfile === 'quality' ? 'deep' : pipelineProfile === 'fast' ? 'light' : 'standard',
     reasoningLevel: pipelineProfile === 'quality' ? 'deep' : pipelineProfile === 'fast' ? 'light' : 'standard',
     recommendedQuestionRange: { min: questionRange.targetMin, max: questionRange.targetMax },
-    rationale: 'Question volume is bounded by the selected pipeline profile; the clarifier judges semantic ambiguity directly, and heuristics validate structural coverage only.',
+    rationale: `Question volume scales with heuristic complexity (${complexity}) bounded by the selected pipeline profile; the clarifier judges semantic ambiguity directly, and heuristics validate structural coverage only.`,
   };
 
   let coverageQualityScore = 0;
@@ -1304,6 +1407,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       domainRoles: opts.config.domainRoles,
       pipelineProfile,
       questionRange,
+      complexity,
     }),
     userMessage: extraInstruction ? `${baseUserMessage}\n\n${extraInstruction}` : baseUserMessage,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 8192),
@@ -1491,7 +1595,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     domainRoles: opts.config.domainRoles,
   };
   const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers, actorSets);
-  const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
+  const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText, 4000);
+  const arPatternLibraryText = pipelineProfile === 'quality' ? opts.arPatternLibraryText : undefined;
   let promptAssemblyMs = 0;
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];
@@ -1520,7 +1625,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
       }),
       userMessage: decompositionUserMessage,
-      maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 12288),
+      maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 8192),
       reasoningEffort: 'medium',
       ...providerOpts,
     });
@@ -1543,7 +1648,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
           processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
         }),
         userMessage: `${decompositionUserMessage}\n\nYour previous output collapsed multiple eligible creator roles into one. Re-run the decomposition and preserve role diversity where the workflow genuinely spans different creators. Keep role names verbatim from the discovered role list.`,
-        maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 12288),
+        maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 8192),
         reasoningEffort: 'medium',
         ...providerOpts,
       });
@@ -1571,7 +1676,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
 
   const pass2StartedAt = Date.now();
   const arPromptStartedAt = Date.now();
-  const arUserMessage = `${buildGenerationContextMessage({
+  const baseContextMessage = buildGenerationContextMessage({
     requirement: opts.requirement,
     clarifyAnswers: opts.clarifyAnswers,
     attachmentText: opts.attachmentText,
@@ -1579,8 +1684,9 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     roleHint,
     discoveryProfile: opts.discoveryProfile,
     actorSets,
-    arPatternLibraryText: opts.arPatternLibraryText,
-  })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
+    arPatternLibraryText,
+  });
+  const arUserMessage = `${baseContextMessage}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
     features: pass1Raw.map((feature) => ({
       ...feature,
       acceptance_requirements: [],
@@ -1599,11 +1705,105 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
     ...providerOpts,
   });
-  let pass2Result = await runArPass();
-  stageUsage.acceptanceRequirements = pass2Result.usage;
+
+  const parallelArEligible = isParallelArEnabled() && pass1Raw.length >= PARALLEL_AR_MIN_FEATURES;
+  let pass2Result: Awaited<ReturnType<typeof runArPass>>;
+  let pass2Raw: RawFeature[];
+  let parallelArDiagnostics: string[] = [];
+
+  if (parallelArEligible) {
+    try {
+      const coverageStartedAt = Date.now();
+      const coverageModel = getTierModel(opts.config.generatorConfig.themeModel, opts.config.tier);
+      const featureBrief = pass1Raw.map((feature) => ({
+        id: feature.id,
+        summary: feature.summary,
+        description: feature.description,
+      }));
+      const coverageUserMessage = `Requirement: ${trimPromptText(opts.requirement, 4000)}\n\nFeatures (write coverage map covering ALL of them):\n${JSON.stringify({ features: featureBrief })}`;
+      const coverageResult = await callLlmJsonWithUsage<{ coverage?: CoverageMapEntry[] }>({
+        model: coverageModel,
+        systemPrompt: buildCoverageMapSystemPrompt(),
+        userMessage: coverageUserMessage,
+        maxTokens: 2048,
+        reasoningEffort: 'low',
+        ...providerOpts,
+      });
+      stageUsage.coverageMap = coverageResult.usage;
+      stageDurationsMs.coverageMap = Date.now() - coverageStartedAt;
+      const coverageRaw = Array.isArray(coverageResult.data?.coverage) ? coverageResult.data!.coverage! : [];
+      const coverageById = new Map<string, CoverageMapEntry>();
+      for (const entry of coverageRaw) {
+        if (entry && typeof entry === 'object' && typeof entry.id === 'string') {
+          coverageById.set(entry.id, {
+            id: entry.id,
+            ownsRuleAreas: Array.isArray(entry.ownsRuleAreas) ? entry.ownsRuleAreas.filter((v): v is string => typeof v === 'string') : [],
+            doesNotCover: Array.isArray(entry.doesNotCover) ? entry.doesNotCover.filter((v): v is string => typeof v === 'string') : [],
+          });
+        }
+      }
+      const coverageEntries: CoverageMapEntry[] = pass1Raw.map((feature) => {
+        const id = feature.id ?? '';
+        return coverageById.get(id) ?? { id, ownsRuleAreas: [], doesNotCover: [] };
+      });
+
+      const perFeatureSystemPrompt = buildPerFeatureArSystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+      });
+      const parallelResults = await runWithConcurrencyLimit(pass1Raw, PARALLEL_AR_CONCURRENCY, async (feature) => {
+        const focalId = feature.id ?? '';
+        const coverageBlock = formatCoverageMapForPrompt(coverageEntries, focalId);
+        const userMessage = `${baseContextMessage}\n\n${coverageBlock}\n\nFocal feature (write ARs only for this one):\n${JSON.stringify({ feature: { ...feature, acceptance_requirements: [] } })}\n\nWrite GIVEN/WHEN/THEN acceptance requirements only for the focal feature. Respect the sibling ownership above — do not write ARs that duplicate behaviors owned by siblings.`;
+        const result = await callLlmJsonWithUsage<{ feature?: RawFeature; features?: RawFeature[] }>({
+          model: arModel,
+          systemPrompt: perFeatureSystemPrompt,
+          userMessage,
+          maxTokens: Math.max(Math.floor((opts.config.generatorConfig.maxTokens || 24576) / 4), 4096),
+          reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
+          ...providerOpts,
+        });
+        const extracted = extractRawFeaturesFromPayload(result.data);
+        return { raw: extracted[0], usage: result.usage, parseOutcome: result.parseOutcome };
+      });
+
+      const aggregatedRaw: RawFeature[] = [];
+      let aggregateInput = 0;
+      let aggregateOutput = 0;
+      let repairedCount = 0;
+      parallelResults.forEach((entry, index) => {
+        const source = pass1Raw[index];
+        const merged = entry.raw
+          ? { ...source, ...entry.raw, id: source.id, summary: source.summary, description: source.description }
+          : { ...source, acceptance_requirements: [] };
+        aggregatedRaw.push(merged);
+        aggregateInput += entry.usage.input;
+        aggregateOutput += entry.usage.output;
+        if (entry.parseOutcome === 'repaired_parse') repairedCount += 1;
+      });
+      stageUsage.acceptanceRequirements = { input: aggregateInput, output: aggregateOutput };
+
+      pass2Raw = aggregatedRaw;
+      pass2Result = {
+        data: { features: aggregatedRaw } as { features?: RawFeature[] },
+        usage: stageUsage.acceptanceRequirements,
+        parseOutcome: repairedCount > 0 ? 'repaired_parse' : 'strict',
+      } as Awaited<ReturnType<typeof runArPass>>;
+      parallelArDiagnostics.push(`Parallel AR pass used (${pass1Raw.length} features, concurrency ${PARALLEL_AR_CONCURRENCY}).`);
+    } catch (error) {
+      console.warn('[storyAssistant] parallel AR pass failed; falling back to single AR call', error);
+      parallelArDiagnostics.push('Parallel AR pass failed; fell back to single AR call.');
+      pass2Result = await runArPass();
+      stageUsage.acceptanceRequirements = pass2Result.usage;
+      pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
+    }
+  } else {
+    pass2Result = await runArPass();
+    stageUsage.acceptanceRequirements = pass2Result.usage;
+    pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
+  }
   stageDurationsMs.acceptanceRequirements = Date.now() - pass2StartedAt;
 
-  let pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
   let mergedRaw = mergePass2IntoPass1(pass1Raw, pass2Raw);
   let features = mergedRaw.map((feature) => normaliseFeature(feature, roleGrounding));
   let repairedOutput = dedupeExactAcceptanceRequirements(features);
@@ -1656,6 +1856,17 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     ]);
   } else if (failedIds.size > 0) {
     features = annotateFailedAcceptanceRequirementFeatures(features, failedIds) as Feature[];
+  }
+
+  if (parallelArDiagnostics.length) {
+    const overlap = measureCrossFeatureArOverlap(features);
+    if (overlap.totalPairs > 0) {
+      parallelArDiagnostics.push(`Cross-feature AR overlap: ${(overlap.overlapRate * 100).toFixed(1)}% (${overlap.duplicatePairs}/${overlap.totalPairs} AR pairs).`);
+      if (overlap.overlapRate > 0.15) {
+        console.warn('[storyAssistant] parallel AR overlap above 15% threshold', overlap);
+      }
+    }
+    pass2CoverageNotes = uniqueStrings([...pass2CoverageNotes, ...parallelArDiagnostics]);
   }
 
   stageDurationsMs.total = Object.values(stageDurationsMs).reduce((sum, value) => sum + (Number(value) || 0), 0);

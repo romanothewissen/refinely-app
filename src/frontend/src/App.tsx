@@ -1458,6 +1458,33 @@ function LegacyApp({
     }
   };
 
+  const retryGenerationFromSnapshot = async () => {
+    const sid = sessionIdRef.current;
+    setIsWorking(true);
+    setWorkflowRunId(prev => prev + 1);
+    setGenerationError(null);
+    setGenerationWarning(null);
+    setGenerationProgressMeta(null);
+    setWorkflowStage('generation');
+    try {
+      const res = await api.retryGeneration({ sessionId: sid }) as any;
+      if (res?.success) {
+        setPendingSessionId(sid);
+        setGenerationWarning(res?.warning || null);
+      } else {
+        setGenerationError(res?.error || 'Could not retry generation. Start a new generation from discovery.');
+        setIsWorking(false);
+        setPendingSessionId(null);
+        restoreWorkflowAfterGenerationFailure();
+      }
+    } catch (err: any) {
+      setGenerationError(`Retry error: ${err?.message ?? String(err)}`);
+      setIsWorking(false);
+      setPendingSessionId(null);
+      restoreWorkflowAfterGenerationFailure();
+    }
+  };
+
   const handlePipelineProfileChange = useCallback((nextProfile: PipelineProfile) => {
     setPipelineProfile(nextProfile);
     void api.saveUserPreferences({ pipelineProfile: nextProfile }).catch((error) => {
@@ -1796,18 +1823,16 @@ function LegacyApp({
                 transition={{ duration: 0.2 }}
               >
                 <span className="flex-1 min-w-0">{generationError}</span>
-                {clarifyQuestions.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGenerationError(null);
-                      void startGeneration(requirement, clarifyAnswers);
-                    }}
-                    className="shrink-0 rounded-lg border border-[var(--rf-danger)]/40 bg-white/80 px-3 py-1.5 text-[12px] font-bold text-[var(--rf-danger)] hover:bg-white transition"
-                  >
-                    Retry generation
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenerationError(null);
+                    void retryGenerationFromSnapshot();
+                  }}
+                  className="shrink-0 rounded-lg border border-[var(--rf-danger)]/40 bg-white/80 px-3 py-1.5 text-[12px] font-bold text-[var(--rf-danger)] hover:bg-white transition"
+                >
+                  Retry generation
+                </button>
                 <button type="button" onClick={() => setGenerationError(null)} className="text-rose-500 hover:text-rose-800 font-bold text-sm leading-none p-1 bg-white/50 rounded-md transition shrink-0">&times;</button>
               </motion.div>
             )}

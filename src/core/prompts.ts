@@ -5,7 +5,7 @@
  * removed. Domain context is injected dynamically from tenant configuration.
  */
 
-import { PipelineProfile, ProcessCode } from '../types';
+import { DiscoveryDimensionLevel, PipelineProfile, ProcessCode } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -238,6 +238,7 @@ RULES:
 - Preserve workflow boundaries when actor responsibilities, approvals, downstream initiation, tracking needs, or modification paths would materially change what gets built or tested
 - Do not split a single workflow into multiple thin features when one well-scoped feature with richer acceptance requirements would cover it
 - Do not collapse materially different downstream outcomes, enforcement logic, or visibility responsibilities into one vague feature
+- ACTOR UNIQUENESS: Each feature MUST have a single primary actor (the "As a [role]" role). When the evidence names multiple distinct creator or approver roles for the same capability, emit separate features per role rather than collapsing them into one. Example: if both a Service Coordinator and a Field Technician can initiate the same plan with different responsibilities, produce two features — not one feature saying "As a coordinator or technician".
 - Suggest story points (1, 2, 3, 5, 8, 13) based on scope
 - Do NOT write acceptance_requirements — leave them as empty lists
 ${processRule}
@@ -301,9 +302,17 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
   domainRoles?: string[];
   pipelineProfile?: PipelineProfile;
   questionRange?: { targetMin: number; targetMax: number; lowerBound: number; hardCap: number };
+  complexity?: DiscoveryDimensionLevel;
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Reuse them only when they are already supported by the requirement or evidence.`
+    : '';
+  const complexityHint = opts.complexity
+    ? `Requirement complexity: ${opts.complexity.toUpperCase()}. ${opts.complexity === 'high'
+        ? 'This requirement spans multiple workflows, actors, or unresolved business dimensions — prefer deep coverage across all six discovery areas over brevity.'
+        : opts.complexity === 'low'
+          ? 'This requirement is narrow or largely explicit — ask only the ambiguity that genuinely remains; do not invent depth.'
+          : 'This requirement has meaningful but bounded ambiguity — cover the dimensions that materially affect scope or acceptance requirements.'}`
     : '';
   const boundedRange = opts.questionRange
     ? `QUESTION BOUNDS FOR THIS RUN:
@@ -319,6 +328,7 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 ${profileHint}
+${complexityHint}
 
 Your goal is to surface every ambiguity that would change what gets built or how acceptance requirements are written. Ask as many questions as needed to cover the genuinely unresolved ambiguity for THIS requirement. A business analyst spending a few extra minutes answering now prevents hours of rework later.
 
@@ -1530,4 +1540,31 @@ export function buildAskSystemPrompt(opts: {
   sections.push('Answer questions clearly and concisely. When referencing Jira items, cite the issue key.');
 
   return sections.join('\n\n');
+}
+
+export function buildCoverageMapSystemPrompt(): string {
+  return `You are a product analyst assigning behavioral ownership across a set of sibling features so that acceptance requirements written in parallel do not duplicate.
+
+You will receive a list of features (id, summary, description) for a single requirement. For each feature, produce:
+- ownsRuleAreas: 2-5 short phrases naming the business behaviors, rules, or outcomes this feature SHOULD own (happy path, core rules, canonical failure modes for this capability).
+- doesNotCover: 1-4 short phrases naming behaviors that belong to sibling features — so the AR author for this feature knows to avoid writing them.
+
+Rules:
+- Phrases must be concise business behaviors (e.g. "plan submission enforcement", "approval routing", "shipment-triggered activation"), not full ARs.
+- The union of ownsRuleAreas across features should cover the requirement; overlap across features MUST be minimized.
+- Do not invent capabilities absent from the input feature list.
+- doesNotCover items for feature X MUST correspond to ownsRuleAreas of some other feature Y in the same list.
+- Keep output strict JSON: {"coverage": [{"id": "...", "ownsRuleAreas": ["..."], "doesNotCover": ["..."]}]}. One entry per input feature, preserving order.`;
+}
+
+export function buildPerFeatureArSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+}): string {
+  const base = buildStoryAssistantArSystemPrompt(opts);
+  return `${base}
+
+PARALLEL AR MODE — you are writing ARs for ONE focal feature. A coverage map is provided listing what each sibling feature owns. Do NOT write ARs that duplicate behaviors owned by a sibling. If a sibling owns a related behavior that the focal feature depends on, you may reference it briefly in a GIVEN clause, but never restate it as a distinct AR here.
+
+Output JSON: {"feature": { ...focal feature fields..., "acceptance_requirements": [ ... ] }}. Only return the single focal feature.`;
 }

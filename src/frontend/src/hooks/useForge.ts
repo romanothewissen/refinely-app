@@ -47,6 +47,9 @@ export const api = {
     sessionId: string;
     featureIds: string[];
   }) => invoke('retryFailedFeatureGenerations', payload),
+  retryGeneration: (payload: {
+    sessionId: string;
+  }) => invoke('retryGeneration', payload),
 
   // Clarify (async queue)
   startClarify: (payload: {
