@@ -361,7 +361,7 @@ function buildCatalog(
 }
 
 function getStrategyCatalogEntries(provider: LlmProvider): LlmModelCatalogEntry[] {
-  if (provider === 'forge_llms' || provider === 'ollama') return [];
+  if (provider === 'forge_llms') return [];
   return strategyCatalog.providers[provider].catalog.map((model) => ({
     id: model.id,
     displayName: model.displayName,
@@ -949,6 +949,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
+  ollamaApiKey?: string;
+  ollamaBaseUrl?: string;
   modelCatalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[];
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;

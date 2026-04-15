@@ -335,6 +335,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [azureOpenAIBaseUrl, setAzureOpenAIBaseUrl] = useState('');
   const [azureOpenAIApiVersion, setAzureOpenAIApiVersion] = useState('2024-06-01');
   const [existingAzureOpenAIApiKey, setExistingAzureOpenAIApiKey] = useState('');
+
+  const [ollamaApiKey, setOllamaApiKey] = useState('');
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
+  const [existingOllamaApiKey, setExistingOllamaApiKey] = useState('');
   const [modelCatalogs, setModelCatalogs] = useState<LlmModelCatalogByVendor>({});
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
   const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
@@ -536,6 +540,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         if (gc.azureOpenAIApiKey) setExistingAzureOpenAIApiKey(gc.azureOpenAIApiKey);
         if (gc.azureOpenAIBaseUrl) setAzureOpenAIBaseUrl(gc.azureOpenAIBaseUrl);
         if (gc.azureOpenAIApiVersion) setAzureOpenAIApiVersion(gc.azureOpenAIApiVersion);
+        if (gc.ollamaApiKey) setExistingOllamaApiKey(gc.ollamaApiKey);
+        if (gc.ollamaBaseUrl) setOllamaBaseUrl(gc.ollamaBaseUrl);
         if (gc.modelCatalogs) {
           const nextCatalogs = { ...gc.modelCatalogs } as LlmModelCatalogByVendor;
           if (!nextCatalogs.anthropic && nextCatalogs.forge_llms) {
@@ -831,6 +837,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           azureOpenAIApiKey: azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || "",
           azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
           azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
+          ollamaApiKey: ollamaApiKey.trim() || existingOllamaApiKey || "",
+          ollamaBaseUrl: ollamaBaseUrl.trim() || undefined,
           modelCatalogs,
         },
         generationPreferences: {
@@ -862,7 +870,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       if (anthropicApiKey.trim()) setExistingAnthropicApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
       if (azureOpenAIApiKey.trim()) setExistingAzureOpenAIApiKey(REDACTED);
-      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey('');
+      if (ollamaApiKey.trim()) setExistingOllamaApiKey(REDACTED);
+      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey(''); setOllamaApiKey('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
@@ -889,6 +898,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         azureOpenAIApiKey: provider === 'azure_openai' ? (azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || undefined) : undefined,
         azureOpenAIBaseUrl: provider === 'azure_openai' ? (azureOpenAIBaseUrl.trim() || undefined) : undefined,
         azureOpenAIApiVersion: provider === 'azure_openai' ? (azureOpenAIApiVersion.trim() || undefined) : undefined,
+        ollamaApiKey: provider === 'ollama' ? (ollamaApiKey.trim() || existingOllamaApiKey || undefined) : undefined,
+        ollamaBaseUrl: provider === 'ollama' ? (ollamaBaseUrl.trim() || undefined) : undefined,
       }) as any;
       setLlmTestResult(res.success ? { ok: true, message: 'Connection successful.' } : { ok: false, message: res.error || 'Connection failed.' });
     } catch (err: any) { setLlmTestResult({ ok: false, message: err.message || 'Connection failed.' }); }
@@ -922,6 +933,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         azureOpenAIApiKey: azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || undefined,
         azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
         azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
+        ollamaApiKey: ollamaApiKey.trim() || existingOllamaApiKey || undefined,
+        ollamaBaseUrl: ollamaBaseUrl.trim() || undefined,
       }) as any;
       if (res?.success && res.catalog) {
         setModelCatalogs(prev => ({ ...prev, [provider]: res.catalog }));
@@ -948,6 +961,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     existingAzureOpenAIApiKey,
     azureOpenAIBaseUrl,
     azureOpenAIApiVersion,
+    ollamaApiKey,
+    existingOllamaApiKey,
+    ollamaBaseUrl,
   ]);
 
   useEffect(() => {
@@ -957,11 +973,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         ? Boolean(existingOpenaiApiKey)
         : provider === 'azure_openai'
           ? Boolean(existingAzureOpenAIApiKey && azureOpenAIBaseUrl.trim())
-          : true;
+          : provider === 'ollama'
+            ? Boolean(existingOllamaApiKey)
+            : true;
     if (hasStoredCredential && !modelCatalogs[provider]) {
       void refreshModelCatalog();
     }
-  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, modelCatalogs, refreshModelCatalog]);
+  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, existingOllamaApiKey, modelCatalogs, refreshModelCatalog]);
 
   const { entries: catalogEntries } = useMemo(
     () => getCatalogEntriesForProvider(provider, modelCatalogs),
@@ -1185,7 +1203,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   <div className="space-y-2">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">LLM Provider</div>
                     <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
-                      {(['anthropic', 'openai', 'azure_openai', 'gemini'] as const).map(p => (
+                      {(['anthropic', 'openai', 'azure_openai', 'gemini', 'ollama'] as const).map(p => (
                         <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
                           {getProviderLabel(p)}
                         </button>
@@ -1248,6 +1266,22 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                         {existingGeminiApiKey && <button onClick={() => { setExistingGeminiApiKey(''); setGeminiApiKey(''); }} className="text-[12px] font-bold text-[var(--rf-danger)]">Clear</button>}
                       </div>
                       <input type="password" value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} placeholder={existingGeminiApiKey ? '••••••••• (stored)' : 'AIza…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                    </motion.div>
+                  )}
+
+                  {provider === 'ollama' && (
+                    <motion.div className="space-y-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Ollama API Key</label>
+                          {existingOllamaApiKey && <button onClick={() => { setExistingOllamaApiKey(''); setOllamaApiKey(''); }} className="text-[12px] font-bold text-[var(--rf-danger)]">Clear</button>}
+                        </div>
+                        <input type="password" value={ollamaApiKey} onChange={e => setOllamaApiKey(e.target.value)} placeholder={existingOllamaApiKey ? '••••••••• (stored)' : 'ollama-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Base URL (optional)</label>
+                        <input type="text" value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="https://api.ollama.ai/v1" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
                     </motion.div>
                   )}
                 </div>

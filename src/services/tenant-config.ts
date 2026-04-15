@@ -8,6 +8,7 @@ const GENERATOR_SECRET_FIELDS = [
   { field: 'geminiApiKey', provider: 'gemini' },
   { field: 'openaiApiKey', provider: 'openai' },
   { field: 'azureOpenAIApiKey', provider: 'azure_openai' },
+  { field: 'ollamaApiKey', provider: 'ollama' },
 ] as const;
 
 export async function getConfig(): Promise<TenantConfig> {
@@ -75,7 +76,8 @@ async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<Tenant
         field === 'anthropicApiKey' ? savedGeneratorConfig.anthropicApiKey
         : field === 'geminiApiKey' ? savedGeneratorConfig.geminiApiKey
         : field === 'openaiApiKey' ? savedGeneratorConfig.openaiApiKey
-        : savedGeneratorConfig.azureOpenAIApiKey;
+        : field === 'azureOpenAIApiKey' ? savedGeneratorConfig.azureOpenAIApiKey
+        : savedGeneratorConfig.ollamaApiKey;
       const normalizedLegacy = typeof legacy === 'string' ? legacy.trim() : '';
       if (normalizedLegacy) {
         legacySecretsDetected = true;

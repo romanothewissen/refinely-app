@@ -94,6 +94,27 @@
           "lite": []
         }
       }
+    },
+    "ollama": {
+      "catalog": [
+        { "id": "qwen2.5:72b",   "displayName": "Qwen 2.5 72B",   "family": "pro"   },
+        { "id": "qwen2.5:14b",   "displayName": "Qwen 2.5 14B",   "family": "flash" },
+        { "id": "qwen2.5:7b",    "displayName": "Qwen 2.5 7B",    "family": "lite"  },
+        { "id": "deepseek-v3",   "displayName": "DeepSeek V3",     "family": "pro"   },
+        { "id": "llama3.3:70b",  "displayName": "Llama 3.3 70B",  "family": "pro"   }
+      ],
+      "presets": {
+        "stable": {
+          "pro":   ["qwen2.5:72b", "deepseek-v3"],
+          "flash": ["qwen2.5:14b"],
+          "lite":  ["qwen2.5:7b"]
+        },
+        "latest": {
+          "pro":   ["qwen2.5:72b", "deepseek-v3"],
+          "flash": ["qwen2.5:14b"],
+          "lite":  ["qwen2.5:7b"]
+        }
+      }
     }
   }
 }

@@ -236,6 +236,8 @@ export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<Generat
     azureOpenAIApiKey: generatorConfig?.azureOpenAIApiKey,
     azureOpenAIBaseUrl: generatorConfig?.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: generatorConfig?.azureOpenAIApiVersion,
+    ollamaApiKey: generatorConfig?.ollamaApiKey,
+    ollamaBaseUrl: generatorConfig?.ollamaBaseUrl,
     modelCatalogs: generatorConfig?.modelCatalogs,
     storyAssistantModelAssignments,
     decompositionModel: storyAssistantModels.decompositionModel,

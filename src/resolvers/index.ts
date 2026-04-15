@@ -353,6 +353,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
   if (ngc.azureOpenAIApiKey === REDACTED) ngc.azureOpenAIApiKey = egc.azureOpenAIApiKey;
+  if (ngc.ollamaApiKey === REDACTED) ngc.ollamaApiKey = egc.ollamaApiKey;
   
   await saveConfig(payload);
 
@@ -365,7 +366,8 @@ resolver.define('saveConfig', async ({ payload, context }) => {
     (ngc.anthropicApiKey && ngc.anthropicApiKey !== REDACTED && ngc.anthropicApiKey !== egc.anthropicApiKey) ||
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
     (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
-    (ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED && ngc.azureOpenAIApiKey !== egc.azureOpenAIApiKey),
+    (ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED && ngc.azureOpenAIApiKey !== egc.azureOpenAIApiKey) ||
+    (ngc.ollamaApiKey && ngc.ollamaApiKey !== REDACTED && ngc.ollamaApiKey !== egc.ollamaApiKey),
   );
   const auditEnabled = Boolean(existingConfig.compliance?.auditTrailEnabled || payload?.compliance?.auditTrailEnabled);
   if (changedModelFields.length > 0) {
@@ -388,6 +390,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
           ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED ? 'azure_openai' : null,
+          ngc.ollamaApiKey && ngc.ollamaApiKey !== REDACTED ? 'ollama' : null,
         ].filter(Boolean),
       },
       enabled: auditEnabled,
@@ -448,7 +451,8 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
     const isAzureOpenAI = payload.provider === 'azure_openai';
-    
+    const isOllama = payload.provider === 'ollama';
+
     const res = await callLlm({
       provider: payload.provider,
       model: payload.model || 'test',
@@ -461,6 +465,8 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       azureOpenAIApiKey: isAzureOpenAI ? (payload.azureOpenAIApiKey === REDACTED ? gc.azureOpenAIApiKey : (payload.azureOpenAIApiKey?.trim() || gc.azureOpenAIApiKey)) : undefined,
       azureOpenAIBaseUrl: isAzureOpenAI ? (payload.azureOpenAIBaseUrl?.trim() || gc.azureOpenAIBaseUrl) : undefined,
       azureOpenAIApiVersion: isAzureOpenAI ? (payload.azureOpenAIApiVersion?.trim() || gc.azureOpenAIApiVersion) : undefined,
+      ollamaApiKey: isOllama ? (payload.ollamaApiKey === REDACTED ? gc.ollamaApiKey : (payload.ollamaApiKey?.trim() || gc.ollamaApiKey)) : undefined,
+      ollamaBaseUrl: isOllama ? (payload.ollamaBaseUrl?.trim() || gc.ollamaBaseUrl) : undefined,
       modelCatalog: payload.provider ? gc.modelCatalogs?.[payload.provider] : undefined,
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
@@ -490,6 +496,8 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
       azureOpenAIApiKey: payload?.azureOpenAIApiKey === REDACTED ? gc.azureOpenAIApiKey : (payload?.azureOpenAIApiKey?.trim() || gc.azureOpenAIApiKey),
       azureOpenAIBaseUrl: payload?.azureOpenAIBaseUrl?.trim() || gc.azureOpenAIBaseUrl,
       azureOpenAIApiVersion: payload?.azureOpenAIApiVersion?.trim() || gc.azureOpenAIApiVersion,
+      ollamaApiKey: payload?.ollamaApiKey === REDACTED ? gc.ollamaApiKey : (payload?.ollamaApiKey?.trim() || gc.ollamaApiKey),
+      ollamaBaseUrl: payload?.ollamaBaseUrl?.trim() || gc.ollamaBaseUrl,
     });
     return { success: true, catalog };
   } catch (err) {

@@ -274,6 +274,6 @@ export const KEYS = {
   transparencyReports: 'transparency_reports',
   complianceRuntimeVersion: 'compliance_runtime_version',
   projectActivity: 'project_activity',
-  providerApiKey: (provider: 'anthropic' | 'gemini' | 'openai' | 'azure_openai') => `provider_api_key_${provider}`,
+  providerApiKey: (provider: 'anthropic' | 'gemini' | 'openai' | 'azure_openai' | 'ollama') => `provider_api_key_${provider}`,
   pipelineAudit: (sessionId: string, auditRunId: string) => `pipeline_audit_${sessionId}_${auditRunId}`,
 } as const;
