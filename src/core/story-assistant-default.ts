@@ -1351,11 +1351,6 @@ async function runWithConcurrencyLimit<T, R>(
 const PARALLEL_AR_MIN_FEATURES = 4;
 const PARALLEL_AR_CONCURRENCY = 4;
 
-function isParallelArEnabled(): boolean {
-  const raw = (process.env.GENERATION_PARALLEL_AR_ENABLED ?? '').trim().toLowerCase();
-  return raw === 'true' || raw === '1' || raw === 'yes';
-}
-
 export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   requirement: string;
   attachmentText: string;
@@ -1706,7 +1701,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     ...providerOpts,
   });
 
-  const parallelArEligible = isParallelArEnabled() && pass1Raw.length >= PARALLEL_AR_MIN_FEATURES;
+  const parallelArEligible = pass1Raw.length >= PARALLEL_AR_MIN_FEATURES;
   let pass2Result: Awaited<ReturnType<typeof runArPass>>;
   let pass2Raw: RawFeature[];
   let parallelArDiagnostics: string[] = [];
