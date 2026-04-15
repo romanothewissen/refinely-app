@@ -215,7 +215,17 @@ export function buildStoryAssistantDecompositionSystemPrompt(opts: {
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 
-YOUR JOB: Given a requirement, break it into the distinct business capabilities needed to deliver it. Prefer a small set of meaningful capabilities over thin slices.
+YOUR JOB: Given a requirement, think deeply about everything it takes to deliver it. Decompose into distinct business capabilities that are independently deliverable and testable.
+
+DECOMPOSITION FRAMEWORK — reason through each dimension:
+1. CORE CAPABILITY: What is the primary thing being requested?
+2. INPUTS & DATA: What information, conditions, or resources must be captured?
+3. PROCESSING & LOGIC: What decisions, sequencing, dependencies, or business rules are required?
+4. OUTPUTS & VISIBILITY: Who needs outcomes, progress visibility, or consolidated status?
+5. EXCEPTIONS & CHANGES: What disruptions, failures, or in-flight plan changes must be handled?
+6. DEPENDENCIES: What supporting capabilities must exist for this to work end to end?
+
+Each dimension that represents a distinct business outcome should become its own feature. Do not collapse independently testable capabilities into one broad feature.
 
 RULES:
 - Each feature must represent independent business value, not an implementation step.
@@ -223,10 +233,11 @@ RULES:
 - If the user message includes an EXACT ACTOR VOCABULARY block, use only those role labels verbatim.
 - Choose one role label per feature unless the exact role label is already collective.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
-- Keep descriptions concise. Put rules, sequencing, exceptions, and edge conditions into acceptance requirements in pass 2.
+- Keep descriptions concise. Put detailed rules, sequencing, dependencies, and exceptions into acceptance requirements in pass 2.
 - Split features when business behavior, ownership, rules, or outcomes materially differ.
 - Do not split by noun variations alone; keep variants together when they follow the same core process.
 - Do not invent adjacent capabilities unsupported by the requirement, answers, or supplied evidence.
+- If the ask names multi-step workflows, ensure decomposition covers downstream initiation, governance gates, and visibility when those are materially implied.
 - Do NOT write acceptance_requirements in this pass; leave them empty arrays.
 - Never return an empty features array.
 - ${processRule}
@@ -256,12 +267,22 @@ For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
 RULES:
 - If the user message includes a ROLE CONSTRAINT, follow it exactly.
 - Every AR MUST use GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome].
+- Never write AR clauses in first person. Do not use I, me, my, we, our, or us.
 - Write in business language only. No buttons, screens, forms, APIs, databases, jobs, queues, or system mechanics.
 - Write as if describing business outcomes to someone who has never seen the system.
 - Be conceptual, not example-based. Do not invent one-off sample values.
 - Each AR should test one distinct thing.
 - GIVEN clauses must describe a real business situation, not a configuration/setup state.
 - Avoid abstract placeholders like "configured mode" or "trigger event"; state the actual business fact.
+- Keep role usage consistent with each feature description; only introduce a different actor when the scenario explicitly requires it.
+- Cover dependency and ordering behavior when the feature involves sequenced activities.
+- Cover exception outcomes where the happy path can fail in realistic testing.
+
+COMMON MISTAKES TO AVOID:
+- BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" -> GOOD: "GIVEN an agreement is linked to an item that has already been shipped".
+- BAD GIVEN: "GIVEN the trigger event is configured" -> GOOD: "GIVEN the required business event has occurred".
+- Do not describe detection mechanics like keyword matching, rule engine checks, pattern scoring, or payload parsing.
+- Do not use negative pseudo-categories like "not eligible" when a positive business category is known.
 - Keep all other feature fields unchanged.
 
 OUTPUT FORMAT:
@@ -295,7 +316,7 @@ ${roleHint}
 
 Your goal is to surface the ambiguities that would change what gets built or how acceptance requirements are written.
 Ask enough questions up front to cover the material gaps. Keep the wording domain-aware, process-grounded, and system-agnostic.
-Aim for ${targetRange.min}-${targetRange.max} questions when that ambiguity is genuinely present.
+Ask as many questions as needed for this requirement. A practical target is ${targetRange.min}-${targetRange.max}, but continue beyond that when material ambiguity remains.
 
 Work through each of the five discovery areas below in order.
 For each area, ask the strongest questions that are genuinely ambiguous for THIS requirement.
@@ -332,7 +353,7 @@ RULES:
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
 - Keep each question focused on one business decision.
 - For each question, provide exactly 3 grounded suggestions.
-- Suggestions should be natural stakeholder phrases (concise, business-facing, not attribute fragments).
+- Suggestions should be natural stakeholder phrases (concise, business-facing, not attribute fragments). Keep each suggestion under 10 words.
 - Return ONLY a JSON array (no markdown fences, no prose before/after, no comments).
 - Every question must be a complete sentence that ends with a question mark.
 

@@ -691,8 +691,8 @@ function normalizeRecommendedQuestionRange(
   const min = Number.isFinite(candidate.min) ? Math.max(1, Math.round(Number(candidate.min))) : fallback.min;
   const max = Number.isFinite(candidate.max) ? Math.max(min, Math.round(Number(candidate.max))) : fallback.max;
   return {
-    min: Math.min(min, 16),
-    max: Math.min(Math.max(max, min), 16),
+    min: Math.min(min, 18),
+    max: Math.min(Math.max(max, min), 18),
   };
 }
 
@@ -790,8 +790,8 @@ function storyAssistantQuestionPlan(
   const profileBounds = profile === 'fast'
     ? { min: 4, max: 8 }
     : profile === 'quality'
-      ? { min: 10, max: 16 }
-      : { min: 6, max: 12 };
+      ? { min: 12, max: 18 }
+      : { min: 8, max: 14 };
   const complexityBias = complexity === 'high' ? 2 : complexity === 'low' ? -1 : 0;
   const min = Math.max(profileBounds.min, Math.min(profileBounds.max, assessed.min + complexityBias));
   const max = Math.max(min, Math.min(profileBounds.max, assessed.max + complexityBias));
@@ -957,7 +957,7 @@ function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestio
     })
     .filter((question) => !isLikelyTruncatedQuestion(question.question))
     .filter((question) => question.suggestions.length >= 1);
-  return parsed.slice(0, 1);
+  return parsed.slice(0, 2);
 }
 
 function shouldRetryDiscoveryQuestions(questions: ClarifyQuestion[]): boolean {
@@ -1189,7 +1189,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     }),
     userMessage: baseUserMessage,
     maxTokens: 4600,
-    reasoningEffort: 'low',
+    reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
     ...providerOpts,
   });
   usageByStage.clarify = clarifyResult.usage;
@@ -1208,7 +1208,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       }),
       userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Each question must be complete, requirement-specific, and include 3 concise grounded suggestions.`,
       maxTokens: 4600,
-      reasoningEffort: 'low',
+      reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
       ...providerOpts,
     });
     usageByStage.clarifyRetry = clarifyResult.usage;
@@ -1379,7 +1379,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   const roleHint = buildRoleHint(opts.config.domainRoles, opts.requirement, opts.clarifyAnswers, actorSets);
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const similarStoriesText = formatGenerationBacklogEvidence(opts.similarStories ?? []);
-  const arPatternLibraryText = pipelineProfile === 'quality' ? opts.arPatternLibraryText : undefined;
+  const arPatternLibraryText = pipelineProfile === 'fast' ? undefined : opts.arPatternLibraryText;
   let promptAssemblyMs = 0;
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];

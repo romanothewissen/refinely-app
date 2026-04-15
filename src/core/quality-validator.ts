@@ -32,6 +32,7 @@ const TRUNCATED_TRAILING_WORDS = new Set([
 ]);
 
 const AR_NEAR_DUPLICATE_JACCARD_THRESHOLD = 0.85;
+const AR_MIN_TOTAL_WORDS = 12;
 const AR_DEDUP_STOP_WORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'by', 'with', 'from', 'for',
   'is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had', 'does', 'do', 'did',
@@ -69,6 +70,18 @@ function clauseEndsOnStopWord(clause: string): boolean {
   const lastToken = tokens[tokens.length - 1]?.toLowerCase().replace(/[^a-z]/g, '');
   if (!lastToken) return false;
   return TRUNCATED_TRAILING_WORDS.has(lastToken);
+}
+
+function containsFirstPersonLanguage(text: string): boolean {
+  return /\b(i|me|my|mine|we|our|ours|us)\b/i.test(String(text ?? ''));
+}
+
+function countWords(text: string): number {
+  return String(text ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .length;
 }
 
 export function textLooksTruncated(text: string): boolean {
@@ -293,8 +306,25 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         });
       }
 
+      const combinedArText = `${ar.given} ${ar.when} ${ar.then}`;
+      if (containsFirstPersonLanguage(combinedArText)) {
+        violations.push({
+          featureId: feature.id,
+          field: 'acceptanceRequirements',
+          message: 'AR uses first-person language; use objective third-person business phrasing',
+        });
+      }
+
+      if (countWords(combinedArText) < AR_MIN_TOTAL_WORDS) {
+        violations.push({
+          featureId: feature.id,
+          field: 'acceptanceRequirements',
+          message: `AR appears too short to be testable (fewer than ${AR_MIN_TOTAL_WORDS} words)`,
+        });
+      }
+
       // Check for solution language in ARs
-      const arText = `${ar.given} ${ar.when} ${ar.then}`.toLowerCase();
+      const arText = combinedArText.toLowerCase();
       for (const term of SOLUTION_TERMS) {
         if (arText.includes(term)) {
           violations.push({
