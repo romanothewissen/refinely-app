@@ -40,6 +40,8 @@ export interface LlmCallOptions {
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
+  ollamaApiKey?: string;
+  ollamaBaseUrl?: string;
   modelCatalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[];
   modelCatalogs?: LlmModelCatalogByVendor;
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
@@ -222,8 +224,10 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     result = await callOpenAI({ ...effectiveOpts, model: resolvedModel });
   } else if (opts.provider === 'azure_openai') {
     result = await callAzureOpenAI({ ...effectiveOpts, model: resolvedModel });
+  } else if (opts.provider === 'ollama') {
+    result = await callOllama({ ...effectiveOpts, model: resolvedModel });
   } else {
-    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, or Azure OpenAI before calling callLlm.');
+    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, Azure OpenAI, or Ollama before calling callLlm.');
   }
 
   const audit = getPipelineAuditWriter();
@@ -357,7 +361,7 @@ function buildCatalog(
 }
 
 function getStrategyCatalogEntries(provider: LlmProvider): LlmModelCatalogEntry[] {
-  if (provider === 'forge_llms') return [];
+  if (provider === 'forge_llms' || provider === 'ollama') return [];
   return strategyCatalog.providers[provider].catalog.map((model) => ({
     id: model.id,
     displayName: model.displayName,
@@ -411,6 +415,8 @@ export async function discoverLlmModelCatalog(opts: {
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
+  ollamaApiKey?: string;
+  ollamaBaseUrl?: string;
 }): Promise<LlmVendorModelCatalog> {
   if (opts.provider === 'forge_llms') {
     return getFallbackModelCatalog('forge_llms');
@@ -509,6 +515,31 @@ export async function discoverLlmModelCatalog(opts: {
         source: 'discovered' as const,
       }));
     return models.length ? buildCatalog('openai', models, 'discovered') : getFallbackModelCatalog('openai');
+  }
+
+  if (opts.provider === 'ollama') {
+    const ollamaApiKey = (opts.ollamaApiKey ?? '').trim();
+    const baseUrl = (opts.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'https://api.ollama.ai').replace(/\/+$/, '');
+    if (!ollamaApiKey) {
+      return getFallbackModelCatalog('ollama');
+    }
+    const url = `${baseUrl}/api/tags`;
+    const res = await fetchWithTimeout(url, {
+      headers: { 'Authorization': `Bearer ${ollamaApiKey}` },
+    }, 'Ollama model discovery');
+    const payload = await res.json() as { models?: Array<{ name?: string; modified_at?: string }> };
+    if (!res.ok) {
+      throw new Error(`Ollama model discovery failed with status ${res.status}`);
+    }
+    const models = (payload.models ?? [])
+      .filter((m) => m.name)
+      .map((m) => ({
+        id: String(m.name),
+        displayName: String(m.name),
+        family: inferModelFamily(String(m.name)) === 'custom' ? 'flash' as ConcreteModelFamily : inferModelFamily(String(m.name)) as ConcreteModelFamily,
+        source: 'discovered' as const,
+      }));
+    return models.length ? buildCatalog('ollama', models, 'discovered') : getFallbackModelCatalog('ollama');
   }
 
   const apiKey = (opts.azureOpenAIApiKey ?? process.env.AZURE_OPENAI_API_KEY ?? '').trim();
@@ -821,6 +852,57 @@ async function callAzureOpenAI(opts: {
   };
 }
 
+async function callOllama(opts: {
+  model: string;
+  systemPrompt: string;
+  userMessage: string;
+  maxTokens?: number;
+  ollamaApiKey?: string;
+  ollamaBaseUrl?: string;
+}): Promise<LlmResponse> {
+  const apiKey = (opts.ollamaApiKey ?? process.env.OLLAMA_API_KEY ?? '').trim();
+  if (!apiKey) {
+    throw new Error('Ollama API key is not set.');
+  }
+
+  const baseUrl = (opts.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'https://api.ollama.ai/v1').replace(/\/+$/, '');
+  const url = `${baseUrl}/chat/completions`;
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: [
+      { role: 'system', content: opts.systemPrompt },
+      { role: 'user', content: opts.userMessage },
+    ],
+    max_tokens: opts.maxTokens ?? 8192,
+    stream: false,
+    response_format: { type: 'json_object' },
+  };
+
+  const { res, rawBody } = await fetchLlmWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  }, 'Ollama request');
+
+  if (!res.ok) {
+    throw new Error(`Ollama API error: ${rawBody}`);
+  }
+
+  const payload = JSON.parse(rawBody) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
+
+  return {
+    text: payload.choices?.[0]?.message?.content ?? '',
+    inputTokens: payload.usage?.prompt_tokens,
+    outputTokens: payload.usage?.completion_tokens,
+  };
+}
+
 /**
  * Call LLM and extract JSON, with one retry on JSON parse failure.
  */
@@ -840,6 +922,8 @@ export async function callLlmJson<T>(opts: {
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
+  ollamaApiKey?: string;
+  ollamaBaseUrl?: string;
   modelCatalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[];
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;
