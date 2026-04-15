@@ -188,6 +188,12 @@ export async function loadSharedPipelineContext(input: {
   const referencedWiSections = summarizeReferencedWiSections(wiContext.chunks.slice(0, 8));
   const referencedSimilarStories = summarizeReferencedSimilarStories(similarStories.slice(0, 5));
   const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, 3);
+  const arPatternStoryKeys = arPatternLibrary.storyKeys.length
+    ? arPatternLibrary.storyKeys
+    : similarStories
+      .slice(0, 3)
+      .map((story) => String(story.key ?? '').trim())
+      .filter(Boolean);
 
   return {
     projectKey: primaryProjectKey,
@@ -223,7 +229,7 @@ export async function loadSharedPipelineContext(input: {
       })),
       referencedWiSections,
       referencedSimilarStories,
-      arPatternStoryKeys: arPatternLibrary.storyKeys,
+      arPatternStoryKeys,
     },
   };
 }

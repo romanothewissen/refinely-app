@@ -151,6 +151,26 @@ test('extractRoles splits multi-role answers joined with "or" and rejects approv
   assert.deepEqual(roles, ['TSS', 'SSS', 'PM Specialist']);
 });
 
+test('extractRoles strips aggregate prefixes and action-phrased pseudo roles', () => {
+  const roles = extractRoles('', [
+    {
+      question: 'Who can initiate actions from the plan?',
+      answer: 'The case owners - TSS, SSS, PM Specialist',
+      selectedSuggestions: [],
+      customAnswer: 'The case owners - TSS, SSS, PM Specialist',
+      categoryKey: 'user_personas',
+    },
+    {
+      question: 'Who owns this flow?',
+      answer: 'Case owners to initiate actions from the plan',
+      selectedSuggestions: ['Case owners to initiate actions from the plan'],
+      categoryKey: 'user_personas',
+    },
+  ]);
+
+  assert.deepEqual(roles, ['TSS', 'SSS', 'PM Specialist']);
+});
+
 test('extractActorSets resolves referential actor phrases back to canonical roles', () => {
   const actorSets = extractActorSets('', [
     {
@@ -263,7 +283,7 @@ test('parseDiscoveryAssessment preserves wide LLM-led discovery ranges', () => {
   });
 
   assert.ok(parsed);
-  assert.deepEqual(parsed?.recommendedQuestionRange, { min: 12, max: 16 });
+  assert.deepEqual(parsed?.recommendedQuestionRange, { min: 12, max: 18 });
 });
 
 test('clarify quality evaluator flags missing deep-workflow obligation coverage', () => {

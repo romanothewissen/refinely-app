@@ -213,7 +213,7 @@ function normalizeQuestionContext(value: string): string {
 
 function splitRoleValue(value: string): string[] {
   return stripChoicePrefix(value)
-    .split(/\s*(?:\n|,|;|\||\bor\b)\s*/gi)
+    .split(/\s*(?:\n|,|;|\||\bor\b|(?:[-–—]\s+))\s*/gi)
     .map((part) => cleanText(part))
     .filter(Boolean);
 }
@@ -232,6 +232,8 @@ function looksLikeRolePhrase(value: string): boolean {
   if (/[?!]/.test(cleaned)) return false;
   if (isNegativeRolePhrase(cleaned)) return false;
   if (isReferentialRolePhrase(cleaned)) return false;
+  if (/^(?:the\s+)?(?:case|plan|service)?\s*(?:owners?|users?|teams?)$/i.test(cleaned)) return false;
+  if (/\bto\s+(?:initiate|create|generate|define|specify|modify|view|manage|perform|track)\b/i.test(cleaned)) return false;
   if (/^(?:only if|if |when |unless |because |after |before |during |while |depends\b)/i.test(cleaned)) return false;
   if (/^(?:no |not |without |none )/i.test(cleaned)) return false;
   if (/\b(?:approval|approvals?)\b/i.test(cleaned) && !/\b(?:manager|lead|owner|team|specialist|coordinator|administrator|reviewer)\b/i.test(cleaned)) return false;
@@ -246,7 +248,9 @@ function buildActorAliasMap(requirement: string, answers: ClarifyAnswer[]): Map<
   const requirementRoles: string[] = [];
   const roleRegex = /\bas\s+an?\s+([A-Za-z][A-Za-z ,/-]{2,60}?)(?:\s*[,.]|\s+(?:i|we|they|who|that|the)\b)/gi;
   for (const match of requirement.matchAll(roleRegex)) {
-    const role = stripChoicePrefix(match[1] ?? '').replace(/\.$/, '');
+    const role = stripChoicePrefix(match[1] ?? '')
+      .replace(/^the\s+/i, '')
+      .replace(/\.$/, '');
     if (looksLikeRolePhrase(role)) {
       requirementRoles.push(role);
     }
@@ -326,7 +330,9 @@ export function extractRoles(requirement: string, answers: ClarifyAnswer[] = [])
   const aliasMap = buildActorAliasMap(requirement, answers);
 
   const addRole = (value: string) => {
-    const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
+    const cleaned = stripChoicePrefix(value)
+      .replace(/^the\s+/i, '')
+      .replace(/\.$/, '');
     if (!looksLikeRolePhrase(cleaned)) return;
     const key = cleaned.toLowerCase();
     if (seen.has(key)) return;

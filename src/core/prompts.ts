@@ -19,6 +19,14 @@ function discoveryEvidenceBlock(domainContext: string): string {
   return `\nOPTIONAL CONTEXT EVIDENCE — use this only to understand the business space and to avoid redundant questions. Do NOT introduce company names, product names, role labels, or internal terminology from this block unless the request or supporting evidence already uses them.\n\n${domainContext.trim()}\n`;
 }
 
+function agnosticGuardrailBlock(): string {
+  return `SYSTEM + DOMAIN AGNOSTIC OUTPUT RULES:
+- Keep all outputs system-agnostic and organization-agnostic.
+- Do not introduce vendor names, product names, module names, API names, object names, or internal platform jargon unless the requirement or supplied evidence explicitly uses them.
+- Do not assume a specific industry workflow. Infer only from requirement text and supplied evidence.
+- If evidence includes organization-specific terms, reuse them only when necessary and already explicit in the ask.`;
+}
+
 export function processTaxonomyBlock(taxonomy: ProcessCode[]): string {
   if (!taxonomy.length) return '';
   const lines = [
@@ -214,6 +222,7 @@ export function buildStoryAssistantDecompositionSystemPrompt(opts: {
   return `You are a principal business analyst and product manager decomposing business requirements into well-scoped backlog features.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
+${agnosticGuardrailBlock()}
 
 YOUR JOB: Given a requirement, think deeply about everything it takes to deliver it. Decompose into distinct business capabilities that are independently deliverable and testable.
 
@@ -258,6 +267,7 @@ export function buildStoryAssistantArSystemPrompt(opts: {
   return `You are a principal QA lead and business analyst writing acceptance requirements for a backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
+${agnosticGuardrailBlock()}
 
 For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
 - the primary business scenario (happy path)
@@ -270,6 +280,7 @@ RULES:
 - Never write AR clauses in first person. Do not use I, me, my, we, our, or us.
 - Write in business language only. No buttons, screens, forms, APIs, databases, jobs, queues, or system mechanics.
 - Write as if describing business outcomes to someone who has never seen the system.
+- Write as business outcomes, not implementation steps.
 - Be conceptual, not example-based. Do not invent one-off sample values.
 - Each AR should test one distinct thing.
 - GIVEN clauses must describe a real business situation, not a configuration/setup state.
@@ -313,6 +324,7 @@ export function buildStoryAssistantClarifySystemPrompt(opts: {
   return `You are a principal business analyst running a structured discovery session before any design begins.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
+${agnosticGuardrailBlock()}
 
 Your goal is to surface the ambiguities that would change what gets built or how acceptance requirements are written.
 Ask enough questions up front to cover the material gaps. Keep the wording domain-aware, process-grounded, and system-agnostic.
@@ -430,6 +442,7 @@ export function buildStoryAssistantSufficiencySystemPrompt(opts: {
   return `You are a senior business analyst deciding whether the current discovery answers are sufficient to write specific, testable acceptance requirements.
 ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
+${agnosticGuardrailBlock()}
 
 Decide whether the current discovery answers are sufficient to write strong features and GIVEN/WHEN/THEN acceptance requirements covering the primary flow, key business rules, and relevant edge cases.
 Keep the evaluation domain-aware and process-grounded, but system-agnostic in its wording.

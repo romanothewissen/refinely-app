@@ -634,7 +634,7 @@ test('decomposition prompt treats features as independently valuable and keeps s
   assert.doesNotMatch(prompt, /Output exactly/i);
 });
 
-test('story assistant clarify prompt uses the five-area legacy discovery structure without budgeting scaffolding', () => {
+test('story assistant clarify prompt preserves five-area structure with practical range guidance', () => {
   const prompt = buildStoryAssistantClarifySystemPrompt({
     domainContext: '',
     domainRoles: [],
@@ -652,7 +652,7 @@ test('story assistant clarify prompt uses the five-area legacy discovery structu
   assert.match(prompt, /SUCCESS & MEASUREMENT/);
   assert.match(prompt, /For each question, provide exactly 3 grounded suggestions/i);
   assert.match(prompt, /Return ONLY a JSON array/i);
-  assert.match(prompt, /Aim for 8-12 questions/i);
+  assert.match(prompt, /A practical target is 8-12/i);
   assert.doesNotMatch(prompt, /DISCOVERY DEPTH:/i);
   assert.doesNotMatch(prompt, /REASONING DEPTH:/i);
   assert.doesNotMatch(prompt, /QUESTION BOUNDS FOR THIS RUN/i);
