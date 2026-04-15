@@ -634,7 +634,7 @@ test('decomposition prompt treats features as independently valuable and keeps s
   assert.doesNotMatch(prompt, /Output exactly/i);
 });
 
-test('story assistant clarify prompt preserves five-area structure with practical range guidance', () => {
+test('story assistant clarify prompt is ambiguity-driven with five discovery dimensions and structured output', () => {
   const prompt = buildStoryAssistantClarifySystemPrompt({
     domainContext: '',
     domainRoles: [],
@@ -644,15 +644,16 @@ test('story assistant clarify prompt preserves five-area structure with practica
 
   assert.match(prompt, /structured discovery session/i);
   assert.match(prompt, /Frame all questions in business language/i);
-  assert.match(prompt, /DISCOVERY AREAS/);
+  assert.match(prompt, /DISCOVERY DIMENSIONS/);
   assert.match(prompt, /ROLES & PERSONAS/);
   assert.match(prompt, /TRIGGER & CONTEXT/);
   assert.match(prompt, /FUNCTIONAL FLOW/);
   assert.match(prompt, /BUSINESS RULES & EXCEPTIONS/);
   assert.match(prompt, /SUCCESS & MEASUREMENT/);
-  assert.match(prompt, /For each question, provide exactly 3 grounded suggestions/i);
-  assert.match(prompt, /Return ONLY a JSON array/i);
+  assert.match(prompt, /For each question, provide exactly 3/i);
+  assert.match(prompt, /Return ONLY valid JSON/i);
   assert.match(prompt, /A practical target is 8-12/i);
+  assert.match(prompt, /ambiguity.*level.*score/i);
   assert.doesNotMatch(prompt, /DISCOVERY DEPTH:/i);
   assert.doesNotMatch(prompt, /REASONING DEPTH:/i);
   assert.doesNotMatch(prompt, /QUESTION BOUNDS FOR THIS RUN/i);

@@ -5,7 +5,7 @@
  * removed. Domain context is injected dynamically from tenant configuration.
  */
 
-import type { DiscoveryDimensionLevel, PipelineProfile, ProcessCode } from '../types';
+import type { DiscoveryDimensionLevel, PipelineProfile, ProcessCode, WorkInstructionInsightItem } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -258,18 +258,64 @@ Return JSON only:
 {"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":5${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ',"process_code":"7.x.x"' : ''}}]}`;
 }
 
+function buildArEvidenceObligationsBlock(wiInsights: {
+  sequencingRules: WorkInstructionInsightItem[];
+  splitVsSingleCaseRules: WorkInstructionInsightItem[];
+  mustCoverBehaviors: WorkInstructionInsightItem[];
+  businessRules: WorkInstructionInsightItem[];
+} | undefined, backlogPatternSummary?: string): string {
+  const parts: string[] = [];
+
+  if (wiInsights) {
+    const rules = [
+      ...wiInsights.mustCoverBehaviors,
+      ...wiInsights.businessRules,
+      ...wiInsights.sequencingRules,
+      ...wiInsights.splitVsSingleCaseRules,
+    ]
+      .map(item => item.text.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    if (rules.length) {
+      parts.push(
+        'EVIDENCE OBLIGATIONS — Work Instruction Rules:',
+        'These operational rules are authoritative for this domain. For each rule that clearly applies to a feature, include it as a concrete AR GIVEN or THEN clause (paraphrased in business language). Do not force-fit rules to features where they do not apply — a feature may have ARs grounded in the requirement alone when no WI rule is relevant.',
+        rules.map(r => `- ${r}`).join('\n'),
+      );
+    }
+  }
+
+  if (backlogPatternSummary?.trim()) {
+    parts.push(
+      'BACKLOG PATTERN:',
+      `Similar stories in this workspace follow this depth: ${backlogPatternSummary.trim()}. Match their specificity; do not copy unrelated details.`,
+    );
+  }
+
+  return parts.length ? `\n${parts.join('\n')}\n` : '';
+}
+
 export function buildStoryAssistantArSystemPrompt(opts: {
   domainContext: string;
   domainRoles?: string[];
+  wiInsights?: {
+    sequencingRules: WorkInstructionInsightItem[];
+    splitVsSingleCaseRules: WorkInstructionInsightItem[];
+    mustCoverBehaviors: WorkInstructionInsightItem[];
+    businessRules: WorkInstructionInsightItem[];
+  };
+  backlogPatternSummary?: string;
 }): string {
   const roleHint = opts.domainRoles?.length
     ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Keep feature roles aligned to evidence from the requirement or answered Q&A.`
     : '';
+  const evidenceObligations = buildArEvidenceObligationsBlock(opts.wiInsights, opts.backlogPatternSummary);
   return `You are a principal QA lead and business analyst writing acceptance requirements for a backlog.
 ${platformContextBlock(opts.domainContext)}
 ${roleHint}
 ${agnosticGuardrailBlock()}
-
+${evidenceObligations}
 For each feature, write GIVEN/WHEN/THEN acceptance requirements that capture:
 - the primary business scenario (happy path)
 - key business rules that must hold true
@@ -290,6 +336,10 @@ RULES:
 - Avoid mechanical role repetition in WHEN clauses. Once the acting role is established for a feature, prefer role-neutral continuation ("they attempt to", "the action is submitted") unless a different actor is semantically required.
 - Cover dependency and ordering behavior when the feature involves sequenced activities.
 - Cover exception outcomes where the happy path can fail in realistic testing.
+
+AR QUALITY:
+- Prefer concrete business nouns (plan, quote, shipment, contract, order, agreement) over abstract verbs (validate, ensure, verify, confirm) in THEN clauses.
+- A THEN clause that consists only of abstract verbs without a concrete business object is not acceptable. Ground each AR in the feature's own scope.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" -> GOOD: "GIVEN an agreement is linked to an item that has already been shipped".
@@ -328,51 +378,33 @@ ${discoveryEvidenceBlock(opts.domainContext)}
 ${roleHint}
 ${agnosticGuardrailBlock()}
 
-Your goal is to surface the ambiguities that would change what gets built or how acceptance requirements are written.
-Ask enough questions up front to cover the material gaps. Keep the wording domain-aware, process-grounded, and system-agnostic.
+Your goal is to surface the business ambiguities that would change WHAT gets built or HOW acceptance requirements are written if left unresolved.
 Ask as many questions as needed for this requirement. A practical target is ${targetRange.min}-${targetRange.max}, but continue beyond that when material ambiguity remains.
 
-Work through each of the five discovery areas below in order.
-For each area, ask the strongest questions that are genuinely ambiguous for THIS requirement.
-Skip a question only if the requirement or supplied evidence already makes the answer unambiguous.
+APPROACH — work through these steps:
+1. Read the requirement and all supplied evidence (work instructions, backlog references) carefully.
+2. Note what the evidence already establishes — roles named, triggers described, process steps documented, rules stated. Treat those as resolved. Do NOT re-ask them.
+3. Identify the remaining gaps across the DISCOVERY DIMENSIONS below (skip any dimension already covered by the evidence):
 
-DISCOVERY AREAS:
-1. ROLES & PERSONAS
-   Probe: Who initiates this process? Who performs each step? Who only views or receives output?
-   Probe: Are there different user types who follow different paths through the same capability?
-   Probe: Are there approval, notification, or escalation roles involved?
-2. TRIGGER & CONTEXT
-   Probe: What specific event or business state causes this process to begin?
-   Probe: What conditions must already be true before a user can act?
-   Probe: Can this be triggered by multiple events, or only one?
-3. FUNCTIONAL FLOW
-   Probe: Walk through the main path step by step. What does the user do and what outcome should follow?
-   Probe: What data, inputs, or selections are required at each step?
-   Probe: Are there decisions or branches in the flow?
-   Probe: When ordering, dependencies, coordination, or handoffs are materially implied, ask what sequence or dependency actually matters.
-   Probe: What is the final output or business state after the process completes?
-4. BUSINESS RULES & EXCEPTIONS
-   Probe: What validation rules or conditions govern whether an action is allowed?
-   Probe: What happens when the happy path is not possible?
-   Probe: Are there volume, frequency, threshold, contractual, or compliance rules that affect behavior?
-5. SUCCESS & MEASUREMENT
-   Probe: What does a successful outcome look like from the user's perspective?
-   Probe: How would a tester know this feature is working correctly?
-   Probe: Are there measurable targets or improvements that matter?
+   ROLES & PERSONAS: who initiates, who performs each step, who approves or only views
+   TRIGGER & CONTEXT: the event or state that causes this to begin; preconditions that must be true
+   FUNCTIONAL FLOW: the step-by-step path; decisions and branches; the final output or business state
+   BUSINESS RULES & EXCEPTIONS: validation rules; exception handling; volume, threshold, or compliance constraints
+   SUCCESS & MEASUREMENT: what a successful outcome looks like; how a tester would verify it
+4. Ask the smallest set of questions that resolve those gaps. Each question must name the specific ambiguity using terms from the requirement.
 
 RULES:
-- Every question must be specific to THIS requirement and never generic boilerplate.
+- Every question must be specific to THIS requirement and directly reference its subject matter — never generic discovery boilerplate.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Do NOT ask anything already clearly answered in the requirement or supplied evidence.
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
 - Keep each question focused on one business decision.
-- For each question, provide exactly 3 grounded suggestions.
-- Suggestions should be natural stakeholder phrases (concise, business-facing, not attribute fragments). Keep each suggestion under 10 words.
-- Return ONLY a JSON array (no markdown fences, no prose before/after, no comments).
+- For each question, provide exactly 3 suggestions that are concrete, plausible stakeholder answers for THIS requirement — not generic placeholders. Keep each under 10 words.
+- Return ONLY valid JSON (no markdown fences, no prose before/after, no comments).
 - Every question must be a complete sentence that ends with a question mark.
 
 OUTPUT FORMAT:
-[{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]`;
+{"ambiguity":{"level":"clear|medium|vague","score":1-10,"rationale":"one sentence explaining why"},"questions":[{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]}`;
 }
 
 export function buildStoryAssistantDiscoveryAssessmentSystemPrompt(opts: {

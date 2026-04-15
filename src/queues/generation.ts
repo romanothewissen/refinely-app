@@ -272,6 +272,7 @@ export async function handler(event: { body: GenerationEvent }) {
           projectKeys: selectedProjectKeys,
           pipelineMode: 'story_assistant_default',
           includeSimilarStories: true,
+          clarifyAnswers: maskedAnswers.answers,
         });
       const cachedSharedEvidence = await entityGet<SharedPipelineEvidenceBundle>(KEYS.sharedPipelineEvidence(sessionId));
       const preloadedEvidence = cachedSharedEvidence?.signature === effectiveSharedEvidenceSignature

@@ -7,6 +7,7 @@ import type {
 } from '../types';
 import { formatArPatternLibraryFromSimilarStories } from '../core/similar-stories';
 import { buildWorkInstructionInsightArtifact, getWorkInstructionInsightCount } from '../core/wi-insights';
+import { isPlausibleRoleLabel } from '../core/story-assistant-default';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -74,6 +75,20 @@ export interface SharedPipelineEvidenceBundle {
   };
 }
 
+function fingerprintClarifyAnswers(answers: ClarifyAnswer[]): string {
+  if (!answers.length) return 'noans';
+  const content = [...answers]
+    .sort((a, b) => (a.categoryKey ?? '').localeCompare(b.categoryKey ?? ''))
+    .map(a => `${a.categoryKey ?? ''}:${String(a.answer ?? '').trim().toLowerCase().slice(0, 60)}`)
+    .join('|');
+  // Simple djb2-style hash — no crypto dependency needed
+  let hash = 5381;
+  for (let i = 0; i < content.length; i++) {
+    hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(36).slice(0, 10);
+}
+
 export function buildSharedPipelineEvidenceSignature(input: {
   requirement: string;
   attachmentText?: string;
@@ -81,14 +96,17 @@ export function buildSharedPipelineEvidenceSignature(input: {
   projectKeys?: string[];
   pipelineMode?: 'story_assistant_default';
   includeSimilarStories?: boolean;
+  clarifyAnswers?: ClarifyAnswer[];
 }): string {
   const normalizedProjects = normalizeProjectKeys(input.projectKey, input.projectKeys).join('|');
-  const retrievalQuery = deriveRetrievalQuery(input.requirement, input.attachmentText ?? '', []);
+  const retrievalQuery = deriveRetrievalQuery(input.requirement, input.attachmentText ?? '', input.clarifyAnswers ?? []);
+  const answersHash = fingerprintClarifyAnswers(input.clarifyAnswers ?? []);
   return [
     input.pipelineMode ?? 'story_assistant_default',
     `projects:${normalizedProjects || '*'}`,
     `similar:${input.includeSimilarStories !== false ? '1' : '0'}`,
     retrievalQuery.toLowerCase(),
+    `answers:${answersHash}`,
   ].join('||');
 }
 
@@ -154,7 +172,8 @@ export async function loadSharedPipelineContext(input: {
   const domainContext = buildCombinedDomainContext(input.config, selectedProjectKeys);
   const domainRoles = getCombinedPersonaRoles(input.config, selectedProjectKeys)
     .map((row) => row.role)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter(isPlausibleRoleLabel);
   const retrievalQuery = deriveRetrievalQuery(
     input.requirement,
     input.attachmentText ?? '',

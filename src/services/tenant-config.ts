@@ -1,4 +1,5 @@
 import { GeneratorConfig, ProjectDomainContext, ProjectPersonaRole, TenantConfig, DEFAULT_CONFIG } from '../types';
+import { isPlausibleRoleLabel } from '../core/story-assistant-default';
 import { entityDeleteSecret, entityGet, entityGetSecret, entitySet, entitySetSecret, KEYS } from './cache';
 import { resolveEffectiveGeneratorConfig } from './model-strategy';
 
@@ -202,6 +203,7 @@ function normalizePersonaRoles(rawRows: unknown): ProjectPersonaRole[] {
       return role || activities ? { role, activities } : null;
     })
     .filter((row): row is ProjectPersonaRole => Boolean(row))
+    .filter((row) => !row.role || isPlausibleRoleLabel(row.role))
     .filter((row) => {
       const key = `${row.role.toLowerCase()}::${row.activities.toLowerCase()}`;
       if (seen.has(key)) return false;

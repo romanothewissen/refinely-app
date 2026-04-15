@@ -517,6 +517,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     projectKeys: selectedProjectKeys,
     pipelineMode: 'story_assistant_default',
     includeSimilarStories: true,
+    clarifyAnswers: payload.clarifyAnswers ?? [],
   });
 
   const event: GenerationEvent = {

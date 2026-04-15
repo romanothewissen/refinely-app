@@ -232,6 +232,20 @@ function isReferentialRolePhrase(value: string): boolean {
   return /\b(?:same person|same role|person who|role that|creator|plan creator|case owner|record owner|owner of the case)\b/i.test(value);
 }
 
+// Rejects strings that look like metrics, sentences, or non-actor entities.
+// Applied as an additional guard inside looksLikeRolePhrase and at storage
+// normalization to stop things like "Plan creation cycle time" leaking as actors.
+export function isPlausibleRoleLabel(value: string): boolean {
+  const v = value.trim();
+  // Reject if it contains standalone metric vocabulary
+  if (/\b(rate|latency|percent|percentage|ratio|throughput|accuracy|volume|duration|count|cycle time|lead time|response time|turn(?:around)?\s+time)\b/i.test(v)) return false;
+  // Reject sentence-like strings (contains a full stop followed by a space, or more than 8 words)
+  if (/\.\s/.test(v) || v.split(/\s+/).length > 8) return false;
+  // Require at least one alpha token of 2+ chars (accepts short acronyms like "TSS")
+  if (!(v.match(/\b[A-Za-z]{2,}\b/))) return false;
+  return true;
+}
+
 function looksLikeRolePhrase(value: string): boolean {
   const cleaned = stripChoicePrefix(value).replace(/\.$/, '');
   if (!cleaned || cleaned.length < 3 || cleaned.length > 80) return false;
@@ -239,6 +253,7 @@ function looksLikeRolePhrase(value: string): boolean {
   if (isNegativeRolePhrase(cleaned)) return false;
   if (isGenericRolePhrase(cleaned)) return false;
   if (isReferentialRolePhrase(cleaned)) return false;
+  if (!isPlausibleRoleLabel(cleaned)) return false;
   if (/^(?:the\s+)?(?:case|plan|service)?\s*(?:owners?|users?|teams?)$/i.test(cleaned)) return false;
   if (/\bto\s+(?:initiate|create|generate|define|specify|modify|view|manage|perform|track)\b/i.test(cleaned)) return false;
   if (/^(?:only if|if |when |unless |because |after |before |during |while |depends\b)/i.test(cleaned)) return false;
@@ -450,7 +465,7 @@ function formatWiEvidence(
       ] as Array<[string, WorkInstructionInsightArtifact['workflowSteps']]>)
         .map(([label, items]) => {
           const lines = items
-            .slice(0, 3)
+            .slice(0, 6)
             .map((item) => cleanText(item.text))
             .filter(Boolean);
           return lines.length ? `${label}:\n- ${lines.join('\n- ')}` : '';
@@ -459,9 +474,57 @@ function formatWiEvidence(
     : [];
 
   if (insightSections.length) {
-    return trimPromptText(insightSections.join('\n\n'), 3600);
+    return trimPromptText(insightSections.join('\n\n'), 5200);
   }
-  return trimPromptText(wiContextText, 3600);
+  return trimPromptText(wiContextText, 5200);
+}
+
+// Lightweight token-overlap score: counts shared 4+ char non-stopword tokens
+// relative to the insight's own token count. Threshold 0.2 = 20% of insight
+// tokens appear in the requirement — enough to confirm domain relevance.
+const WI_STOPWORDS = new Set([
+  'that', 'this', 'with', 'from', 'will', 'have', 'been', 'when', 'then',
+  'than', 'they', 'them', 'their', 'there', 'what', 'which', 'where', 'were',
+  'each', 'also', 'into', 'such', 'only', 'both', 'most', 'some', 'more',
+  'over', 'other', 'after', 'before', 'during', 'through', 'between', 'about',
+  'under', 'should', 'would', 'could', 'must', 'shall', 'need', 'used', 'using',
+]);
+
+function wiTokenSet(text: string): string[] {
+  return (text.toLowerCase().match(/\b[a-z]{4,}\b/g) ?? []).filter(w => !WI_STOPWORDS.has(w));
+}
+
+function wiInsightRelevanceScore(insightText: string, requirementText: string): number {
+  const insightTokens = wiTokenSet(insightText);
+  if (!insightTokens.length) return 0;
+  const reqSet = new Set(wiTokenSet(requirementText));
+  const shared = insightTokens.filter(t => reqSet.has(t)).length;
+  return shared / insightTokens.length;
+}
+
+function buildResolvedEvidenceBullets(
+  wiInsightsArtifact: WorkInstructionInsightArtifact | null | undefined,
+  requirement: string,
+): string {
+  if (!wiInsightsArtifact) return '';
+  const candidates = [
+    ...wiInsightsArtifact.mustCoverBehaviors,
+    ...wiInsightsArtifact.sequencingRules,
+    ...wiInsightsArtifact.splitVsSingleCaseRules,
+    ...wiInsightsArtifact.businessRules,
+  ];
+  const relevant = candidates
+    .map(item => ({ text: cleanText(item.text), score: wiInsightRelevanceScore(item.text, requirement) }))
+    .filter(({ text, score }) => text.length >= 20 && score >= 0.2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map(({ text }) => `- ${text}`);
+
+  if (!relevant.length) return '';
+  return trimPromptText(
+    `RESOLVED EVIDENCE (do not re-ask — already known from work instructions):\n${relevant.join('\n')}`,
+    800,
+  );
 }
 
 function formatDiscoveryBacklogEvidence(similarStories: SimilarStory[] = []): string {
@@ -515,15 +578,20 @@ function buildClarifyUserMessage(input: {
   requirement: string;
   attachmentText: string;
   wiEvidenceText: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   similarStoriesText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
   const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
+  const resolvedBullets = buildResolvedEvidenceBullets(input.wiInsightsArtifact, input.requirement);
+  if (resolvedBullets) {
+    parts.push(resolvedBullets);
+  }
   if (input.wiEvidenceText.trim()) {
-    parts.push(`Operational evidence from Work Instructions (use to ask sharper, process-grounded questions):\n${input.wiEvidenceText}`);
+    parts.push(`Operational evidence from Work Instructions (use to ask sharper, process-grounded questions; treat as already-known domain context):\n${input.wiEvidenceText}`);
   }
   if (input.similarStoriesText?.trim()) {
-    parts.push(`Relevant backlog references from this workspace (use to understand how this team usually frames good scope; do not copy unrelated details):\n${input.similarStoriesText}`);
+    parts.push(`Relevant backlog references from this workspace (use as evidence of what this requirement likely implies — domain norms, vocabulary, typical scope. Ask follow-ups only where they leave ambiguity):\n${input.similarStoriesText}`);
   }
   return parts.join('\n\n');
 }
@@ -541,10 +609,10 @@ function buildSufficiencyUserMessage(input: {
     `Questions and answers so far:\n${formatClarifyAnswers(input.answers) || '(none)'}`,
   ];
   if (input.wiEvidenceText?.trim()) {
-    parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);
+    parts.push(`Operational evidence from Work Instructions (treat as already-known domain context):\n${input.wiEvidenceText}`);
   }
   if (input.similarStoriesText?.trim()) {
-    parts.push(`Relevant backlog references from this workspace:\n${input.similarStoriesText}`);
+    parts.push(`Relevant backlog references from this workspace (use as evidence of what this requirement likely implies; ask follow-ups only where they leave ambiguity):\n${input.similarStoriesText}`);
   }
   return parts.join('\n\n');
 }
@@ -1074,24 +1142,40 @@ function buildClarifyAmbiguityAssessment(
   assessment: DiscoveryAssessment,
   qualityScore: number,
   qualityReasons: string[],
+  llmAmbiguity?: { level?: string; score?: number; rationale?: string },
 ): NonNullable<ClarifyContextMeta['ambiguityAssessment']> {
-  const level = assessment.ambiguityLevel === 'high'
-    ? 'vague'
-    : assessment.ambiguityLevel === 'medium'
-      ? 'medium'
-      : 'clear';
+  // Prefer LLM-provided level/score when the model returned a valid ambiguity envelope.
+  // Fall back to the deterministic depth-enum mapping if the envelope is absent or malformed.
+  const llmLevel = llmAmbiguity?.level === 'vague' || llmAmbiguity?.level === 'medium' || llmAmbiguity?.level === 'clear'
+    ? llmAmbiguity.level as 'vague' | 'medium' | 'clear'
+    : undefined;
+  const llmScore = typeof llmAmbiguity?.score === 'number' && llmAmbiguity.score >= 1 && llmAmbiguity.score <= 10
+    ? llmAmbiguity.score
+    : undefined;
+
+  const level = llmLevel ?? (
+    assessment.ambiguityLevel === 'high'
+      ? 'vague'
+      : assessment.ambiguityLevel === 'medium'
+        ? 'medium'
+        : 'clear'
+  );
+  const score = llmScore ?? Math.max(
+    1,
+    Math.min(
+      10,
+      assessment.discoveryDepth === 'deep' ? 8 : assessment.discoveryDepth === 'standard' ? 6 : 3,
+    ),
+  );
+  const reasons = qualityReasons.length
+    ? qualityReasons
+    : llmAmbiguity?.rationale
+      ? [llmAmbiguity.rationale]
+      : ['Discovery depth was calibrated from semantic workflow ambiguity rather than prompt length.'];
   return {
     level,
-    score: Math.max(
-      1,
-      Math.min(
-        10,
-        assessment.discoveryDepth === 'deep' ? 8 : assessment.discoveryDepth === 'standard' ? 6 : 3,
-      ),
-    ),
-    reasons: qualityReasons.length
-      ? qualityReasons
-      : ['Discovery depth was calibrated from semantic workflow ambiguity rather than prompt length.'],
+    score,
+    reasons,
     questionPlan: {
       min: assessment.recommendedQuestionRange.min,
       max: assessment.recommendedQuestionRange.max,
@@ -1226,6 +1310,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     requirement: opts.requirement,
     attachmentText: opts.attachmentText,
     wiEvidenceText,
+    wiInsightsArtifact: opts.wiInsightsArtifact,
     similarStoriesText,
   });
   promptAssemblyMs += Date.now() - baseUserMessageStartedAt;
@@ -1269,12 +1354,20 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   const coverageQualityScore = quality.score;
   const qualityReasons = quality.reasons;
 
+  // Extract the ambiguity envelope returned by the new clarify output schema.
+  // The envelope is {"ambiguity":{level,score,rationale},"questions":[...]} — if present,
+  // prefer its level/score over the deterministic depth-enum fallback.
+  const llmAmbiguity = (clarifyResult.data && typeof clarifyResult.data === 'object' && !Array.isArray(clarifyResult.data))
+    ? (clarifyResult.data as Record<string, unknown>).ambiguity as { level?: string; score?: number; rationale?: string } | undefined
+    : undefined;
+
   const discoveryProfile = buildMinimalDiscoveryProfile(questions, discoveryAssessment);
   const ambiguityAssessment = buildClarifyAmbiguityAssessment(
     questions,
     discoveryAssessment,
     coverageQualityScore,
     qualityReasons,
+    llmAmbiguity,
   );
   return {
     questions,
@@ -1516,6 +1609,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     systemPrompt: buildStoryAssistantArSystemPrompt({
       domainContext: opts.config.domainContext,
       domainRoles: opts.config.domainRoles,
+      wiInsights: opts.wiInsightsArtifact ?? undefined,
     }),
     userMessage: arUserMessage,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),

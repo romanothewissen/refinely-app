@@ -50,6 +50,30 @@ const AR_DEDUP_STOP_WORDS = new Set([
   'that', 'which', 'this', 'these', 'those', 'it', 'its', 'as', 'into', 'onto',
 ]);
 
+// Extracts 4+ char domain-content tokens from the action+benefit clause of a
+// user-story description ("As a X, I need Y so that Z"), stripping scaffolding
+// and abstract process verbs so we're left with the business nouns that should
+// appear in THEN clauses.
+const DESCRIPTION_NOUN_STOPWORDS = new Set([
+  'that', 'this', 'with', 'from', 'will', 'have', 'been', 'when', 'then', 'than',
+  'they', 'them', 'their', 'there', 'what', 'which', 'where', 'were', 'each', 'also',
+  'into', 'such', 'only', 'both', 'most', 'some', 'more', 'over', 'other', 'after',
+  'before', 'during', 'through', 'between', 'about', 'under', 'should', 'would',
+  'could', 'must', 'shall', 'need', 'used', 'using', 'able', 'allow', 'ensure',
+  'verify', 'confirm', 'validate', 'manage', 'track', 'maintain', 'process', 'support',
+  'provide', 'create', 'update', 'delete', 'access', 'view', 'review', 'submit',
+  'request', 'perform', 'complete', 'accomplish', 'facilitate', 'enable', 'without',
+]);
+
+function extractDescriptionConcreteNouns(description: string): Set<string> {
+  const stripped = description
+    .replace(/^as\s+an?\s+[^,]+,\s*/i, '')
+    .replace(/\bi\s+need(?:\s+to)?\s+/i, '')
+    .replace(/\bso\s+that\b.*/i, '')
+    .toLowerCase();
+  return new Set((stripped.match(/\b[a-z]{4,}\b/g) ?? []).filter(w => !DESCRIPTION_NOUN_STOPWORDS.has(w)));
+}
+
 // Feature-level overlap detection thresholds
 const FEATURE_OVERLAP_JACCARD_THRESHOLD = 0.55;
 // Overlap coefficient catches the case where one feature's content is largely contained in the
@@ -336,8 +360,10 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
 
     const featureActorRole = extractActorRoleFromDescription(feature.description);
     const summaryTokenSet = tokenizeFeatureForOverlap(feature.summary ?? '');
+    const descriptionNouns = extractDescriptionConcreteNouns(feature.description);
     let repeatedWhenActorCount = 0;
     let tautologicalThenCount = 0;
+    let abstractThenCount = 0;
 
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {
@@ -416,6 +442,16 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         }
       }
 
+      // Depth-anchoring: THEN clause should contain at least one concrete noun
+      // from the feature description scope, not just abstract process verbs.
+      if (descriptionNouns.size > 0) {
+        const thenLower = String(ar.then ?? '').toLowerCase();
+        const thenHasAnchor = [...descriptionNouns].some(noun => thenLower.includes(noun));
+        if (!thenHasAnchor) {
+          abstractThenCount += 1;
+        }
+      }
+
     }
 
     if (
@@ -438,6 +474,18 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         featureId: feature.id,
         field: 'acceptanceRequirements',
         message: 'AR THEN clauses paraphrase the feature summary instead of describing distinct verifiable outcomes',
+      });
+    }
+
+    if (
+      feature.acceptanceRequirements.length >= 2
+      && descriptionNouns.size > 0
+      && abstractThenCount >= Math.ceil(feature.acceptanceRequirements.length * 0.5)
+    ) {
+      violations.push({
+        featureId: feature.id,
+        field: 'acceptanceRequirements',
+        message: 'AR THEN clauses lack concrete business anchors from the feature scope; prefer specific business nouns over abstract verbs (validate, ensure, verify, confirm)',
       });
     }
 
