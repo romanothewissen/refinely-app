@@ -235,6 +235,8 @@ export const api = {
     azureOpenAIApiKey?: string;
     azureOpenAIBaseUrl?: string;
     azureOpenAIApiVersion?: string;
+    ollamaApiKey?: string;
+    ollamaBaseUrl?: string;
   }) => invoke('testLlmConnection', payload),
   discoverLlmModels: (payload: {
     provider: LlmProvider;
@@ -247,6 +249,8 @@ export const api = {
     azureOpenAIApiKey?: string;
     azureOpenAIBaseUrl?: string;
     azureOpenAIApiVersion?: string;
+    ollamaApiKey?: string;
+    ollamaBaseUrl?: string;
   }) => invoke('discoverLlmModels', payload),
 };
 
