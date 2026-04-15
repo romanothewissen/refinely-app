@@ -15,7 +15,7 @@ import type {
 import { extractActorSets } from '../core/story-assistant-default';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
+import { entityGet, entitySet, entitySetSmall, entitySetWithTtl, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
@@ -32,6 +32,7 @@ import { buildSharedPipelineEvidenceSignature, toSharedPipelineEvidenceBundle } 
 import { runWithWiRetrievalCacheScope } from '../core/wi-ingestion';
 
 const PROGRESS_HEARTBEAT_MS = 15000;
+const SHARED_PIPELINE_EVIDENCE_TTL_MS = 6 * 60 * 60 * 1000;
 
 export async function handler(event: { body: ClarifyEvent }) {
   const {
@@ -247,9 +248,10 @@ export async function handler(event: { body: ClarifyEvent }) {
         includeSimilarStories: true,
       });
       clarifyContext.sharedEvidenceSignature = sharedEvidenceSignature;
-      await entitySet(
+      await entitySetWithTtl(
         KEYS.sharedPipelineEvidence(sessionId),
         toSharedPipelineEvidenceBundle(sharedContext, sharedEvidenceSignature),
+        SHARED_PIPELINE_EVIDENCE_TTL_MS,
       );
 
       const persistenceStartedAt = Date.now();

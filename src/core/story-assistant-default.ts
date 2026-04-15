@@ -222,6 +222,12 @@ function isNegativeRolePhrase(value: string): boolean {
   return /^(?:none|no one|nobody|not applicable|n\/a|na|never|unknown|no formal approval is typically needed)$/i.test(value);
 }
 
+function isGenericRolePhrase(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!normalized) return true;
+  return /^(?:(?:any\s+|an?\s+|the\s+)?authori[sz]ed\s+users?|various\s+roles?|different\s+roles?|a\s+different\s+role|anyone|someone|everyone|no\s+specific\s+role|any\s+user|a\s+user|the\s+user|users?)$/i.test(normalized);
+}
+
 function isReferentialRolePhrase(value: string): boolean {
   return /\b(?:same person|same role|person who|role that|creator|plan creator|case owner|record owner|owner of the case)\b/i.test(value);
 }
@@ -231,6 +237,7 @@ function looksLikeRolePhrase(value: string): boolean {
   if (!cleaned || cleaned.length < 3 || cleaned.length > 80) return false;
   if (/[?!]/.test(cleaned)) return false;
   if (isNegativeRolePhrase(cleaned)) return false;
+  if (isGenericRolePhrase(cleaned)) return false;
   if (isReferentialRolePhrase(cleaned)) return false;
   if (/^(?:the\s+)?(?:case|plan|service)?\s*(?:owners?|users?|teams?)$/i.test(cleaned)) return false;
   if (/\bto\s+(?:initiate|create|generate|define|specify|modify|view|manage|perform|track)\b/i.test(cleaned)) return false;
@@ -404,12 +411,12 @@ function buildRoleHint(
   if (!roleVocabulary.length) return '';
 
   const lines = [
-    `EXACT ACTOR VOCABULARY: ${roleVocabulary.join(', ')}`,
+    `ROLE CONSTRAINT: ${roleVocabulary.join(', ')}`,
     extractedRoles.length
-      ? 'Use only these actor labels verbatim in feature descriptions unless the requirement itself names a different exact role.'
-      : 'If you use a configured workspace role, use it verbatim and do not paraphrase or combine role labels.',
-    'Choose exactly one actor label per feature description unless the exact label is already collective.',
-    'Never use referential phrases like "the plan creator" or non-actor answers like approval states as role labels.',
+      ? 'These are the human actor labels grounded in the requirement or answered discovery. Prefer them when naming actors in feature descriptions; match them verbatim when a feature is clearly about one of these roles, and only introduce a different named role when the scenario genuinely requires one.'
+      : 'These are the configured workspace roles. Use them verbatim when a feature clearly fits one of them; otherwise prefer the most specific actor that evidence supports.',
+    'Choose one actor label per feature description unless the label is already collective.',
+    'Never use referential phrases like "the plan creator", generic placeholders like "any authorized user", or non-actor answers (e.g. approval states) as role labels.',
   ];
 
   return lines.join('\n');

@@ -21,7 +21,7 @@ import { GenerationCancelledError } from '../core/feature-output';
 import { generateSessionTitle } from '../core/session-title';
 import { formatSimilarStoriesText } from '../core/similar-stories';
 import { recordGeneration, getEffectiveTier } from '../services/billing';
-import { entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
+import { entityDelete, entityGet, entitySet, entitySetSmall, entitySetWithTtl, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
@@ -74,6 +74,7 @@ interface GenerationProgressPayload {
 
 const PROGRESS_HEARTBEAT_MS = 15000;
 const MAX_FULL_GENERATION_ATTEMPTS = 2;
+const SHARED_PIPELINE_EVIDENCE_TTL_MS = 6 * 60 * 60 * 1000;
 
 async function sendProgress(sessionId: string, message: string, pass?: 1 | 2, payload?: GenerationProgressPayload) {
   await entitySetSmall(KEYS.generationProgress(sessionId), {
@@ -390,9 +391,10 @@ export async function handler(event: { body: GenerationEvent }) {
             },
           });
           evidenceReuse = genOutcome.sharedContext;
-          await entitySet(
+          await entitySetWithTtl(
             KEYS.sharedPipelineEvidence(sessionId),
             toSharedPipelineEvidenceBundle(genOutcome.sharedContext, effectiveSharedEvidenceSignature),
+            SHARED_PIPELINE_EVIDENCE_TTL_MS,
           );
           break;
         } catch (genErr) {
@@ -668,6 +670,10 @@ export async function handler(event: { body: GenerationEvent }) {
         payload: result,
         updatedAt: Date.now(),
       } as RealtimeEvent);
+
+      void entityDelete(KEYS.sharedPipelineEvidence(sessionId)).catch((cleanupErr) => {
+        console.warn('[generation-queue] Failed to clean up shared evidence bundle:', cleanupErr);
+      });
 
       setImmediate(() => {
         void generateSessionTitle(maskedRequirement.text, config)

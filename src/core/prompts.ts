@@ -239,8 +239,9 @@ Each dimension that represents a distinct business outcome should become its own
 RULES:
 - Each feature must represent independent business value, not an implementation step.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]".
-- If the user message includes an EXACT ACTOR VOCABULARY block, use only those role labels verbatim.
-- Choose one role label per feature unless the exact role label is already collective.
+- If the user message includes a ROLE CONSTRAINT block, follow it as a soft but strong preference — use those labels verbatim when a feature clearly fits one of them, and only deviate when evidence requires a different named role.
+- Never invent generic actor placeholders like "any authorized user", "various roles", or "anyone"; resolve roles from requirement evidence and answered discovery, otherwise fall back to "authorized user" only when no grounded label exists.
+- Choose one role label per feature unless the role label is already collective.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
 - Keep descriptions concise. Put detailed rules, sequencing, dependencies, and exceptions into acceptance requirements in pass 2.
 - Split features when business behavior, ownership, rules, or outcomes materially differ.

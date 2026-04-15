@@ -1299,20 +1299,110 @@ function requirementKeywordOverlap(requirement: string, corpus: string): number 
   return hits;
 }
 
-function extractGwtSampleLines(acceptanceCriteria: string): { given: string; when: string; then: string } | null {
-  let given = '';
-  let when = '';
-  let then = '';
-  for (const line of acceptanceCriteria.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const head = trimmed.slice(0, 6).toUpperCase();
-    if (!given && head.startsWith('GIVEN')) given = trimmed.slice(0, 320);
-    else if (!when && head.startsWith('WHEN')) when = trimmed.slice(0, 320);
-    else if (!then && head.startsWith('THEN')) then = trimmed.slice(0, 320);
-    if (given && when && then) break;
+/**
+ * Strip leading markdown bullets, numbered-list markers, quotes, and bold
+ * emphasis so a clause like "- **GIVEN** x" is recognised as starting with
+ * `GIVEN`.
+ */
+function stripLeadingClauseMarkers(line: string): string {
+  return line
+    .trim()
+    .replace(/^[\s>]*/, '')
+    .replace(/^(?:[-*•]+\s+|\d+[.)]\s+|\(\d+\)\s+|[a-z][.)]\s+)/i, '')
+    .replace(/^\*+\s*/, '')
+    .replace(/^["'`“”‘’]+/, '')
+    .trim();
+}
+
+function clauseKind(line: string): 'given' | 'when' | 'then' | 'and' | null {
+  const body = stripLeadingClauseMarkers(line)
+    .replace(/^\*+\s*/, '')
+    .replace(/^["'`“”‘’]+/, '');
+  const match = body.match(/^\**\s*(GIVEN|WHEN|THEN|AND)\b/i);
+  if (!match) return null;
+  const kind = match[1].toLowerCase();
+  return kind as 'given' | 'when' | 'then' | 'and';
+}
+
+function normalizeClauseText(line: string, max = 320): string {
+  const cleaned = stripLeadingClauseMarkers(line)
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.slice(0, max);
+}
+
+/**
+ * Lenient G/W/T extractor.
+ *
+ * Accepts variations used across teams: case-insensitive keywords, markdown
+ * bullets, numbered lists, multi-line clauses, bold emphasis. Returns up to
+ * `maxTriples` complete GIVEN/WHEN/THEN triples from the text. If no triple
+ * parses, returns the first two non-empty lines as a single raw fallback so the
+ * caller still has something to emit to the prompt.
+ */
+function extractGwtSamples(
+  acceptanceCriteria: string,
+  maxTriples = 3,
+): Array<{ given: string; when: string; then: string }> {
+  const lines = acceptanceCriteria.split(/\r?\n/);
+  const triples: Array<{ given: string; when: string; then: string }> = [];
+  let current: { given: string; when: string; then: string } = { given: '', when: '', then: '' };
+  let lastClause: 'given' | 'when' | 'then' | null = null;
+
+  const commitIfComplete = () => {
+    if (current.given && current.when && current.then) {
+      triples.push({ ...current });
+      current = { given: '', when: '', then: '' };
+      lastClause = null;
+    }
+  };
+
+  for (const raw of lines) {
+    const kind = clauseKind(raw);
+    const text = normalizeClauseText(raw);
+    if (!text) continue;
+
+    if (kind === 'given') {
+      if (current.given || current.when || current.then) {
+        current = { given: '', when: '', then: '' };
+      }
+      current.given = text;
+      lastClause = 'given';
+    } else if (kind === 'when') {
+      current.when = text;
+      lastClause = 'when';
+    } else if (kind === 'then') {
+      current.then = text;
+      lastClause = 'then';
+    } else if (kind === 'and' && lastClause) {
+      const merged = `${current[lastClause]} ${text}`.slice(0, 320);
+      current[lastClause] = merged;
+    } else if (!kind && lastClause && current[lastClause]) {
+      const merged = `${current[lastClause]} ${text}`.slice(0, 320);
+      current[lastClause] = merged;
+    }
+    commitIfComplete();
+    if (triples.length >= maxTriples) break;
   }
-  return given && when && then ? { given, when, then } : null;
+
+  return triples;
+}
+
+function extractGwtSampleLines(acceptanceCriteria: string): { given: string; when: string; then: string } | null {
+  const [first] = extractGwtSamples(acceptanceCriteria, 1);
+  return first ?? null;
+}
+
+function extractRawArFallbackLines(acceptanceCriteria: string, max = 2): string[] {
+  const lines: string[] = [];
+  for (const raw of acceptanceCriteria.split(/\r?\n/)) {
+    const text = normalizeClauseText(raw, 220);
+    if (!text) continue;
+    lines.push(text);
+    if (lines.length >= max) break;
+  }
+  return lines;
 }
 
 /**
@@ -1327,14 +1417,21 @@ export function formatArPatternLibraryFromSimilarStories(
   const req = requirement.trim();
   if (!stories.length || !req) return { text: '', storyKeys: [] };
 
-  type Row = { story: SimilarStory; score: number; gwt: NonNullable<ReturnType<typeof extractGwtSampleLines>> };
+  type Row = {
+    story: SimilarStory;
+    score: number;
+    triples: Array<{ given: string; when: string; then: string }>;
+    rawLines: string[];
+  };
   const rows: Row[] = [];
   for (const story of stories) {
     const ac = String(story.acceptanceCriteria ?? '');
-    const gwt = extractGwtSampleLines(ac);
-    if (!gwt) continue;
+    if (!ac.trim()) continue;
+    const triples = extractGwtSamples(ac, 3);
+    const rawLines = triples.length ? [] : extractRawArFallbackLines(ac, 2);
+    if (!triples.length && !rawLines.length) continue;
     const blob = `${story.summary} ${story.description ?? ''} ${ac}`.slice(0, 4000);
-    rows.push({ story, score: requirementKeywordOverlap(req, blob), gwt });
+    rows.push({ story, score: requirementKeywordOverlap(req, blob), triples, rawLines });
   }
   if (!rows.length) return { text: '', storyKeys: [] };
 
@@ -1349,12 +1446,20 @@ export function formatArPatternLibraryFromSimilarStories(
     'ACCEPTANCE PATTERN REFERENCES (reuse structure and phrasing style only; do not copy unrelated scope):',
   ];
   const storyKeys: string[] = [];
-  for (const { story, gwt } of picked) {
+  for (const { story, triples, rawLines } of picked) {
     storyKeys.push(story.key);
     lines.push(`— ${story.key}: ${story.summary}`);
-    lines.push(`  ${gwt.given}`);
-    lines.push(`  ${gwt.when}`);
-    lines.push(`  ${gwt.then}`);
+    if (triples.length) {
+      for (const gwt of triples) {
+        lines.push(`  ${gwt.given}`);
+        lines.push(`  ${gwt.when}`);
+        lines.push(`  ${gwt.then}`);
+      }
+    } else {
+      for (const raw of rawLines) {
+        lines.push(`  ${raw}`);
+      }
+    }
   }
   return { text: lines.join('\n'), storyKeys };
 }

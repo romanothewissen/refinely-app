@@ -33,6 +33,17 @@ const TRUNCATED_TRAILING_WORDS = new Set([
 
 const AR_NEAR_DUPLICATE_JACCARD_THRESHOLD = 0.85;
 const AR_MIN_TOTAL_WORDS = 12;
+const AR_SUMMARY_TAUTOLOGY_JACCARD_THRESHOLD = 0.75;
+const AR_COUNT_FLOOR_STORY_POINTS = 5;
+const AR_COUNT_FLOOR_MIN_ARS = 3;
+
+const GENERIC_ROLE_DENYLIST_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bas\s+an?\s+any\s+authori[sz]ed\s+users?\b/i, label: 'any authorized user' },
+  { pattern: /\bas\s+an?\s+various\s+roles?\b/i, label: 'various roles' },
+  { pattern: /\bas\s+an?\s+different\s+roles?\b/i, label: 'different roles' },
+  { pattern: /\bas\s+an?\s+(?:anyone|someone|everyone)\b/i, label: 'undefined actor' },
+  { pattern: /\bas\s+a\s+user\b/i, label: 'generic "user" actor' },
+];
 const AR_DEDUP_STOP_WORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'by', 'with', 'from', 'for',
   'is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had', 'does', 'do', 'did',
@@ -121,6 +132,13 @@ function stripUserStoryScaffolding(description: string): string {
 
 function tokenizeFeatureForOverlap(text: string): Set<string> {
   const cleaned = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  const filtered = tokens.filter(token => token.length > 2 && !AR_DEDUP_STOP_WORDS.has(token));
+  return new Set(filtered);
+}
+
+function tokenizeThenClause(text: string): Set<string> {
+  const cleaned = String(text ?? '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
   const tokens = cleaned.split(/\s+/).filter(Boolean);
   const filtered = tokens.filter(token => token.length > 2 && !AR_DEDUP_STOP_WORDS.has(token));
   return new Set(filtered);
@@ -277,6 +295,33 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
       }
     }
 
+    // Role deny-list: generic/undefined actor phrases that indicate the LLM
+    // failed to resolve a grounded role.
+    for (const entry of GENERIC_ROLE_DENYLIST_PATTERNS) {
+      if (entry.pattern.test(feature.description)) {
+        violations.push({
+          featureId: feature.id,
+          field: 'description',
+          message: `Description uses generic actor label "${entry.label}"; resolve to a grounded role from evidence or configured domain roles`,
+        });
+        break;
+      }
+    }
+
+    // AR count floor: substantive features (>= 5 story points) need enough ARs
+    // to actually cover their behavioral surface.
+    if (
+      typeof feature.storyPoints === 'number'
+      && feature.storyPoints >= AR_COUNT_FLOOR_STORY_POINTS
+      && feature.acceptanceRequirements.length < AR_COUNT_FLOOR_MIN_ARS
+    ) {
+      violations.push({
+        featureId: feature.id,
+        field: 'acceptanceRequirements',
+        message: `Feature estimated at ${feature.storyPoints} points has only ${feature.acceptanceRequirements.length} acceptance requirement(s); expect at least ${AR_COUNT_FLOOR_MIN_ARS}`,
+      });
+    }
+
     // Check process code if taxonomy is enabled
     if (config.processTaxonomyEnabled && config.processTaxonomy.length) {
       const validCodes = new Set(config.processTaxonomy.map(p => p.code));
@@ -290,7 +335,9 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
     }
 
     const featureActorRole = extractActorRoleFromDescription(feature.description);
+    const summaryTokenSet = tokenizeFeatureForOverlap(feature.summary ?? '');
     let repeatedWhenActorCount = 0;
+    let tautologicalThenCount = 0;
 
     for (const ar of feature.acceptanceRequirements) {
       if (!ar.given || !ar.when || !ar.then) {
@@ -335,6 +382,16 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         repeatedWhenActorCount += 1;
       }
 
+      if (summaryTokenSet.size) {
+        const thenTokens = tokenizeThenClause(ar.then);
+        if (thenTokens.size) {
+          const similarity = jaccardSimilarity(thenTokens, summaryTokenSet);
+          if (similarity >= AR_SUMMARY_TAUTOLOGY_JACCARD_THRESHOLD) {
+            tautologicalThenCount += 1;
+          }
+        }
+      }
+
       // Check for solution language in ARs
       const arText = combinedArText.toLowerCase();
       for (const term of SOLUTION_TERMS) {
@@ -370,6 +427,17 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         featureId: feature.id,
         field: 'acceptanceRequirements',
         message: 'AR WHEN clauses over-repeat the same actor label; prefer role-neutral continuation where actor does not change',
+      });
+    }
+
+    if (
+      feature.acceptanceRequirements.length >= 2
+      && tautologicalThenCount >= Math.ceil(feature.acceptanceRequirements.length * 0.75)
+    ) {
+      violations.push({
+        featureId: feature.id,
+        field: 'acceptanceRequirements',
+        message: 'AR THEN clauses paraphrase the feature summary instead of describing distinct verifiable outcomes',
       });
     }
 

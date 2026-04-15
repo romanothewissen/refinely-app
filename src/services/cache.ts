@@ -17,6 +17,12 @@ type LargeValuePointer = {
   shardCount: number;
 };
 
+type TtlEnvelope = {
+  __ttlEnvelope: true;
+  expiresAt: number;
+  payload: unknown;
+};
+
 function isLargeValuePointer(value: unknown): value is LargeValuePointer {
   return Boolean(
     value
@@ -24,6 +30,15 @@ function isLargeValuePointer(value: unknown): value is LargeValuePointer {
     && (value as { __largeValue?: boolean }).__largeValue === true
     && typeof (value as { storageKey?: unknown }).storageKey === 'string'
     && typeof (value as { shardCount?: unknown }).shardCount === 'number',
+  );
+}
+
+function isTtlEnvelope(value: unknown): value is TtlEnvelope {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && (value as { __ttlEnvelope?: boolean }).__ttlEnvelope === true
+    && typeof (value as { expiresAt?: unknown }).expiresAt === 'number',
   );
 }
 
@@ -129,19 +144,46 @@ export async function entitySetSmall(key: string, value: unknown): Promise<void>
 
 export async function entityGet<T = unknown>(key: string): Promise<T | undefined> {
   const stored = await kvs.get<unknown>(key);
-  if (!isLargeValuePointer(stored)) {
-    return stored as T | undefined;
+  let resolved: unknown = stored;
+  if (isLargeValuePointer(stored)) {
+    const serialized = await readLargeValue(stored);
+    if (serialized == null) return undefined;
+    try {
+      resolved = JSON.parse(serialized);
+    } catch (err) {
+      console.error(`[cache] entityGet failed to parse sharded value for key=${key}:`, err);
+      return undefined;
+    }
   }
 
-  const serialized = await readLargeValue(stored);
-  if (serialized == null) return undefined;
-
-  try {
-    return JSON.parse(serialized) as T;
-  } catch (err) {
-    console.error(`[cache] entityGet failed to parse sharded value for key=${key}:`, err);
-    return undefined;
+  if (isTtlEnvelope(resolved)) {
+    if (resolved.expiresAt <= Date.now()) {
+      void entityDelete(key).catch(() => {});
+      return undefined;
+    }
+    return resolved.payload as T | undefined;
   }
+
+  return resolved as T | undefined;
+}
+
+/**
+ * Write a value with a soft TTL. The value is wrapped in an envelope carrying
+ * `expiresAt`; `entityGet` unwraps transparently and deletes the key on read
+ * after expiry. Forge KVS has no native TTL, so callers that need hard expiry
+ * should also invoke `entityDelete` when the session is done.
+ */
+export async function entitySetWithTtl(key: string, value: unknown, ttlMs: number): Promise<void> {
+  if (value === undefined || value === null) {
+    console.warn(`[cache] entitySetWithTtl called with null/undefined value for key=${key}, skipping write`);
+    return;
+  }
+  const envelope: TtlEnvelope = {
+    __ttlEnvelope: true,
+    expiresAt: Date.now() + Math.max(0, ttlMs),
+    payload: value,
+  };
+  await entitySet(key, envelope);
 }
 
 export async function entityDelete(key: string): Promise<void> {
@@ -209,6 +251,7 @@ export const KEYS = {
   backlogRefreshStatus: (projectKey: string) => `backlog_refresh_status_${projectKey}`,
   wiChunks: 'wi_chunks',
   wiChunksForDoc: (docId: string) => `wi_chunks_${docId}`,
+  wiInsightsForDoc: (docId: string) => `wi_insights_${docId}`,
   wiDocs: 'wi_docs',
   wiCorpusCache: 'wi_corpus_cache',
   usageCurrentMonth: 'usage_current_month',

@@ -187,7 +187,7 @@ export async function loadSharedPipelineContext(input: {
   const wiInsightExtractionMs = Date.now() - wiInsightStartedAt;
   const referencedWiSections = summarizeReferencedWiSections(wiContext.chunks.slice(0, 8));
   const referencedSimilarStories = summarizeReferencedSimilarStories(similarStories.slice(0, 5));
-  const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, 3);
+  const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, 5);
   const arPatternStoryKeys = arPatternLibrary.storyKeys.length
     ? arPatternLibrary.storyKeys
     : similarStories
