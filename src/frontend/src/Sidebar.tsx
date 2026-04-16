@@ -70,6 +70,19 @@ function profileAccentAlpha(profile: PipelineProfile): string {
   return 'rgba(43, 89, 74, 0.04)';
 }
 
+function StepLabel({ number, title }: { number: string; title: string }) {
+  return (
+    <div className="flex items-center gap-2 px-1 pt-1">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--rf-border)] bg-white/60 text-[10px] font-bold text-[var(--rf-text-tertiary)] leading-none">
+        {number}
+      </span>
+      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+        {title}
+      </span>
+    </div>
+  );
+}
+
 export function Sidebar({
   viewMode,
   setViewMode,
@@ -332,430 +345,511 @@ export function Sidebar({
 
       {/* ── Scrollable body ── */}
       <div
-        className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-3 gap-3 overflow-y-auto custom-scrollbar"
+        className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-4 overflow-y-auto custom-scrollbar"
         style={{ background: `linear-gradient(to bottom, ${profileAccentAlpha(pipelineProfile)}, transparent 220px)` }}
       >
 
-        {/* ── Requirement input (HERO) ── */}
-        <motion.div
-          className="rf-sidebar-card flex-[1] flex flex-col min-h-[200px] max-h-[380px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
-          variants={fadeUp}
-          initial="hidden"
-          animate="visible"
-          custom={0.5}
-        >
-          {/* Card header */}
-          <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 border-b border-[var(--rf-border-subtle)] bg-white/40">
-            <div className="flex items-center gap-2.5 min-w-0">
-              {originIssueKey && (
-                <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
-                  {originIssueKey}
-                </span>
-              )}
-              <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
-                Requirement
-              </span>
-            </div>
-            <motion.button
-              type="button"
-              onClick={() => runAttachmentInputRef.current?.click()}
-              disabled={isWorking}
-              title="Attach supporting files for this run only"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
-              whileTap={{ scale: 0.97 }}
-            >
-              <Paperclip className="w-3 h-3" />
-              <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
-            </motion.button>
-            <input
-              ref={runAttachmentInputRef}
-              type="file"
-              onChange={handleRunAttachmentUpload}
-              accept=".pdf,.csv,.txt,.md,.eml"
-              multiple
-              className="hidden"
-              disabled={isWorking}
-            />
-          </div>
+        {/* ── Step 1: Scope ── */}
+        <div className="flex flex-col gap-1.5">
+          <StepLabel number="01" title="Scope" />
+          <motion.div
+            className="rf-sidebar-card"
+            style={{
+              boxShadow: contextMode === 'undecided'
+                ? '0 0 0 2px rgba(43,89,74,0.18), 0 4px 16px -6px rgba(43, 89, 74, 0.08), 0 1px 4px -1px rgba(43, 89, 74, 0.05)'
+                : undefined,
+            }}
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={0.5}
+          >
+            {/* Animated left-accent pulse when scope is undecided */}
+            {contextMode === 'undecided' && (
+              <motion.div
+                className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full bg-[var(--rf-brand)]"
+                animate={{ opacity: [0.4, 1, 0.4] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+              />
+            )}
 
-          {/* Attached files */}
-          {runAttachments.length > 0 && (
-            <div className="px-3.5 pt-3 flex flex-wrap gap-1.5">
-              {runAttachments.map((attachment) => (
-                <div
-                  key={attachment.id}
-                  className="flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/65 px-2.5 py-1.5"
-                >
-                  <div className="min-w-0">
-                    <div className="max-w-[140px] truncate text-[13px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
-                    <div className="text-[11px] text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveRunAttachment(attachment.id)}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[var(--rf-text-tertiary)] transition hover:bg-white hover:text-[var(--rf-text)]"
-                    title={`Remove ${attachment.filename}`}
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Textarea */}
-          <textarea
-            value={requirement}
-            onChange={(e) => setRequirement(e.target.value)}
-            placeholder={!contextReady ? 'Pick a scope below first…' : 'Describe your feature or requirement…'}
-            disabled={isWorking || !contextReady}
-            className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[14px] leading-relaxed resize-none disabled:opacity-50 px-3.5 pt-3 pb-2 custom-scrollbar"
-          />
-
-          {/* Card footer */}
-          <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-3.5 py-2 bg-white/30">
-            <span className="text-[12px] text-[var(--rf-text-tertiary)]">
-              {wordCount > 0 ? `${wordCount} word${wordCount !== 1 ? 's' : ''}` : 'No input yet'}
-            </span>
-            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] border transition-all ${
-              hasPromptInput
-                ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-border)]'
-                : 'bg-white/50 text-[var(--rf-text-tertiary)] border-[var(--rf-border-subtle)]'
-            }`}>
-              {hasPromptInput ? 'Ready' : 'Add input'}
-            </span>
-          </div>
-        </motion.div>
-
-        {/* ── Context bar (compact workspace selector) ── */}
-        <motion.div
-          className="rf-sidebar-card"
-          variants={fadeUp}
-          initial="hidden"
-          animate="visible"
-          custom={1}
-        >
-          <div className="px-3 pt-3 pb-3">
-            {/* Compact context row */}
-            <motion.button
-              type="button"
-              onClick={() => setWorkspaceExpanded((prev) => !prev)}
-              aria-expanded={workspaceExpanded}
-              aria-controls="workspace-selector"
-              className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
-              whileTap={{ scale: 0.99 }}
-              title={workspaceExpanded ? 'Collapse project picker' : 'Expand project picker'}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] shadow-sm">
-                    <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] font-semibold text-[var(--rf-text)]">
-                      {contextMode === 'undecided' ? 'Pick a scope' : projectTitle}
+            <div className="px-3 pt-3 pb-3">
+              {/* Compact context row */}
+              <motion.button
+                type="button"
+                onClick={() => setWorkspaceExpanded((prev) => !prev)}
+                aria-expanded={workspaceExpanded}
+                aria-controls="workspace-selector"
+                className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
+                whileTap={{ scale: 0.99 }}
+                title={workspaceExpanded ? 'Collapse project picker' : 'Expand project picker'}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] shadow-sm">
+                      <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-semibold text-[var(--rf-text)]">
+                        {contextMode === 'undecided' ? 'Pick a scope' : projectTitle}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {contextReady && (
-                    <>
-                      <span
-                        className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/78 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
-                      >
-                        <Database className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
-                        {selectedProjects.length ? `${totalCachedStories}` : 'All'}
-                      </span>
-                      {activeWiDocs.length > 0 && (
-                        <span className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/78 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
-                          <FileText className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
-                          {activeWiDocs.length}
+                  <div className="flex items-center gap-2">
+                    {contextReady && (
+                      <>
+                        <span
+                          className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/78 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
+                        >
+                          <Database className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
+                          {selectedProjects.length ? `${totalCachedStories}` : 'All'}
                         </span>
+                        {activeWiDocs.length > 0 && (
+                          <span className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/78 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
+                            <FileText className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
+                            {activeWiDocs.length}
+                          </span>
+                        )}
+                      </>
+                    )}
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                  </div>
+                </div>
+              </motion.button>
+
+              <AnimatePresence initial={false}>
+                {workspaceExpanded && (
+                  <motion.div
+                    id="workspace-selector"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                    className="overflow-hidden pt-2"
+                  >
+                    <div className="space-y-2">
+                      {/* Workspace-wide quick-select */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProjectKeys([]);
+                          setContextMode('global');
+                          setWorkspaceExpanded(false);
+                        }}
+                        className={`w-full flex items-center justify-between rounded-xl border px-3 py-2.5 text-left transition ${
+                          projectKeys.length === 0 && contextMode !== 'undecided'
+                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
+                            : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/80 hover:text-[var(--rf-text)]'
+                        }`}
+                      >
+                        <span className="text-[13px] font-semibold">Workspace-wide</span>
+                        <span className="text-[11px] font-medium opacity-70">All projects</span>
+                      </button>
+
+                      {/* Divider */}
+                      <div className="flex items-center gap-2">
+                        <div className="h-px flex-1 bg-[var(--rf-border)]" />
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--rf-text-tertiary)]">or pick a project</span>
+                        <div className="h-px flex-1 bg-[var(--rf-border)]" />
+                      </div>
+
+                      {/* Selected project chips */}
+                      {selectedProjects.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedProjects.map((project) => (
+                            <button
+                              key={project.key}
+                              type="button"
+                              onClick={() => toggleProject(project.key)}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)] transition hover:bg-white/70"
+                            >
+                              <span className="max-w-[120px] truncate">
+                                {project.key}{project.name ? ` · ${project.name}` : ''}
+                              </span>
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          ))}
+                        </div>
                       )}
-                    </>
+
+                      {/* Project search + list */}
+                      <div className="relative">
+                        <input
+                          value={projectFilter}
+                          onChange={(e) => setProjectFilter(e.target.value)}
+                          placeholder="Search projects…"
+                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                        />
+                      </div>
+
+                      <div className="max-h-36 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar backdrop-blur-sm">
+                        {filteredProjects.length ? filteredProjects.map((project) => {
+                          const selected = projectKeys.includes(project.key);
+                          const disabled = !selected && projectKeys.length >= 2;
+                          return (
+                            <button
+                              key={project.key}
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => toggleProject(project.key)}
+                              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                                selected
+                                  ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
+                                  : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
+                              } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-[13px] font-semibold">{project.key}</span>
+                                <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{project.name}</span>
+                              </span>
+                              <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
+                                {selected ? 'Selected' : 'Pick'}
+                              </span>
+                            </button>
+                          );
+                        }) : (
+                          <div className="px-3 py-2 text-[13px] text-[var(--rf-text-tertiary)]">
+                            No projects found.
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
+                        Select up to 2 projects to merge their backlog, docs, and guidance.
+                      </p>
+                      {cacheBreakdown.length > 1 && (
+                        <div className="rounded-xl border border-[var(--rf-border-subtle)] bg-white/55 px-3 py-2 text-[11px] text-[var(--rf-text-tertiary)]">
+                          {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* ── Step 2: Requirement ── */}
+        <div className="flex flex-col gap-1.5">
+          <StepLabel number="02" title="Requirement" />
+          <motion.div
+            className="rf-sidebar-card flex-[1] flex flex-col min-h-[200px] max-h-[380px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={1}
+          >
+            {/* Scope strip — shown when scope is set, replaces the Requirement title row */}
+            {contextMode !== 'undecided' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceExpanded((prev) => !prev)}
+                  className="flex items-center justify-between gap-2 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-brand-subtle)] px-3.5 py-2 text-left transition-colors hover:bg-[rgba(43,89,74,0.14)]"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Orbit className="h-3 w-3 shrink-0 text-[var(--rf-brand)]" />
+                    <span className="truncate text-[12px] font-semibold text-[var(--rf-brand)]">{projectTitle}</span>
+                  </div>
+                  <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 transition-transform ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                </button>
+                {/* Attach button row when scope is set */}
+                <div className="flex items-center justify-between gap-3 px-3.5 py-2 border-b border-[var(--rf-border-subtle)] bg-white/40">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {originIssueKey && (
+                      <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
+                        {originIssueKey}
+                      </span>
+                    )}
+                    <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
+                      Describe your requirement
+                    </span>
+                  </div>
+                  <motion.button
+                    type="button"
+                    onClick={() => runAttachmentInputRef.current?.click()}
+                    disabled={isWorking}
+                    title="Attach supporting files for this run only"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
+                    whileTap={{ scale: 0.97 }}
+                  >
+                    <Paperclip className="w-3 h-3" />
+                    <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
+                  </motion.button>
+                  <input
+                    ref={runAttachmentInputRef}
+                    type="file"
+                    onChange={handleRunAttachmentUpload}
+                    accept=".pdf,.csv,.txt,.md,.eml"
+                    multiple
+                    className="hidden"
+                    disabled={isWorking}
+                  />
+                </div>
+              </>
+            ) : (
+              /* Original header — shown when scope is undecided */
+              <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 border-b border-[var(--rf-border-subtle)] bg-white/40">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {originIssueKey && (
+                    <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
+                      {originIssueKey}
+                    </span>
                   )}
-                  <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${workspaceExpanded ? 'rotate-180' : ''}`} />
+                  <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
+                    Requirement
+                  </span>
+                </div>
+                <motion.button
+                  type="button"
+                  onClick={() => runAttachmentInputRef.current?.click()}
+                  disabled={isWorking}
+                  title="Attach supporting files for this run only"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <Paperclip className="w-3 h-3" />
+                  <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
+                </motion.button>
+                <input
+                  ref={runAttachmentInputRef}
+                  type="file"
+                  onChange={handleRunAttachmentUpload}
+                  accept=".pdf,.csv,.txt,.md,.eml"
+                  multiple
+                  className="hidden"
+                  disabled={isWorking}
+                />
+              </div>
+            )}
+
+            {/* Attached files */}
+            {runAttachments.length > 0 && (
+              <div className="px-3.5 pt-3 flex flex-wrap gap-1.5">
+                {runAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/65 px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="max-w-[140px] truncate text-[13px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
+                      <div className="text-[11px] text-[var(--rf-text-tertiary)]">{attachment.charCount.toLocaleString()} chars</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveRunAttachment(attachment.id)}
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[var(--rf-text-tertiary)] transition hover:bg-white hover:text-[var(--rf-text)]"
+                      title={`Remove ${attachment.filename}`}
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Textarea */}
+            <textarea
+              value={requirement}
+              onChange={(e) => setRequirement(e.target.value)}
+              placeholder={!contextReady ? 'Pick a scope above first…' : 'Describe your feature or requirement…'}
+              disabled={isWorking || !contextReady}
+              className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[14px] leading-relaxed resize-none disabled:opacity-50 px-3.5 pt-3 pb-2 custom-scrollbar"
+            />
+
+            {/* Card footer */}
+            <div className="flex items-center justify-between gap-3 border-t border-[var(--rf-border-subtle)] px-3.5 py-2 bg-white/30">
+              <span className="text-[12px] text-[var(--rf-text-tertiary)]">
+                {wordCount > 0 ? `${wordCount} word${wordCount !== 1 ? 's' : ''}` : 'No input yet'}
+              </span>
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] border transition-all ${
+                hasPromptInput
+                  ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-border)]'
+                  : 'bg-white/50 text-[var(--rf-text-tertiary)] border-[var(--rf-border-subtle)]'
+              }`}>
+                {hasPromptInput ? 'Ready' : 'Add input'}
+              </span>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* ── Step 3: Options ── */}
+        <div className="flex flex-col gap-1.5">
+          <StepLabel number="03" title="Options" />
+          <motion.div
+            className="rf-sidebar-card"
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={1.5}
+          >
+            <button
+              type="button"
+              onClick={() => setOptionsExpanded((prev) => !prev)}
+              className="group w-full px-3.5 py-2.5 flex items-center justify-between gap-3 text-left"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--rf-border)] bg-white/70 shadow-sm">
+                  <SlidersHorizontal className="h-3 w-3 text-[var(--rf-text-tertiary)]" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-[var(--rf-text)]">Options</div>
+                  {/* Inline status pills */}
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
+                      {pipelineProfile === 'fast' ? 'Fast' : pipelineProfile === 'quality' ? 'Quality' : 'Balanced'}
+                    </span>
+                    {activeWiDocs.length > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
+                        <FileText className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
+                        {wiSelectionMode === 'auto' ? 'Auto docs' : `${selectedRunWiDocs.length}/3 docs`}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </motion.button>
+              <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${optionsExpanded ? 'rotate-180' : ''}`} />
+            </button>
 
             <AnimatePresence initial={false}>
-              {workspaceExpanded && (
+              {optionsExpanded && (
                 <motion.div
-                  id="workspace-selector"
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                  className="overflow-hidden pt-2"
+                  className="overflow-hidden"
                 >
-                  <div className="space-y-2">
-                    {/* Workspace-wide quick-select */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProjectKeys([]);
-                        setContextMode('global');
-                        setWorkspaceExpanded(false);
-                      }}
-                      className={`w-full flex items-center justify-between rounded-xl border px-3 py-2.5 text-left transition ${
-                        projectKeys.length === 0 && contextMode !== 'undecided'
-                          ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                          : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/80 hover:text-[var(--rf-text)]'
-                      }`}
-                    >
-                      <span className="text-[13px] font-semibold">Workspace-wide</span>
-                      <span className="text-[11px] font-medium opacity-70">All projects</span>
-                    </button>
-
+                  <div className="px-3.5 pb-3.5 space-y-4">
                     {/* Divider */}
-                    <div className="flex items-center gap-2">
-                      <div className="h-px flex-1 bg-[var(--rf-border)]" />
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--rf-text-tertiary)]">or pick a project</span>
-                      <div className="h-px flex-1 bg-[var(--rf-border)]" />
-                    </div>
+                    <div className="h-px bg-[var(--rf-border-subtle)]" />
 
-                    {/* Selected project chips */}
-                    {selectedProjects.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedProjects.map((project) => (
-                          <button
-                            key={project.key}
-                            type="button"
-                            onClick={() => toggleProject(project.key)}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)] transition hover:bg-white/70"
-                          >
-                            <span className="max-w-[120px] truncate">
-                              {project.key}{project.name ? ` · ${project.name}` : ''}
-                            </span>
-                            <X className="h-2.5 w-2.5" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Project search + list */}
-                    <div className="relative">
-                      <input
-                        value={projectFilter}
-                        onChange={(e) => setProjectFilter(e.target.value)}
-                        placeholder="Search projects…"
-                        className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
-                      />
-                    </div>
-
-                    <div className="max-h-36 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar backdrop-blur-sm">
-                      {filteredProjects.length ? filteredProjects.map((project) => {
-                        const selected = projectKeys.includes(project.key);
-                        const disabled = !selected && projectKeys.length >= 2;
-                        return (
-                          <button
-                            key={project.key}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => toggleProject(project.key)}
-                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
-                              selected
-                                ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
-                                : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
-                            } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-[13px] font-semibold">{project.key}</span>
-                              <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{project.name}</span>
-                            </span>
-                            <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
-                              {selected ? 'Selected' : 'Pick'}
-                            </span>
-                          </button>
-                        );
-                      }) : (
-                        <div className="px-3 py-2 text-[13px] text-[var(--rf-text-tertiary)]">
-                          No projects found.
+                    {/* Performance profile */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Performance</div>
+                          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                            Speed and depth for this run.
+                          </div>
                         </div>
-                      )}
+                      </div>
+                      <div className="relative inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
+                        {(
+                          [
+                            { id: 'fast' as const, label: 'Fast' },
+                            { id: 'balanced' as const, label: 'Balanced' },
+                            { id: 'quality' as const, label: 'Quality' },
+                          ] as const
+                        ).map((option, idx) => {
+                          const selected = pipelineProfile === option.id;
+                          return (
+                            <React.Fragment key={option.id}>
+                              {selected && (
+                                <motion.span
+                                  layoutId="profile-pill"
+                                  className="absolute inset-y-1 rounded-[14px] shadow-sm pointer-events-none"
+                                  style={{
+                                    backgroundColor: profileAccentColor(pipelineProfile),
+                                    left: `calc(${idx} * 33.33% + 2px)`,
+                                    width: 'calc(33.33% - 4px)',
+                                  }}
+                                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                                />
+                              )}
+                              <motion.button
+                                type="button"
+                                onClick={() => onPipelineProfileChange(option.id)}
+                                disabled={isWorking}
+                                whileTap={{ scale: 0.95 }}
+                                className={`relative z-10 rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
+                                  selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                                } disabled:opacity-50`}
+                              >
+                                {option.label}
+                              </motion.button>
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                      Select up to 2 projects to merge their backlog, docs, and guidance.
-                    </p>
-                    {cacheBreakdown.length > 1 && (
-                      <div className="rounded-xl border border-[var(--rf-border-subtle)] bg-white/55 px-3 py-2 text-[11px] text-[var(--rf-text-tertiary)]">
-                        {cacheBreakdown.map((entry) => `${entry.key} ${entry.count}`).join(' · ')}
+                    {/* WI scope */}
+                    {activeWiDocs.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Work instructions</div>
+                            <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                              Auto uses all linked docs. Pick limits to up to 3.
+                            </div>
+                          </div>
+                          <span className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                            {wiSelectionMode === 'auto' ? 'Auto' : `${selectedRunWiDocs.length}/3`}
+                          </span>
+                        </div>
+
+                        <div className="inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1">
+                          {([
+                            { id: 'auto' as const, label: 'Auto' },
+                            { id: 'selected' as const, label: 'Pick up to 3' },
+                          ]).map((option) => {
+                            const selected = wiSelectionMode === option.id;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => setWiSelectionMode(option.id)}
+                                className={`rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
+                                  selected
+                                    ? 'bg-[var(--rf-brand)] text-white'
+                                    : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {wiSelectionMode === 'selected' && (
+                          <div className="max-h-32 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar">
+                            {activeWiDocs.map((doc) => {
+                              const isSelected = selectedWiDocIds.includes(doc.docId);
+                              const disabled = !isSelected && selectedWiDocIds.length >= 3;
+                              return (
+                                <button
+                                  key={doc.docId}
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => toggleRunWiDoc(doc.docId)}
+                                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                                    isSelected
+                                      ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
+                                      : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
+                                  } ${disabled ? 'opacity-45 cursor-not-allowed' : ''}`}
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-[12px] font-semibold">{doc.filename}</span>
+                                    <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{doc.chunkCount} chunks</span>
+                                  </span>
+                                  <span className="ml-3 shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
+                                    {isSelected ? 'Selected' : 'Pick'}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
-        </motion.div>
-
-        {/* ── Options drawer (Performance + WI scope combined) ── */}
-        <motion.div
-          className="rf-sidebar-card"
-          variants={fadeUp}
-          initial="hidden"
-          animate="visible"
-          custom={1.5}
-        >
-          <button
-            type="button"
-            onClick={() => setOptionsExpanded((prev) => !prev)}
-            className="group w-full px-3.5 py-2.5 flex items-center justify-between gap-3 text-left"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--rf-border)] bg-white/70 shadow-sm">
-                <SlidersHorizontal className="h-3 w-3 text-[var(--rf-text-tertiary)]" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[13px] font-semibold text-[var(--rf-text)]">Options</div>
-                <div className="text-[11px] text-[var(--rf-text-tertiary)] truncate">
-                  {pipelineProfile === 'fast' ? 'Fast' : pipelineProfile === 'quality' ? 'Quality' : 'Balanced'}
-                  {activeWiDocs.length > 0 && ` · ${wiSelectionMode === 'auto' ? 'Auto docs' : `${selectedRunWiDocs.length}/3 docs`}`}
-                </div>
-              </div>
-            </div>
-            <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${optionsExpanded ? 'rotate-180' : ''}`} />
-          </button>
-
-          <AnimatePresence initial={false}>
-            {optionsExpanded && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                className="overflow-hidden"
-              >
-                <div className="px-3.5 pb-3.5 space-y-4">
-                  {/* Divider */}
-                  <div className="h-px bg-[var(--rf-border-subtle)]" />
-
-                  {/* Performance profile */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Performance</div>
-                        <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
-                          Speed and depth for this run.
-                        </div>
-                      </div>
-                    </div>
-                    <div className="relative inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
-                      {(
-                        [
-                          { id: 'fast' as const, label: 'Fast' },
-                          { id: 'balanced' as const, label: 'Balanced' },
-                          { id: 'quality' as const, label: 'Quality' },
-                        ] as const
-                      ).map((option, idx) => {
-                        const selected = pipelineProfile === option.id;
-                        return (
-                          <React.Fragment key={option.id}>
-                            {selected && (
-                              <motion.span
-                                layoutId="profile-pill"
-                                className="absolute inset-y-1 rounded-[14px] shadow-sm pointer-events-none"
-                                style={{
-                                  backgroundColor: profileAccentColor(pipelineProfile),
-                                  left: `calc(${idx} * 33.33% + 2px)`,
-                                  width: 'calc(33.33% - 4px)',
-                                }}
-                                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                              />
-                            )}
-                            <motion.button
-                              type="button"
-                              onClick={() => onPipelineProfileChange(option.id)}
-                              disabled={isWorking}
-                              whileTap={{ scale: 0.95 }}
-                              className={`relative z-10 rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
-                                selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                              } disabled:opacity-50`}
-                            >
-                              {option.label}
-                            </motion.button>
-                          </React.Fragment>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* WI scope */}
-                  {activeWiDocs.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Work instructions</div>
-                          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
-                            Auto uses all linked docs. Pick limits to up to 3.
-                          </div>
-                        </div>
-                        <span className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
-                          {wiSelectionMode === 'auto' ? 'Auto' : `${selectedRunWiDocs.length}/3`}
-                        </span>
-                      </div>
-
-                      <div className="inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1">
-                        {([
-                          { id: 'auto' as const, label: 'Auto' },
-                          { id: 'selected' as const, label: 'Pick up to 3' },
-                        ]).map((option) => {
-                          const selected = wiSelectionMode === option.id;
-                          return (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => setWiSelectionMode(option.id)}
-                              className={`rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
-                                selected
-                                  ? 'bg-[var(--rf-brand)] text-white'
-                                  : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {wiSelectionMode === 'selected' && (
-                        <div className="max-h-32 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar">
-                          {activeWiDocs.map((doc) => {
-                            const isSelected = selectedWiDocIds.includes(doc.docId);
-                            const disabled = !isSelected && selectedWiDocIds.length >= 3;
-                            return (
-                              <button
-                                key={doc.docId}
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => toggleRunWiDoc(doc.docId)}
-                                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
-                                  isSelected
-                                    ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
-                                    : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
-                                } ${disabled ? 'opacity-45 cursor-not-allowed' : ''}`}
-                              >
-                                <span className="min-w-0">
-                                  <span className="block truncate text-[12px] font-semibold">{doc.filename}</span>
-                                  <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{doc.chunkCount} chunks</span>
-                                </span>
-                                <span className="ml-3 shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
-                                  {isSelected ? 'Selected' : 'Pick'}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
+          </motion.div>
+        </div>
 
         {/* ── Attachment parse state / error ── */}
         {(runAttachmentParseState || runAttachmentError) && (
