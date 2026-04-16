@@ -150,13 +150,15 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 4. FINANCIAL & CONTRACTUAL: What quoting, billing, authorization, or contractual adjustment flows are triggered? Separate when they involve a distinct actor (e.g., billing specialist) or distinct business process.
 5. DOWNSTREAM EXECUTION: What follow-on transactions, work orders, shipments, or records must be created when the plan/request is approved? Prefer ONE feature that covers all downstream initiation, with ARs for each variant — unless the business behavior genuinely diverges by type.
 6. CONSOLIDATED VISIBILITY: Who needs to see the end-to-end status of the process? What consolidated view enables a different role to track progress without reviewing individual sub-records? Separate when visibility serves a different actor with different information needs.
-7. ADAPTATION & MODIFICATION: What happens when conditions change after execution begins? How does the user modify, add, or remove items from an active plan? What financial or authorization consequences follow from mid-execution changes?
+7. ADAPTATION & MODIFICATION: What happens when conditions change AFTER execution begins? How does the user modify, add, or remove items from an active plan or workflow? What financial, authorization, or enforcement consequences follow from mid-execution changes?
+   CRITICAL: When a requirement describes a plan or multi-step workflow that can be modified after initiation, this is ALWAYS a separate feature — it has distinct preconditions (the workflow is already active), distinct actor behavior (modifying vs. creating), distinct system enforcement (completed steps are immutable), and distinct downstream consequences (new charges, re-authorization). Do not assume the Create feature covers this.
 
 Each dimension helps you test whether a distinct, deliverable BUSINESS CAPABILITY exists. Key judgment rule: variants of the same capability that follow a similar process belong in ONE feature with scenario-level ARs — NOT separate features with identical structure.
 
 ANTI-PATTERNS TO AVOID:
 - NOUN-SPLITTING: Do NOT create a separate feature for each noun the requirement names. If the requirement names multiple variants that are all initiated from the same parent entity through a similar process, they are ONE downstream execution capability with ARs covering each scenario. Only split when the business behavior genuinely diverges (e.g., one variant has return/reversal logistics while another does not).
-- LIFECYCLE PADDING: Do NOT create thin lifecycle features (cancel, track status, submit for approval) unless they have independently complex business rules. Simple status transitions and cancellation guards belong as ARs on the parent workflow feature.
+- LIFECYCLE PADDING: Do NOT create thin lifecycle features (cancel, finalize, close, designate as a type, submit for approval) unless they have independently complex business rules or involve a materially different actor than the parent feature.
+  Test before creating one: does this step have distinct decision logic beyond "the status advances"? If not, it belongs as an AR on the parent feature, not as a separate feature. Ask: which existing feature already owns this workflow stage? Move it there as an AR scenario instead.
 - SINGLE-ACTOR DOMINANCE: If the requirement or discovery answers name multiple roles, distribute feature ownership across them. The actor in the "As a [role]" description should be the person who OWNS that business outcome.
 - PATTERN CLONING: If you realize you are writing features with identical structure where only one noun changes, stop and consolidate them into one feature.
 
@@ -189,7 +191,7 @@ RULES:
   (b) the requirement names distinct downstream paths that diverge per outcome.
 - DO NOT promote configuration or settings screens into top-level features unless the requirement explicitly asks for configurability as a distinct deliverable.
 - Before finalizing, check whether any pair of features is truly duplicative. Merge only when they represent the same primary capability and outcome, not merely adjacent parts of the same workflow area.
-- Suggest story points (1, 2, 3, 5, 8, 13) based on scope
+- Suggest story points proportional to behavioral surface, not just feature count: 1–3 for a single-actor action with one primary path; 5 for a multi-step workflow with branching or business rule gates; 8 for a multi-actor or multi-step workflow with sequencing, exception paths, or downstream initiation across several variants; 13 for a cross-cutting capability with multiple actor handoffs, lifecycle stages, and exception enforcement. Do not compress a feature covering multiple workflow variants and actor handoffs to 5 points — that misrepresents delivery cost.
 - Do NOT write acceptance_requirements — leave them as empty arrays
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
 ${processRule}
@@ -1088,7 +1090,7 @@ RULES:
 - Frame all questions in business language — no specific system names or technical concepts.
 - Each question must cover exactly one business decision. Do not bundle multiple sub-questions using numbers, letters, semicolons, bullets, or "and also" constructions.
 - Never write questions in first person. Do not use I, my, me, we, our phrasing in question text or suggestions.
-- Reuse concrete nouns from the requirement when they make the question sharper. Do not genericize domain-rich wording into vague terms like capability, process, system, item, thing, or record when a better business noun is available.
+- Reuse concrete nouns and workflow elements from the requirement verbatim when they make the question sharper. When the requirement names specific activities, object types, or participant groups, use those exact terms in the questions that probe those flows — do not replace them with generic substitutes like capability, process, item, or record. For multi-step workflows, name the specific steps and handoff points implied by the requirement rather than referring to them abstractly.
 - Include up to 3 short, grounded answer suggestions per question. Omit suggestions only when no grounded starter answer exists.
 - The question field should be short and plain-language. Use an optional details field when extra context is needed to preserve meaning.
 - Do not use quotation marks around terms, values, or phrases.

@@ -70,4 +70,4 @@ permissions:
         - address: https://api.anthropic.com
         - address: https://generativelanguage.googleapis.com
         - address: https://api.openai.com
-        - address: https://api.ollama.ai
+        - address: https://ollama.com

@@ -1227,6 +1227,8 @@ async function rerankWithLlm(
 function buildLlmProviderOpts(config: TenantConfig) {
   return {
     provider: config.generatorConfig.provider,
+    anthropicApiKey: config.generatorConfig.anthropicApiKey,
+    anthropicBaseUrl: config.generatorConfig.anthropicBaseUrl,
     geminiApiKey: config.generatorConfig.geminiApiKey,
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
     openaiApiKey: config.generatorConfig.openaiApiKey,
@@ -1234,6 +1236,8 @@ function buildLlmProviderOpts(config: TenantConfig) {
     azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+    ollamaApiKey: config.generatorConfig.ollamaApiKey,
+    ollamaBaseUrl: config.generatorConfig.ollamaBaseUrl,
     modelCatalogs: config.generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   };

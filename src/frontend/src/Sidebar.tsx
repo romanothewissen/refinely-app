@@ -54,6 +54,18 @@ const fadeUp = {
   }),
 };
 
+function profileAccentColor(profile: PipelineProfile): string {
+  if (profile === 'fast') return 'rgb(37, 99, 235)';
+  if (profile === 'quality') return 'rgb(124, 58, 237)';
+  return 'rgb(43, 89, 74)';
+}
+
+function profileAccentAlpha(profile: PipelineProfile): string {
+  if (profile === 'fast') return 'rgba(37, 99, 235, 0.06)';
+  if (profile === 'quality') return 'rgba(124, 58, 237, 0.06)';
+  return 'rgba(43, 89, 74, 0.04)';
+}
+
 export function Sidebar({
   viewMode,
   setViewMode,
@@ -299,7 +311,10 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Scrollable body ── */}
-      <div className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-2.5 gap-2.5 overflow-y-auto custom-scrollbar">
+      <div
+        className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-2.5 gap-2.5 overflow-y-auto custom-scrollbar"
+        style={{ background: `linear-gradient(to bottom, ${profileAccentAlpha(pipelineProfile)}, transparent 220px)` }}
+      >
 
         {/* ── Workspace card ── */}
         <motion.div
@@ -479,56 +494,13 @@ export function Sidebar({
           </div>
         </motion.div>
 
-        <motion.div
-          className="rf-sidebar-card"
-          variants={fadeUp}
-          initial="hidden"
-          animate="visible"
-          custom={1.5}
-        >
-          <div className="px-3 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Performance</div>
-                <div className="mt-1 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
-                  Choose the speed and depth for your next run.
-                </div>
-              </div>
-              <div className="inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
-                {[
-                  { id: 'fast' as const, label: 'Fast' },
-                  { id: 'balanced' as const, label: 'Balanced' },
-                  { id: 'quality' as const, label: 'Quality' },
-                ].map((option) => {
-                  const selected = pipelineProfile === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => onPipelineProfileChange(option.id)}
-                      disabled={isWorking}
-                      className={`rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition ${
-                        selected
-                          ? 'bg-[var(--rf-brand)] text-white shadow-sm'
-                          : 'text-[var(--rf-text-secondary)] hover:bg-white hover:text-[var(--rf-text)]'
-                      } disabled:opacity-50`}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </motion.div>
-
         {/* ── Input card ── */}
         <motion.div
           className="rf-sidebar-card flex-[1] flex flex-col min-h-[180px] max-h-[340px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
           variants={fadeUp}
           initial="hidden"
           animate="visible"
-          custom={2}
+          custom={1.5}
         >
           {/* Card header */}
           <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-[var(--rf-border-subtle)] bg-white/40">
@@ -610,6 +582,64 @@ export function Sidebar({
             }`}>
               {hasPromptInput ? 'Ready' : 'Add input'}
             </span>
+          </div>
+        </motion.div>
+
+        {/* ── Performance card ── */}
+        <motion.div
+          className="rf-sidebar-card"
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={2}
+        >
+          <div className="px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Performance</div>
+                <div className="mt-1 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                  Choose the speed and depth for your next run.
+                </div>
+              </div>
+              <div className="relative inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
+                {(
+                  [
+                    { id: 'fast' as const, label: 'Fast' },
+                    { id: 'balanced' as const, label: 'Balanced' },
+                    { id: 'quality' as const, label: 'Quality' },
+                  ] as const
+                ).map((option, idx) => {
+                  const selected = pipelineProfile === option.id;
+                  return (
+                    <React.Fragment key={option.id}>
+                      {selected && (
+                        <motion.span
+                          layoutId="profile-pill"
+                          className="absolute inset-y-1 rounded-[14px] shadow-sm pointer-events-none"
+                          style={{
+                            backgroundColor: profileAccentColor(pipelineProfile),
+                            left: `calc(${idx} * 33.33% + 2px)`,
+                            width: 'calc(33.33% - 4px)',
+                          }}
+                          transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                        />
+                      )}
+                      <motion.button
+                        type="button"
+                        onClick={() => onPipelineProfileChange(option.id)}
+                        disabled={isWorking}
+                        whileTap={{ scale: 0.95 }}
+                        className={`relative z-10 rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
+                          selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                        } disabled:opacity-50`}
+                      >
+                        {option.label}
+                      </motion.button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </motion.div>
 

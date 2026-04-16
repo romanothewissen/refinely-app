@@ -49,6 +49,7 @@ import {
   DiscoveryCoverageArtifact,
   ValidationViolation,
   WorkInstructionInsightArtifact,
+  PipelineProfile,
 } from '../types';
 import { callLlm, callLlmJson, callLlmJsonWithUsage, LlmJsonParseError } from './llm';
 import { getTierModel } from '../services/billing';
@@ -262,14 +263,22 @@ interface FeatureArRepairResult {
 
 const AR_GENERATION_ATTEMPTS = 2;
 const AR_RETRY_DELAY_MS = 600;
-/** Caps parallel AR LLM calls so providers (especially Gemini) do not throttle or queue excessively — often improves wall-clock vs unbounded fan-out. */
-const AR_PARALLEL_CONCURRENCY = 5;
+/** Caps parallel AR LLM calls (backfill path) so providers do not throttle. Reduced from 5 to 3 to avoid Gemini rate-limiting. */
+const AR_PARALLEL_CONCURRENCY = 3;
 
 /**
- * Triage + initial discovery must stay fast: Gemini 2.x maps "medium" reasoning to a large thinking budget (~8192),
- * which routinely pushes a single call past several minutes. Use no extended thinking here; quality stays in prompts + WI context.
+ * Maps the user-selected pipeline profile to a reasoning effort level.
+ * fast → 'none'  (no thinking budget — fastest, lowest token cost)
+ * balanced → 'low'  (~4k thinking tokens on Gemini 2.x; ignored on Ollama / non-thinking models)
+ * quality → 'medium'  (~8k thinking tokens on Gemini 2.x)
+ *
+ * Non-thinking providers (Ollama, older Claude/Gemini/OpenAI) silently ignore reasoning effort.
  */
-const CLARIFY_PIPELINE_REASONING_EFFORT = 'none' as const;
+function pipelineReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'low' | 'medium' {
+  if (profile === 'fast') return 'none';
+  if (profile === 'quality') return 'medium';
+  return 'low'; // 'balanced' or undefined → low
+}
 
 export class AcceptanceRequirementsGenerationError extends Error {
   draftFeatures: Feature[];
@@ -668,7 +677,7 @@ async function runDecompositionPass(input: {
     piiMaskingEnabled?: boolean;
   };
 }): Promise<DecompositionDraftResult> {
-  const reasoningEffort = 'medium';
+  const reasoningEffort = pipelineReasoningEffort(input.generatorConfig.pipelineProfile);
   const firstAttempt = await callLlmJsonWithUsage<RawDecompositionResponse>({
     model: getTierModel(input.generatorConfig.decompositionModel, input.tier),
     systemPrompt: input.systemPrompt,
@@ -1055,7 +1064,7 @@ async function generateAcceptanceRequirementsForFeature(input: {
         systemPrompt: input.systemPrompt,
         userMessage: input.userMessage,
         maxTokens: input.maxTokens,
-        reasoningEffort: 'low',
+        reasoningEffort: 'medium',
         ...input.providerOpts,
       });
 
@@ -1152,7 +1161,7 @@ async function runParallelArPass(input: {
   });
 
   const model = getTierModel(input.generatorConfig.arModel, input.tier);
-  const maxTokens = 4096;
+  const maxTokens = 8192;
 
   const wiInsightsText = input.wiInsightsArtifact
     ? formatWorkInstructionInsightsForPrompt(input.wiInsightsArtifact, 5).trim()
@@ -1358,7 +1367,7 @@ async function backfillMissingAcceptanceRequirements(input: {
         systemPrompt,
         userMessage: buildUserMessage(feature),
         model,
-        maxTokens: 4096,
+        maxTokens: 8192,
         providerOpts: input.providerOpts,
       });
     } catch {
@@ -1645,7 +1654,7 @@ export async function assessRequirementWithLlmWithUsage(input: {
       model: getTierModel(input.generatorConfig.triageModel, input.tier),
       systemPrompt: buildTriageSystemPrompt(),
       userMessage,
-      reasoningEffort: CLARIFY_PIPELINE_REASONING_EFFORT,
+      reasoningEffort: pipelineReasoningEffort(input.generatorConfig.pipelineProfile),
       ...input.providerOpts,
     });
     return {
@@ -2799,6 +2808,8 @@ export async function generateFeatures(opts: {
   const outputProfile = outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first';
   const providerOpts = {
     provider: generatorConfig.provider,
+    anthropicApiKey: generatorConfig.anthropicApiKey,
+    anthropicBaseUrl: generatorConfig.anthropicBaseUrl,
     geminiApiKey: generatorConfig.geminiApiKey,
     geminiBaseUrl: generatorConfig.geminiBaseUrl,
     openaiApiKey: generatorConfig.openaiApiKey,
@@ -2806,6 +2817,8 @@ export async function generateFeatures(opts: {
     azureOpenAIApiKey: generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: generatorConfig.azureOpenAIApiVersion,
+    ollamaApiKey: generatorConfig.ollamaApiKey,
+    ollamaBaseUrl: generatorConfig.ollamaBaseUrl,
     modelCatalogs: generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
@@ -3020,102 +3033,30 @@ export async function generateFeatures(opts: {
   }
 
   // ── Pass 2: Acceptance Requirements ──
-  // Use parallel per-feature AR generation for 2+ features (faster);
-  // fall back to monolithic single-call for 1 feature (no parallelism benefit).
+  // Batch path: one LLM call for all features regardless of count.
+  // Sending all features together reduces token usage by ~83% vs the old
+  // per-feature parallel approach (shared context sent once, not N times)
+  // and eliminates rate-limiting from concurrent Gemini calls.
+  // backfillMissingAcceptanceRequirements handles any per-feature gaps.
 
   let pass2Usage: { input: number; output: number };
   let rawFeatures: RawFeature[];
 
-  if (pass1Features.length >= 2) {
-    // Parallel path: one small LLM call per feature
-    const arStartedAt = Date.now();
-    const parallelResult = await runParallelArPass({
-      features: pass1Features,
-      requirement,
-      clarifyAnswers,
-      attachmentText,
-      wiContextText: wiForPass2Ar,
-      similarStoriesText: similarForPass2Ar,
-      wiInsightsArtifact,
-      arObligations,
-      domainContext: config.domainContext,
-      arPlan: effectiveArPlan,
-      generatorConfig,
-      tier: config.tier,
-      providerOpts,
-      onArProgress,
-      discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
-    });
-    if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-    stageDurationsMs.acceptanceRequirements = (stageDurationsMs.acceptanceRequirements ?? 0) + (Date.now() - arStartedAt);
-    rawFeatures = parallelResult.features;
-    let backfillUsage = { input: 0, output: 0 };
-    let retryUsage = { input: 0, output: 0 };
-    if (hasAnyIncompleteAcceptanceRequirements(rawFeatures)) {
-      const backfillStartedAt = Date.now();
-      const backfillResult = await backfillMissingAcceptanceRequirements({
-        features: rawFeatures,
-        requirement,
-        clarifyAnswers,
-        attachmentText,
-        wiContextText: wiForPass2Ar,
-        similarStoriesText: similarForPass2Ar,
-        wiInsightsArtifact,
-        arObligations,
-        domainContext: config.domainContext,
-        arPlan: effectiveArPlan,
-        generatorConfig,
-        tier: config.tier,
-        discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
-        providerOpts,
-        onArProgress,
-      });
-      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-      stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
-      rawFeatures = backfillResult.features;
-      backfillUsage = backfillResult.usage;
-    }
-    if (hasAnyIncompleteAcceptanceRequirements(rawFeatures)) {
-      const targetedRetryStartedAt = Date.now();
-      const targetedRetryResult = await backfillMissingAcceptanceRequirements({
-        features: rawFeatures,
-        requirement,
-        clarifyAnswers,
-        attachmentText,
-        wiContextText: wiForPass2Ar,
-        similarStoriesText: similarForPass2Ar,
-        wiInsightsArtifact,
-        arObligations,
-        domainContext: config.domainContext,
-        arPlan: effectiveArPlan,
-        generatorConfig,
-        tier: config.tier,
-        discoveredRoles: extractDiscoveredRoles(clarifyAnswers),
-        providerOpts,
-        onArProgress,
-      });
-      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
-      stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
-      rawFeatures = targetedRetryResult.features;
-      retryUsage = targetedRetryResult.usage;
-    }
-    pass2Usage = {
-      input: parallelResult.usage.input + backfillUsage.input + retryUsage.input,
-      output: parallelResult.usage.output + backfillUsage.output + retryUsage.output,
-    };
-  } else {
-    // Monolithic path: single LLM call for all features (used for 1-feature results)
-    const singleFeatureId = pass1Features[0]?.id;
-    if (onArProgress && singleFeatureId) {
+  {
+    const allFeatureIds = pass1Features
+      .map((f) => f.id)
+      .filter((id): id is string => Boolean(id));
+    if (onArProgress) {
       await onArProgress({
         total: pass1Features.length,
         completedFeatureIds: [],
-        activeFeatureIds: [singleFeatureId],
+        activeFeatureIds: allFeatureIds,
         backfillFeatureIds: [],
         failedFeatureIds: [],
         phase: 'initial',
       });
     }
+
     const pass2System = buildArSystemPrompt({
       domainContext: config.domainContext,
       arPlan: effectiveArPlan,
@@ -3137,7 +3078,12 @@ export async function generateFeatures(opts: {
       `FEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`,
     ].join('\n\n---\n\n');
 
-    const pass2MaxTokens = Math.max(generatorConfig.maxTokens ?? 8192, 4096);
+    // Scale output token budget with feature count so batch calls never truncate.
+    // 1200 tokens per feature covers ~4 detailed ARs; 4096 covers JSON overhead.
+    const pass2MaxTokens = Math.max(
+      generatorConfig.maxTokens ?? 8192,
+      Math.min(24576, pass1Features.length * 1200 + 4096),
+    );
 
     const arStartedAt = Date.now();
     const pass2Result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
@@ -3145,7 +3091,7 @@ export async function generateFeatures(opts: {
       systemPrompt: pass2System,
       userMessage: pass2UserMessage,
       maxTokens: pass2MaxTokens,
-      reasoningEffort: 'medium',
+      reasoningEffort: pipelineReasoningEffort(generatorConfig.pipelineProfile),
       ...providerOpts,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
@@ -3174,6 +3120,7 @@ export async function generateFeatures(opts: {
         providerOpts,
         onArProgress,
       });
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
       stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - backfillStartedAt);
       rawFeatures = backfillResult.features;
       backfillUsage = backfillResult.usage;
@@ -3196,6 +3143,7 @@ export async function generateFeatures(opts: {
         providerOpts,
         onArProgress,
       });
+      if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
       stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - targetedRetryStartedAt);
       rawFeatures = targetedRetryResult.features;
       retryUsage = targetedRetryResult.usage;
@@ -3204,19 +3152,14 @@ export async function generateFeatures(opts: {
       input: pass2Result.usage.input + backfillUsage.input + retryUsage.input,
       output: pass2Result.usage.output + backfillUsage.output + retryUsage.output,
     };
-    const completedSingleFeatureIds = listCompleteFeatureIds(rawFeatures);
+    const completedBatchFeatureIds = listCompleteFeatureIds(rawFeatures);
     if (onArProgress) {
       await onArProgress({
         total: pass1Features.length,
-        completedFeatureIds: completedSingleFeatureIds,
+        completedFeatureIds: completedBatchFeatureIds,
         activeFeatureIds: [],
         backfillFeatureIds: [],
-        failedFeatureIds: pass1Features
-          .map((feature) => feature.id)
-          .filter((featureId): featureId is string => {
-            if (!featureId) return false;
-            return !completedSingleFeatureIds.includes(featureId);
-          }),
+        failedFeatureIds: allFeatureIds.filter((id) => !completedBatchFeatureIds.includes(id)),
         phase: 'initial',
       });
     }
@@ -4748,6 +4691,8 @@ export function normaliseFeature(raw: RawFeature, roleGrounding?: RoleGroundingC
 function buildLlmProviderOpts(config: TenantConfig) {
   return {
     provider: config.generatorConfig.provider,
+    anthropicApiKey: config.generatorConfig.anthropicApiKey,
+    anthropicBaseUrl: config.generatorConfig.anthropicBaseUrl,
     geminiApiKey: config.generatorConfig.geminiApiKey,
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
     openaiApiKey: config.generatorConfig.openaiApiKey,
@@ -4755,6 +4700,8 @@ function buildLlmProviderOpts(config: TenantConfig) {
     azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+    ollamaApiKey: config.generatorConfig.ollamaApiKey,
+    ollamaBaseUrl: config.generatorConfig.ollamaBaseUrl,
     modelCatalogs: config.generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;

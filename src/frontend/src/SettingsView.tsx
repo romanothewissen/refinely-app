@@ -1280,7 +1280,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Base URL (optional)</label>
-                        <input type="text" value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="https://api.ollama.ai/v1" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        <input type="text" value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="https://ollama.com/v1" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                       </div>
                     </motion.div>
                   )}
@@ -1306,11 +1306,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Story Assistant Profile</div>
-                    <div className="mt-1.5 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                      End users choose Fast, Balanced, or Quality in the sidebar. Configure the light and heavy model assignments here, and the runtime routes use those assignments automatically.
-                    </div>
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Story Assistant Models</div>
+                    <p className="text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
+                      Fast uses the light model for all stages. Balanced uses light for Clarify, heavy for Decomposition + ARs. Quality uses heavy throughout.
+                    </p>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -1318,20 +1318,22 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       {
                         key: 'lightModel' as const,
                         label: 'Light Model',
-                        description: 'Used for Fast across the full run, and for Clarify in Balanced.',
+                        description: 'Fast (all stages) · Balanced Clarify',
                         value: storyAssistantAssignments.lightModel,
                       },
                       {
                         key: 'heavyModel' as const,
                         label: 'Heavy Model',
-                        description: 'Used for Decomposition + ARs in Balanced, and for all stages in Quality.',
+                        description: 'Balanced Decomp + ARs · Quality (all stages)',
                         value: storyAssistantAssignments.heavyModel,
                       },
                     ].map((item) => (
-                      <div key={item.key} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
-                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
-                        <div className="mt-1 text-[12px] text-[var(--rf-text-secondary)] leading-relaxed">{item.description}</div>
-                        <div className="relative mt-3">
+                      <div key={item.key} className="space-y-1.5">
+                        <div>
+                          <div className="text-[12px] font-semibold text-[var(--rf-text)]">{item.label}</div>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)]">{item.description}</div>
+                        </div>
+                        <div className="relative">
                           <select
                             value={item.value}
                             disabled={availableModels.length === 0 || !isAdmin}
@@ -1357,37 +1359,18 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     ))}
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {[
-                      { label: 'Fast', value: `${storyAssistantAssignments.lightModel || 'No model selected'} for all story-assistant stages`, note: 'Clarify + Decomposition + ARs' },
-                      { label: 'Balanced', value: `${storyAssistantAssignments.lightModel || 'No model selected'} for Clarify, ${storyAssistantAssignments.heavyModel || 'No model selected'} for Decomposition + ARs`, note: 'Default mixed route' },
-                      { label: 'Quality', value: `${storyAssistantAssignments.heavyModel || 'No model selected'} for all story-assistant stages`, note: 'Deepest route' },
-                    ].map((item) => (
-                      <div key={item.label} className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3">
-                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
-                        <div className="mt-1 text-[13px] font-semibold text-[var(--rf-text)]">{item.value || 'No model selected'}</div>
-                        <div className="mt-1 text-[11px] text-[var(--rf-text-tertiary)]">{item.note}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3.5 py-3 space-y-3">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Advanced Models</div>
-                      <div className="mt-1 text-[13px] text-[var(--rf-text-secondary)] leading-relaxed">
-                        These models are still configurable because they support workflows outside the main story assistant pipeline.
-                      </div>
-                    </div>
+                  <div className="pt-1 border-t border-[var(--rf-border-subtle)] space-y-3">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Other Models</div>
                     {[
                       { field: 'refineModel' as const, label: 'Refinement', description: 'Interactive edits on existing features' },
                       { field: 'themeModel' as const, label: 'Theme Analysis', description: 'Tagging, titles, and support analysis' },
                     ].map((item) => (
-                      <div key={item.field} className="flex items-center justify-between gap-4 py-1">
+                      <div key={item.field} className="flex items-center justify-between gap-4">
                         <div>
-                          <div className="text-sm font-semibold text-[var(--rf-text)]">{item.label}</div>
-                          <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-0.5">{item.description}</div>
+                          <div className="text-[13px] font-semibold text-[var(--rf-text)]">{item.label}</div>
+                          <div className="text-[11px] text-[var(--rf-text-tertiary)]">{item.description}</div>
                         </div>
-                        <div className="relative w-[220px] shrink-0">
+                        <div className="relative w-[200px] shrink-0">
                           <select
                             value={roleModelValues[item.field]}
                             disabled={availableModels.length === 0 || !isAdmin}

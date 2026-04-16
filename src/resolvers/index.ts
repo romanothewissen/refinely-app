@@ -328,6 +328,7 @@ resolver.define('getConfig', async ({ context }) => {
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
     if (gc.azureOpenAIApiKey) gc.azureOpenAIApiKey = REDACTED;
+    if (gc.ollamaApiKey) gc.ollamaApiKey = REDACTED;
   }
   
   return {

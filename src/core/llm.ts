@@ -112,11 +112,11 @@ function openAISupportsReasoning(model: string): boolean {
   // reasoning: { effort } is only supported by o-series models (o1, o3, o4, o3-mini, etc.)
   // GPT-4o and other chat models ignore or error on this parameter.
   return /\bo\d/.test(model);
+}
 
 function openAIRequiresMaxCompletionTokens(model: string): boolean {
   // o-series reasoning models use max_completion_tokens instead of max_tokens.
   return openAISupportsReasoning(model);
-}
 }
 
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
@@ -173,6 +173,32 @@ const LLM_MAX_ATTEMPTS = 4;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeOllamaBaseUrl(rawBaseUrl: string | undefined, mode: 'native' | 'openai'): string {
+  const fallback = mode === 'native' ? 'https://ollama.com' : 'https://ollama.com/v1';
+  const candidate = (rawBaseUrl ?? '').trim();
+  if (!candidate) return fallback;
+
+  try {
+    const parsed = new URL(candidate);
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'api.ollama.ai' || host === 'api.ollama.com') {
+      parsed.hostname = 'ollama.com';
+      // Preserve caller intent: native API should not keep /v1, OpenAI mode should include /v1.
+      if (mode === 'native' && parsed.pathname.startsWith('/v1')) {
+        parsed.pathname = parsed.pathname.replace(/^\/v1/, '') || '/';
+      } else if (mode === 'openai' && !parsed.pathname.startsWith('/v1')) {
+        const normalizedPath = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+        parsed.pathname = `${normalizedPath}/v1`;
+      }
+      return parsed.toString().replace(/\/+$/, '');
+    }
+  } catch {
+    // Ignore invalid URL input and fall back to the provided value as-is.
+  }
+
+  return candidate.replace(/\/+$/, '');
 }
 
 async function fetchLlmWithRetry(
@@ -524,7 +550,10 @@ export async function discoverLlmModelCatalog(opts: {
 
   if (opts.provider === 'ollama') {
     const ollamaApiKey = (opts.ollamaApiKey ?? '').trim();
-    const baseUrl = (opts.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'https://api.ollama.ai').replace(/\/+$/, '');
+    const baseUrl = normalizeOllamaBaseUrl(
+      opts.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'https://ollama.com',
+      'native',
+    );
     if (!ollamaApiKey) {
       return getFallbackModelCatalog('ollama');
     }
@@ -698,13 +727,21 @@ async function callAnthropic(opts: {
 
   const baseUrl = opts.anthropicBaseUrl ?? process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com/v1';
   const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
+  const requestedMaxTokens = opts.maxTokens ?? 8192;
+  const thinkingBudget = anthropicSupportsThinking(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none'
+    ? geminiThinkingBudget(opts.reasoningEffort)
+    : undefined;
+  const maxTokens = thinkingBudget !== undefined && thinkingBudget >= requestedMaxTokens
+    ? thinkingBudget + 256
+    : requestedMaxTokens;
+
   const body: Record<string, unknown> = {
     model: opts.model,
     system: opts.systemPrompt,
     messages: [
       { role: 'user', content: opts.userMessage },
     ],
-    max_tokens: opts.maxTokens ?? 8192,
+    max_tokens: maxTokens,
   };
   if (thinkingBudget !== undefined && thinkingBudget > 0) {
     body.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
@@ -728,14 +765,6 @@ async function callAnthropic(opts: {
     content?: Array<{ type?: string; text?: string }>;
     usage?: { input_tokens?: number; output_tokens?: number };
   };
-
-  const requestedMaxTokens = opts.maxTokens ?? 8192;
-  const thinkingBudget = anthropicSupportsThinking(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none'
-    ? geminiThinkingBudget(opts.reasoningEffort)
-    : undefined;
-  const maxTokens = thinkingBudget !== undefined && thinkingBudget >= requestedMaxTokens
-    ? thinkingBudget + 256
-    : requestedMaxTokens;
 
   const text = (payload.content ?? [])
     .filter((item) => item.type === 'text')
@@ -772,9 +801,13 @@ async function callOpenAI(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    max_tokens: maxTokens,
     response_format: { type: 'json_object' },
   };
+  if (openAIRequiresMaxCompletionTokens(opts.model)) {
+    body.max_completion_tokens = opts.maxTokens ?? 8192;
+  } else {
+    body.max_tokens = opts.maxTokens ?? 8192;
+  }
   if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning = { effort: opts.reasoningEffort };
   }
@@ -804,11 +837,6 @@ async function callOpenAI(opts: {
 
 async function callAzureOpenAI(opts: {
   model: string;
-  if (openAIRequiresMaxCompletionTokens(opts.model)) {
-    body.max_completion_tokens = opts.maxTokens ?? 8192;
-  } else {
-    body.max_tokens = opts.maxTokens ?? 8192;
-  }
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
@@ -837,6 +865,11 @@ async function callAzureOpenAI(opts: {
       { role: 'user', content: opts.userMessage },
     ],
   };
+  if (openAIRequiresMaxCompletionTokens(opts.model)) {
+    body.max_completion_tokens = opts.maxTokens ?? 8192;
+  } else {
+    body.max_tokens = opts.maxTokens ?? 8192;
+  }
   if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning = { effort: opts.reasoningEffort };
   }
@@ -867,11 +900,6 @@ async function callAzureOpenAI(opts: {
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
   };
-  if (openAIRequiresMaxCompletionTokens(opts.model)) {
-    body.max_completion_tokens = opts.maxTokens ?? 8192;
-  } else {
-    body.max_tokens = opts.maxTokens ?? 8192;
-  }
 }
 
 async function callOllama(opts: {
@@ -887,7 +915,10 @@ async function callOllama(opts: {
     throw new Error('Ollama API key is not set.');
   }
 
-  const baseUrl = (opts.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'https://api.ollama.ai/v1').replace(/\/+$/, '');
+  const baseUrl = normalizeOllamaBaseUrl(
+    opts.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'https://ollama.com/v1',
+    'openai',
+  );
   const url = `${baseUrl}/chat/completions`;
   const body: Record<string, unknown> = {
     model: opts.model,
@@ -895,6 +926,7 @@ async function callOllama(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
+    max_tokens: opts.maxTokens ?? 8192,
     stream: false,
     response_format: { type: 'json_object' },
   };

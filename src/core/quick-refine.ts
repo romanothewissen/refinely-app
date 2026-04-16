@@ -83,6 +83,8 @@ function buildProviderOpts(config: TenantConfig) {
     azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
+    ollamaApiKey: config.generatorConfig.ollamaApiKey,
+    ollamaBaseUrl: config.generatorConfig.ollamaBaseUrl,
     modelCatalogs: config.generatorConfig.modelCatalogs,
   };
 }
