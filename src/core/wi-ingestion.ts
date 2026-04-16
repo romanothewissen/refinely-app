@@ -113,19 +113,24 @@ function pickWiContextForProjectKeys(
   topK: number,
   maxChars: number,
   projectKeys: string[],
+  selectedDocIds?: string[],
 ): WiContextResult & { linkedDocs: WiDoc[] } {
+  const selectedDocIdSet = new Set((selectedDocIds ?? []).map((id) => String(id ?? '').trim()).filter(Boolean));
   const linkedDocs = cache.docs.filter((doc) => (
     !projectKeys.length || projectKeys.some((key) => docMatchesProject(doc, key))
   ));
+  const scopedLinkedDocs = selectedDocIdSet.size
+    ? linkedDocs.filter((doc) => selectedDocIdSet.has(doc.docId))
+    : linkedDocs;
 
   if (!cache.chunks.length) {
-    return { text: '', docs: [], chunks: [], linkedDocs };
+    return { text: '', docs: [], chunks: [], linkedDocs: scopedLinkedDocs };
   }
 
-  const allowedDocIds = new Set(linkedDocs.map((doc) => doc.docId));
+  const allowedDocIds = new Set(scopedLinkedDocs.map((doc) => doc.docId));
   const scopedChunks = cache.chunks.filter((chunk) => allowedDocIds.has(chunk.docId));
   if (!scopedChunks.length) {
-    return { text: '', docs: [], chunks: [], linkedDocs };
+    return { text: '', docs: [], chunks: [], linkedDocs: scopedLinkedDocs };
   }
 
   const docsById = new Map(cache.docs.map((doc) => [doc.docId, doc]));
@@ -140,7 +145,7 @@ function pickWiContextForProjectKeys(
 
   let result = parts.join('\n\n---\n\n');
   if (result.length > maxChars) result = result.slice(0, maxChars);
-  return { text: result, docs, chunks, linkedDocs };
+  return { text: result, docs, chunks, linkedDocs: scopedLinkedDocs };
 }
 
 /** Scoped retrieval for one or more Jira projects, or the full tenant corpus when `projectKeys` is empty. */
@@ -149,9 +154,10 @@ export async function retrieveWiContextMultiProject(
   topK: number,
   maxChars: number,
   projectKeys: string[],
+  selectedDocIds?: string[],
 ): Promise<WiContextResult & { linkedDocs: WiDoc[] }> {
   const cache = await loadCache();
-  return pickWiContextForProjectKeys(cache, query, topK, maxChars, projectKeys);
+  return pickWiContextForProjectKeys(cache, query, topK, maxChars, projectKeys, selectedDocIds);
 }
 
 export async function retrieveWiContext(

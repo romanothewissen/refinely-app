@@ -20,6 +20,7 @@ export async function runStoryAssistantClarifyStage(input: {
   config: TenantConfig;
   projectKey?: string;
   projectKeys?: string[];
+  selectedWiDocIds?: string[];
 }) {
   const sharedContext = await loadSharedPipelineContext({
     requirement: input.requirement,
@@ -28,6 +29,7 @@ export async function runStoryAssistantClarifyStage(input: {
     config: input.config,
     projectKey: input.projectKey,
     projectKeys: input.projectKeys,
+    selectedWiDocIds: input.selectedWiDocIds,
     pipelineMode: 'story_assistant_default',
     includeSimilarStories: true,
   });
@@ -56,6 +58,7 @@ export async function runStoryAssistantSufficiencyStage(input: {
   config: TenantConfig;
   projectKey?: string;
   projectKeys?: string[];
+  selectedWiDocIds?: string[];
   /**
    * When true, loads WI + similar stories before evaluation (slower, sharper sufficiency).
    * Default false: judges Q&A + requirement only; full evidence loads once at generation.
@@ -81,6 +84,7 @@ export async function runStoryAssistantSufficiencyStage(input: {
       config: input.config,
       projectKey: input.projectKey,
       projectKeys: input.projectKeys,
+      selectedWiDocIds: input.selectedWiDocIds,
       pipelineMode: 'story_assistant_default',
     });
 
@@ -124,6 +128,7 @@ export async function runStoryAssistantGenerationStage(input: {
   config: TenantConfig;
   projectKey?: string;
   projectKeys?: string[];
+  selectedWiDocIds?: string[];
   precomputedDraftFeatures?: Feature[];
   priorStageDurationsMs?: GenerationStageDurationsMs;
   preloadedSharedContext?: SharedPipelineContext;
@@ -139,6 +144,7 @@ export async function runStoryAssistantGenerationStage(input: {
       config: input.config,
       projectKey: input.projectKey,
       projectKeys: input.projectKeys,
+      selectedWiDocIds: input.selectedWiDocIds,
       pipelineMode: 'story_assistant_default',
     }));
 

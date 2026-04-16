@@ -33,6 +33,7 @@ export const api = {
     modelOverrides?: GenerationModelOverrides;
     projectKey?: string;
     projectKeys?: string[];
+    selectedWiDocIds?: string[];
     clarifyDiscoveryProfile?: unknown;
     clarifySizingContract?: unknown;
     clarifyAdvisoryTriage?: unknown;
@@ -58,6 +59,7 @@ export const api = {
     attachmentText?: string;
     projectKey?: string;
     projectKeys?: string[];
+    selectedWiDocIds?: string[];
     inputSignature?: string;
     round?: 1 | 2;
     priorAnswers?: unknown[];
@@ -70,6 +72,7 @@ export const api = {
     attachmentText?: string;
     projectKey?: string;
     projectKeys?: string[];
+    selectedWiDocIds?: string[];
     inputSignature?: string;
     round?: 1 | 2;
     priorAnswers?: unknown[];

@@ -225,7 +225,10 @@ export async function findSimilarStories(
     if (!candidates.length) return [];
 
     let ranked = candidates;
-    if (config.similarityConfig.useLlmRerank && candidates.length > 5) {
+    const shouldSkipRerank =
+      (candidates[0]?.relevanceScore ?? 0) >= 5
+      && ((candidates[5]?.relevanceScore ?? 0) <= (candidates[0]?.relevanceScore ?? 0) * 0.55);
+    if (config.similarityConfig.useLlmRerank && candidates.length > 5 && !shouldSkipRerank) {
       ranked = await rerankWithLlm(requirement, candidates, config.generatorConfig.themeModel);
     }
 

@@ -230,8 +230,8 @@ export const DEFAULT_CONFIG: TenantConfig = {
   },
   wiConfig: {
     enabled: true,
-    topKChunks: 8,
-    maxChars: 100000,
+    topKChunks: 6,
+    maxChars: 20000,
   },
   tier: 'standard',
   compliance: {
@@ -763,6 +763,11 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   latencyMs?: PipelineLatencyBreakdown;
   modelRoute?: GenerationModelRoute;
   pipelineProfile?: PipelineProfile;
+  discoveryCategoryCoverage?: {
+    orderedCategories: ClarifyCategoryKey[];
+    askedCategoryKeys: ClarifyCategoryKey[];
+    missingCategoryKeys: ClarifyCategoryKey[];
+  };
 }
 
 export type SizingAssessmentArchetype = 'guard_rule' | 'focused_capability' | 'workflow_area' | 'broad_platform';
@@ -859,6 +864,13 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   modelRoute?: GenerationModelRoute;
   pipelineProfile?: PipelineProfile;
   qualityMode?: GenerationQualityMode;
+  arCoverageStats?: {
+    featureCount: number;
+    completeFeatureCount: number;
+    incompleteFeatureCount: number;
+    acceptanceRequirementCount: number;
+    averageAcceptanceRequirementsPerFeature: number;
+  };
 }
 
 export interface GenerationResult {
@@ -1105,6 +1117,7 @@ export interface ClarifyEvent {
   license?: any;
   projectKey?: string;
   projectKeys?: string[];
+  selectedWiDocIds?: string[];
   round?: 1 | 2;
   priorAnswers?: ClarifyAnswer[];
   pipelineAudit?: boolean;
@@ -1123,6 +1136,7 @@ export interface GenerationEvent {
   outputProfileOverride?: OutputProfile;
   projectKey?: string;
   projectKeys?: string[];
+  selectedWiDocIds?: string[];
   reviewedDraftFeatures?: Feature[];
   reviewedDraftReview?: DraftReviewMetadata;
   reviewedDraftDecision?: DraftReviewDecision;

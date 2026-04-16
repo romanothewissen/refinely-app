@@ -45,6 +45,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     config: eventConfig,
     projectKey,
     projectKeys,
+    selectedWiDocIds,
     priorAnswers,
   } = event.body;
 
@@ -113,6 +114,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         config,
         projectKey,
         projectKeys,
+        selectedWiDocIds,
       });
       const {
         questions,
@@ -124,6 +126,15 @@ export async function handler(event: { body: ClarifyEvent }) {
         coverageRetryTriggered,
         promptAssemblyMs,
       } = result;
+      const orderedDiscoveryCategories = [
+        'user_personas',
+        'context_trigger',
+        'functional_flow',
+        'business_rules',
+        'success_measurement',
+      ] as const;
+      const askedCategoryKeys = [...new Set(questions.map((question) => question.categoryKey))];
+      const missingCategoryKeys = orderedDiscoveryCategories.filter((key) => !askedCategoryKeys.includes(key));
       const initialClarifyDurationMs = Date.now() - clarifyStartedAt;
 
       const shouldBlockEmptyDiscovery =
@@ -238,6 +249,11 @@ export async function handler(event: { body: ClarifyEvent }) {
         referencedWiDocs: sharedContext.sources.referencedWiDocs,
         referencedWiSections: sharedContext.sources.referencedWiSections,
         wiInsights: sharedContext.wiInsights,
+        discoveryCategoryCoverage: {
+          orderedCategories: [...orderedDiscoveryCategories],
+          askedCategoryKeys,
+          missingCategoryKeys,
+        },
       };
       const sharedEvidenceSignature = buildSharedPipelineEvidenceSignature({
         requirement: maskedRequirement.text,
@@ -246,6 +262,7 @@ export async function handler(event: { body: ClarifyEvent }) {
         projectKeys: sharedContext.projectKeys,
         pipelineMode: 'story_assistant_default',
         includeSimilarStories: true,
+        selectedWiDocIds,
       });
       clarifyContext.sharedEvidenceSignature = sharedEvidenceSignature;
       await entitySetWithTtl(

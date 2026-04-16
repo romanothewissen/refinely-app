@@ -52,8 +52,9 @@ export async function retrieveScopedWiContext(
   topK: number,
   maxChars: number,
   projectKeys: string[],
+  selectedDocIds?: string[],
 ): Promise<RetrievedWiContext> {
-  const result = await retrieveWiContextMultiProject(query, topK, maxChars, projectKeys);
+  const result = await retrieveWiContextMultiProject(query, topK, maxChars, projectKeys, selectedDocIds);
   return {
     text: result.text,
     docs: result.docs,

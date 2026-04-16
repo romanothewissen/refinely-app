@@ -237,8 +237,8 @@ export const DEFAULT_CONFIG: TenantConfig = {
   },
   wiConfig: {
     enabled: true,
-    topKChunks: 8,
-    maxChars: 100000,
+    topKChunks: 6,
+    maxChars: 20000,
   },
   tier: 'standard',
   compliance: {
@@ -780,6 +780,11 @@ export interface ClarifyContextMeta extends ContextSourceMeta {
   pipelineProfile?: PipelineProfile;
   scopeContract?: ScopeContract;
   sharedEvidenceSignature?: string;
+  discoveryCategoryCoverage?: {
+    orderedCategories: ClarifyCategoryKey[];
+    askedCategoryKeys: ClarifyCategoryKey[];
+    missingCategoryKeys: ClarifyCategoryKey[];
+  };
 }
 
 export type SizingAssessmentArchetype = 'guard_rule' | 'focused_capability' | 'workflow_area' | 'broad_platform';
@@ -881,6 +886,13 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   scopeContract?: ScopeContract;
   sharedEvidenceSignature?: string;
   sharedEvidenceReused?: boolean;
+  arCoverageStats?: {
+    featureCount: number;
+    completeFeatureCount: number;
+    incompleteFeatureCount: number;
+    acceptanceRequirementCount: number;
+    averageAcceptanceRequirementsPerFeature: number;
+  };
 }
 
 export interface GenerationResult {
@@ -1285,6 +1297,8 @@ export interface ClarifyEvent {
   license?: any;
   projectKey: string;
   projectKeys?: string[];
+  /** Optional per-run WI scope; when set, retrieval is constrained to these docs. */
+  selectedWiDocIds?: string[];
   round?: 1 | 2;
   priorAnswers?: ClarifyAnswer[];
   /** When set with config.developerTools.pipelineAuditEnabled, persist full audit bundle. */
@@ -1306,6 +1320,8 @@ export interface GenerationEvent {
   outputProfileOverride?: OutputProfile;
   projectKey: string;
   projectKeys?: string[];
+  /** Optional per-run WI scope; when set, retrieval is constrained to these docs. */
+  selectedWiDocIds?: string[];
   /** Discovery profile from the clarify LLM — retained for context/questioning only. */
   clarifyDiscoveryProfile?: DiscoveryProfile;
   /** Shared LLM sizing contract captured during discovery. */

@@ -189,6 +189,7 @@ export async function handler(event: { body: GenerationEvent }) {
     config: eventConfig,
     projectKey,
     projectKeys,
+    selectedWiDocIds,
     clarifySizingContract,
     clarifyAdvisoryTriage,
     clarifyDiscoveryProfile,
@@ -273,6 +274,7 @@ export async function handler(event: { body: GenerationEvent }) {
           pipelineMode: 'story_assistant_default',
           includeSimilarStories: true,
           clarifyAnswers: maskedAnswers.answers,
+          selectedWiDocIds,
         });
       const cachedSharedEvidence = await entityGet<SharedPipelineEvidenceBundle>(KEYS.sharedPipelineEvidence(sessionId));
       const preloadedEvidence = cachedSharedEvidence?.signature === effectiveSharedEvidenceSignature
@@ -330,6 +332,7 @@ export async function handler(event: { body: GenerationEvent }) {
             config: runConfig,
             projectKey,
             projectKeys,
+            selectedWiDocIds,
             precomputedDraftFeatures: targetedRetryFeatures.length ? targetedRetryFeatures : undefined,
             priorStageDurationsMs,
             preloadedSharedContext: evidenceReuse,
@@ -556,6 +559,7 @@ export async function handler(event: { body: GenerationEvent }) {
           attachmentText: maskedAttachment.text,
           projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
           projectKeys: selectedProjectKeys,
+          selectedWiDocIds: [...new Set((selectedWiDocIds ?? []).map((id) => String(id ?? '').trim()).filter(Boolean))].slice(0, 3),
           sizingContract: generationContext.sizingContract,
           advisoryTriage: generationContext.advisoryTriage,
           scopeContract: clarifyScopeContract,
@@ -739,6 +743,7 @@ async function saveConversationTurn(
     attachmentText: string;
     projectKey: string;
     projectKeys: string[];
+    selectedWiDocIds?: string[];
     sizingContract?: EffectiveSizingContract;
     advisoryTriage?: AdvisoryTriageContract;
     scopeContract?: GenerationEvent['clarifyScopeContract'];

@@ -517,6 +517,10 @@ resolver.define('startGeneration', async ({ payload, context }) => {
 
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
+  const selectedWiDocIds = [...new Set((payload?.selectedWiDocIds ?? [])
+    .map((id: unknown) => String(id ?? '').trim())
+    .filter(Boolean))]
+    .slice(0, 3);
   const finalSufficiency = payload?.clarifyFinalSufficiency;
   const scopeContract = payload?.clarifyScopeContract;
   const sharedEvidenceSignature = buildSharedPipelineEvidenceSignature({
@@ -527,6 +531,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     pipelineMode: 'story_assistant_default',
     includeSimilarStories: true,
     clarifyAnswers: payload.clarifyAnswers ?? [],
+    selectedWiDocIds,
   });
 
   const event: GenerationEvent = {
@@ -541,6 +546,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     pauseForDraftReview: undefined,
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
+    selectedWiDocIds,
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile ?? undefined,
     clarifySizingContract: payload.clarifySizingContract ?? undefined,
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage ?? undefined,
@@ -564,6 +570,7 @@ resolver.define('startGeneration', async ({ payload, context }) => {
     outputProfileOverride: payload?.outputProfileOverride,
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
+    selectedWiDocIds,
     clarifyDiscoveryProfile: payload.clarifyDiscoveryProfile,
     clarifySizingContract: payload.clarifySizingContract,
     clarifyAdvisoryTriage: payload.clarifyAdvisoryTriage,
@@ -629,6 +636,9 @@ resolver.define('retryGeneration', async ({ payload, context }) => {
     pauseForDraftReview: undefined,
     projectKey: authorizedProjects.projectKey,
     projectKeys: authorizedProjects.projectKeys,
+    selectedWiDocIds: Array.isArray(snapshot.selectedWiDocIds)
+      ? [...new Set(snapshot.selectedWiDocIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean))].slice(0, 3)
+      : [],
     clarifyDiscoveryProfile: snapshot.clarifyDiscoveryProfile,
     clarifySizingContract: snapshot.clarifySizingContract,
     clarifyAdvisoryTriage: snapshot.clarifyAdvisoryTriage,
@@ -691,6 +701,7 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
     license: context?.license,
     projectKey: authorizedProjects.projectKey,
     projectKeys: authorizedProjects.projectKeys,
+    selectedWiDocIds: retryContext?.selectedWiDocIds ?? [],
     clarifySizingContract: retryContext?.sizingContract,
     clarifyAdvisoryTriage: retryContext?.advisoryTriage,
     clarifyScopeContract: retryContext?.scopeContract,
@@ -752,6 +763,7 @@ resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) =>
     license: context?.license,
     projectKey: authorizedProjects.projectKey,
     projectKeys: authorizedProjects.projectKeys,
+    selectedWiDocIds: retryContext?.selectedWiDocIds ?? [],
     clarifySizingContract: retryContext?.sizingContract,
     clarifyAdvisoryTriage: retryContext?.advisoryTriage,
     clarifyScopeContract: retryContext?.scopeContract,
@@ -804,6 +816,7 @@ async function enqueueClarifyWorkflow(
     attachmentText?: string;
     projectKey?: string;
     projectKeys?: string[];
+    selectedWiDocIds?: string[];
     inputSignature?: string;
     round?: 1 | 2;
     priorAnswers?: ClarifyAnswer[];
@@ -818,6 +831,10 @@ async function enqueueClarifyWorkflow(
   const clarifyQueue = new Queue({ key: 'clarify-queue' });
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
+  const selectedWiDocIds = [...new Set((payload.selectedWiDocIds ?? [])
+    .map((id) => String(id ?? '').trim())
+    .filter(Boolean))]
+    .slice(0, 3);
   const event: ClarifyEvent = {
     sessionId: payload.sessionId,
     accountId,
@@ -828,6 +845,7 @@ async function enqueueClarifyWorkflow(
     license: context?.license,
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
+    selectedWiDocIds,
     round: payload.round ?? 1,
     priorAnswers: payload.priorAnswers ?? [],
     pipelineAudit: payload.pipelineAudit,

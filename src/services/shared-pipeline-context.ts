@@ -38,6 +38,7 @@ export interface SharedPipelineContextSources {
   referencedWiSections: ReturnType<typeof summarizeReferencedWiSections>;
   referencedSimilarStories: ReferencedSimilarStory[];
   arPatternStoryKeys: string[];
+  selectedWiDocIds?: string[];
 }
 
 export interface SharedPipelineContext {
@@ -97,6 +98,7 @@ export function buildSharedPipelineEvidenceSignature(input: {
   pipelineMode?: 'story_assistant_default';
   includeSimilarStories?: boolean;
   clarifyAnswers?: ClarifyAnswer[];
+  selectedWiDocIds?: string[];
 }): string {
   const normalizedProjects = normalizeProjectKeys(input.projectKey, input.projectKeys).join('|');
   const retrievalQuery = deriveRetrievalQuery(input.requirement, input.attachmentText ?? '', input.clarifyAnswers ?? []);
@@ -105,6 +107,7 @@ export function buildSharedPipelineEvidenceSignature(input: {
     input.pipelineMode ?? 'story_assistant_default',
     `projects:${normalizedProjects || '*'}`,
     `similar:${input.includeSimilarStories !== false ? '1' : '0'}`,
+    `wiDocs:${(input.selectedWiDocIds ?? []).map((id) => String(id ?? '').trim()).filter(Boolean).sort().join(',') || '*'}`,
     retrievalQuery.toLowerCase(),
     `answers:${answersHash}`,
   ].join('||');
@@ -165,6 +168,7 @@ export async function loadSharedPipelineContext(input: {
   projectKeys?: string[];
   pipelineMode?: 'story_assistant_default';
   includeSimilarStories?: boolean;
+  selectedWiDocIds?: string[];
 }): Promise<SharedPipelineContext> {
   const retrievalStartedAt = Date.now();
   const selectedProjectKeys = normalizeProjectKeys(input.projectKey, input.projectKeys);
@@ -180,6 +184,21 @@ export async function loadSharedPipelineContext(input: {
     input.clarifyAnswers ?? [],
   );
   const includeSimilarStories = input.includeSimilarStories !== false;
+  const pipelineProfile = input.config.generatorConfig.pipelineProfile;
+  const similarMaxResults = pipelineProfile === 'fast'
+    ? 2
+    : pipelineProfile === 'quality'
+      ? 4
+      : 3;
+  const arPatternMaxStories = pipelineProfile === 'fast'
+    ? 2
+    : pipelineProfile === 'quality'
+      ? 5
+      : 4;
+  const selectedWiDocIds = [...new Set((input.selectedWiDocIds ?? [])
+    .map((id) => String(id ?? '').trim())
+    .filter(Boolean))]
+    .slice(0, 3);
   const [wiContext, similarStories] = await Promise.all([
     input.config.wiConfig.enabled
       ? retrieveScopedWiContext(
@@ -187,6 +206,7 @@ export async function loadSharedPipelineContext(input: {
           input.config.wiConfig.topKChunks,
           input.config.wiConfig.maxChars,
           selectedProjectKeys,
+          selectedWiDocIds,
         )
       : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
     includeSimilarStories
@@ -196,7 +216,7 @@ export async function loadSharedPipelineContext(input: {
           clarifyAnswers: input.clarifyAnswers,
           config: input.config,
           projectKeys: selectedProjectKeys,
-          maxResults: 5,
+          maxResults: similarMaxResults,
         })
       : Promise.resolve([]),
   ]);
@@ -205,8 +225,8 @@ export async function loadSharedPipelineContext(input: {
   const wiInsights = buildWorkInstructionInsightArtifact(wiContext.chunks);
   const wiInsightExtractionMs = Date.now() - wiInsightStartedAt;
   const referencedWiSections = summarizeReferencedWiSections(wiContext.chunks.slice(0, 8));
-  const referencedSimilarStories = summarizeReferencedSimilarStories(similarStories.slice(0, 5));
-  const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, 5);
+  const referencedSimilarStories = summarizeReferencedSimilarStories(similarStories.slice(0, similarMaxResults));
+  const arPatternLibrary = formatArPatternLibraryFromSimilarStories(similarStories, input.requirement, arPatternMaxStories);
   const arPatternStoryKeys = arPatternLibrary.storyKeys.length
     ? arPatternLibrary.storyKeys
     : similarStories
@@ -249,6 +269,7 @@ export async function loadSharedPipelineContext(input: {
       referencedWiSections,
       referencedSimilarStories,
       arPatternStoryKeys,
+      ...(selectedWiDocIds.length ? { selectedWiDocIds } : {}),
     },
   };
 }

@@ -338,6 +338,7 @@ RULES:
 - Avoid mechanical role repetition in WHEN clauses. Once the acting role is established for a feature, prefer role-neutral continuation ("they attempt to", "the action is submitted") unless a different actor is semantically required.
 - Cover dependency and ordering behavior when the feature involves sequenced activities.
 - Cover exception outcomes where the happy path can fail in realistic testing.
+- Avoid clone-like AR sets across sibling features. Each feature should include at least one scenario that is specific to that feature's unique boundary.
 
 AR QUALITY:
 - Prefer concrete business nouns (plan, quote, shipment, contract, order, agreement) over abstract verbs (validate, ensure, verify, confirm) in THEN clauses.
@@ -394,9 +395,11 @@ APPROACH — work through these steps:
    BUSINESS RULES & EXCEPTIONS: validation rules; exception handling; volume, threshold, or compliance constraints
    SUCCESS & MEASUREMENT: what a successful outcome looks like; how a tester would verify it
 4. Ask the smallest set of questions that resolve those gaps. Each question must name the specific ambiguity using terms from the requirement.
+5. Keep categories in this exact order: Roles & Personas, Trigger & Context, Functional Flow, Business Rules & Exceptions, Success & Measurement.
 
 RULES:
 - Every question must be specific to THIS requirement and directly reference its subject matter — never generic discovery boilerplate.
+- For complex requirements, ensure the set spans all five categories above unless a category is already explicitly resolved by supplied evidence.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Do NOT ask anything already clearly answered in the requirement or supplied evidence.
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
@@ -606,12 +609,12 @@ export function buildArSystemPrompt(opts: {
     if (depth === 'lean')
       return `${base}
 - Focus on the happy path and one or two key business rules.
-- Prefer fewer ARs when one concise set fully covers the feature.
+- Include at least one materially distinct scenario when the feature contains branching behavior.
 - Do not over-specify very small, straightforward features.`;
 
     // standard / thorough
     return `${base}
-- Prefer fewer ARs when one concise set fully covers the feature.
+- Cover materially distinct branches and business-rule outcomes when they exist.
 - Do not under-specify broad or risky features.
 - Do not over-specify very small, straightforward features.`;
   })();
@@ -648,7 +651,7 @@ RULES:
 - When the requirement or discovery names classification, routing, linkage, carryover, exclusion, fallback, or manual-review obligations, preserve them in business language instead of flattening them into generic processing steps.
 - If ambiguity remains in the supplied evidence, describe the explicit business fallback or manual-review outcome when it is supported. Do not invent product-specific rules to make the AR sound complete.
 - CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
-- Prefer the minimum number of distinct ARs needed for the requested depth. Do not create extra scenarios just to make the feature feel more complete.
+- Write enough ARs to cover all materially distinct business behaviors for the requested depth. Avoid filler, but do not compress distinct scenarios into one vague AR.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
 - When sibling features are listed, do not write ARs that duplicate another sibling's likely scope. If a sibling feature's description covers the same enforcement rule, lifecycle gate, or authorization check, let that sibling own the AR. Each business rule should be tested exactly once across the entire feature set.
 - scopeBoundaries in AR OBLIGATIONS define what is OUT OF SCOPE for the feature set. Do NOT write ARs that test these boundaries by creating "WHEN ... attempts ... THEN ... is prevented" scenarios for out-of-scope items. Instead, treat them as context that narrows what the feature covers. Only write enforcement ARs when the boundary represents an active business rule the system must check at runtime (authorization, eligibility, contractual coverage), not when it simply marks something the system does not handle.

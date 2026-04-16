@@ -108,6 +108,29 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
   'success': 'success_measurement',
 };
 
+const DISCOVERY_CATEGORY_ORDER: ClarifyCategoryKey[] = [
+  'user_personas',
+  'context_trigger',
+  'functional_flow',
+  'business_rules',
+  'success_measurement',
+];
+
+function normalizeDiscoveryCategoryKey(categoryKey: ClarifyCategoryKey): ClarifyCategoryKey {
+  if (categoryKey === 'state_lifecycle') return 'functional_flow';
+  return categoryKey;
+}
+
+function sortDiscoveryQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
+  const order = new Map(DISCOVERY_CATEGORY_ORDER.map((key, index) => [key, index]));
+  return [...questions].sort((left, right) => {
+    const leftOrder = order.get(left.categoryKey) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = order.get(right.categoryKey) ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return left.question.localeCompare(right.question);
+  });
+}
+
 function buildProviderOpts(config: TenantConfig) {
   return {
     provider: config.generatorConfig.provider,
@@ -208,7 +231,9 @@ function stripChoicePrefix(value: string): string {
   return cleanText(value)
     .replace(/^chosen answer:\s*/i, '')
     .replace(/^selected answer:\s*/i, '')
-    .replace(/^[*-]\s*/, '');
+    .replace(/^[*-]\s*/, '')
+    .replace(/^[("'`\[]+/, '')
+    .replace(/[)"'`\]]+$/, '');
 }
 
 function normalizeQuestionContext(value: string): string {
@@ -548,7 +573,7 @@ function extractMustCarryRules(answers: ClarifyAnswer[]): string[] {
     .filter((answer) => {
       const answerText = cleanText(answer.answer);
       if (!answerText) return false;
-      return ['functional_flow', 'business_rules', 'state_lifecycle', 'success_measurement'].includes(answer.categoryKey ?? '');
+      return ['functional_flow', 'business_rules', 'success_measurement'].includes(answer.categoryKey ?? '');
     })
     .map((answer) => `${cleanText(answer.question)} => ${cleanText(answer.answer)}`)
     .filter(Boolean)
@@ -695,7 +720,7 @@ function inferCategoryKey(question: string): ClarifyCategoryKey {
     return 'success_measurement';
   }
   if (/\bstatus\b|\blifecycle\b|\btransition\b|\breopen\b|\bretry\b/.test(normalized)) {
-    return 'state_lifecycle';
+    return 'functional_flow';
   }
   if (/\bsequence\b|\border\b|\bstep\b|\bbranch\b|\bpath\b|\bfinal output\b|\bstate after\b/.test(normalized)) {
     return 'functional_flow';
@@ -763,13 +788,13 @@ const OBLIGATION_CATEGORY_MAP: Record<string, ClarifyCategoryKey[]> = {
   trigger: ['context_trigger'],
   sequencing: ['functional_flow'],
   dependencies: ['functional_flow', 'business_rules'],
-  downstream_initiation: ['functional_flow', 'state_lifecycle'],
+  downstream_initiation: ['functional_flow'],
   quote_and_billing: ['business_rules'],
   entitlement_and_contract: ['business_rules'],
-  disruption_and_exceptions: ['business_rules', 'state_lifecycle'],
+  disruption_and_exceptions: ['business_rules', 'functional_flow'],
   validation: ['business_rules'],
-  status_visibility: ['success_measurement', 'state_lifecycle'],
-  active_change_handling: ['state_lifecycle', 'business_rules'],
+  status_visibility: ['success_measurement', 'functional_flow'],
+  active_change_handling: ['functional_flow', 'business_rules'],
   success_measurement: ['success_measurement'],
   linked_assets: ['functional_flow'],
 };
@@ -1039,18 +1064,17 @@ function extractQuestionCandidates(rawData: unknown): RawQuestionCandidate[] {
 }
 
 export function parseStoryAssistantQuestionCandidates(rawData: unknown): ClarifyQuestion[] {
-  return extractQuestionCandidates(rawData)
+  const parsed = extractQuestionCandidates(rawData)
     .flatMap((candidate) => {
       const rawQuestion = cleanText(candidate.question);
       if (!rawQuestion) return [];
-      const categoryKey = mapCategoryKey(candidate.categoryKey ?? candidate.category, rawQuestion);
+      const categoryKey = normalizeDiscoveryCategoryKey(mapCategoryKey(candidate.categoryKey ?? candidate.category, rawQuestion));
       const category = cleanText(candidate.category)
         || (categoryKey === 'user_personas' ? 'Roles & Personas'
           : categoryKey === 'context_trigger' ? 'Trigger & Context'
           : categoryKey === 'functional_flow' ? 'Functional Flow'
           : categoryKey === 'business_rules' ? 'Business Rules & Exceptions'
-          : categoryKey === 'success_measurement' ? 'Success & Measurement'
-          : 'State & Lifecycle');
+          : 'Success & Measurement');
       const intent = cleanText(candidate.intent).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48)
         || `story_assistant_${categoryKey}`;
       const suggestions = normalizeSuggestions(Array.isArray(candidate.suggestions) ? candidate.suggestions : []);
@@ -1066,6 +1090,7 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
       }));
     })
     .filter((question) => question.question.length > 0);
+  return sortDiscoveryQuestions(parsed);
 }
 
 function normalizeSufficiencyFollowupQuestions(rawData: unknown): ClarifyQuestion[] {
@@ -1354,6 +1379,41 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     usageByStage.clarifyRetry = clarifyResult.usage;
     questions = parseStoryAssistantQuestionCandidates(clarifyResult.data);
   }
+  const missingDiscoveryCategories = DISCOVERY_CATEGORY_ORDER.filter(
+    (categoryKey) => !questions.some((question) => question.categoryKey === categoryKey),
+  );
+  const needsCoverageRetry = questions.length < questionPlan.min
+    || (questionPlan.min >= 5 && missingDiscoveryCategories.length > 0);
+  if (needsCoverageRetry) {
+    coverageRetryTriggered = true;
+    const missingLabels = missingDiscoveryCategories
+      .map((categoryKey) => (
+        categoryKey === 'user_personas'
+          ? 'Roles & Personas'
+          : categoryKey === 'context_trigger'
+            ? 'Trigger & Context'
+            : categoryKey === 'functional_flow'
+              ? 'Functional Flow'
+              : categoryKey === 'business_rules'
+                ? 'Business Rules & Exceptions'
+                : 'Success & Measurement'
+      ))
+      .join(', ');
+    clarifyResult = await callLlmJsonWithUsage<unknown>({
+      model: clarifyModel,
+      systemPrompt: buildStoryAssistantClarifySystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+        questionPlan,
+      }),
+      userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Provide ${questionPlan.min}-${questionPlan.max} specific questions and cover categories in this order: Roles & Personas, Trigger & Context, Functional Flow, Business Rules & Exceptions, Success & Measurement.${missingLabels ? ` Missing in prior attempt: ${missingLabels}.` : ''}`,
+      maxTokens: 5200,
+      reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
+      ...providerOpts,
+    });
+    usageByStage.clarifyCoverageRetry = clarifyResult.usage;
+    questions = parseStoryAssistantQuestionCandidates(clarifyResult.data);
+  }
   const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
   const coverageQualityScore = quality.score;
   const qualityReasons = quality.reasons;
@@ -1634,10 +1694,63 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       : [];
   features = repairedOutput.features;
   const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
-  const failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
+  let failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
+  const rescueNotes: string[] = [];
+  if (failedIds.size === features.length && features.length > 0) {
+    const rescueStartedAt = Date.now();
+    const rescueResult = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+      model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
+      systemPrompt: buildStoryAssistantArSystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+        wiInsights: opts.wiInsightsArtifact ?? undefined,
+      }),
+      userMessage: `${buildGenerationContextMessage({
+        requirement: opts.requirement,
+        clarifyAnswers: opts.clarifyAnswers,
+        attachmentText: '',
+        wiEvidenceText: trimPromptText(wiEvidenceText, 2200),
+        roleHint,
+        discoveryProfile: opts.discoveryProfile,
+        actorSets,
+        similarStoriesText: '',
+        arPatternLibraryText: '',
+      })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
+        features: pass1Raw.map((feature) => ({
+          ...feature,
+          acceptance_requirements: [],
+        })),
+      })}\n\nEvery feature MUST contain complete GIVEN/WHEN/THEN acceptance requirements. Return strict JSON only and keep all feature summaries unchanged.`,
+      maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
+      reasoningEffort: 'high',
+      ...providerOpts,
+    });
+    stageUsage.acceptanceRequirementsRescue = rescueResult.usage;
+    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - rescueStartedAt);
+    const rescueRaw = extractRawFeaturesFromPayload(rescueResult.data);
+    if (rescueRaw.length > 0) {
+      const mergedRescueRaw = mergePass2IntoPass1(pass1Raw, rescueRaw);
+      let rescueFeatures = mergedRescueRaw.map((feature) => normaliseFeature(feature, roleGrounding));
+      rescueFeatures = dedupeExactAcceptanceRequirements(rescueFeatures).features;
+      const rescueFailedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(rescueFeatures);
+      const rescueFailedIds = new Set(rescueFailedIndexes.map((index) => rescueFeatures[index]?.id).filter(Boolean) as string[]);
+      if (rescueFailedIds.size < failedIds.size) {
+        features = rescueFeatures;
+        failedIds = rescueFailedIds;
+        rescueNotes.push(
+          `AR rescue fallback reduced incomplete features from ${failedIndexes.length} to ${rescueFailedIndexes.length}.`,
+        );
+      }
+    }
+  }
   if (failedIds.size > 0) {
     features = annotateFailedAcceptanceRequirementFeatures(features, failedIds) as Feature[];
   }
+  const acceptanceRequirementCount = features.reduce(
+    (sum, feature) => sum + (feature.acceptanceRequirements?.length ?? 0),
+    0,
+  );
+  const completeFeatureCount = features.length - failedIds.size;
 
   stageDurationsMs.total = Object.values(stageDurationsMs).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const tokenUsage = buildTokenUsageSummary(stageUsage);
@@ -1667,12 +1780,24 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       ...(pass2CoverageNotes.length
         ? { mergeDiagnostics: pass2CoverageNotes }
         : {}),
+      ...(rescueNotes.length
+        ? { mergeDiagnostics: [...pass2CoverageNotes, ...rescueNotes] }
+        : {}),
       actorSets,
       pass2ArPatternStoryKeys: opts.arPatternStoryKeys,
       latencyMs: {
         promptAssemblyMs,
       },
       tokenUsage,
+      arCoverageStats: {
+        featureCount: features.length,
+        completeFeatureCount,
+        incompleteFeatureCount: failedIds.size,
+        acceptanceRequirementCount,
+        averageAcceptanceRequirementsPerFeature: features.length
+          ? Number((acceptanceRequirementCount / features.length).toFixed(2))
+          : 0,
+      },
     } as any,
   };
 }

@@ -272,6 +272,8 @@ function buildDiscoveryInputSignature(params: {
   projectKeys?: string[];
   contextMode: 'undecided' | 'project' | 'global';
   attachments: RunAttachment[];
+  wiSelectionMode: 'auto' | 'selected';
+  selectedWiDocIds?: string[];
 }): string {
   return JSON.stringify({
     requirement: params.requirement.trim(),
@@ -283,6 +285,8 @@ function buildDiscoveryInputSignature(params: {
       filename: attachment.filename,
       text: attachment.text,
     })),
+    wiSelectionMode: params.wiSelectionMode,
+    selectedWiDocIds: (params.selectedWiDocIds ?? []).map((id) => String(id ?? '').trim()).filter(Boolean).sort(),
   });
 }
 
@@ -481,6 +485,8 @@ function LegacyApp({
   const [pipelineProfile, setPipelineProfile] = useState<PipelineProfile>('balanced');
   const [reviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
+  const [wiSelectionMode, setWiSelectionMode] = useState<'auto' | 'selected'>('auto');
+  const [selectedWiDocIds, setSelectedWiDocIds] = useState<string[]>([]);
   const [runAttachments, setRunAttachments] = useState<RunAttachment[]>([]);
   const [runAttachmentParseState, setRunAttachmentParseState] = useState<{ filename: string; stage: 'reading' | 'parsing' } | null>(null);
   const [runAttachmentError, setRunAttachmentError] = useState<string | null>(null);
@@ -653,7 +659,14 @@ function LegacyApp({
           docsById.set(doc.docId, doc);
         });
       });
-      setWiDocs([...docsById.values()]);
+      const nextDocs = [...docsById.values()];
+      setWiDocs(nextDocs);
+      setSelectedWiDocIds((prev) => {
+        if (!prev.length) return prev;
+        const allowed = new Set(nextDocs.map((doc: any) => String(doc?.docId ?? '').trim()).filter(Boolean));
+        const filtered = prev.filter((id) => allowed.has(id));
+        return filtered.length === prev.length ? prev : filtered;
+      });
     } catch {}
   };
 
@@ -668,8 +681,10 @@ function LegacyApp({
       projectKeys: effectiveProjectKeys,
       contextMode: effectiveProjectKeys.length ? 'project' : contextMode,
       attachments: runAttachments,
+      wiSelectionMode,
+      selectedWiDocIds,
     }),
-    [requirement, effectiveProjectKey, effectiveProjectKeys, contextMode, runAttachments],
+    [requirement, effectiveProjectKey, effectiveProjectKeys, contextMode, runAttachments, wiSelectionMode, selectedWiDocIds],
   );
 
   const hydrateConversationState = (conversation: any) => {
@@ -1189,6 +1204,9 @@ function LegacyApp({
     const attachmentText = runAttachments
       .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
       .join('\n\n');
+    const scopedWiDocIds = wiSelectionMode === 'selected'
+      ? [...new Set(selectedWiDocIds.map((id) => String(id ?? '').trim()).filter(Boolean))].slice(0, 3)
+      : [];
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
     setGenerationError(null);
@@ -1223,6 +1241,7 @@ function LegacyApp({
         attachmentText,
         projectKey: effectiveProjectKey,
         projectKeys: effectiveProjectKeys,
+        selectedWiDocIds: scopedWiDocIds,
         inputSignature: discoveryInputSignature,
         pipelineAudit: pipelineAuditActiveRef.current,
         auditRunId: pipelineAuditRunIdRef.current ?? undefined,
@@ -1263,6 +1282,9 @@ function LegacyApp({
     const attachmentText = runAttachments
       .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
       .join('\n\n');
+    const scopedWiDocIds = wiSelectionMode === 'selected'
+      ? [...new Set(selectedWiDocIds.map((id) => String(id ?? '').trim()).filter(Boolean))].slice(0, 3)
+      : [];
 
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
@@ -1292,6 +1314,7 @@ function LegacyApp({
         attachmentText,
         projectKey: effectiveProjectKey,
         projectKeys: effectiveProjectKeys,
+        selectedWiDocIds: scopedWiDocIds,
         inputSignature: discoveryInputSignature,
         pipelineAudit: pipelineAuditActiveRef.current,
         auditRunId: pipelineAuditRunIdRef.current ?? undefined,
@@ -1341,6 +1364,9 @@ function LegacyApp({
     const attachmentText = runAttachments
       .map(attachment => `--- ${attachment.filename} ---\n${attachment.text}`)
       .join('\n\n');
+    const scopedWiDocIds = wiSelectionMode === 'selected'
+      ? [...new Set(selectedWiDocIds.map((id) => String(id ?? '').trim()).filter(Boolean))].slice(0, 3)
+      : [];
     
     setIsWorking(true);
     setWorkflowRunId(prev => prev + 1);
@@ -1369,6 +1395,7 @@ function LegacyApp({
         outputProfileOverride: runOutputProfileOverride,
         projectKey: effectiveProjectKey,
         projectKeys: effectiveProjectKeys,
+        selectedWiDocIds: scopedWiDocIds,
         clarifyDiscoveryProfile: clarifyContext?.discoveryProfile ?? undefined,
         clarifySizingContract: clarifyContext?.sizingContract ?? undefined,
         clarifyAdvisoryTriage: clarifyContext?.advisoryTriage ?? undefined,
@@ -1728,6 +1755,10 @@ function LegacyApp({
               availableProjects={availableProjects}
               cacheCountsByProject={sidebarCacheCounts}
               wiDocs={wiDocs}
+              wiSelectionMode={wiSelectionMode}
+              setWiSelectionMode={setWiSelectionMode}
+              selectedWiDocIds={selectedWiDocIds}
+              setSelectedWiDocIds={setSelectedWiDocIds}
               onOpenProjectSettings={openProjectSettings}
               runAttachments={runAttachments}
               runAttachmentParseState={runAttachmentParseState}

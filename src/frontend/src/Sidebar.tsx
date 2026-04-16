@@ -34,6 +34,10 @@ interface SidebarProps {
   availableProjects: Array<{ key: string; name: string }>;
   cacheCountsByProject: Record<string, number>;
   wiDocs: Array<{ docId: string; filename: string; chunkCount: number; targetProjects?: string[] }>;
+  wiSelectionMode: 'auto' | 'selected';
+  setWiSelectionMode: (mode: 'auto' | 'selected') => void;
+  selectedWiDocIds: string[];
+  setSelectedWiDocIds: (docIds: string[]) => void;
   onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
   runAttachments: Array<{ id: string; filename: string; charCount: number }>;
   runAttachmentParseState: { filename: string; stage: 'reading' | 'parsing' } | null;
@@ -97,6 +101,10 @@ export function Sidebar({
   availableProjects,
   cacheCountsByProject,
   wiDocs,
+  wiSelectionMode,
+  setWiSelectionMode,
+  selectedWiDocIds,
+  setSelectedWiDocIds,
   onOpenProjectSettings,
   runAttachments,
   runAttachmentParseState,
@@ -122,6 +130,8 @@ export function Sidebar({
         return targets.includes('*') || projectKeys.some(key => targets.includes(key));
       })
     : wiDocs;
+  const activeWiDocIdSet = React.useMemo(() => new Set(activeWiDocs.map((doc) => doc.docId)), [activeWiDocs]);
+  const selectedRunWiDocs = activeWiDocs.filter((doc) => selectedWiDocIds.includes(doc.docId));
   const selectedProjects = projectKeys
     .map(key => availableProjects.find(p => p.key === key) || { key, name: '' })
     .filter((project): project is { key: string; name: string } => Boolean(project.key));
@@ -201,6 +211,15 @@ export function Sidebar({
     if (!files.length) return;
     await onAddRunAttachments(files);
   }
+
+  const toggleRunWiDoc = (docId: string) => {
+    const normalized = String(docId ?? '').trim();
+    if (!normalized || !activeWiDocIdSet.has(normalized)) return;
+    const next = selectedWiDocIds.includes(normalized)
+      ? selectedWiDocIds.filter((id) => id !== normalized)
+      : [...selectedWiDocIds, normalized].slice(0, 3);
+    setSelectedWiDocIds(next);
+  };
 
   return (
     <aside
@@ -642,6 +661,84 @@ export function Sidebar({
             </div>
           </div>
         </motion.div>
+
+        {/* ── WI scope card ── */}
+        {activeWiDocs.length > 0 && (
+          <motion.div
+            className="rf-sidebar-card"
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={2.2}
+          >
+            <div className="px-3 py-3 space-y-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Work instruction scope</div>
+                  <div className="mt-1 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                    Auto uses all linked docs. Pick limits this run to up to 3 docs.
+                  </div>
+                </div>
+                <span className="rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
+                  {wiSelectionMode === 'auto' ? 'Auto' : `${selectedRunWiDocs.length}/3 selected`}
+                </span>
+              </div>
+
+              <div className="inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1">
+                {([
+                  { id: 'auto' as const, label: 'Auto' },
+                  { id: 'selected' as const, label: 'Pick up to 3' },
+                ]).map((option) => {
+                  const selected = wiSelectionMode === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setWiSelectionMode(option.id)}
+                      className={`rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
+                        selected
+                          ? 'bg-[var(--rf-brand)] text-white'
+                          : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {wiSelectionMode === 'selected' && (
+                <div className="max-h-32 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar">
+                  {activeWiDocs.map((doc) => {
+                    const isSelected = selectedWiDocIds.includes(doc.docId);
+                    const disabled = !isSelected && selectedWiDocIds.length >= 3;
+                    return (
+                      <button
+                        key={doc.docId}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => toggleRunWiDoc(doc.docId)}
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                          isSelected
+                            ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
+                            : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
+                        } ${disabled ? 'opacity-45 cursor-not-allowed' : ''}`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12px] font-semibold">{doc.filename}</span>
+                          <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{doc.chunkCount} chunks</span>
+                        </span>
+                        <span className="ml-3 shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
+                          {isSelected ? 'Selected' : 'Pick'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
 
         {/* Output profile session card removed — capability-based decomposition handles output style automatically */}
 
