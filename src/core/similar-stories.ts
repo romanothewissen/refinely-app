@@ -12,6 +12,7 @@ import { buildRerankPrompt } from './prompts';
 import { ClarifyAnswer, SimilarStory, TenantConfig } from '../types';
 import { objectDelete, objectRead, objectWrite, KEYS } from '../services/cache';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
+import { ANCHOR_EXAMPLES, formatAnchorBundleText } from './ar-anchor-bundle';
 
 interface BacklogDoc {
   key: string;
@@ -1290,6 +1291,199 @@ const AR_PATTERN_STOP = new Set([
   'given', 'when', 'then', 'and', 'or', 'the', 'a', 'an', 'to', 'of', 'in', 'for', 'is', 'are', 'with', 'on', 'as', 'at', 'by', 'from', 'be', 'it', 'if',
 ]);
 
+// ─── AR Exemplar Quality Scoring ─────────────────────────────────────────────
+
+const CONCRETE_NOUNS_RE = /\b(plan|quote|contract|agreement|order|shipment|activity|record|request|case|approval|notification|invoice|estimate|schedule|assignment|entitlement|coverage|authorisation|authorization|allocation|delivery)\b/gi;
+const ABSTRACT_VERBS_RE = /\b(ensure|verify|validate|confirm|process|handle|manage|perform|execute|check|update|complete|allow|prevent|enable|disable)\b/gi;
+const UI_LEAK_RE = /\b(button|click|screen|dropdown|checkbox|popup|modal|tab|field|form|page|menu|sidebar|panel|widget|dialog|tooltip|toggle)\b/gi;
+const FIRST_PERSON_RE = /\b(i |we |my |our )/gi;
+const CONFIG_GIVEN_RE = /\b(is configured|configured for|trigger event|status equals|flag is set|setting is)\b/gi;
+const PLACEHOLDER_RE = /\b(tbd|todo|placeholder|see description|n\/a|fill in|xxx)\b/i;
+const FRAGMENT_TAIL_RE = /\s+(the|and|with|or|of|a|an|to|for|in|at|by)\.?\s*$/i;
+const CLAUSE_SEPARATOR_RE = /\r?\n/;
+
+/** Detect non-GWT scenario-shaped items: numbered lists, Gherkin, Scenario:, Precondition: patterns */
+function countScenarioItems(ac: string): number {
+  let count = 0;
+  const lines = ac.split(CLAUSE_SEPARATOR_RE);
+  for (const line of lines) {
+    const stripped = stripLeadingClauseMarkers(line);
+    if (!stripped) continue;
+    if (/^(given|when|then|scenario|precondition|trigger|outcome|expected result|expected)[\s:]/i.test(stripped)) {
+      count += 1;
+    } else if (/^\d+[.)]\s+\w/.test(line.trim()) && stripped.split(/\s+/).length >= 6) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function countMatches(text: string, re: RegExp): number {
+  return (text.match(re) ?? []).length;
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function avgTrippleClauseWordCount(triples: Array<{ given: string; when: string; then: string }>): number {
+  if (!triples.length) return 0;
+  let total = 0;
+  for (const t of triples) {
+    total += wordCount(t.given) + wordCount(t.when) + wordCount(t.then);
+  }
+  return total / (triples.length * 3);
+}
+
+function hasFragmentTail(text: string): boolean {
+  return FRAGMENT_TAIL_RE.test(text);
+}
+
+function detectsDuplication(triples: Array<{ given: string; when: string; then: string }>): boolean {
+  if (triples.length < 2) return false;
+  const thens = triples.map((t) => t.then.toLowerCase().replace(/\s+/g, ' ').trim());
+  const seen = new Set<string>();
+  for (const t of thens) {
+    if (t.length > 10 && seen.has(t)) return true;
+    seen.add(t);
+  }
+  return false;
+}
+
+/**
+ * Hard gate: minimum substance check, format-agnostic.
+ * Returns null when the item passes, or a drop reason string when it fails.
+ */
+function hardGateDropReason(ac: string): string | null {
+  if (!ac || ac.length < 60) return 'ac_too_short';
+  if (PLACEHOLDER_RE.test(ac)) return 'placeholder_text';
+
+  // Require at least 2 structured items (GWT triples OR scenario-shaped lines)
+  // to ensure the AC has list-like substance, not just a single sentence.
+  const triples = extractGwtSamples(ac, 8);
+  const scenarioItems = countScenarioItems(ac);
+  const substantiveItems = triples.length + Math.max(0, scenarioItems - triples.length);
+  if (substantiveItems < 2) {
+    // Last resort: count lines with ≥ 12 words
+    const longLines = ac.split(CLAUSE_SEPARATOR_RE).filter((l) => wordCount(l) >= 12);
+    if (longLines.length < 2) return 'insufficient_structured_items';
+  }
+  return null;
+}
+
+export interface ExemplarQualityResult {
+  score: number;
+  hardGatePassed: boolean;
+  dropReason: string | null;
+  detectedFormat: 'gwt' | 'gherkin' | 'numbered' | 'prose';
+  gwtTripleCount: number;
+}
+
+/**
+ * Score a single backlog doc's acceptance criteria for quality as an AR exemplar.
+ *
+ * Well-formed GWT triples earn the highest weight. Non-GWT scenario formats
+ * (numbered lists, Gherkin, Scenario:/Precondition: patterns) are also
+ * recognised and scored on their structural merits rather than excluded.
+ *
+ * Returns a score in [0, 100] for survivors, 0 for items that fail the hard gate.
+ */
+export function scoreExemplarQuality(ac: string): ExemplarQualityResult {
+  const dropReason = hardGateDropReason(ac);
+  if (dropReason) {
+    return { score: 0, hardGatePassed: false, dropReason, detectedFormat: 'prose', gwtTripleCount: 0 };
+  }
+
+  const triples = extractGwtSamples(ac, 8);
+  const gwtTripleCount = triples.length;
+
+  // ── Detect format ──────────────────────────────────────────────────────────
+  let detectedFormat: ExemplarQualityResult['detectedFormat'] = 'prose';
+  if (gwtTripleCount >= 2) {
+    detectedFormat = 'gwt';
+  } else if (/\b(scenario|precondition|expected result|expected):?\s/i.test(ac)) {
+    detectedFormat = 'gherkin';
+  } else if (/^\s*\d+[.)]/m.test(ac)) {
+    detectedFormat = 'numbered';
+  }
+
+  // ── Positive signals ───────────────────────────────────────────────────────
+  let score = 0;
+
+  // GWT completeness — highest weight (0–40 pts)
+  // gwtTripleCount 0=0, 1=10, 2=22, 3=30, 4=36, 5+=40
+  const gwtPts = Math.min(40, gwtTripleCount > 0 ? 10 + (gwtTripleCount - 1) * 7.5 : 0);
+  score += gwtPts;
+
+  // Clause substance: average words per clause should be in 5–40 (0–10 pts)
+  const avgWords = avgTrippleClauseWordCount(triples);
+  if (gwtTripleCount > 0) {
+    if (avgWords >= 5 && avgWords <= 40) score += 10;
+    else if (avgWords >= 3) score += 4;
+  }
+
+  // Non-GWT scenario items when few/no GWT found (0–8 pts)
+  const scenarioItems = countScenarioItems(ac);
+  if (gwtTripleCount < 2 && scenarioItems >= 2) {
+    score += Math.min(8, scenarioItems * 2);
+  }
+
+  // AR count in band 2–8 (0–6 pts)
+  const totalItems = Math.max(gwtTripleCount, scenarioItems);
+  if (totalItems >= 2 && totalItems <= 8) score += 6;
+  else if (totalItems === 1 || totalItems === 9) score += 2;
+
+  // User-story description (0–4 pts)
+  // (checked via presence in the full text, not just description field)
+  if (/as an? .+, (i|we) need/i.test(ac)) score += 4;
+
+  // Concrete noun density in THEN / outcome clauses (0–12 pts)
+  const thenText = gwtTripleCount > 0
+    ? triples.map((t) => t.then).join(' ')
+    : ac;
+  const concreteHits = countMatches(thenText, CONCRETE_NOUNS_RE);
+  const abstractHits = countMatches(thenText, ABSTRACT_VERBS_RE);
+  const density = concreteHits / Math.max(1, concreteHits + abstractHits);
+  score += Math.round(density * 12);
+
+  // ── Penalties ──────────────────────────────────────────────────────────────
+  // UI leak (–8 per hit, max –16)
+  const uiLeaks = countMatches(ac, UI_LEAK_RE);
+  score -= Math.min(16, uiLeaks * 8);
+
+  // First person in AC (–6)
+  if (FIRST_PERSON_RE.test(ac)) score -= 6;
+
+  // Config-language GIVENs (–6 per hit, max –12)
+  const configHits = countMatches(ac, CONFIG_GIVEN_RE);
+  score -= Math.min(12, configHits * 6);
+
+  // Fragment tails in GIVEN/THEN clauses (–2 per hit, max –8)
+  const allClauseText = gwtTripleCount > 0
+    ? triples.flatMap((t) => [t.given, t.then])
+    : ac.split(CLAUSE_SEPARATOR_RE);
+  const fragmentPenalty = allClauseText.filter((c) => hasFragmentTail(c)).length;
+  score -= Math.min(8, fragmentPenalty * 2);
+
+  // Duplication across THEN clauses (–10)
+  if (gwtTripleCount >= 2 && detectsDuplication(triples)) score -= 10;
+
+  return {
+    score: Math.max(0, Math.min(100, Math.round(score))),
+    hardGatePassed: true,
+    dropReason: null,
+    detectedFormat,
+    gwtTripleCount,
+  };
+}
+
+/**
+ * Minimum quality floor for tenant exemplars (vs shipped anchors).
+ * Calibrated so an item with 2 well-formed GWT triples, reasonable clause length,
+ * and some concrete nouns scores above this even with minor penalties.
+ */
+const EXEMPLAR_QUALITY_FLOOR = 38;
+
 function requirementKeywordOverlap(requirement: string, corpus: string): number {
   const reqTokens = new Set(
     requirement
@@ -1414,61 +1608,93 @@ function extractRawArFallbackLines(acceptanceCriteria: string, max = 2): string[
 
 /**
  * Compact AR phrasing patterns from already-fetched similar stories (no extra Jira fetch).
- * Prefer stories whose text overlaps the requirement lexically and contain GIVEN/WHEN/THEN.
+ *
+ * Applies a two-step quality filter before emitting examples to the prompt:
+ *   1. Hard gate: substantive, non-placeholder AC with list-shaped structure.
+ *   2. Quality scoring: structural + linguistic signals; GWT triples earn the
+ *      highest weight, but other scenario formats (Gherkin, numbered) also score.
+ *
+ * If fewer than 2 stories survive the gate OR the top survivors' median score is
+ * below EXEMPLAR_QUALITY_FLOOR, falls back to the shipped anchor bundle so the
+ * model always receives at least one high-quality concrete GWT example.
  */
 export function formatArPatternLibraryFromSimilarStories(
   stories: SimilarStory[],
   requirement: string,
   maxStories = 5,
-): { text: string; storyKeys: string[] } {
+): { text: string; storyKeys: string[]; usedAnchorFallback: boolean } {
   const req = requirement.trim();
-  if (!stories.length || !req) return { text: '', storyKeys: [] };
+  if (!stories.length || !req) {
+    return { text: formatAnchorBundleText(), storyKeys: [], usedAnchorFallback: true };
+  }
 
   type Row = {
     story: SimilarStory;
-    score: number;
+    keywordOverlap: number;
+    quality: ExemplarQualityResult;
     triples: Array<{ given: string; when: string; then: string }>;
-    rawLines: string[];
   };
+
+  // ── Step 1: score all candidates ──────────────────────────────────────────
   const rows: Row[] = [];
   for (const story of stories) {
     const ac = String(story.acceptanceCriteria ?? '');
-    if (!ac.trim()) continue;
-    const triples = extractGwtSamples(ac, 3);
-    const rawLines = triples.length ? [] : extractRawArFallbackLines(ac, 2);
-    if (!triples.length && !rawLines.length) continue;
-    const blob = `${story.summary} ${story.description ?? ''} ${ac}`.slice(0, 4000);
-    rows.push({ story, score: requirementKeywordOverlap(req, blob), triples, rawLines });
-  }
-  if (!rows.length) return { text: '', storyKeys: [] };
+    const quality = scoreExemplarQuality(ac);
+    if (!quality.hardGatePassed) continue; // dropped by hard gate
 
+    const triples = extractGwtSamples(ac, 4);
+    const blob = `${story.summary} ${story.description ?? ''} ${ac}`.slice(0, 4000);
+    rows.push({ story, keywordOverlap: requirementKeywordOverlap(req, blob), quality, triples });
+  }
+
+  // ── Step 2: check if the pool is strong enough ────────────────────────────
+  const useFallback = (): boolean => {
+    if (rows.length < 2) return true;
+    const sorted = [...rows].sort((a, b) => b.quality.score - a.quality.score);
+    const topK = sorted.slice(0, Math.min(maxStories, sorted.length));
+    const median = topK[Math.floor(topK.length / 2)].quality.score;
+    return median < EXEMPLAR_QUALITY_FLOOR;
+  };
+
+  if (useFallback()) {
+    return { text: formatAnchorBundleText(), storyKeys: [], usedAnchorFallback: true };
+  }
+
+  // ── Step 3: rank and select ───────────────────────────────────────────────
+  // Primary sort: quality score; secondary: keyword overlap; tertiary: Jira relevance score
   rows.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
+    if (b.quality.score !== a.quality.score) return b.quality.score - a.quality.score;
+    if (b.keywordOverlap !== a.keywordOverlap) return b.keywordOverlap - a.keywordOverlap;
     return (b.story.relevanceScore ?? 0) - (a.story.relevanceScore ?? 0);
   });
-  const withOverlap = rows.filter((r) => r.score > 0).slice(0, maxStories);
-  const picked = withOverlap.length ? withOverlap : rows.slice(0, maxStories);
 
+  const topK = Math.min(maxStories, Math.ceil(rows.length * 0.4), rows.length);
+  const picked = rows.slice(0, Math.max(2, topK));
+
+  // ── Step 4: format output ─────────────────────────────────────────────────
   const lines: string[] = [
-    'ACCEPTANCE PATTERN REFERENCES (reuse structure and phrasing style only; do not copy unrelated scope):',
+    'ACCEPTANCE REQUIREMENT EXAMPLES from this workspace (match their specificity and depth — do not copy their scope):',
+    'Study the structure: compound preconditions in GIVEN, concrete business objects in THEN, distinct branch variants.',
+    '',
   ];
   const storyKeys: string[] = [];
-  for (const { story, triples, rawLines } of picked) {
+  for (const { story, triples } of picked) {
     storyKeys.push(story.key);
     lines.push(`— ${story.key}: ${story.summary}`);
     if (triples.length) {
       for (const gwt of triples) {
-        lines.push(`  ${gwt.given}`);
-        lines.push(`  ${gwt.when}`);
-        lines.push(`  ${gwt.then}`);
+        lines.push(`  GIVEN ${gwt.given}`);
+        lines.push(`  WHEN ${gwt.when}`);
+        lines.push(`  THEN ${gwt.then}`);
       }
     } else {
-      for (const raw of rawLines) {
+      for (const raw of extractRawArFallbackLines(String(story.acceptanceCriteria ?? ''), 3)) {
         lines.push(`  ${raw}`);
       }
     }
+    lines.push('');
   }
-  return { text: lines.join('\n'), storyKeys };
+  return { text: lines.join('\n').trimEnd(), storyKeys, usedAnchorFallback: false };
 }
 
 export function formatSimilarStoriesText(items: SimilarStory[], maxItems = 12): string {

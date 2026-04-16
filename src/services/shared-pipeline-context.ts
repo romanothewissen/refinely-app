@@ -186,15 +186,15 @@ export async function loadSharedPipelineContext(input: {
   const includeSimilarStories = input.includeSimilarStories !== false;
   const pipelineProfile = input.config.generatorConfig.pipelineProfile;
   const similarMaxResults = pipelineProfile === 'fast'
-    ? 2
+    ? 4
     : pipelineProfile === 'quality'
-      ? 4
-      : 3;
+      ? 12
+      : 12; // raised so the quality scorer has a large enough pool to filter from
   const arPatternMaxStories = pipelineProfile === 'fast'
     ? 2
     : pipelineProfile === 'quality'
       ? 5
-      : 4;
+      : 5;
   const selectedWiDocIds = [...new Set((input.selectedWiDocIds ?? [])
     .map((id) => String(id ?? '').trim())
     .filter(Boolean))]

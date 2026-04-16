@@ -21,7 +21,9 @@ import { getTierModel } from '../services/billing';
 import { buildStoryAssistantModelRoute, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { callLlmJsonWithUsage } from './llm';
 import {
-  buildStoryAssistantArSystemPrompt,
+  buildAddFeatureSystemPrompt,
+  buildArSystemPrompt,
+  buildCombinedDecompositionArSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantDecompositionSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
@@ -677,7 +679,7 @@ function buildGenerationContextMessage(input: {
     parts.push(`Operational evidence from Work Instructions:\n${input.wiEvidenceText}`);
   }
   if (input.similarStoriesText?.trim()) {
-    parts.push(`Relevant backlog references from this workspace (scope and phrasing calibration only):\n${input.similarStoriesText}`);
+    parts.push(`Relevant backlog references from this workspace (use as evidence of domain vocabulary, scope, and typical feature structure — do not copy actor labels or business rules that differ from this requirement):\n${input.similarStoriesText}`);
   }
   if (input.arPatternLibraryText?.trim()) {
     parts.push(input.arPatternLibraryText);
@@ -1246,6 +1248,116 @@ function mergePass2IntoPass1(pass1: RawFeature[], pass2: RawFeature[]): RawFeatu
   });
 }
 
+// ─── Multi-activity coverage probe ────────────────────────────────────────────
+
+const MULTI_ACTIVITY_KEYWORDS = [
+  'sequence', 'sequenced', 'sequential', 'sequencing',
+  'dependency', 'dependencies', 'dependent',
+  'de-install', 'deinstall', 'reinstall', 're-install',
+  'loaner', 'loan',
+  'in-house', 'off-site', 'offsite',
+  'multi-activity', 'multi activity',
+  'multiple activities', 'multiple work orders',
+  'phased', 'phase',
+  'follow-up actions', 'follow-on',
+];
+
+const DEPENDENCY_SUMMARIES_RE = /\b(enforc|sequen|depend|order|prerequisite|block|prevent)\b/i;
+const VALIDATION_SUMMARIES_RE = /\b(valid|logical|illogical|detect|warn|alert|check sequence)\b/i;
+const STATUS_SUMMARIES_RE = /\b(status|progress|visib|consolidat|overview|track|monitor)\b/i;
+
+/**
+ * Returns true when the requirement + WI sequencing signals strongly suggest
+ * a multi-step orchestration workflow that could have missing coverage.
+ */
+function isMultiActivityRequirement(
+  requirement: string,
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null,
+): boolean {
+  const text = requirement.toLowerCase();
+  if (MULTI_ACTIVITY_KEYWORDS.some((kw) => text.includes(kw))) return true;
+  // Also flag when WI sequencing rules are present — they indicate dependency ordering matters
+  const seqRules = wiInsightsArtifact?.sequencingRules ?? [];
+  return seqRules.length >= 2;
+}
+
+/**
+ * Check whether the pass-1 feature set already covers the three key dimensions
+ * of a multi-activity workflow: dependency enforcement, sequence validation,
+ * and consolidated status visibility.
+ */
+function checkMultiActivityCoverage(features: Feature[]): {
+  missingDependencyEnforcement: boolean;
+  missingSequenceValidation: boolean;
+  missingConsolidatedStatus: boolean;
+} {
+  const summaries = features.map((f) => (f.summary ?? '') + ' ' + (f.description ?? ''));
+  const combined = summaries.join(' ');
+  return {
+    missingDependencyEnforcement: !DEPENDENCY_SUMMARIES_RE.test(combined),
+    missingSequenceValidation: !VALIDATION_SUMMARIES_RE.test(combined),
+    missingConsolidatedStatus: !STATUS_SUMMARIES_RE.test(combined),
+  };
+}
+
+/**
+ * Run a targeted LLM call to add only the missing multi-activity coverage features.
+ * Budget-gated: skips on fast profile or when no gaps are detected.
+ * Returns any new features to be appended to the pass-1 set, or [] if nothing needed.
+ */
+async function runMultiActivityCoverageProbe(opts: {
+  features: Feature[];
+  requirement: string;
+  wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
+  config: TenantConfig;
+  model: string;
+  pipelineProfile: PipelineProfile;
+  providerOpts: Record<string, unknown>;
+}): Promise<{ newRaw: RawFeature[]; probeNote: string | null }> {
+  if (opts.pipelineProfile === 'fast') return { newRaw: [], probeNote: null };
+  if (!isMultiActivityRequirement(opts.requirement, opts.wiInsightsArtifact)) {
+    return { newRaw: [], probeNote: null };
+  }
+
+  const { missingDependencyEnforcement, missingSequenceValidation, missingConsolidatedStatus } =
+    checkMultiActivityCoverage(opts.features);
+
+  const gaps: string[] = [];
+  if (missingDependencyEnforcement) gaps.push('dependency enforcement between sequenced activities (preventing a later step from being initiated before its prerequisite is complete)');
+  if (missingSequenceValidation) gaps.push('logical sequence validation (detecting and warning when activities are ordered illogically, e.g. a re-installation before a de-installation)');
+  if (missingConsolidatedStatus) gaps.push('consolidated status visibility across all activities in the plan for a managing role');
+
+  if (!gaps.length) return { newRaw: [], probeNote: null };
+
+  const existingSummaries = opts.features.map((f, i) => `${i + 1}. ${f.summary}`).join('\n');
+  const gapList = gaps.map((g, i) => `${i + 1}. ${g}`).join('\n');
+  const userMessage = `Original requirement:\n${opts.requirement}\n\nExisting features already decomposed:\n${existingSummaries}\n\nThe following multi-activity workflow coverage is missing:\n${gapList}\n\nAdd only the features needed to cover these specific gaps. Return an empty array if any gap is already covered by the existing features. Do not rewrite or rename existing features.`;
+
+  try {
+    const result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+      model: opts.model,
+      systemPrompt: buildAddFeatureSystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles ?? [],
+        processTaxonomy: opts.config.processTaxonomy ?? [],
+        processTaxonomyEnabled: opts.config.processTaxonomyEnabled ?? false,
+      }),
+      userMessage,
+      maxTokens: 4096,
+      reasoningEffort: 'medium',
+      ...opts.providerOpts,
+    });
+    const newRaw = extractRawFeaturesFromPayload(result.data);
+    if (!newRaw.length) return { newRaw: [], probeNote: 'Coverage probe: no gaps found after LLM review.' };
+    return {
+      newRaw,
+      probeNote: `Coverage probe added ${newRaw.length} feature(s) for: ${gaps.join('; ')}.`,
+    };
+  } catch {
+    return { newRaw: [], probeNote: 'Coverage probe failed silently; continuing without additions.' };
+  }
+}
+
 function featureToRaw(feature: Feature): RawFeature {
   return {
     id: feature.id,
@@ -1594,19 +1706,77 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
 
   const maybeCancelled = async () => Boolean(await opts.shouldCancel?.());
 
-  if (!pass1Features.length) {
+  // Build the shared evidence block once so both pass 1 and pass 2 user
+  // messages share a byte-identical leading prefix, enabling Gemini implicit
+  // prefix caching on pass 2 (which sees the same content + a new trailing task).
+  const sharedEvidenceBlock = buildGenerationContextMessage({
+    requirement: opts.requirement,
+    clarifyAnswers: opts.clarifyAnswers,
+    attachmentText: opts.attachmentText,
+    wiEvidenceText,
+    roleHint,
+    discoveryProfile: opts.discoveryProfile,
+    actorSets,
+    similarStoriesText,
+    arPatternLibraryText,
+  });
+
+  // Single-pass gate: for low-complexity + low-ambiguity requirements, fuse
+  // decomposition and AR writing into one LLM call. Saves ~45-50s of wall-clock.
+  // Falls back to 2-pass when: precomputed drafts exist, fast profile is used,
+  // multi-activity signals are present, or when the combined call returns too few
+  // features or any feature has empty ARs.
+  const isSinglePassEligible = !pass1Features.length
+    && pipelineProfile !== 'fast'
+    && opts.discoveryProfile?.complexity === 'low'
+    && opts.discoveryProfile?.ambiguity === 'low'
+    && !isMultiActivityRequirement(opts.requirement, opts.wiInsightsArtifact);
+
+  let usedSinglePass = false;
+
+  if (isSinglePassEligible) {
+    const singlePassStartedAt = Date.now();
+    const singlePassMessage = `${sharedEvidenceBlock}\n\nDecompose this requirement into the distinct features needed to deliver it and immediately write complete GIVEN/WHEN/THEN acceptance requirements for each feature.`;
+    try {
+      const singlePassResult = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
+        model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
+        systemPrompt: buildCombinedDecompositionArSystemPrompt({
+          domainContext: opts.config.domainContext,
+          domainRoles: opts.config.domainRoles,
+          processTaxonomy: opts.config.processTaxonomy,
+          processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
+        }),
+        userMessage: singlePassMessage,
+        maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
+        reasoningEffort: 'medium',
+        ...providerOpts,
+      });
+      stageUsage.decomposition = singlePassResult.usage;
+      const singlePassRaw = extractRawFeaturesFromPayload(singlePassResult.data);
+      const singlePassHasArs = singlePassRaw.every(
+        (f) => Array.isArray(f.acceptance_requirements) && (f.acceptance_requirements as unknown[]).length >= 2,
+      );
+      if (singlePassRaw.length >= 2 && singlePassHasArs) {
+        pass1Raw = singlePassRaw;
+        pass1Features = singlePassRaw.map((feature) => normaliseFeature(feature, roleGrounding));
+        stageUsage.acceptanceRequirements = { input: 0, output: 0 };
+        stageDurationsMs.decomposition = Date.now() - singlePassStartedAt;
+        stageDurationsMs.acceptanceRequirements = 0;
+        usedSinglePass = true;
+        if (opts.onPass1DraftFeatures) {
+          await opts.onPass1DraftFeatures(pass1Features);
+        }
+      }
+      // On insufficient result: fall through to 2-pass below
+    } catch {
+      // Fall through to 2-pass on any error
+    }
+  }
+
+  if (!usedSinglePass && !pass1Features.length) {
     const startedAt = Date.now();
     const decompositionPromptStartedAt = Date.now();
-    const decompositionUserMessage = `${buildGenerationContextMessage({
-      requirement: opts.requirement,
-      clarifyAnswers: opts.clarifyAnswers,
-      attachmentText: opts.attachmentText,
-      wiEvidenceText,
-      roleHint,
-      discoveryProfile: opts.discoveryProfile,
-      actorSets,
-      similarStoriesText,
-    })}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
+    const decompositionUserMessage = `${sharedEvidenceBlock}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
     promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
       model: getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier),
@@ -1634,7 +1804,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     if (opts.onPass1DraftFeatures) {
       await opts.onPass1DraftFeatures(pass1Features);
     }
-  } else {
+  } else if (!usedSinglePass) {
     pass1Raw = pass1Features.map((feature) => featureToRaw(feature));
   }
 
@@ -1642,6 +1812,41 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     throw new GenerationCancelledError();
   }
 
+  // ── Multi-activity coverage probe ─────────────────────────────────────────
+  // Runs only when sequencing/multi-step signals are detected and not on fast
+  // profile. Adds missing dependency-enforcement, sequence-validation, or
+  // consolidated-status features without re-running full decomposition.
+  const probeNotes: string[] = [];
+  if (pipelineProfile !== 'fast') {
+    const probeResult = await runMultiActivityCoverageProbe({
+      features: pass1Features,
+      requirement: opts.requirement,
+      wiInsightsArtifact: opts.wiInsightsArtifact,
+      config: opts.config,
+      model: getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier),
+      pipelineProfile,
+      providerOpts: providerOpts as Record<string, unknown>,
+    });
+    if (probeResult.newRaw.length) {
+      const newFeatures = probeResult.newRaw.map((f) => normaliseFeature({ ...f, acceptance_requirements: [] }, roleGrounding));
+      pass1Raw = [...pass1Raw, ...probeResult.newRaw];
+      pass1Features = [...pass1Features, ...newFeatures];
+    }
+    if (probeResult.probeNote) probeNotes.push(probeResult.probeNote);
+  }
+
+  let features: Feature[];
+  let pass2CoverageNotes: string[] = [];
+  let failedIds = new Set<string>();
+  const rescueNotes: string[] = [];
+  let autoRepairedIssues: string[] = [];
+
+  if (usedSinglePass) {
+    // Single-pass already produced features with ARs — skip the separate AR call.
+    features = dedupeExactAcceptanceRequirements(pass1Features).features;
+    const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
+    failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
+  } else {
   const pass2StartedAt = Date.now();
   const arPromptStartedAt = Date.now();
   const arReasoningEffort = shouldUseHighArReasoning({
@@ -1651,17 +1856,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     clarifyAnswers: opts.clarifyAnswers,
     wiEvidenceText,
   }) ? 'high' : 'medium';
-  const arUserMessage = `${buildGenerationContextMessage({
-    requirement: opts.requirement,
-    clarifyAnswers: opts.clarifyAnswers,
-    attachmentText: opts.attachmentText,
-    wiEvidenceText,
-    roleHint,
-    discoveryProfile: opts.discoveryProfile,
-    actorSets,
-    similarStoriesText,
-    arPatternLibraryText,
-  })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
+  const arUserMessage = `${sharedEvidenceBlock}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
     features: pass1Raw.map((feature) => ({
       ...feature,
       acceptance_requirements: [],
@@ -1670,11 +1865,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
     model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
-    systemPrompt: buildStoryAssistantArSystemPrompt({
-      domainContext: opts.config.domainContext,
-      domainRoles: opts.config.domainRoles,
-      wiInsights: opts.wiInsightsArtifact ?? undefined,
-    }),
+    systemPrompt: buildArSystemPrompt({ domainContext: opts.config.domainContext }),
     userMessage: arUserMessage,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
     reasoningEffort: arReasoningEffort,
@@ -1685,26 +1876,22 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
 
   const pass2Raw = extractRawFeaturesFromPayload(pass2Result.data);
   const mergedRaw = mergePass2IntoPass1(pass1Raw, pass2Raw);
-  let features = mergedRaw.map((feature) => normaliseFeature(feature, roleGrounding));
-  const repairedOutput = dedupeExactAcceptanceRequirements(features);
-  const pass2CoverageNotes = pass2Raw.length === 0
+  let twoPassFeatures = mergedRaw.map((feature) => normaliseFeature(feature, roleGrounding));
+  const repairedOutput = dedupeExactAcceptanceRequirements(twoPassFeatures);
+  autoRepairedIssues = repairedOutput.notes;
+  pass2CoverageNotes = pass2Raw.length === 0
     ? ['Acceptance requirements pass returned no feature array; preserved pass-1 features for targeted retries.']
     : pass2Raw.length < pass1Raw.length
       ? ['Acceptance requirements pass returned fewer features than decomposition; merged by id/summary and index fallback.']
       : [];
   features = repairedOutput.features;
   const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
-  let failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
-  const rescueNotes: string[] = [];
+  failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
   if (failedIds.size === features.length && features.length > 0) {
     const rescueStartedAt = Date.now();
     const rescueResult = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
       model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
-      systemPrompt: buildStoryAssistantArSystemPrompt({
-        domainContext: opts.config.domainContext,
-        domainRoles: opts.config.domainRoles,
-        wiInsights: opts.wiInsightsArtifact ?? undefined,
-      }),
+      systemPrompt: buildArSystemPrompt({ domainContext: opts.config.domainContext }),
       userMessage: `${buildGenerationContextMessage({
         requirement: opts.requirement,
         clarifyAnswers: opts.clarifyAnswers,
@@ -1743,6 +1930,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       }
     }
   }
+  } // end else (two-pass path)
+
   if (failedIds.size > 0) {
     features = annotateFailedAcceptanceRequirementFeatures(features, failedIds) as Feature[];
   }
@@ -1776,13 +1965,14 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       partialSuccessMessage: failedIds.size > 0
         ? `Acceptance requirements could not be completed for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}.`
         : undefined,
-      autoRepairedIssues: repairedOutput.notes,
+      autoRepairedIssues,
       ...(pass2CoverageNotes.length
         ? { mergeDiagnostics: pass2CoverageNotes }
         : {}),
       ...(rescueNotes.length
         ? { mergeDiagnostics: [...pass2CoverageNotes, ...rescueNotes] }
         : {}),
+      ...(probeNotes.length ? { coverageProbeNotes: probeNotes } : {}),
       actorSets,
       pass2ArPatternStoryKeys: opts.arPatternStoryKeys,
       latencyMs: {

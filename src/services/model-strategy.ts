@@ -29,7 +29,9 @@ export const DEFAULT_BUCKET_CLASSES: GeneratorBucketClasses = {
 };
 
 const DEFAULT_RESOLVED_MODELS: Pick<GeneratorConfig, GeneratorRoleModelField> = {
-  decompositionModel: strategyCatalog.providers.anthropic.presets.stable.pro[0],
+  // Pass 1 (decomposition) uses Flash: structurally simple outline task, ~3x faster than Pro.
+  // Pass 2 (AR writing) keeps Pro: reasoning depth is where quality matters most.
+  decompositionModel: strategyCatalog.providers.anthropic.presets.stable.flash[0],
   arModel: strategyCatalog.providers.anthropic.presets.stable.pro[0],
   clarifyModel: strategyCatalog.providers.anthropic.presets.stable.flash[0],
   refineModel: strategyCatalog.providers.anthropic.presets.stable.flash[0],

@@ -209,7 +209,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     },
     modelStrategyVersion: strategyCatalog.version,
     pipelineProfile: 'balanced',
-    decompositionModel: DEFAULT_ANTHROPIC_STABLE.pro[0],
+    decompositionModel: DEFAULT_ANTHROPIC_STABLE.flash[0], // Flash: fast outline task; AR writing keeps Pro
     arModel: DEFAULT_ANTHROPIC_STABLE.pro[0],
     clarifyModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     refineModel: DEFAULT_ANTHROPIC_STABLE.flash[0],

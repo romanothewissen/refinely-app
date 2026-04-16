@@ -260,6 +260,116 @@ Return JSON only:
 {"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":5${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ',"process_code":"7.x.x"' : ''}}]}`;
 }
 
+/**
+ * Combined decomposition + acceptance requirements prompt for single-pass generation.
+ * Used only for low-complexity / low-ambiguity requirements where the 2-pass overhead
+ * is not justified. Produces features with acceptance_requirements already filled.
+ */
+export function buildCombinedDecompositionArSystemPrompt(opts: {
+  domainContext: string;
+  domainRoles?: string[];
+  processTaxonomy: ProcessCode[];
+  processTaxonomyEnabled: boolean;
+}): string {
+  const roleHint = opts.domainRoles?.length
+    ? `Known roles in this domain: ${opts.domainRoles.join(', ')}. Use them only when supported by the requirement or answered Q&A.`
+    : 'If no actor is named, use "authorized user".';
+  const taxonomySection = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? `\n${processTaxonomyBlock(opts.processTaxonomy)}\n`
+    : '';
+  const processRule = opts.processTaxonomyEnabled && opts.processTaxonomy.length
+    ? '- Each feature MUST include a process_code from the taxonomy above.'
+    : '- Omit process_code from output.';
+
+  return `You are a principal business analyst and QA lead decomposing a requirement into well-scoped features and writing GIVEN/WHEN/THEN acceptance requirements for each feature in a single pass.
+${platformContextBlock(opts.domainContext)}
+${roleHint}
+${agnosticGuardrailBlock()}
+
+YOUR JOB: Decompose the requirement into distinct business capabilities, then immediately write acceptance requirements for each one — all in this single response.
+
+DECOMPOSITION RULES:
+- Each feature must represent independent business value, not an implementation step.
+- Each feature description MUST be: "As a [role], I need to [action] so that [benefit]".
+- Never invent generic actor placeholders; resolve roles from evidence, else fall back to "authorized user".
+- No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
+- Split features when business behavior, ownership, rules, or outcomes materially differ.
+- Never return an empty features array.
+- ${processRule}
+
+ACCEPTANCE REQUIREMENT RULES:
+- Every AR MUST use GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome].
+- Never write ARs in first person.
+- Write in business language only — no buttons, screens, forms, APIs, databases, or system mechanics.
+- Be CONCEPTUAL, not example-based. Describe behavior patterns, not specific instances.
+- Each AR tests one distinct thing.
+- Cover: primary business scenario (happy path), key business rules, at least one realistic edge case or failure path.
+- GIVEN clauses must describe a real business situation, not a configuration/setup state.
+- Avoid abstract placeholders like "configured mode" or "trigger event"; state the actual business fact.
+- Prefer concrete business nouns (plan, quote, order, agreement, approval) in THEN clauses over abstract verbs (ensure, verify, confirm).
+- Every returned feature MUST include at least two complete GIVEN/WHEN/THEN acceptance requirements.
+${taxonomySection}
+
+OUTPUT FORMAT:
+Return JSON only:
+{"features":[{"summary":"...","description":"As a ...","acceptance_requirements":["GIVEN ... WHEN ... THEN ..."],"suggested_story_points":5${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ',"process_code":"7.x.x"' : ''}}]}`;
+}
+
+/**
+ * Heuristic filter for WI insight items extracted from PDFs.
+ * Removes fragments that are section headings, truncated lines, or otherwise
+ * too short/malformed to be actionable as business rules.
+ *
+ * A "clean rule" must:
+ *   - Be ≥ 15 characters
+ *   - Contain at least one verb (loose check)
+ *   - Not be a pure section heading (starts with a digit + dot, or is all-caps/title-cased with < 4 words)
+ *   - Not end on a dangling preposition / article (truncation artifact)
+ */
+function isCleanWiRule(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 15) return false;
+  // Section heading: "3.Plan Creation" or "3.1 Something"
+  if (/^\d+(\.\d+)*[\s.]/.test(t)) return false;
+  // Trailing truncation: ends with a bare preposition/article
+  if (/\s+(the|and|with|or|of|a|an|to|for|in|at|by|from|on|is|are|was|were|be|been)\s*\.?\s*$/.test(t)) return false;
+  // Must contain at least one likely verb
+  if (!/\b(is|are|was|were|will|can|must|should|may|have|has|need|allow|prevent|create|generate|assign|manage|track|ensure|use|require|trigger|initiate|complete|follow|update|record|confirm|check|validate|submit|approve|reject|cancel|close|open|process|send|receive)\b/i.test(t)) return false;
+  return true;
+}
+
+/**
+ * Merge consecutive fragments from the same WI chunk into a single sentence.
+ * When a line ends without sentence-ending punctuation and the next continues
+ * the same thought, stitch them together.
+ */
+function mergeWiFragments(items: WorkInstructionInsightItem[]): WorkInstructionInsightItem[] {
+  if (!items.length) return items;
+  const merged: WorkInstructionInsightItem[] = [];
+  let pending: WorkInstructionInsightItem | null = null;
+
+  for (const item of items) {
+    const text = item.text.trim();
+    if (!pending) {
+      pending = { ...item, text };
+      continue;
+    }
+    const prevText: string = pending.text;
+    const prevEndsClean = /[.!?]$/.test(prevText);
+    const sameChunk = pending.sourceSpans?.[0]?.chunkIndex === item.sourceSpans?.[0]?.chunkIndex;
+
+    if (!prevEndsClean && sameChunk && prevText.length + text.length < 280) {
+      // Stitch: append with a space
+      pending = { ...pending, text: `${prevText} ${text}` };
+    } else {
+      merged.push(pending);
+      pending = { ...item, text };
+    }
+  }
+  if (pending) merged.push(pending);
+  return merged;
+}
+
 function buildArEvidenceObligationsBlock(wiInsights: {
   sequencingRules: WorkInstructionInsightItem[];
   splitVsSingleCaseRules: WorkInstructionInsightItem[];
@@ -269,21 +379,22 @@ function buildArEvidenceObligationsBlock(wiInsights: {
   const parts: string[] = [];
 
   if (wiInsights) {
-    const rules = [
+    const rawItems = [
       ...wiInsights.mustCoverBehaviors,
       ...wiInsights.businessRules,
       ...wiInsights.sequencingRules,
       ...wiInsights.splitVsSingleCaseRules,
-    ]
+    ];
+    const cleanRules = mergeWiFragments(rawItems)
       .map(item => item.text.trim())
-      .filter(Boolean)
+      .filter(isCleanWiRule)
       .slice(0, 8);
 
-    if (rules.length) {
+    if (cleanRules.length) {
       parts.push(
         'EVIDENCE OBLIGATIONS — Work Instruction Rules:',
         'These operational rules are authoritative for this domain. For each rule that clearly applies to a feature, include it as a concrete AR GIVEN or THEN clause (paraphrased in business language). Do not force-fit rules to features where they do not apply — a feature may have ARs grounded in the requirement alone when no WI rule is relevant.',
-        rules.map(r => `- ${r}`).join('\n'),
+        cleanRules.map(r => `- ${r}`).join('\n'),
       );
     }
   }
