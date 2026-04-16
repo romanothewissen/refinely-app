@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown, Gauge } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { PipelineProfile } from './types';
 
@@ -70,13 +70,50 @@ function profileAccentAlpha(profile: PipelineProfile): string {
   return 'rgba(43, 89, 74, 0.04)';
 }
 
+/** CSS custom properties driven by the active output profile — applied to the sidebar root. */
+function profileCssVars(profile: PipelineProfile): React.CSSProperties {
+  const themes: Record<PipelineProfile, Record<string, string>> = {
+    fast: {
+      '--sidebar-accent': 'rgb(37, 99, 235)',
+      '--sidebar-accent-subtle': 'rgba(37, 99, 235, 0.08)',
+      '--sidebar-accent-alpha': 'rgba(37, 99, 235, 0.06)',
+      '--sidebar-accent-border': 'rgba(37, 99, 235, 0.25)',
+      '--sidebar-cta-from': '#1e3a5f',
+      '--sidebar-cta-mid': '#2563eb',
+      '--sidebar-cta-to': '#3b82f6',
+      '--sidebar-cta-shadow': 'rgba(37, 99, 235, 0.45)',
+    },
+    balanced: {
+      '--sidebar-accent': 'rgb(43, 89, 74)',
+      '--sidebar-accent-subtle': 'rgba(43, 89, 74, 0.08)',
+      '--sidebar-accent-alpha': 'rgba(43, 89, 74, 0.04)',
+      '--sidebar-accent-border': 'rgba(43, 89, 74, 0.25)',
+      '--sidebar-cta-from': '#1e4035',
+      '--sidebar-cta-mid': '#2b594a',
+      '--sidebar-cta-to': '#3a7062',
+      '--sidebar-cta-shadow': 'rgba(43, 89, 74, 0.55)',
+    },
+    quality: {
+      '--sidebar-accent': 'rgb(124, 58, 237)',
+      '--sidebar-accent-subtle': 'rgba(124, 58, 237, 0.08)',
+      '--sidebar-accent-alpha': 'rgba(124, 58, 237, 0.06)',
+      '--sidebar-accent-border': 'rgba(124, 58, 237, 0.25)',
+      '--sidebar-cta-from': '#3b1a6e',
+      '--sidebar-cta-mid': '#7c3aed',
+      '--sidebar-cta-to': '#8b5cf6',
+      '--sidebar-cta-shadow': 'rgba(124, 58, 237, 0.45)',
+    },
+  };
+  return themes[profile] as React.CSSProperties;
+}
+
 function StepLabel({ number, title }: { number: string; title: string }) {
   return (
     <div className="flex items-center gap-2 px-1 pt-1">
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--rf-border)] bg-white/60 text-[10px] font-bold text-[var(--rf-text-tertiary)] leading-none">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] text-[10px] font-bold text-[var(--sidebar-accent)] leading-none">
         {number}
       </span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--sidebar-accent)]">
         {title}
       </span>
     </div>
@@ -156,7 +193,6 @@ export function Sidebar({
   const [workspaceExpanded, setWorkspaceExpanded] = React.useState(() =>
     contextMode === 'undecided' && !hasSelectedProject && (width ?? 400) >= 360
   );
-  const [optionsExpanded, setOptionsExpanded] = React.useState(false);
   const filteredProjects = availableProjects.filter(project => {
     const haystack = `${project.key} ${project.name}`.toLowerCase();
     return !projectFilter.trim() || haystack.includes(projectFilter.trim().toLowerCase());
@@ -235,10 +271,18 @@ export function Sidebar({
     setSelectedWiDocIds(next);
   };
 
+  const profileOptions = [
+    { id: 'fast' as const, label: 'Fast', desc: 'Quick iteration · lighter analysis' },
+    { id: 'balanced' as const, label: 'Balanced', desc: 'Standard depth and quality' },
+    { id: 'quality' as const, label: 'Quality', desc: 'Thorough analysis · richer output' },
+  ] as const;
+
+  const selectedProfileOption = profileOptions.find(o => o.id === pipelineProfile);
+
   return (
     <aside
       className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden"
-      style={{ width: width ?? 400 }}
+      style={{ width: width ?? 400, ...profileCssVars(pipelineProfile) }}
     >
       {/* ── Header ── */}
       <motion.header
@@ -346,17 +390,17 @@ export function Sidebar({
       {/* ── Scrollable body ── */}
       <div
         className="relative z-[1] flex-1 min-h-0 flex flex-col w-full px-4 py-4 gap-4 overflow-y-auto custom-scrollbar"
-        style={{ background: `linear-gradient(to bottom, ${profileAccentAlpha(pipelineProfile)}, transparent 220px)` }}
+        style={{ background: `linear-gradient(to bottom, var(--sidebar-accent-alpha), transparent 220px)` }}
       >
 
-        {/* ── Step 1: Scope ── */}
+        {/* ── Step 01: Scope ── */}
         <div className="flex flex-col gap-1.5">
           <StepLabel number="01" title="Scope" />
           <motion.div
-            className="rf-sidebar-card"
+            className="rf-sidebar-card relative"
             style={{
               boxShadow: contextMode === 'undecided'
-                ? '0 0 0 2px rgba(43,89,74,0.18), 0 4px 16px -6px rgba(43, 89, 74, 0.08), 0 1px 4px -1px rgba(43, 89, 74, 0.05)'
+                ? `0 0 0 2px var(--sidebar-accent-border), 0 4px 16px -6px var(--sidebar-cta-shadow), 0 1px 4px -1px var(--sidebar-cta-shadow)`
                 : undefined,
             }}
             variants={fadeUp}
@@ -367,7 +411,7 @@ export function Sidebar({
             {/* Animated left-accent pulse when scope is undecided */}
             {contextMode === 'undecided' && (
               <motion.div
-                className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full bg-[var(--rf-brand)]"
+                className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full bg-[var(--sidebar-accent)]"
                 animate={{ opacity: [0.4, 1, 0.4] }}
                 transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
               />
@@ -380,14 +424,14 @@ export function Sidebar({
                 onClick={() => setWorkspaceExpanded((prev) => !prev)}
                 aria-expanded={workspaceExpanded}
                 aria-controls="workspace-selector"
-                className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/92 hover:shadow-md"
+                className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--sidebar-accent-border)] hover:bg-white/92 hover:shadow-md"
                 whileTap={{ scale: 0.99 }}
                 title={workspaceExpanded ? 'Collapse project picker' : 'Expand project picker'}
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] shadow-sm">
-                      <Orbit className="h-3 w-3 text-[var(--rf-brand)]" />
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] shadow-sm">
+                      <Orbit className="h-3 w-3 text-[var(--sidebar-accent)]" />
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-[13px] font-semibold text-[var(--rf-text)]">
@@ -399,14 +443,14 @@ export function Sidebar({
                     {contextReady && (
                       <>
                         <span
-                          className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/78 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]"
+                          className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] px-2 py-0.5 text-[10px] font-semibold text-[var(--sidebar-accent)]"
                         >
-                          <Database className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
+                          <Database className="h-2.5 w-2.5 text-[var(--sidebar-accent)]" />
                           {selectedProjects.length ? `${totalCachedStories}` : 'All'}
                         </span>
                         {activeWiDocs.length > 0 && (
-                          <span className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/78 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
-                            <FileText className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
+                          <span className="hidden min-[380px]:inline-flex items-center gap-1 rounded-full border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] px-2 py-0.5 text-[10px] font-semibold text-[var(--sidebar-accent)]">
+                            <FileText className="h-2.5 w-2.5 text-[var(--sidebar-accent)]" />
                             {activeWiDocs.length}
                           </span>
                         )}
@@ -438,8 +482,8 @@ export function Sidebar({
                         }}
                         className={`w-full flex items-center justify-between rounded-xl border px-3 py-2.5 text-left transition ${
                           projectKeys.length === 0 && contextMode !== 'undecided'
-                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                            : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--rf-border-strong)] hover:bg-white/80 hover:text-[var(--rf-text)]'
+                            ? 'border-[var(--sidebar-accent)] bg-[var(--sidebar-accent-subtle)] text-[var(--sidebar-accent)]'
+                            : 'border-[var(--rf-border)] bg-white/60 text-[var(--rf-text-secondary)] hover:border-[var(--sidebar-accent-border)] hover:bg-white/80 hover:text-[var(--rf-text)]'
                         }`}
                       >
                         <span className="text-[13px] font-semibold">Workspace-wide</span>
@@ -461,7 +505,7 @@ export function Sidebar({
                               key={project.key}
                               type="button"
                               onClick={() => toggleProject(project.key)}
-                              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--rf-border)] bg-[var(--rf-brand-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)] transition hover:bg-white/70"
+                              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] px-2.5 py-0.5 text-[12px] font-semibold text-[var(--sidebar-accent)] transition hover:bg-white/70"
                             >
                               <span className="max-w-[120px] truncate">
                                 {project.key}{project.name ? ` · ${project.name}` : ''}
@@ -478,7 +522,7 @@ export function Sidebar({
                           value={projectFilter}
                           onChange={(e) => setProjectFilter(e.target.value)}
                           placeholder="Search projects…"
-                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand-subtle)] backdrop-blur-sm"
+                          className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--sidebar-accent)] focus:ring-2 focus:ring-[var(--sidebar-accent-subtle)] backdrop-blur-sm"
                         />
                       </div>
 
@@ -494,7 +538,7 @@ export function Sidebar({
                               onClick={() => toggleProject(project.key)}
                               className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
                                 selected
-                                  ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
+                                  ? 'bg-[var(--sidebar-accent-subtle)] text-[var(--rf-text)]'
                                   : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
                               } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                             >
@@ -502,7 +546,7 @@ export function Sidebar({
                                 <span className="block truncate text-[13px] font-semibold">{project.key}</span>
                                 <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{project.name}</span>
                               </span>
-                              <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
+                              <span className="ml-3 shrink-0 text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--sidebar-accent)]">
                                 {selected ? 'Selected' : 'Pick'}
                               </span>
                             </button>
@@ -530,99 +574,239 @@ export function Sidebar({
           </motion.div>
         </div>
 
-        {/* ── Step 2: Requirement ── */}
+        {/* ── Step 02: Output Profile ── */}
         <div className="flex flex-col gap-1.5">
-          <StepLabel number="02" title="Requirement" />
+          <StepLabel number="02" title="Output Profile" />
           <motion.div
-            className="rf-sidebar-card flex-[1] flex flex-col min-h-[200px] max-h-[380px] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--rf-brand-subtle)] transition-shadow"
+            className="rf-sidebar-card"
             variants={fadeUp}
             initial="hidden"
             animate="visible"
             custom={1}
           >
-            {/* Scope strip — shown when scope is set, replaces the Requirement title row */}
-            {contextMode !== 'undecided' ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setWorkspaceExpanded((prev) => !prev)}
-                  className="flex items-center justify-between gap-2 border-b border-[var(--rf-border-subtle)] bg-[var(--rf-brand-subtle)] px-3.5 py-2 text-left transition-colors hover:bg-[rgba(43,89,74,0.14)]"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Orbit className="h-3 w-3 shrink-0 text-[var(--rf-brand)]" />
-                    <span className="truncate text-[12px] font-semibold text-[var(--rf-brand)]">{projectTitle}</span>
-                  </div>
-                  <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--rf-brand)] opacity-60 transition-transform ${workspaceExpanded ? 'rotate-180' : ''}`} />
-                </button>
-                {/* Attach button row when scope is set */}
-                <div className="flex items-center justify-between gap-3 px-3.5 py-2 border-b border-[var(--rf-border-subtle)] bg-white/40">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    {originIssueKey && (
-                      <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
-                        {originIssueKey}
-                      </span>
-                    )}
-                    <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
-                      Describe your requirement
-                    </span>
-                  </div>
-                  <motion.button
-                    type="button"
-                    onClick={() => runAttachmentInputRef.current?.click()}
-                    disabled={isWorking}
-                    title="Attach supporting files for this run only"
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
-                    whileTap={{ scale: 0.97 }}
-                  >
-                    <Paperclip className="w-3 h-3" />
-                    <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
-                  </motion.button>
-                  <input
-                    ref={runAttachmentInputRef}
-                    type="file"
-                    onChange={handleRunAttachmentUpload}
-                    accept=".pdf,.csv,.txt,.md,.eml"
-                    multiple
-                    className="hidden"
-                    disabled={isWorking}
-                  />
+            <div className="px-3.5 pt-3.5 pb-3.5 space-y-3">
+              {/* Header row */}
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] shadow-sm">
+                  <Gauge className="h-3.5 w-3.5 text-[var(--sidebar-accent)]" />
                 </div>
-              </>
-            ) : (
-              /* Original header — shown when scope is undecided */
-              <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 border-b border-[var(--rf-border-subtle)] bg-white/40">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {originIssueKey && (
-                    <span className="rounded-full bg-[var(--rf-brand-subtle)] border border-[var(--rf-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)] truncate">
-                      {originIssueKey}
-                    </span>
-                  )}
-                  <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
-                    Requirement
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-[var(--rf-text)]">Performance</div>
+                  <div className="text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                    Speed and depth for this run.
+                  </div>
+                </div>
+              </div>
+
+              {/* Full-width segmented toggle */}
+              <div className="relative flex w-full rounded-2xl border border-[var(--sidebar-accent-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
+                {profileOptions.map((option, idx) => {
+                  const selected = pipelineProfile === option.id;
+                  return (
+                    <React.Fragment key={option.id}>
+                      {selected && (
+                        <motion.span
+                          layoutId="profile-pill"
+                          className="absolute inset-y-1 rounded-[14px] shadow-sm pointer-events-none"
+                          style={{
+                            backgroundColor: profileAccentColor(pipelineProfile),
+                            left: `calc(${idx} * 33.333% + 4px)`,
+                            width: 'calc(33.333% - 5.333px)',
+                          }}
+                          transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                        />
+                      )}
+                      <motion.button
+                        type="button"
+                        onClick={() => onPipelineProfileChange(option.id)}
+                        disabled={isWorking}
+                        whileTap={{ scale: 0.95 }}
+                        className={`relative z-10 flex-1 rounded-[14px] px-2 py-2 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors text-center ${
+                          selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                        } disabled:opacity-50`}
+                      >
+                        {option.label}
+                      </motion.button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
+              {/* Profile description — changes with selection */}
+              <div className="text-[11px] text-[var(--rf-text-tertiary)] leading-relaxed min-h-[16px]">
+                {selectedProfileOption?.desc}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* ── Step 03: Work Instructions ── */}
+        {activeWiDocs.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <StepLabel number="03" title="Work Instructions" />
+            <motion.div
+              className="rf-sidebar-card"
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              custom={1.5}
+            >
+              <div className="px-3.5 pt-3.5 pb-3.5 space-y-3">
+                {/* Header row */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] shadow-sm">
+                      <FileText className="h-3.5 w-3.5 text-[var(--sidebar-accent)]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-[var(--rf-text)]">Docs</div>
+                      <div className="text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
+                        Auto uses all linked docs. Pick limits to 3.
+                      </div>
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--sidebar-accent)]">
+                    {wiSelectionMode === 'auto' ? `${activeWiDocs.length} auto` : `${selectedRunWiDocs.length}/3 picked`}
                   </span>
                 </div>
-                <motion.button
-                  type="button"
-                  onClick={() => runAttachmentInputRef.current?.click()}
-                  disabled={isWorking}
-                  title="Attach supporting files for this run only"
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/70 px-2.5 py-1.5 text-[12px] font-semibold text-[var(--rf-brand)] shadow-sm transition-all hover:border-[var(--rf-border-strong)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <Paperclip className="w-3 h-3" />
-                  <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
-                </motion.button>
-                <input
-                  ref={runAttachmentInputRef}
-                  type="file"
-                  onChange={handleRunAttachmentUpload}
-                  accept=".pdf,.csv,.txt,.md,.eml"
-                  multiple
-                  className="hidden"
-                  disabled={isWorking}
-                />
+
+                {/* Full-width Auto / Pick toggle */}
+                <div className="relative flex w-full rounded-2xl border border-[var(--sidebar-accent-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
+                  {([
+                    { id: 'auto' as const, label: 'Auto' },
+                    { id: 'selected' as const, label: 'Pick up to 3' },
+                  ]).map((option, idx) => {
+                    const selected = wiSelectionMode === option.id;
+                    return (
+                      <React.Fragment key={option.id}>
+                        {selected && (
+                          <motion.span
+                            layoutId="wi-mode-pill"
+                            className="absolute inset-y-1 rounded-[14px] shadow-sm pointer-events-none"
+                            style={{
+                              backgroundColor: 'var(--sidebar-accent)',
+                              left: idx === 0 ? '4px' : 'calc(50% + 2px)',
+                              width: idx === 0 ? 'calc(50% - 6px)' : 'calc(50% - 6px)',
+                            }}
+                            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                          />
+                        )}
+                        <motion.button
+                          type="button"
+                          onClick={() => setWiSelectionMode(option.id)}
+                          whileTap={{ scale: 0.95 }}
+                          className={`relative z-10 flex-1 rounded-[14px] px-3 py-2 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors text-center ${
+                            selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
+                          }`}
+                        >
+                          {option.label}
+                        </motion.button>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+
+                {/* Doc list when Pick mode */}
+                {wiSelectionMode === 'selected' && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <div className="max-h-32 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar">
+                      {activeWiDocs.map((doc) => {
+                        const isSelected = selectedWiDocIds.includes(doc.docId);
+                        const disabled = !isSelected && selectedWiDocIds.length >= 3;
+                        return (
+                          <button
+                            key={doc.docId}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => toggleRunWiDoc(doc.docId)}
+                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
+                              isSelected
+                                ? 'bg-[var(--sidebar-accent-subtle)] text-[var(--rf-text)]'
+                                : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
+                            } ${disabled ? 'opacity-45 cursor-not-allowed' : ''}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[12px] font-semibold">{doc.filename}</span>
+                              <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{doc.chunkCount} chunks</span>
+                            </span>
+                            <span className="ml-3 shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--sidebar-accent)]">
+                              {isSelected ? 'Selected' : 'Pick'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ── Step 04: Requirement ── */}
+        <div className="flex flex-col gap-1.5">
+          <StepLabel number={activeWiDocs.length > 0 ? '04' : '03'} title="Requirement" />
+          <motion.div
+            className="rf-sidebar-card relative flex-[1] flex flex-col min-h-[220px] overflow-hidden transition-shadow"
+            style={{
+              boxShadow: !contextReady ? 'none' : undefined,
+              opacity: !contextReady ? 0.55 : undefined,
+            }}
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={activeWiDocs.length > 0 ? 2 : 1.5}
+          >
+            {/* Scope-not-set overlay */}
+            {!contextReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-[2px] rounded-[inherit] z-10">
+                <div className="text-center px-4">
+                  <Orbit className="w-6 h-6 mx-auto mb-2 text-[var(--sidebar-accent)] opacity-40" />
+                  <div className="text-[13px] font-semibold text-[var(--rf-text-secondary)]">Select a scope first</div>
+                  <div className="text-[11px] text-[var(--rf-text-tertiary)] mt-1">Choose a project or workspace in Step 1</div>
+                </div>
               </div>
             )}
+
+            {/* Toolbar row */}
+            <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 border-b border-[var(--rf-border-subtle)] bg-white/40">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {originIssueKey && (
+                  <span className="rounded-full bg-[var(--sidebar-accent-subtle)] border border-[var(--sidebar-accent-border)] px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-accent)] truncate">
+                    {originIssueKey}
+                  </span>
+                )}
+                <span className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">
+                  Describe your requirement
+                </span>
+              </div>
+              <motion.button
+                type="button"
+                onClick={() => runAttachmentInputRef.current?.click()}
+                disabled={isWorking || !contextReady}
+                title="Attach supporting files for this run only"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--sidebar-accent)] shadow-sm transition-all hover:border-[var(--sidebar-accent)] hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40 backdrop-blur-sm"
+                whileTap={{ scale: 0.97 }}
+              >
+                <Paperclip className="w-3 h-3" />
+                <span>{runAttachmentParseState ? 'Parsing…' : runAttachments.length > 0 ? `${runAttachments.length} file${runAttachments.length > 1 ? 's' : ''}` : 'Add files'}</span>
+              </motion.button>
+              <input
+                ref={runAttachmentInputRef}
+                type="file"
+                onChange={handleRunAttachmentUpload}
+                accept=".pdf,.csv,.txt,.md,.eml"
+                multiple
+                className="hidden"
+                disabled={isWorking || !contextReady}
+              />
+            </div>
 
             {/* Attached files */}
             {runAttachments.length > 0 && (
@@ -630,7 +814,7 @@ export function Sidebar({
                 {runAttachments.map((attachment) => (
                   <div
                     key={attachment.id}
-                    className="flex items-center gap-1.5 rounded-xl border border-[var(--rf-border)] bg-white/65 px-2.5 py-1.5"
+                    className="flex items-center gap-1.5 rounded-xl border border-[var(--sidebar-accent-border)] bg-[var(--sidebar-accent-subtle)] px-2.5 py-1.5"
                   >
                     <div className="min-w-0">
                       <div className="max-w-[140px] truncate text-[13px] font-semibold text-[var(--rf-text)]">{attachment.filename}</div>
@@ -653,7 +837,7 @@ export function Sidebar({
             <textarea
               value={requirement}
               onChange={(e) => setRequirement(e.target.value)}
-              placeholder={!contextReady ? 'Pick a scope above first…' : 'Describe your feature or requirement…'}
+              placeholder={!contextReady ? 'Select a scope in Step 1 to enable input…' : 'Describe your feature or requirement…'}
               disabled={isWorking || !contextReady}
               className="flex-1 min-h-0 w-full bg-transparent border-none text-[var(--rf-text)] placeholder-[var(--rf-text-tertiary)] focus:outline-none text-[14px] leading-relaxed resize-none disabled:opacity-50 px-3.5 pt-3 pb-2 custom-scrollbar"
             />
@@ -665,189 +849,12 @@ export function Sidebar({
               </span>
               <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] border transition-all ${
                 hasPromptInput
-                  ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-border)]'
+                  ? 'bg-[var(--sidebar-accent-subtle)] text-[var(--sidebar-accent)] border-[var(--sidebar-accent-border)]'
                   : 'bg-white/50 text-[var(--rf-text-tertiary)] border-[var(--rf-border-subtle)]'
               }`}>
                 {hasPromptInput ? 'Ready' : 'Add input'}
               </span>
             </div>
-          </motion.div>
-        </div>
-
-        {/* ── Step 3: Options ── */}
-        <div className="flex flex-col gap-1.5">
-          <StepLabel number="03" title="Options" />
-          <motion.div
-            className="rf-sidebar-card"
-            variants={fadeUp}
-            initial="hidden"
-            animate="visible"
-            custom={1.5}
-          >
-            <button
-              type="button"
-              onClick={() => setOptionsExpanded((prev) => !prev)}
-              className="group w-full px-3.5 py-2.5 flex items-center justify-between gap-3 text-left"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--rf-border)] bg-white/70 shadow-sm">
-                  <SlidersHorizontal className="h-3 w-3 text-[var(--rf-text-tertiary)]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[13px] font-semibold text-[var(--rf-text)]">Options</div>
-                  {/* Inline status pills */}
-                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    <span className="inline-flex items-center rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
-                      {pipelineProfile === 'fast' ? 'Fast' : pipelineProfile === 'quality' ? 'Quality' : 'Balanced'}
-                    </span>
-                    {activeWiDocs.length > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-[var(--rf-text-tertiary)]">
-                        <FileText className="h-2.5 w-2.5 text-[var(--rf-brand)]" />
-                        {wiSelectionMode === 'auto' ? 'Auto docs' : `${selectedRunWiDocs.length}/3 docs`}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--rf-text-tertiary)] transition-transform group-hover:text-[var(--rf-text)] ${optionsExpanded ? 'rotate-180' : ''}`} />
-            </button>
-
-            <AnimatePresence initial={false}>
-              {optionsExpanded && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                  className="overflow-hidden"
-                >
-                  <div className="px-3.5 pb-3.5 space-y-4">
-                    {/* Divider */}
-                    <div className="h-px bg-[var(--rf-border-subtle)]" />
-
-                    {/* Performance profile */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Performance</div>
-                          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
-                            Speed and depth for this run.
-                          </div>
-                        </div>
-                      </div>
-                      <div className="relative inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
-                        {(
-                          [
-                            { id: 'fast' as const, label: 'Fast' },
-                            { id: 'balanced' as const, label: 'Balanced' },
-                            { id: 'quality' as const, label: 'Quality' },
-                          ] as const
-                        ).map((option, idx) => {
-                          const selected = pipelineProfile === option.id;
-                          return (
-                            <React.Fragment key={option.id}>
-                              {selected && (
-                                <motion.span
-                                  layoutId="profile-pill"
-                                  className="absolute inset-y-1 rounded-[14px] shadow-sm pointer-events-none"
-                                  style={{
-                                    backgroundColor: profileAccentColor(pipelineProfile),
-                                    left: `calc(${idx} * 33.33% + 2px)`,
-                                    width: 'calc(33.33% - 4px)',
-                                  }}
-                                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                                />
-                              )}
-                              <motion.button
-                                type="button"
-                                onClick={() => onPipelineProfileChange(option.id)}
-                                disabled={isWorking}
-                                whileTap={{ scale: 0.95 }}
-                                className={`relative z-10 rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
-                                  selected ? 'text-white' : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                                } disabled:opacity-50`}
-                              >
-                                {option.label}
-                              </motion.button>
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* WI scope */}
-                    {activeWiDocs.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-[11px] font-700 uppercase tracking-[0.13em] text-[var(--rf-text-tertiary)]">Work instructions</div>
-                            <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--rf-text-secondary)]">
-                              Auto uses all linked docs. Pick limits to up to 3.
-                            </div>
-                          </div>
-                          <span className="shrink-0 rounded-full border border-[var(--rf-border)] bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-[var(--rf-text-secondary)]">
-                            {wiSelectionMode === 'auto' ? 'Auto' : `${selectedRunWiDocs.length}/3`}
-                          </span>
-                        </div>
-
-                        <div className="inline-flex rounded-2xl border border-[var(--rf-border)] bg-white/72 p-1">
-                          {([
-                            { id: 'auto' as const, label: 'Auto' },
-                            { id: 'selected' as const, label: 'Pick up to 3' },
-                          ]).map((option) => {
-                            const selected = wiSelectionMode === option.id;
-                            return (
-                              <button
-                                key={option.id}
-                                type="button"
-                                onClick={() => setWiSelectionMode(option.id)}
-                                className={`rounded-[14px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] transition-colors ${
-                                  selected
-                                    ? 'bg-[var(--rf-brand)] text-white'
-                                    : 'text-[var(--rf-text-secondary)] hover:text-[var(--rf-text)]'
-                                }`}
-                              >
-                                {option.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {wiSelectionMode === 'selected' && (
-                          <div className="max-h-32 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar">
-                            {activeWiDocs.map((doc) => {
-                              const isSelected = selectedWiDocIds.includes(doc.docId);
-                              const disabled = !isSelected && selectedWiDocIds.length >= 3;
-                              return (
-                                <button
-                                  key={doc.docId}
-                                  type="button"
-                                  disabled={disabled}
-                                  onClick={() => toggleRunWiDoc(doc.docId)}
-                                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition ${
-                                    isSelected
-                                      ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-text)]'
-                                      : 'hover:bg-white/70 text-[var(--rf-text-secondary)]'
-                                  } ${disabled ? 'opacity-45 cursor-not-allowed' : ''}`}
-                                >
-                                  <span className="min-w-0">
-                                    <span className="block truncate text-[12px] font-semibold">{doc.filename}</span>
-                                    <span className="block truncate text-[11px] text-[var(--rf-text-tertiary)]">{doc.chunkCount} chunks</span>
-                                  </span>
-                                  <span className="ml-3 shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--rf-brand)]">
-                                    {isSelected ? 'Selected' : 'Pick'}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </motion.div>
         </div>
 
@@ -858,11 +865,11 @@ export function Sidebar({
             variants={fadeUp}
             initial="hidden"
             animate="visible"
-            custom={2}
+            custom={2.5}
           >
             {runAttachmentParseState && (
               <div className="space-y-1">
-                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-brand)]">
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-accent)]">
                   {runAttachmentParseState.stage === 'reading' ? 'Reading file' : 'Parsing file'}
                 </div>
                 <div className="text-[13px] font-semibold text-[var(--rf-text)] break-words">{runAttachmentParseState.filename}</div>
@@ -883,7 +890,7 @@ export function Sidebar({
           variants={fadeUp}
           initial="hidden"
           animate="visible"
-          custom={2.5}
+          custom={3}
         >
           {workspacePipelineAuditEnabled && setRecordPipelineAuditForRun && (
             <label className="flex items-start gap-2.5 px-1 cursor-pointer">
@@ -891,19 +898,28 @@ export function Sidebar({
                 type="checkbox"
                 checked={recordPipelineAuditForRun}
                 onChange={(e) => setRecordPipelineAuditForRun(e.target.checked)}
-                className="mt-0.5 rounded border-[var(--rf-border)]"
+                className="mt-0.5 rounded border-[var(--rf-border)] accent-[var(--sidebar-accent)]"
               />
               <span className="text-[11px] font-semibold text-[var(--rf-text-secondary)] leading-snug">
-                Record pipeline audit for this run (export prompts &amp; trace after generation)
+                Record pipeline audit for this run (export prompts & trace after generation)
               </span>
             </label>
           )}
-          {/* Primary CTA */}
+          {/* Primary CTA — profile-aware gradient */}
           <motion.button
             onClick={onStartBrainstorm}
             disabled={brainstormDisabled}
             title={isAtLimit ? 'Included monthly usage has been reached. Generation is still available.' : ''}
-            className="brainstorm-shimmer w-full bg-[linear-gradient(135deg,#1e4035,#2b594a,#3a7062)] hover:brightness-[1.05] disabled:bg-[var(--rf-border-strong)] disabled:text-white/40 disabled:cursor-not-allowed text-white text-[13px] font-bold py-[11px] rounded-[18px] transition-all flex items-center justify-center gap-2 shadow-[0_10px_32px_-12px_rgba(43,89,74,0.55)] border border-white/10"
+            className="brainstorm-shimmer w-full text-white text-[13px] font-bold py-[11px] rounded-[18px] transition-all flex items-center justify-center gap-2 border border-white/10 disabled:cursor-not-allowed"
+            style={{
+              background: brainstormDisabled
+                ? 'var(--rf-border-strong)'
+                : 'linear-gradient(135deg, var(--sidebar-cta-from), var(--sidebar-cta-mid), var(--sidebar-cta-to))',
+              boxShadow: brainstormDisabled
+                ? 'none'
+                : '0 10px 32px -12px var(--sidebar-cta-shadow)',
+              color: brainstormDisabled ? 'rgba(255,255,255,0.4)' : 'white',
+            }}
             whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
             whileTap={!brainstormDisabled ? { scale: 0.98 } : {}}
           >
