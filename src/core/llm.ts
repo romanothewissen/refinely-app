@@ -112,6 +112,11 @@ function openAISupportsReasoning(model: string): boolean {
   // reasoning: { effort } is only supported by o-series models (o1, o3, o4, o3-mini, etc.)
   // GPT-4o and other chat models ignore or error on this parameter.
   return /\bo\d/.test(model);
+
+function openAIRequiresMaxCompletionTokens(model: string): boolean {
+  // o-series reasoning models use max_completion_tokens instead of max_tokens.
+  return openAISupportsReasoning(model);
+}
 }
 
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
@@ -701,8 +706,8 @@ async function callAnthropic(opts: {
     ],
     max_tokens: opts.maxTokens ?? 8192,
   };
-  if (anthropicSupportsThinking(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
-    body.thinking = { type: 'enabled', budget_tokens: geminiThinkingBudget(opts.reasoningEffort) ?? 4096 };
+  if (thinkingBudget !== undefined && thinkingBudget > 0) {
+    body.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
   }
 
   const { res, rawBody } = await fetchLlmWithRetry(url, {
@@ -723,6 +728,14 @@ async function callAnthropic(opts: {
     content?: Array<{ type?: string; text?: string }>;
     usage?: { input_tokens?: number; output_tokens?: number };
   };
+
+  const requestedMaxTokens = opts.maxTokens ?? 8192;
+  const thinkingBudget = anthropicSupportsThinking(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none'
+    ? geminiThinkingBudget(opts.reasoningEffort)
+    : undefined;
+  const maxTokens = thinkingBudget !== undefined && thinkingBudget >= requestedMaxTokens
+    ? thinkingBudget + 256
+    : requestedMaxTokens;
 
   const text = (payload.content ?? [])
     .filter((item) => item.type === 'text')
@@ -759,7 +772,7 @@ async function callOpenAI(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    max_tokens: opts.maxTokens ?? 8192,
+    max_tokens: maxTokens,
     response_format: { type: 'json_object' },
   };
   if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
@@ -791,6 +804,11 @@ async function callOpenAI(opts: {
 
 async function callAzureOpenAI(opts: {
   model: string;
+  if (openAIRequiresMaxCompletionTokens(opts.model)) {
+    body.max_completion_tokens = opts.maxTokens ?? 8192;
+  } else {
+    body.max_tokens = opts.maxTokens ?? 8192;
+  }
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
@@ -818,7 +836,6 @@ async function callAzureOpenAI(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    max_tokens: opts.maxTokens ?? 8192,
   };
   if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning = { effort: opts.reasoningEffort };
@@ -850,6 +867,11 @@ async function callAzureOpenAI(opts: {
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
   };
+  if (openAIRequiresMaxCompletionTokens(opts.model)) {
+    body.max_completion_tokens = opts.maxTokens ?? 8192;
+  } else {
+    body.max_tokens = opts.maxTokens ?? 8192;
+  }
 }
 
 async function callOllama(opts: {
@@ -873,7 +895,6 @@ async function callOllama(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    max_tokens: opts.maxTokens ?? 8192,
     stream: false,
     response_format: { type: 'json_object' },
   };
