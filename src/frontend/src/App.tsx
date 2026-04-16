@@ -334,6 +334,8 @@ function buildConversationInputSignature(
     projectKeys: restoredProjectKeys,
     contextMode: resolveContextModeForSignature(restoredProjectKey, fallback.contextMode),
     attachments: [],
+    wiSelectionMode: 'auto',
+    selectedWiDocIds: [],
   });
 }
 
