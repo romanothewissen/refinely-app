@@ -272,6 +272,33 @@ function mergeSuggestedPersonaRoles(
   return nextRows.length ? nextRows : [{ role: '', activities: '' }];
 }
 
+const DOMAIN_PLATFORMS_MARKER = 'PLATFORMS:';
+const DOMAIN_OBJECTS_MARKER = 'BUSINESS OBJECTS:';
+const DOMAIN_HANDOFFS_MARKER = 'HANDOFFS & INTEGRATIONS:';
+
+interface DomainContextFields { platforms: string; businessObjects: string; handoffs: string; }
+
+function parseDomainContextFields(raw = ''): DomainContextFields {
+  const lines = raw.split('\n').map(l => l.trim());
+  const get = (marker: string) => {
+    const line = lines.find(l => l.startsWith(marker));
+    return line ? line.slice(marker.length).trim() : '';
+  };
+  return { platforms: get(DOMAIN_PLATFORMS_MARKER), businessObjects: get(DOMAIN_OBJECTS_MARKER), handoffs: get(DOMAIN_HANDOFFS_MARKER) };
+}
+
+function formatDomainContextFields({ platforms, businessObjects, handoffs }: DomainContextFields): string {
+  const parts: string[] = [];
+  if (platforms.trim()) parts.push(`${DOMAIN_PLATFORMS_MARKER} ${platforms.trim()}`);
+  if (businessObjects.trim()) parts.push(`${DOMAIN_OBJECTS_MARKER} ${businessObjects.trim()}`);
+  if (handoffs.trim()) parts.push(`${DOMAIN_HANDOFFS_MARKER} ${handoffs.trim()}`);
+  return parts.join('\n');
+}
+
+function isStructuredDomainContext(raw = ''): boolean {
+  return raw.includes(DOMAIN_PLATFORMS_MARKER) || raw.includes(DOMAIN_OBJECTS_MARKER) || raw.includes(DOMAIN_HANDOFFS_MARKER);
+}
+
 function splitGuidanceContext(rawContext = '') {
   const markerIndex = rawContext.indexOf(ROLE_GUIDANCE_MARKER);
   if (markerIndex === -1) {
@@ -359,6 +386,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [backlogRefreshStatus, setBacklogRefreshStatus] = useState<BacklogRefreshStatusRow | null>(null);
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
   const [backlogThemeBudgetOverride, setBacklogThemeBudgetOverride] = useState('');
+  const [goldStoryPool, setGoldStoryPool] = useState<{ key: string; summary: string; score: number }[]>([]);
 
   // Personal + workspace state
   const [defaultProjectKey, setDefaultProjectKey] = useState('');
@@ -447,6 +475,11 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           legacyFallback: !!res.legacyFallback,
         };
         setBacklogCacheInfo(nextInfo);
+        // Also load gold story pool for this project
+        try {
+          const goldRes = await api.getGoldStoryPool(projectKey) as any;
+          if (goldRes?.success) setGoldStoryPool(goldRes.entries ?? []);
+        } catch { /* non-fatal */ }
         return nextInfo;
       }
     } catch (e) {
@@ -1482,6 +1515,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       onRefreshBacklogCache={handleRefreshBacklogCache}
                       backlogThemeBudgetOverride={backlogThemeBudgetOverride}
                       onBacklogThemeBudgetOverrideChange={setBacklogThemeBudgetOverride}
+                      goldStoryPool={goldStoryPool}
                     />
                   ) : (
                     <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-[var(--rf-border)]">
@@ -2166,12 +2200,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   );
 }
 
-function ProjectConfigurationManager({ 
+function ProjectConfigurationManager({
   projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts,
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
   activeArProj, isAdmin, isProjectAdmin,
   backlogCacheInfo, backlogDiagnostics, backlogRefreshStatus, isRefreshingBacklogCache, onRefreshBacklogCache,
   backlogThemeBudgetOverride, onBacklogThemeBudgetOverrideChange,
+  goldStoryPool = [],
 }: any) {
 const [issueTypes, setIssueTypes] = useState<any[]>([]);
   const [activeIssueType, setActiveIssueType] = useState<string>('*');
@@ -2551,6 +2586,26 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                  })}
                </div>
              </div>
+
+             {goldStoryPool.length > 0 && (
+               <div className="rf-card px-4 py-4 space-y-3">
+                 <div>
+                   <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Gold Stories</div>
+                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">
+                     Auto-selected from your backlog as AR exemplars. These replace the generic anchor bundle. Rebuilt automatically on cache refresh.
+                   </p>
+                 </div>
+                 <div className="space-y-2">
+                   {goldStoryPool.map((entry: any) => (
+                     <div key={entry.key} className="flex items-center gap-3 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
+                       <span className="text-[11px] font-black tabular-nums rounded px-1.5 py-0.5 bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] min-w-[36px] text-center">{entry.score}</span>
+                       <span className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</span>
+                       <span className="text-xs font-medium text-[var(--rf-text-secondary)] truncate flex-1">{entry.summary}</span>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             )}
            </div>
            )}
          </div>
@@ -2575,14 +2630,54 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
             </button>
             {expandedSections.guidance && (
               <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-                <div className="rf-card p-4  space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Project guidance</div>
-                      <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Use this for rules, defaults, and phrasing that should apply to this project only.</p>
-                    </div>
+                <div className="rf-card p-4 space-y-4">
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Domain context</div>
+                    <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Answer these to give the AI platform awareness. All three are optional — fill in what you know.</p>
                   </div>
-                  <textarea value={currentContext.context} onChange={e => updateContext({ context: e.target.value })} placeholder="e.g. Ensure all stories include accessibility requirements..." className="w-full h-28 bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl p-4 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition shadow-sm resize-none" />
+                  {(() => {
+                    const raw = currentContext.context ?? '';
+                    const fields = isStructuredDomainContext(raw)
+                      ? parseDomainContextFields(raw)
+                      : { platforms: '', businessObjects: '', handoffs: raw };
+                    const update = (patch: Partial<DomainContextFields>) => {
+                      updateContext({ context: formatDomainContextFields({ ...fields, ...patch }) });
+                    };
+                    return (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What platforms or systems does your work connect to?</label>
+                          <input
+                            type="text"
+                            value={fields.platforms}
+                            onChange={e => update({ platforms: e.target.value })}
+                            placeholder='e.g. "Salesforce/ServiceMax and SAP"'
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What are the main business objects in your domain?</label>
+                          <input
+                            type="text"
+                            value={fields.businessObjects}
+                            onChange={e => update({ businessObjects: e.target.value })}
+                            placeholder='e.g. "service plans, work orders, entitlements, parts shipments"'
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What are the key handoffs between teams or systems?</label>
+                          <input
+                            type="text"
+                            value={fields.handoffs}
+                            onChange={e => update({ handoffs: e.target.value })}
+                            placeholder='e.g. "When a service plan is approved, work orders and parts shipments are created in back-office"'
+                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="rf-card p-4 space-y-4">

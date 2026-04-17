@@ -48,7 +48,7 @@ import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } f
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { extractDocumentText } from '../core/document-parser';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
-import { getBacklogCacheInfo, diagnoseBacklogCache } from '../core/similar-stories';
+import { getBacklogCacheInfo, diagnoseBacklogCache, getGoldStoryPool } from '../core/similar-stories';
 import { inferProjectPersonaRolesFromBacklog } from '../core/persona-role-inference';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
@@ -2019,6 +2019,14 @@ resolver.define('getBacklogCacheInfo', async ({ payload, context }) => {
   await ensureProjectBrowse(context, projectKey);
   const info = await getBacklogCacheInfo(projectKey);
   return { success: true, ...info };
+});
+
+resolver.define('getGoldStoryPool', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = payload?.projectKey;
+  if (!projectKey || projectKey === '*') return { success: false, entries: [] };
+  const pool = await getGoldStoryPool(projectKey);
+  return { success: true, entries: pool?.entries ?? [], builtAt: pool?.builtAt ?? null };
 });
 
 resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {

@@ -189,6 +189,7 @@ export const api = {
   diagnoseBacklogCache: (projectKey: string) => invoke('diagnoseBacklogCache', { projectKey }),
   refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),
   getBacklogRefreshStatus: (projectKey: string) => invoke('getBacklogRefreshStatus', { projectKey }),
+  getGoldStoryPool: (projectKey: string) => invoke('getGoldStoryPool', { projectKey }),
   inferProjectPersonaRoles: (projectKey: string) => invoke('inferProjectPersonaRoles', { projectKey }),
 
   // History

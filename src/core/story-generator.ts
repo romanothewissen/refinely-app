@@ -73,7 +73,9 @@ import {
 import { detectFeatureOverlaps, validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import { retrieveScopedWiContext } from '../services/project-selection';
-import { formatArPatternLibraryFromSimilarStories } from './similar-stories';
+import { formatArPatternLibraryFromSimilarStories, getGoldStoryPool, formatGoldStoryExemplars } from './similar-stories';
+import { objectRead, KEYS } from '../services/cache';
+import type { DomainPatterns } from './similar-stories';
 import {
   allowsZeroQuestionDiscovery,
   buildDiscoveryCoverageArtifact,
@@ -1136,6 +1138,7 @@ async function runParallelArPass(input: {
   similarStoriesText?: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   domainContext: string;
+  domainPatterns?: { roles: string[]; coreTerminology: string[]; arStyle: string } | null;
   arPlan: ArPlan;
   arObligations?: ArObligations;
   generatorConfig: TenantConfig['generatorConfig'];
@@ -1157,6 +1160,7 @@ async function runParallelArPass(input: {
 }): Promise<{ features: RawFeature[]; usage: { input: number; output: number } }> {
   const systemPrompt = buildArSystemPrompt({
     domainContext: input.domainContext,
+    domainPatterns: input.domainPatterns,
     arPlan: input.arPlan,
   });
 
@@ -1275,6 +1279,7 @@ async function backfillMissingAcceptanceRequirements(input: {
   similarStoriesText?: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   domainContext: string;
+  domainPatterns?: { roles: string[]; coreTerminology: string[]; arStyle: string } | null;
   arPlan: ArPlan;
   arObligations?: ArObligations;
   generatorConfig: TenantConfig['generatorConfig'];
@@ -1307,6 +1312,7 @@ async function backfillMissingAcceptanceRequirements(input: {
 
   const systemPrompt = buildArSystemPrompt({
     domainContext: input.domainContext,
+    domainPatterns: input.domainPatterns,
     arPlan: input.arPlan,
   });
   const model = getTierModel(input.generatorConfig.arModel, input.tier);
@@ -3023,7 +3029,34 @@ export async function generateFeatures(opts: {
     }
   }
 
-  if (!precomputedDraftFeatures?.length && similarStories?.length && config.tier !== 'free') {
+  let pass2DomainPatterns: DomainPatterns | null = null;
+
+  if (!precomputedDraftFeatures?.length && projectKeys?.length) {
+    const activeProjectKey = projectKeys[0];
+    // Load domain patterns extracted during last cache rebuild (best-effort)
+    try {
+      pass2DomainPatterns = await objectRead<DomainPatterns>(KEYS.domainPatterns(activeProjectKey));
+    } catch { /* non-fatal */ }
+
+    // Use gold story exemplars when available; fall back to similar-stories pattern library
+    try {
+      const goldPool = await getGoldStoryPool(activeProjectKey);
+      if (goldPool?.entries?.length) {
+        const goldText = formatGoldStoryExemplars(goldPool);
+        if (goldText) {
+          const merged = `${similarForPass2Ar}\n\n---\n\n${goldText}`;
+          similarForPass2Ar = trimPromptText(merged, 5200);
+        }
+      } else if (similarStories?.length && config.tier !== 'free') {
+        const pat = formatArPatternLibraryFromSimilarStories(similarStories, requirement, 5);
+        if (pat.text) {
+          pass2ArPatternStoryKeys = pat.storyKeys;
+          const merged = `${similarStoriesText}\n\n---\n\n${pat.text}`;
+          similarForPass2Ar = trimPromptText(merged, 5200);
+        }
+      }
+    } catch { /* non-fatal */ }
+  } else if (!precomputedDraftFeatures?.length && similarStories?.length && config.tier !== 'free') {
     const pat = formatArPatternLibraryFromSimilarStories(similarStories, requirement, 5);
     if (pat.text) {
       pass2ArPatternStoryKeys = pat.storyKeys;
@@ -3059,6 +3092,7 @@ export async function generateFeatures(opts: {
 
     const pass2System = buildArSystemPrompt({
       domainContext: config.domainContext,
+      domainPatterns: pass2DomainPatterns,
       arPlan: effectiveArPlan,
     });
 
@@ -3114,6 +3148,7 @@ export async function generateFeatures(opts: {
         wiInsightsArtifact,
         arObligations,
         domainContext: config.domainContext,
+        domainPatterns: pass2DomainPatterns,
         arPlan: effectiveArPlan,
         generatorConfig,
         tier: config.tier,
@@ -3137,6 +3172,7 @@ export async function generateFeatures(opts: {
         wiInsightsArtifact,
         arObligations,
         domainContext: config.domainContext,
+        domainPatterns: pass2DomainPatterns,
         arPlan: effectiveArPlan,
         generatorConfig,
         tier: config.tier,

@@ -95,6 +95,25 @@ interface BacklogIndexInfo {
   legacyFallback: boolean;
 }
 
+export interface GoldStoryEntry {
+  key: string;
+  summary: string;
+  score: number;
+  arSample: string;
+}
+
+export interface GoldStoryPool {
+  projectKey: string;
+  builtAt: string;
+  entries: GoldStoryEntry[];
+}
+
+export interface DomainPatterns {
+  roles: string[];
+  coreTerminology: string[];
+  arStyle: string;
+}
+
 interface LoadedBacklogIndex {
   manifest?: BacklogManifest;
   themeIndex?: BacklogThemeIndex | null;
@@ -366,6 +385,10 @@ export async function refreshBacklogCache(projectKey: string, config: TenantConf
     }
   }
 
+  // Build and persist gold story pool (best-scored exemplars for AR generation)
+  const pool = selectGoldStories(projectKey, docs, builtAt);
+  await objectWrite(KEYS.goldStoryPool(projectKey), pool);
+
   return {
     projectKey,
     builtAt: manifest.builtAt,
@@ -376,6 +399,54 @@ export async function refreshBacklogCache(projectKey: string, config: TenantConf
     themeBuiltAt: manifest.themeBuiltAt,
     legacyFallback: false,
   };
+}
+
+function selectGoldStories(projectKey: string, docs: BacklogDoc[], builtAt: string): GoldStoryPool {
+  const MAX_GOLD = 15;
+  const scored = docs
+    .map((doc) => {
+      const ac = String(doc.acceptanceCriteria ?? '');
+      const result = scoreExemplarQuality(ac);
+      return { doc, score: result.score, hardGatePassed: result.hardGatePassed };
+    })
+    .filter((r) => r.hardGatePassed && r.score >= EXEMPLAR_QUALITY_FLOOR)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_GOLD);
+
+  const entries: GoldStoryEntry[] = scored.map((r) => ({
+    key: r.doc.key,
+    summary: r.doc.summary,
+    score: r.score,
+    arSample: r.doc.acceptanceCriteria.slice(0, 1200),
+  }));
+
+  return { projectKey, builtAt, entries };
+}
+
+export async function getGoldStoryPool(projectKey: string): Promise<GoldStoryPool | null> {
+  return objectRead<GoldStoryPool>(KEYS.goldStoryPool(projectKey));
+}
+
+export function formatGoldStoryExemplars(pool: GoldStoryPool, confirmedKeys?: string[]): string {
+  let entries = pool.entries;
+  if (confirmedKeys?.length) {
+    const keySet = new Set(confirmedKeys);
+    const confirmed = entries.filter((e) => keySet.has(e.key));
+    entries = confirmed.length ? confirmed : entries;
+  }
+  if (!entries.length) return '';
+
+  const lines: string[] = [
+    'GOLD STORY EXAMPLES from this workspace (match their specificity and depth — do not copy their scope):',
+    'Study the structure: compound preconditions in GIVEN, concrete business objects in THEN, distinct branch variants.',
+    '',
+  ];
+  for (const entry of entries.slice(0, 5)) {
+    lines.push(`— ${entry.summary}`);
+    lines.push(entry.arSample.trim());
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
 }
 
 export async function refreshBacklogCachesForProjects(

@@ -690,6 +690,7 @@ OUTPUT FORMAT (strict):
 
 export function buildArSystemPrompt(opts: {
   domainContext: string;
+  domainPatterns?: { roles: string[]; coreTerminology: string[]; arStyle: string } | null;
   arPlan?: {
     min: number;
     max: number;
@@ -730,8 +731,19 @@ export function buildArSystemPrompt(opts: {
 - Do not over-specify very small, straightforward features.`;
   })();
 
+  const domainVocabBlock = (() => {
+    const p = opts.domainPatterns;
+    if (!p) return '';
+    const parts: string[] = [];
+    if (p.roles?.length) parts.push(`Roles: ${p.roles.join(', ')}`);
+    if (p.coreTerminology?.length) parts.push(`Core terminology: ${p.coreTerminology.join(', ')}`);
+    if (p.arStyle) parts.push(`AR style: ${p.arStyle}`);
+    if (!parts.length) return '';
+    return `\nDOMAIN VOCABULARY — use these roles and terms when they fit the requirement:\n${parts.join('\n')}\n`;
+  })();
+
   return `You are a principal QA lead and business analyst writing acceptance requirements for a Jira backlog.
-${platformContextBlock(opts.domainContext)}
+${platformContextBlock(opts.domainContext)}${domainVocabBlock}
 For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that capture:
 - The primary business scenario (happy path)
 - Key business rules that must hold true
@@ -739,64 +751,46 @@ For each feature provided, write GIVEN/WHEN/THEN acceptance requirements that ca
 
 RULES:
 - Every AR MUST use: GIVEN [precondition] WHEN [action or trigger] THEN [single, verifiable outcome]
-- Never write ARs in first person. Do not use I, my, me, we, or our in GIVEN, WHEN, or THEN clauses. Write from a third-person perspective describing business outcomes and actor behaviors.
+- Never write ARs in first person. Do not use I, my, me, we, or our. Write from a third-person perspective describing business outcomes and actor behaviors.
 - No solution language: no buttons, screens, fields, forms, clicks, APIs, databases
 - No system-specific terms: no product names, module names, system object names
-- Write as if describing business outcomes to someone who has never seen the system
-- Translate technical event wording into plain business language. Prefer business objects, active records, approvals, routing, and outcomes over intake-source names, metadata fields, identifiers, matching logic, append operations, parsing steps, or generic system actions.
-- BAD: "GIVEN a message arrives from intake source A with identifier metadata WHEN the system matches the payload THEN the source content is appended to the existing record"
+- Translate technical event wording into plain business language. Prefer business objects, active records, approvals, routing, and outcomes over intake-source names, metadata fields, identifiers, matching logic, or generic system actions.
+- BAD: "GIVEN a message arrives from intake source A WHEN the system matches the payload THEN the source content is appended to the record"
 - GOOD: "GIVEN an incoming update clearly relates to an active record WHEN the update is reviewed THEN the record history includes that update"
 - Be CONCEPTUAL — describe behavior patterns, never invent example values (e.g. never "when the weighting is 20", always "when a weighting is configured")
 - Each AR tests one distinct thing
-- Treat the feature description role as the default actor anchor for that feature.
-- If an AR refers to the same actor named in the feature description, use that exact same role label.
-- Only upgrade to a more specific role when that role is directly supported by the requirement, clarified answers, or other provided evidence. If you do upgrade, use that same specific role consistently across the feature instead of mixing generic and specific labels.
-- Do not replace the feature role with synonyms like user, worker, technician, operator, specialist, or agent unless the feature description itself uses that term
-- When multiple ARs for the same feature share the same actor, do not restate the full role label in every WHEN clause. After the role is established, role-neutral phrasing ("they attempt to", "a record is created") is preferred over mechanical repetition of the label.
-- When a requirement names two closely related object types subject to the same rule, prefer one WHEN clause that covers both ("WHEN a [role] attempts to create either linked record type") over four near-identical ARs that repeat the same scenario for each type separately.
-- If clarified answers or work-instruction guidance in the user message materially affect the workflow, treat them as required coverage obligations instead of optional background context.
-- When relevant to the requirement and provided context, explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts.
-- Keep each clause concise and business-focused. Do not add explanatory prose, implementation guidance, or multiple outcomes inside one THEN clause.
-- Concise is good only when the business condition, trigger, and outcome remain concrete. Do not make an AR short by replacing real business meaning with generic wording.
-- Avoid vague placeholders such as "is processed", "is reviewed", "criteria are met", "specific key", "rules are applied", or "cannot be applied". Name the actual business condition, business trigger, and business outcome instead.
-- When the requirement or discovery names classification, routing, linkage, carryover, exclusion, fallback, or manual-review obligations, preserve them in business language instead of flattening them into generic processing steps.
-- If ambiguity remains in the supplied evidence, describe the explicit business fallback or manual-review outcome when it is supported. Do not invent product-specific rules to make the AR sound complete.
+- Use the actor from the feature description as the default anchor. Only upgrade to a more specific role when directly supported by evidence; use that specific role consistently across the feature. Do not replace the feature role with synonyms unless the description itself uses that term.
+- After the role is established, role-neutral phrasing ("they attempt to", "a record is created") is preferred over repeating the label in every WHEN clause.
+- Treat clarified answers and work-instruction guidance as required coverage obligations, not optional context.
+- Explicitly cover actor-specific handling paths, decision logic, state transitions, preconditions, exception behavior, and downstream impacts when relevant.
+- Keep each clause concise, business-focused, and concrete. No explanatory prose, implementation guidance, or multiple outcomes per THEN. Do not make an AR short by replacing real business meaning with generic wording.
+- Avoid vague placeholders such as "is processed", "is reviewed", "criteria are met", "rules are applied". Name the actual business condition, trigger, and outcome.
+- When the requirement or discovery names classification, routing, linkage, carryover, exclusion, fallback, or manual-review obligations, preserve them in business language.
+- If ambiguity remains in the evidence, describe the business fallback or manual-review outcome. Do not invent rules to fill gaps.
 - Keep each clause focused on one business condition, trigger, or outcome. Split the AR rather than overloading a single clause.
-- Write enough ARs to cover all materially distinct business behaviors for the requested depth. Avoid filler, but do not compress distinct scenarios into one vague AR.
-- When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
-- When sibling features are listed, do not write ARs that duplicate another sibling's likely scope. If a sibling feature's description covers the same enforcement rule, lifecycle gate, or authorization check, let that sibling own the AR. Each business rule should be tested exactly once across the entire feature set.
-- scopeBoundaries in AR OBLIGATIONS define what is OUT OF SCOPE for the feature set. Do NOT write ARs that test these boundaries by creating "WHEN ... attempts ... THEN ... is prevented" scenarios for out-of-scope items. Instead, treat them as context that narrows what the feature covers. Only write enforcement ARs when the boundary represents an active business rule the system must check at runtime (authorization, eligibility, contractual coverage), not when it simply marks something the system does not handle.
-- When the requirement or discovery answers list multiple examples of the same category, do NOT enumerate all of them in a single THEN clause. Write the AR at the capability level — what the system does with items of that type — not as an inventory of every named variant. Write separate ARs for specific variants ONLY when their business behavior genuinely diverges.
-- Treat any unresolved decisions from discovery as explicitly out of scope for AR generation. Do not invent rules that were left open.
+- Write enough ARs for the requested depth. Do not compress distinct scenarios into one vague AR and do not pad with near-identical variants.
+- When sibling features are listed, each business rule belongs to exactly one feature — the most appropriate owner. Do not duplicate enforcement rules, lifecycle gates, or authorization checks across siblings.
+- Treat scopeBoundaries as context that narrows what the feature covers, not as enforcement ARs to write.
+- Treat any unresolved decisions from discovery as explicitly out of scope. Do not invent rules that were left open.
 
 SCENARIO DEPTH — go beyond status gates:
 - Do NOT default to the pattern: happy path + "not in right status" guard + "not included" guard. This produces structurally identical ARs across features and misses real business logic.
-- For each feature, ask: What would a REAL TESTER verify beyond the obvious status checks? What compound scenarios involve multiple preconditions? What cross-feature or cross-activity interactions create interesting test cases?
-- Probe for: compound preconditions (e.g., "GIVEN a plan includes both billable and covered items AND customer authorization has been recorded"), financial consequences of actions, downstream impacts on related records, behavior when dependencies are partially met.
-- When a feature covers multiple activity types or variants, write ARs that name the specific scenario (e.g., "GIVEN a plan requires parts at one location AND equipment at another") rather than generic ARs about "activities."
+- For each feature, ask: What would a REAL TESTER verify beyond the obvious status checks? What compound scenarios involve multiple preconditions? What downstream impacts or dependency enforcements create interesting test cases?
+- Probe for: compound preconditions (e.g., "GIVEN a plan includes both billable and covered items AND customer authorization has been recorded"), financial consequences, downstream impacts on related records, behavior when dependencies are partially met.
 - When a feature involves sequencing or dependencies, write ARs that test the dependency enforcement (e.g., "GIVEN a preceding activity has not been completed WHEN the subsequent activity is scheduled THEN scheduling is prevented").
-- When the requirement and evidence imply materially different branches or ordering, name them in distinct ARs (or record unresolved items in open_decisions). Use vocabulary from the supplied inputs only—do not add domain-specific examples the user did not provide.
+- When the requirement and evidence imply materially different branches or ordering, name them in distinct ARs. Use vocabulary from the supplied inputs only.
 
 ORDERING:
-- List acceptance_requirements in a coherent narrative flow for the capability (e.g. initiating context, main path, materially different branches, completion). Each AR must still test one distinct thing; ordering serves readability for testers, not padding.
+- List acceptance_requirements in a coherent narrative flow (initiating context, main path, materially different branches, completion). Each AR still tests one distinct thing; ordering serves readability.
 
 ACTOR ASSIGNMENT:
-- Use the actor from the feature description as the default anchor.
 - GIVEN clauses describe business state — they rarely need to name a role. Roles belong in WHEN (who performs the action), not GIVEN (what conditions exist).
-- When the feature description names multiple actors ("As a RoleA, RoleB, or RoleC"), do not default to the first-listed role in every AR. Reason about which actor is specifically relevant to the action in this AR's WHEN clause. When any of the named roles could perform the action interchangeably, prefer a functional description drawn from the requirement text (e.g., "the plan creator", "the requesting party") over mechanically repeating one job title.
-- After the acting role is established for a feature, role-neutral phrasing in subsequent WHEN clauses ("they attempt to", "a plan is updated") is strongly preferred over restating the full role label.
-- When a DIFFERENT actor performs an action (e.g., customer acceptance, manager approval), name that actor explicitly in the WHEN clause only.
+- After the acting role is established, role-neutral phrasing in subsequent WHEN clauses is strongly preferred. When a DIFFERENT actor performs an action, name that actor explicitly in the WHEN clause only.
 
 COMMON MISTAKES TO AVOID:
-- BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" → GOOD: "GIVEN an agreement is linked to an item that has already been received"
-- BAD GIVEN: "GIVEN an item's eligibility date is today or in the past" → GOOD: "GIVEN an item has passed its eligibility date"
-- BAD GIVEN: "GIVEN the contract start date is before today" → GOOD: "GIVEN a contract has become active"
-- Translate literal field comparisons (date is X, status equals Y, count is greater than Z) into business-state language (has expired, is active, exceeds the threshold). Write what is true about the business situation, not what a database field contains.
-- Never reference internal system concepts or admin configurations as preconditions
-- Avoid abstract umbrella terms: "activation type", "trigger event", "configured mode"
-- CRITICAL — never confuse the actor role with the business object. The actor (from "As a [role]") is a human who performs actions. The GIVEN describes the state of a business object, not the state of the actor. BAD: "GIVEN an Operations Manager has expired" — the Operations Manager is the human role; the thing that expires is the agreement. CORRECT: "GIVEN an agreement has expired". The actor belongs in WHEN ("WHEN the Operations Manager triggers the process"), never as the subject of an expired/completed/failed state in GIVEN.
-- CLASSIFICATION OUTCOMES must name the business state or category, not the detection mechanism that produces it. BAD: "GIVEN a record contains the required keywords THEN it is classified as eligible" — "contains keywords" names the algorithm, not the business situation. GOOD: "GIVEN a record meets the eligibility criteria THEN it is marked as eligible". Never write: keywords, keyword matching, pattern matching, contains [word] or phrase, keyword detection, rules engine, classifier, scoring threshold, match score. Write what is true about the business situation — not how the system detects or tests for it.
-- CLASSIFICATION FRAMING must use the positive category name when the requirement provides one. BAD: "THEN the record is marked as not eligible" or "THEN the request is classified as not a priority type" — these name absence, not outcome. GOOD: "THEN the record is marked as standard" or "THEN the request is routed as a general inquiry". When a requirement explicitly names two or more classification categories, every AR that assigns or routes to a category must use that exact category name, never its negation.
+- Translate literal field comparisons into business-state language. BAD GIVEN: "GIVEN the contract start date is before today" → GOOD: "GIVEN a contract has become active". Write what is true about the business situation, not what a database field contains.
+- CRITICAL — never confuse the actor role with the business object. The actor is a human who performs actions. The GIVEN describes the state of a business object. BAD: "GIVEN an Operations Manager has expired" — the thing that expires is the agreement. CORRECT: "GIVEN an agreement has expired WHEN the Operations Manager reviews it".
+- CLASSIFICATION FRAMING must use the positive category name when the requirement provides one. BAD: "THEN the record is marked as not eligible". GOOD: "THEN the record is marked as standard". When a requirement names two or more categories, every AR must use the exact category name, never its negation.
 ${arGuidance ? `\n${arGuidance}` : ''}
 
 OUTPUT FORMAT (strict):

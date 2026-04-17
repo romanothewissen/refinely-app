@@ -249,6 +249,8 @@ export const KEYS = {
   backlogDocsShard: (projectKey: string, shardId: string) => `backlog_docs_${projectKey}_${shardId}`,
   backlogThemes: (projectKey: string) => `backlog_themes_${projectKey}`,
   backlogRefreshStatus: (projectKey: string) => `backlog_refresh_status_${projectKey}`,
+  goldStoryPool: (projectKey: string) => `gold_story_pool_${projectKey}`,
+  domainPatterns: (projectKey: string) => `domain_patterns_${projectKey}`,
   wiChunks: 'wi_chunks',
   wiChunksForDoc: (docId: string) => `wi_chunks_${docId}`,
   wiInsightsForDoc: (docId: string) => `wi_insights_${docId}`,
