@@ -4530,7 +4530,9 @@ function looksLikeOpenDecisionText(text: string): boolean {
 
 function collectWeakArReasons(feature: Feature): string[] {
   const reasons = new Set<string>();
-  for (const ar of feature.acceptanceRequirements ?? []) {
+  const ars = feature.acceptanceRequirements ?? [];
+
+  for (const ar of ars) {
     const given = String(ar.given ?? '').trim();
     const when = String(ar.when ?? '').trim();
     const then = String(ar.then ?? '').trim();
@@ -4547,6 +4549,56 @@ function collectWeakArReasons(feature: Feature): string[] {
       reasons.add('Acceptance requirement outcome is too shallow and should name the concrete business result.');
     }
   }
+
+  // CRUD-THEN detection: flag features where THEN clauses express persistence
+  // rather than business capability.
+  if (ars.length >= 2) {
+    const CRUD_THEN_PATTERNS: RegExp[] = [
+      /\bis\s+added\s+to\s+the\b/i,
+      /\bis\s+created\s+and\s+linked?\b/i,
+      /\breflects\s+the\b/i,
+      /\bis\s+updated\s+to\s+\w/i,
+      /\bis\s+visible\s+from\s+the\b/i,
+      /\bincludes\s+(?:the\s+)?(?:new|updated|required)\b/i,
+      /\bare\s+created\s+based\s+on\b/i,
+      /\bis\s+not\s+automatically\s+\w/i,
+    ];
+    let crudThenCount = 0;
+    for (const ar of ars) {
+      const thenText = String(ar.then ?? '');
+      if (CRUD_THEN_PATTERNS.some(p => p.test(thenText))) crudThenCount += 1;
+    }
+    if (crudThenCount >= Math.ceil(ars.length * 0.5)) {
+      reasons.add('AR THEN clauses express persistence/crud outcomes rather than business capabilities; reframe to state what the feature enables, decides, enforces, or makes possible.');
+    }
+  }
+
+  // WHEN-CRUD detection: flag features where WHEN clauses describe CRUD actions
+  // rather than business moments or triggers.
+  if (ars.length >= 2) {
+    const WHEN_CRUD_RE = /\b(?:adds?|removes?|creates?|updates?|deletes?|modifies?)\s+(?:an?\s+)?\w+\s+(?:to|from|on|in)\s+(?:the\s+)?/i;
+    let whenCrudCount = 0;
+    for (const ar of ars) {
+      const whenText = String(ar.when ?? '');
+      if (WHEN_CRUD_RE.test(whenText)) whenCrudCount += 1;
+    }
+    if (whenCrudCount >= Math.ceil(ars.length * 0.6)) {
+      reasons.add('AR WHEN clauses describe CRUD actions rather than business moments or triggers; reframe to express the business situation that triggers the behavior.');
+    }
+  }
+
+  // Generic actor detection: flag features where the description uses a
+  // generic authorized-role bucket instead of a specific business role.
+  const desc = feature.description ?? '';
+  const GENERIC_ACTOR_PATTERNS: RegExp[] = [
+    /\bas\s+an?\s+authori[sz]ed\s+\w+\s+team\s+member\b/i,
+    /\bas\s+an?\s+\w+\s+team\s+member\b/i,
+    /\bas\s+an?\s+member\s+of\s+the\b/i,
+  ];
+  if (GENERIC_ACTOR_PATTERNS.some(p => p.test(desc))) {
+    reasons.add('Feature actor is a generic authorized-role bucket, not an accountable business role; resolve to a specific job title or business responsibility grounded in the requirement or discovery answers.');
+  }
+
   return [...reasons];
 }
 

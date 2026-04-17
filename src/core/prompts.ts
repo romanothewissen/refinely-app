@@ -191,6 +191,13 @@ RULES:
 - A feature must represent independent business value, not just a supporting mechanism, side effect, analysis step, or operational convenience.
 - Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
+- ACTOR RESOLUTION — strict rules:
+  - Every feature must be owned by a specific, accountable business role — not a generic team, committee, or "authorized" bucket.
+  - "Authorized [domain] team member", "authorized user", "[domain] team member" are NOT acceptable role labels. They describe access, not accountability.
+  - If the requirement names a team but not a role within it, infer the most specific accountable role from the action: the person who creates a plan is a "Planner" (not "team member"), the person who coordinates execution is a "Coordinator" (not "authorized member"), the person who owns the case is a "Case Owner" (not "any authorized user").
+  - When discovery answers name a team, decompose it: who within that team initiates? Who approves? Who executes? Each is a different role.
+  - If no specific role can be grounded in evidence, use "authorized user" as a LAST RESORT and flag it in open_decisions as a role gap that must be resolved.
+  - The actor in "As a [role]" must be a person with a job title or business responsibility, not a permission level.
 - Do NOT invent composite bucket actors such as "any authorized …", "any … team member", "relevant stakeholder", or "appropriate user" — those are not accountable roles. If evidence does not support a specific title, use "authorized user" or record the gap in open_decisions.
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
@@ -261,6 +268,13 @@ RULES:
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]".
 - If the user message includes a ROLE CONSTRAINT block, follow it as a soft but strong preference — use those labels verbatim when a feature clearly fits one of them, and only deviate when evidence requires a different named role.
 - Never invent generic actor placeholders like "any authorized user", "any authorized … member", "… team member" as a catch-all, "various roles", or "anyone"; resolve roles from requirement evidence and answered discovery, otherwise fall back to "authorized user" only when no grounded label exists.
+- ACTOR RESOLUTION — strict rules:
+  - Every feature must be owned by a specific, accountable business role — not a generic team, committee, or "authorized" bucket.
+  - "Authorized [domain] team member", "authorized user", "[domain] team member" are NOT acceptable role labels. They describe access, not accountability.
+  - If the requirement names a team but not a role within it, infer the most specific accountable role from the action: the person who creates a plan is a "Planner" (not "team member"), the person who coordinates execution is a "Coordinator" (not "authorized member"), the person who owns the case is a "Case Owner" (not "any authorized user").
+  - When discovery answers name a team, decompose it: who within that team initiates? Who approves? Who executes? Each is a different role.
+  - If no specific role can be grounded in evidence, use "authorized user" as a LAST RESORT.
+  - The actor in "As a [role]" must be a person with a job title or business responsibility, not a permission level.
 - Choose one role label per feature unless the role label is already collective.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
 - Keep descriptions concise. Put detailed rules, sequencing, dependencies, and exceptions into acceptance requirements in pass 2.
@@ -310,6 +324,13 @@ DECOMPOSITION RULES:
 - Each feature must represent independent business value, not an implementation step.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]".
 - Never invent generic actor placeholders; resolve roles from evidence, else fall back to "authorized user".
+- ACTOR RESOLUTION — strict rules:
+  - Every feature must be owned by a specific, accountable business role — not a generic team, committee, or "authorized" bucket.
+  - "Authorized [domain] team member", "authorized user", "[domain] team member" are NOT acceptable role labels. They describe access, not accountability.
+  - If the requirement names a team but not a role within it, infer the most specific accountable role from the action: the person who creates a plan is a "Planner" (not "team member"), the person who coordinates execution is a "Coordinator" (not "authorized member"), the person who owns the case is a "Case Owner" (not "any authorized user").
+  - When discovery answers name a team, decompose it: who within that team initiates? Who approves? Who executes? Each is a different role.
+  - If no specific role can be grounded in evidence, use "authorized user" as a LAST RESORT.
+  - The actor in "As a [role]" must be a person with a job title or business responsibility, not a permission level.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
 - Split features when business behavior, ownership, rules, or outcomes materially differ.
 - Never return an empty features array.
@@ -740,7 +761,11 @@ export function buildArSystemPrompt(opts: {
 
     // standard / thorough
     return `${base}
-- Cover materially distinct branches and business-rule outcomes when they exist.
+- Every AR's THEN must express a business capability, rule, or observable truth — never mere persistence.
+- Include at least one AR that tests a business rule or constraint beyond the happy path.
+- Include at least one AR that tests a downstream impact or dependency enforcement when the feature implies them.
+- WHEN clauses should name business moments, not CRUD actions.
+- If all your ARs follow the same template (GIVEN precondition WHEN actor adds/changes/removes THEN item is added/changed/removed), you are writing CRUD requirements, not business requirements. Vary the structure.
 - Do not under-specify broad or risky features.
 - Do not over-specify very small, straightforward features.`;
   })();
@@ -801,6 +826,34 @@ CAPABILITY-SHAPED THEN (avoid implicit CRUD):
 - GOOD: "GIVEN multiple work items may need a fixed order WHEN the plan is being drafted THEN the relative order of those items can be expressed".
 - BAD: "GIVEN an active plan WHEN a user adds a line item THEN the item is added to the plan".
 - GOOD: "GIVEN an active plan WHEN a line item is selected from the approved catalog THEN that line item is available on the plan".
+- BAD: "THEN the activity is added to the plan" — GOOD: "THEN that activity is available on the plan for scheduling".
+- BAD: "THEN the plan's status is updated to finalized" — GOOD: "THEN the plan is confirmed as complete and ready for execution".
+- BAD: "THEN the current status of each follow-on action is visible from the plan" — GOOD: "THEN the progress of each follow-on action can be tracked from the plan".
+- BAD: "THEN the creation of a plan is prevented" — GOOD: "THEN a plan cannot be initiated until the prerequisite conditions are met".
+- BAD: "THEN the existing order is not automatically updated" — GOOD: "THEN the existing order requires manual review before any changes take effect".
+
+CAPABILITY VERBS FOR THEN CLAUSES:
+Prefer these to express business capability:
+- can be [expressed/indicated/specified/determined/tracked/identified]
+- is [available/eligible/prevented until/enforced as/constrained to]
+- must be [able to/confirmed as]
+- becomes [eligible for/available for/ready for]
+- requires [manual review/approval before/confirmation before]
+Avoid these persistence-adjacent verbs:
+- is added to, is created, is updated, reflects, includes, contains, shows, displays, is visible from, is linked to
+
+WHEN-CLAUSE BUSINESS MOMENTS:
+- WHEN should name the business moment, situation, or trigger — not just "who does what to the data".
+- Prefer: "WHEN the plan is being drafted", "WHEN a plan is ready for execution", "WHEN entitlements are checked", "WHEN a required resource becomes unavailable"
+- Avoid: "WHEN an authorized team member adds an activity", "WHEN the owner generates a quote", "WHEN an authorized team member finalizes the plan"
+- The actor is already established by the feature description. WHEN should advance the narrative by naming the business situation, not repeating who is acting.
+- Exception: When a DIFFERENT actor than the feature owner performs the action, name that actor in WHEN.
+
+STRUCTURAL VARIETY — avoid template cloning:
+- Do not produce ARs that follow the same template across features with only the noun swapped.
+- BAD pattern: "GIVEN [active plan] WHEN [actor] [adds/removes/changes] [noun] THEN [noun] is [added/removed/changed] on the plan" — repeated across features.
+- Instead, vary the AR structure: some test preconditions, some test enforcement rules, some test downstream impacts, some test edge cases.
+- For each feature, ask: What would a skilled tester check BEYOND the obvious CRUD operations? What business rules constrain this? What happens when preconditions are partially met? What downstream consequences follow?
 
 ORDERING:
 - List acceptance_requirements in a coherent narrative flow (initiating context, main path, materially different branches, completion). Each AR still tests one distinct thing; ordering serves readability.
@@ -837,6 +890,13 @@ RULES:
 - Preserve the feature summary, description, suggested_story_points, and process_code unless a trivial typo fix is unavoidable.
 - Preserve feature ownership and scope. Do not move rules to sibling features and do not invent new feature boundaries.
 - Keep valid existing intent, but expand weak AR wording into concrete business conditions, triggers, and outcomes; rewrite THEN clauses that only mirror persistence so they state the business capability or rule realized.
+- ADDITIONAL REPAIR CHECK:
+  - After repairing the flagged issues, also review every THEN clause: does it express a business capability (what becomes possible, true, or enforced) or merely persistence (what was stored, updated, or reflected)? Rewrite any persistence-flavored THEN to state the capability.
+  - Also review every WHEN clause: does it name a business moment or trigger, or just describe who does what to the data? Rewrite any CRUD-flavored WHEN to name the business situation.
+  - Persistence-flavored THEN patterns to rewrite: "is added to the", "is created and linked", "reflects the", "is updated to [status]", "is visible from the", "includes the new/updated", "are created based on", "is not automatically updated".
+  - Capability-shaped THEN alternatives: "is available for", "can be expressed/indicated/tracked", "is confirmed as", "becomes eligible for", "requires review before".
+  - CRUD-flavored WHEN patterns to rewrite: "adds [noun] to the", "removes [noun] from the", "creates [noun] in the", "updates [noun] on the".
+  - Business-moment WHEN alternatives: "the plan is being drafted", "a plan is ready for execution", "entitlements are checked", "a required resource becomes unavailable".
 - If the evidence supports ambiguity handling, manual review, fallback, exclusions, routing, linkage, or carryover obligations, express those in business language rather than generic processing wording.
 - Do not invent domain-specific logic, product-specific categories, or internal implementation mechanisms that are not supported by the requirement, discovery answers, work instructions, or current valid AR meaning.
 - Remove duplicate or near-duplicate ARs by folding them into the strongest single valid AR.

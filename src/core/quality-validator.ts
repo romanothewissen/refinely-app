@@ -41,11 +41,35 @@ const GENERIC_ROLE_DENYLIST_PATTERNS: Array<{ pattern: RegExp; label: string }> 
   { pattern: /\bas\s+an?\s+any\s+authori[sz]ed\s+users?\b/i, label: 'any authorized user' },
   { pattern: /\bas\s+an?\s+any\s+authori[sz]ed\b/i, label: 'composite "any authorized …" actor' },
   { pattern: /\bas\s+an?\s+authori[sz]ed\s+.+?\s+(?:member|person|user|party)\b/i, label: 'generic authorized member bucket' },
+  { pattern: /\bas\s+an?\s+authori[sz]ed\s+\w+\s+team\s+member\b/i, label: 'generic authorized team member' },
+  { pattern: /\bas\s+an?\s+\w+\s+team\s+member\b/i, label: 'generic team member' },
+  { pattern: /\bas\s+an?\s+member\s+of\s+the\b/i, label: 'generic member of team' },
   { pattern: /\bas\s+an?\s+various\s+roles?\b/i, label: 'various roles' },
   { pattern: /\bas\s+an?\s+different\s+roles?\b/i, label: 'different roles' },
   { pattern: /\bas\s+an?\s+(?:anyone|someone|everyone)\b/i, label: 'undefined actor' },
   { pattern: /\bas\s+a\s+user\b/i, label: 'generic "user" actor' },
 ];
+
+// Detects THEN clauses that express mere persistence/crud rather than business capability.
+// These patterns are structural and domain-agnostic — they match regardless of the business domain.
+const CRUD_FLAVORED_THEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bis\s+added\s+to\s+the\b/i, label: 'persistence: added to' },
+  { pattern: /\bis\s+created\s+and\s+linked?\b/i, label: 'persistence: created and linked' },
+  { pattern: /\breflects\s+the\b/i, label: 'persistence: reflects the' },
+  { pattern: /\bis\s+updated\s+to\s+\w/i, label: 'persistence: status update' },
+  { pattern: /\bis\s+visible\s+from\s+the\b/i, label: 'persistence: visible from' },
+  { pattern: /\bincludes\s+(?:the\s+)?(?:new|updated|required)\b/i, label: 'persistence: includes' },
+  { pattern: /\bare\s+created\s+based\s+on\b/i, label: 'persistence: created based on' },
+  { pattern: /\bis\s+not\s+automatically\s+\w/i, label: 'persistence: not automatically updated' },
+];
+
+// Detects WHEN clauses that describe a CRUD action rather than a business moment or trigger.
+const WHEN_CRUD_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\b(?:adds?|removes?|creates?|updates?|deletes?|modifies?)\s+(?:an?\s+)?\w+\s+(?:to|from|on|in)\s+(?:the\s+)?/i, label: 'CRUD action in WHEN' },
+];
+
+const CRUD_THEN_THRESHOLD = 0.5; // Flag when ≥50% of ARs match a CRUD-THEN pattern
+const WHEN_CRUD_THRESHOLD = 0.6; // Flag when ≥60% of WHEN clauses match a CRUD pattern
 const AR_DEDUP_STOP_WORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'by', 'with', 'from', 'for',
   'is', 'are', 'was', 'were', 'be', 'been', 'being', 'has', 'have', 'had', 'does', 'do', 'did',
@@ -489,6 +513,50 @@ export function validateFeatures(features: Feature[], config: TenantConfig): Val
         field: 'acceptanceRequirements',
         message: 'AR THEN clauses lack concrete business anchors from the feature scope; prefer specific business nouns over abstract verbs (validate, ensure, verify, confirm)',
       });
+    }
+
+    // CRUD-THEN detection: flag features where too many THEN clauses express
+    // persistence rather than business capability.
+    if (feature.acceptanceRequirements.length >= 2) {
+      let crudThenCount = 0;
+      for (const ar of feature.acceptanceRequirements) {
+        const thenText = String(ar.then ?? '');
+        for (const entry of CRUD_FLAVORED_THEN_PATTERNS) {
+          if (entry.pattern.test(thenText)) {
+            crudThenCount += 1;
+            break;
+          }
+        }
+      }
+      if (crudThenCount >= Math.ceil(feature.acceptanceRequirements.length * CRUD_THEN_THRESHOLD)) {
+        violations.push({
+          featureId: feature.id,
+          field: 'acceptanceRequirements',
+          message: 'AR THEN clauses express persistence/crud outcomes rather than business capabilities; reframe to state what the feature enables, decides, enforces, or makes possible',
+        });
+      }
+    }
+
+    // WHEN-CRUD detection: flag features where too many WHEN clauses describe
+    // CRUD actions rather than business moments or triggers.
+    if (feature.acceptanceRequirements.length >= 2) {
+      let whenCrudCount = 0;
+      for (const ar of feature.acceptanceRequirements) {
+        const whenText = String(ar.when ?? '');
+        for (const entry of WHEN_CRUD_PATTERNS) {
+          if (entry.pattern.test(whenText)) {
+            whenCrudCount += 1;
+            break;
+          }
+        }
+      }
+      if (whenCrudCount >= Math.ceil(feature.acceptanceRequirements.length * WHEN_CRUD_THRESHOLD)) {
+        violations.push({
+          featureId: feature.id,
+          field: 'acceptanceRequirements',
+          message: 'AR WHEN clauses describe CRUD actions rather than business moments or triggers; reframe to express the business situation that triggers the behavior',
+        });
+      }
     }
 
     // Check for near-duplicate ARs within the feature
