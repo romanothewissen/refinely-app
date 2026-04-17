@@ -99,7 +99,8 @@ test('defaults story assistant pipeline profile to balanced and resolves a deter
   assert.equal(route.clarify, resolved.clarifyModel);
   assert.equal(route.decomposition, resolved.decompositionModel);
   assert.equal(route.ar, resolved.arModel);
-  assert.notEqual(route.clarify, route.decomposition);
+  // Balanced route: decomposition and AR share the heavier model; clarify uses the lighter tier when the catalog distinguishes them.
+  assert.equal(route.decomposition, route.ar);
 });
 
 test('infers quality and fast profiles from saved story assistant model families', () => {

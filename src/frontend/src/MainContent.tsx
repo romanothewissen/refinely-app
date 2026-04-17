@@ -40,7 +40,6 @@ import type {
   FeatureClass,
   FeatureConfidence,
   GenerationContextMeta,
-  OutputProfile,
   PipelineProfile,
   RestructureScope,
   StructuralFeatureProposal,
@@ -145,12 +144,6 @@ function formatActorSourceLabel(value?: FeatureActorSource): string {
   return 'Prompt';
 }
 
-function formatOutputProfileLabel(value?: OutputProfile): string {
-  if (value === 'technical_first') return 'Technical-first';
-  if (value === 'balanced') return 'Balanced';
-  return 'Business-first';
-}
-
 function formatPipelineProfileLabel(value?: PipelineProfile): string {
   switch (value) {
     case 'fast':
@@ -201,7 +194,6 @@ type GenerationProgressMeta = {
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };
-  outputProfile?: OutputProfile;
   pipelineProfile?: PipelineProfile;
 };
 
@@ -508,8 +500,8 @@ function _DraftReviewCard_REMOVED({
               <div className="text-[14px] font-black text-[var(--rf-text)]">{openDecisions.length}</div>
             </div>
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Output style</div>
-              <div className="text-[14px] font-black text-[var(--rf-text)]">{formatOutputProfileLabel(meta?.outputProfile)}</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] mb-0.5">Pipeline</div>
+              <div className="text-[14px] font-black text-[var(--rf-text)]">{formatPipelineProfileLabel(meta?.pipelineProfile)}</div>
             </div>
           </div>
         </div>
@@ -2707,11 +2699,6 @@ export function MainContent({
                         {generationContext.pipelineProfile && (
                           <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
                             {formatPipelineProfileLabel(generationContext.pipelineProfile)}
-                          </span>
-                        )}
-                        {generationContext.outputProfile && (
-                          <span className="inline-flex items-center rounded-md border border-[rgba(43,89,74,0.14)] bg-[var(--rf-brand-muted)] px-2 py-0.5 text-[12px] font-semibold text-[var(--rf-brand)]">
-                            {formatOutputProfileLabel(generationContext.outputProfile)}
                           </span>
                         )}
                         {generationContext.attachmentIncluded && (

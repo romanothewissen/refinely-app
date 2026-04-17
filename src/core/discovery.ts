@@ -34,6 +34,7 @@ export const CLARIFY_CATEGORY_LABELS: Record<ClarifyCategoryKey, string> = {
 const CATEGORY_ALIASES: Record<string, ClarifyCategoryKey> = {
   'context trigger': 'context_trigger',
   'context and trigger': 'context_trigger',
+  'trigger & context': 'context_trigger',
   'trigger context': 'context_trigger',
   'trigger and context': 'context_trigger',
   'objective outcome': 'context_trigger',
@@ -43,6 +44,7 @@ const CATEGORY_ALIASES: Record<string, ClarifyCategoryKey> = {
   'actors and ownership': 'user_personas',
   'roles personas': 'user_personas',
   'roles and personas': 'user_personas',
+  'roles & personas': 'user_personas',
   'user personas': 'user_personas',
   'personas': 'user_personas',
   // Legacy keys mapped to new equivalents
@@ -55,6 +57,8 @@ const CATEGORY_ALIASES: Record<string, ClarifyCategoryKey> = {
   'workflow flow': 'functional_flow',
   'step by step': 'functional_flow',
   'business rules': 'business_rules',
+  'business rules exceptions': 'business_rules',
+  'business rules and exceptions': 'business_rules',
   'rules constraints': 'business_rules',
   'rules and constraints': 'business_rules',
   'dependencies boundaries': 'business_rules',
@@ -177,8 +181,8 @@ export function inferCategoryKeyFromQuestion(question: string): ClarifyCategoryK
   if (/\b(status|state|lifecycle|transition|stage|reopen|retry|reverse|progression|move through)\b/.test(normalized)) {
     return 'state_lifecycle';
   }
-  if (/\b(success|measure|metric|test|tester|verify|outcome|improvement|visibility|track end-to-end|kpi|confirm.*working)\b/.test(normalized)) {
-    return 'success_measurement';
+  if (/\b(who|whom|actor|actors|owner|ownership|permission|permissions|access|role|roles|team|persona|personas|stakeholder|accountable|assignee|responsible party)\b/.test(normalized)) {
+    return 'user_personas';
   }
   if (/\b(step|sequence|order|flow|depend|precondition|branch|parallel|serial|before.*complete|when.*complete|activity.*order)\b/.test(normalized)) {
     return 'functional_flow';
@@ -186,8 +190,11 @@ export function inferCategoryKeyFromQuestion(question: string): ClarifyCategoryK
   if (/\b(rule|constraint|priority|validation|approval|threshold|policy|timing|rank|score|missing|duplicate|conflict|offline|unavailable|error|fail|fallback|exception|invalid)\b/.test(normalized)) {
     return 'business_rules';
   }
-  if (/\b(who|actor|owner|permission|access|role|team|persona|visibility)\b/.test(normalized)) {
-    return 'user_personas';
+  if (/\b(success criteria|definition of done|measurement target|key performance|kpi|metric target|how (?:would|do) we (?:know|verify)|acceptance signal)\b/.test(normalized)) {
+    return 'success_measurement';
+  }
+  if (/\b(success|measure|metric|tester|verify|outcome|improvement|track end-to-end|confirm.*working)\b/.test(normalized)) {
+    return 'success_measurement';
   }
   return 'context_trigger';
 }

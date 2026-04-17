@@ -140,13 +140,11 @@ export interface Branding {
   secondaryColor: string;
 }
 
-export type OutputProfile = 'business_first' | 'balanced' | 'technical_first';
 export type FeatureClass = 'business_capability' | 'technical_enabler' | 'cross_cutting_rule';
 export type FeatureConfidence = 'confirmed' | 'assumption_applied';
 export type FeatureActorSource = 'prompt' | 'clarify' | 'workspace_role' | 'fallback';
 
 export interface GenerationPreferences {
-  outputProfile: OutputProfile;
   backlogDepth?: 'quick' | 'standard' | 'thorough';
   featureProfile?: {
     includeTechnicalEnablers?: boolean;
@@ -218,9 +216,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     themeModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     maxTokens: 8192,
   },
-  generationPreferences: {
-    outputProfile: 'business_first',
-  },
+  generationPreferences: {},
   domainContext: '',
   domainRoles: [],
   processTaxonomyEnabled: false,
@@ -850,7 +846,6 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
-  outputProfile?: OutputProfile;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   sizingAssessment?: GenerationSizingAssessment;
@@ -1201,7 +1196,6 @@ export interface PipelineAuditBundle {
   userInputs?: {
     requirement?: string;
     attachmentText?: string;
-    outputProfile?: OutputProfile;
     clarifyDiscoveryProfile?: unknown;
     clarifySizingContract?: unknown;
     clarifyAdvisoryTriage?: unknown;
@@ -1317,7 +1311,6 @@ export interface GenerationEvent {
   attachmentText: string;
   config: TenantConfig;
   license?: { active: boolean; licenseType: string };
-  outputProfileOverride?: OutputProfile;
   projectKey: string;
   projectKeys?: string[];
   /** Optional per-run WI scope; when set, retrieval is constrained to these docs. */

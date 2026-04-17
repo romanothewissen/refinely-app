@@ -11,7 +11,6 @@ import type {
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
   LlmProvider,
-  OutputProfile,
   PipelineProfile,
   ProjectActivitySummaryRow,
   ProjectPersonaRoleSuggestion,
@@ -390,7 +389,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   // Personal + workspace state
   const [defaultProjectKey, setDefaultProjectKey] = useState('');
-  const [workspaceOutputProfile, setWorkspaceOutputProfile] = useState<OutputProfile>('business_first');
   const [tier, setTier] = useState<'free' | 'standard'>('standard');
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [transparencyEnabled, setTransparencyEnabled] = useState(false);
@@ -406,6 +404,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
   const [showAllAuditEvents, setShowAllAuditEvents] = useState(false);
+  const [setupBannerDismissed, setSetupBannerDismissed] = useState(() => {
+    try { return localStorage.getItem('rf_setup_banner_dismissed') === '1'; } catch { return false; }
+  });
   const [auditCategoryFilter, setAuditCategoryFilter] = useState<'all' | 'config' | 'security' | 'prompt' | 'runtime'>('runtime');
   const [piiPreviewInput, setPiiPreviewInput] = useState('Contact Jane Doe at jane.doe@example.com or +31 6 1234 5678 to review payment card 4111 1111 1111 1111.');
   const [piiPreviewResult, setPiiPreviewResult] = useState<PiiPreviewResult>({ text: '', totalRedactions: 0, byType: {} });
@@ -438,6 +439,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
     });
     return keys.size;
   }, [arMappings, domainContexts, backlogStatusScopes]);
+
+  const completionStatus = useMemo(() => {
+    const hasApiKey = !!(existingAnthropicApiKey || existingGeminiApiKey || existingOpenaiApiKey || existingAzureOpenAIApiKey || existingOllamaApiKey);
+    return {
+      models: provider === 'forge_llms' || hasApiKey ? 'complete' : hasApiKey === false && isAdmin !== null ? 'warning' : 'pending',
+      jira: arMappings.length > 0 ? 'complete' : 'pending',
+      domain: domainContexts.some(d => d.context?.trim()) ? 'complete' : 'pending',
+    } as const;
+  }, [provider, existingAnthropicApiKey, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, existingOllamaApiKey, arMappings, domainContexts, isAdmin]);
 
   const projectUsageBreakdown = useMemo(() => {
     return projectActivityRows
@@ -590,11 +600,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
         }
 
         if (existingConfig.tier) setTier(existingConfig.tier);
-        setWorkspaceOutputProfile(
-          existingConfig.generationPreferences?.outputProfile === 'balanced' || existingConfig.generationPreferences?.outputProfile === 'technical_first'
-            ? existingConfig.generationPreferences.outputProfile
-            : 'business_first',
-        );
         setComplianceEnabled(Boolean(existingConfig.compliance?.enabled));
         setTransparencyEnabled(Boolean(existingConfig.compliance?.transparencyReportsEnabled));
         setPiiMaskingEnabled(Boolean(existingConfig.compliance?.piiMaskingEnabled));
@@ -874,9 +879,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           ollamaBaseUrl: ollamaBaseUrl.trim() || undefined,
           modelCatalogs,
         },
-        generationPreferences: {
-          outputProfile: workspaceOutputProfile,
-        },
+        generationPreferences: {},
         domainContext: '',
         domainContexts,
         domainRoles: [],
@@ -1193,8 +1196,40 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       </header>
 
       <div className="flex-1 overflow-hidden flex">
-          <div className="w-44 shrink-0 border-r border-[rgba(43,89,74,0.10)] bg-[rgba(248,246,240,0.60)] backdrop-blur-xl px-3 py-3 flex flex-col gap-0.5">
-            {settingsNav.map((tab) => (
+          <div className="w-44 shrink-0 border-r border-[rgba(43,89,74,0.10)] bg-[rgba(248,246,240,0.60)] backdrop-blur-xl px-3 py-3 flex flex-col gap-0.5 overflow-y-auto">
+            {/* Group: Core Setup */}
+            <div className="px-2.5 pb-1 pt-0.5">
+              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] opacity-60">Setup</span>
+            </div>
+            {settingsNav.filter(t => ['models', 'jira', 'domain'].includes(t.id)).map((tab) => {
+              const status = completionStatus[tab.id as keyof typeof completionStatus];
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-white/90 text-[var(--rf-brand)] shadow-sm border border-[rgba(43,89,74,0.10)]'
+                      : 'text-[var(--rf-text-tertiary)] border border-transparent hover:bg-white/50 hover:text-[var(--rf-text-secondary)]'
+                  }`}
+                >
+                  <tab.icon className={`w-3.5 h-3.5 shrink-0 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`} />
+                  <span className={`flex-1 text-[13px] font-semibold leading-tight text-left ${activeTab === tab.id ? 'text-[var(--rf-brand-hover)]' : 'text-[var(--rf-text-secondary)]'}`}>{tab.label}</span>
+                  {status === 'complete' && (
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--rf-success)]" title="Configured" />
+                  )}
+                  {status === 'warning' && (
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--rf-warning)]" title="Needs attention" />
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Group: Admin */}
+            <div className="px-2.5 pb-1 pt-3">
+              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] opacity-60">Admin</span>
+            </div>
+            {settingsNav.filter(t => ['stats', 'billing', 'compliance'].includes(t.id)).map((tab) => (
               <button
                 key={tab.id}
                 disabled={tab.id === 'compliance'}
@@ -1206,7 +1241,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 } ${tab.id === 'compliance' ? 'opacity-50 cursor-not-allowed filter grayscale' : ''}`}
               >
                 <tab.icon className={`w-3.5 h-3.5 shrink-0 ${activeTab === tab.id ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`} />
-                <div className="flex flex-col text-left">
+                <div className="flex flex-col text-left flex-1">
                   <span className={`text-[13px] font-semibold leading-tight ${activeTab === tab.id ? 'text-[var(--rf-brand-hover)]' : 'text-[var(--rf-text-secondary)]'}`}>{tab.label}</span>
                   {tab.id === 'compliance' && <span className="text-[10px] font-bold text-[var(--rf-brand)] uppercase tracking-tighter mt-0.5">Coming Soon</span>}
                 </div>
@@ -1231,6 +1266,55 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
               >
+                {/* Quick Setup banner — dismissable, shown until key steps are done */}
+                {!setupBannerDismissed && (completionStatus.models !== 'complete' || completionStatus.jira !== 'complete' || completionStatus.domain !== 'complete') && isAdmin && (
+                  <motion.div
+                    className="relative rounded-2xl border border-[rgba(43,89,74,0.18)] bg-[rgba(43,89,74,0.05)] px-4 py-3.5"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSetupBannerDismissed(true);
+                        try { localStorage.setItem('rf_setup_banner_dismissed', '1'); } catch {}
+                      }}
+                      className="absolute top-3 right-3 p-1 rounded-lg text-[var(--rf-text-tertiary)] hover:bg-white/70 hover:text-[var(--rf-text)] transition-all"
+                      title="Dismiss"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-brand)] mb-2">Quick Setup</div>
+                    <div className="text-[12px] text-[var(--rf-text-secondary)] mb-3 leading-relaxed">Complete these steps for the best results.</div>
+                    <div className="space-y-1.5">
+                      {[
+                        { key: 'models' as const, label: 'Set your LLM provider and API key', tab: 'models' as const },
+                        { key: 'jira' as const, label: 'Configure a project in Project Setup', tab: 'jira' as const },
+                        { key: 'domain' as const, label: 'Add domain context and team guidance', tab: 'domain' as const },
+                      ].map((step, idx) => {
+                        const done = completionStatus[step.key] === 'complete';
+                        return (
+                          <button
+                            key={step.key}
+                            type="button"
+                            onClick={() => setActiveTab(step.tab)}
+                            className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-all ${done ? 'opacity-60' : 'hover:bg-white/70'}`}
+                          >
+                            <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black border ${done ? 'bg-[var(--rf-success)] border-[var(--rf-success)] text-white' : 'border-[rgba(43,89,74,0.25)] bg-white/70 text-[var(--rf-brand)]'}`}>
+                              {done ? <Check className="h-3 w-3" /> : idx + 1}
+                            </div>
+                            <span className={`flex-1 text-[12px] font-medium leading-tight ${done ? 'line-through text-[var(--rf-text-tertiary)]' : 'text-[var(--rf-text-secondary)]'}`}>
+                              {step.label}
+                            </span>
+                            {!done && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--rf-text-tertiary)]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+
                 {/* Provider + API key */}
                 <div className="rf-card p-5 space-y-4">
                   <div className="space-y-2">
@@ -1653,29 +1737,6 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   </div>
                 </div>
 
-                {isAdmin && (
-                  <div className="rf-card p-5 space-y-5">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Generation output default</div>
-                      <div className="text-[13px] text-[var(--rf-text-tertiary)] mt-1">Choose how requirement generation should balance business readability and technical detail across the workspace.</div>
-                    </div>
-                    <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 flex flex-col gap-3">
-                      <label className="text-sm font-bold text-[var(--rf-text)]">Workspace output profile</label>
-                      <select
-                        value={workspaceOutputProfile}
-                        onChange={(e) => setWorkspaceOutputProfile(e.target.value as OutputProfile)}
-                        className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-sm font-semibold text-[var(--rf-text)] outline-none"
-                      >
-                        <option value="business_first">Business-first</option>
-                        <option value="balanced">Balanced</option>
-                        <option value="technical_first">Technical-first</option>
-                      </select>
-                      <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                        Business-first keeps core output broad-use and readable by default. Teams can still override the style per run from the generator.
-                      </div>
-                    </div>
-                  </div>
-                )}
               </motion.div>
             )}
 

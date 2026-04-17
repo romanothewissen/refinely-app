@@ -136,13 +136,23 @@ function normalizeConfig(config: TenantConfig): TenantConfig {
   const withoutLegacy = { ...config };
   delete (withoutLegacy as { goldSources?: unknown }).goldSources;
   const normalizedContexts = normalizeDomainContexts(withoutLegacy);
+  const rawPrefs = { ...(config.generationPreferences ?? {}) } as Record<string, unknown>;
+  delete rawPrefs.outputProfile;
+
+  const backlogDepthRaw = rawPrefs.backlogDepth;
+  const backlogDepth = backlogDepthRaw === 'quick' || backlogDepthRaw === 'standard' || backlogDepthRaw === 'thorough'
+    ? backlogDepthRaw
+    : undefined;
+  const featureProfile = rawPrefs.featureProfile && typeof rawPrefs.featureProfile === 'object'
+    ? rawPrefs.featureProfile as TenantConfig['generationPreferences']['featureProfile']
+    : undefined;
+
   return {
     ...withoutLegacy,
     generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
     generationPreferences: {
-      outputProfile: config.generationPreferences?.outputProfile === 'balanced' || config.generationPreferences?.outputProfile === 'technical_first'
-        ? config.generationPreferences.outputProfile
-        : 'business_first',
+      ...(backlogDepth ? { backlogDepth } : {}),
+      ...(featureProfile ? { featureProfile } : {}),
     },
     domainContexts: normalizedContexts,
   };

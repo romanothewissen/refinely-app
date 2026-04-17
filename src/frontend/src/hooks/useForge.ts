@@ -1,5 +1,5 @@
 import { invoke } from '@forge/bridge';
-import type { CanvasEditIntent, CanvasEditScope, GenerationModelOverrides, LlmProvider, OutputProfile } from '../types';
+import type { CanvasEditIntent, CanvasEditScope, GenerationModelOverrides, LlmProvider } from '../types';
 
 type Payload = Record<string, unknown>;
 const p = (v: unknown) => v as Payload;
@@ -29,7 +29,6 @@ export const api = {
     clarifyQuestionsAsked?: unknown[];
     clarifyFinalSufficiency?: unknown;
     attachmentText?: string;
-    outputProfileOverride?: OutputProfile;
     modelOverrides?: GenerationModelOverrides;
     projectKey?: string;
     projectKeys?: string[];

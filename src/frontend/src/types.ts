@@ -117,13 +117,16 @@ export interface Branding {
   secondaryColor: string;
 }
 
-export type OutputProfile = 'business_first' | 'balanced' | 'technical_first';
 export type FeatureClass = 'business_capability' | 'technical_enabler' | 'cross_cutting_rule';
 export type FeatureConfidence = 'confirmed' | 'assumption_applied';
 export type FeatureActorSource = 'prompt' | 'clarify' | 'workspace_role' | 'fallback';
 
 export interface GenerationPreferences {
-  outputProfile: OutputProfile;
+  backlogDepth?: 'quick' | 'standard' | 'thorough';
+  featureProfile?: {
+    includeTechnicalEnablers?: boolean;
+    includeCrossCuttingRules?: boolean;
+  };
 }
 
 export interface ProjectArMapping {
@@ -211,9 +214,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     themeModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     maxTokens: 8192,
   },
-  generationPreferences: {
-    outputProfile: 'business_first',
-  },
+  generationPreferences: {},
   domainContext: '',
   domainRoles: [],
   processTaxonomyEnabled: false,
@@ -831,7 +832,6 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
   referencedSimilarStories?: ReferencedSimilarStory[];
-  outputProfile?: OutputProfile;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   sizingAssessment?: GenerationSizingAssessment;
@@ -1133,7 +1133,6 @@ export interface GenerationEvent {
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
   config: TenantConfig;
-  outputProfileOverride?: OutputProfile;
   projectKey?: string;
   projectKeys?: string[];
   selectedWiDocIds?: string[];

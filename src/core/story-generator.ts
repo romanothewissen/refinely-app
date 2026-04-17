@@ -25,7 +25,6 @@ import {
   TenantConfig,
   GenerationResult,
   OpenDecision,
-  OutputProfile,
   RoleCoverageItem,
   SimilarStory,
   CoverageFindings,
@@ -280,6 +279,12 @@ function pipelineReasoningEffort(profile: PipelineProfile | undefined): 'none' |
   if (profile === 'fast') return 'none';
   if (profile === 'quality') return 'medium';
   return 'low'; // 'balanced' or undefined → low
+}
+
+/** Pass-2 AR batch + repair: balanced needs enough reasoning to avoid templated shallow ARs. */
+function acceptanceRequirementsReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'low' | 'medium' {
+  if (profile === 'fast') return 'none';
+  return 'medium'; // balanced + quality
 }
 
 export class AcceptanceRequirementsGenerationError extends Error {
@@ -2154,7 +2159,6 @@ async function reviewDraftFeatureSet(opts: {
   action: Exclude<DraftReviewDecision, 'continue'>;
   selectedFeatureIds?: string[];
   currentReviewMeta?: DraftReviewMetadata;
-  outputProfile?: OutputProfile;
   config: TenantConfig;
   providerOpts: {
     provider: TenantConfig['generatorConfig']['provider'];
@@ -2228,7 +2232,6 @@ async function reviewDraftFeatureSet(opts: {
     model: getTierModel(opts.config.generatorConfig.decompositionModel, opts.config.tier),
     systemPrompt: buildDraftReviewSystemPrompt({
       domainContext: opts.config.domainContext,
-      outputProfile: opts.outputProfile ?? opts.config.generationPreferences?.outputProfile ?? 'business_first',
       processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
       action: opts.action,
     }),
@@ -2767,7 +2770,6 @@ export async function generateFeatures(opts: {
   wiContextText: string;
   wiInsightsArtifact?: WorkInstructionInsightArtifact | null;
   config: TenantConfig;
-  outputProfileOverride?: OutputProfile;
   advisoryTriage?: AdvisoryTriageContract;
   precomputedDraftFeatures?: Feature[];
   /** @deprecated No longer used — pipeline flows straight through without review pause. */
@@ -2798,7 +2800,6 @@ export async function generateFeatures(opts: {
     wiContextText,
     wiInsightsArtifact,
     config,
-    outputProfileOverride,
     advisoryTriage,
     precomputedDraftFeatures,
     allowPartialArFailure,
@@ -2811,7 +2812,6 @@ export async function generateFeatures(opts: {
     similarStories,
   } = opts;
   const { generatorConfig } = config;
-  const outputProfile = outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first';
   const providerOpts = {
     provider: generatorConfig.provider,
     anthropicApiKey: generatorConfig.anthropicApiKey,
@@ -2963,7 +2963,6 @@ export async function generateFeatures(opts: {
         features: pass1DraftFeatures,
         action: 'tighten',
         currentReviewMeta: draftReview,
-        outputProfile,
         config,
         providerOpts,
         shouldCancel,
@@ -3033,29 +3032,28 @@ export async function generateFeatures(opts: {
 
   if (!precomputedDraftFeatures?.length && projectKeys?.length) {
     const activeProjectKey = projectKeys[0];
-    // Load domain patterns extracted during last cache rebuild (best-effort)
-    try {
-      pass2DomainPatterns = await objectRead<DomainPatterns>(KEYS.domainPatterns(activeProjectKey));
-    } catch { /* non-fatal */ }
 
-    // Use gold story exemplars when available; fall back to similar-stories pattern library
-    try {
-      const goldPool = await getGoldStoryPool(activeProjectKey);
-      if (goldPool?.entries?.length) {
-        const goldText = formatGoldStoryExemplars(goldPool);
-        if (goldText) {
-          const merged = `${similarForPass2Ar}\n\n---\n\n${goldText}`;
-          similarForPass2Ar = trimPromptText(merged, 5200);
-        }
-      } else if (similarStories?.length && config.tier !== 'free') {
-        const pat = formatArPatternLibraryFromSimilarStories(similarStories, requirement, 5);
-        if (pat.text) {
-          pass2ArPatternStoryKeys = pat.storyKeys;
-          const merged = `${similarStoriesText}\n\n---\n\n${pat.text}`;
-          similarForPass2Ar = trimPromptText(merged, 5200);
-        }
+    const [domainPatterns, goldPool] = await Promise.all([
+      objectRead<DomainPatterns>(KEYS.domainPatterns(activeProjectKey)).catch(() => null),
+      getGoldStoryPool(activeProjectKey).catch(() => null),
+    ]);
+
+    pass2DomainPatterns = domainPatterns;
+
+    if (goldPool?.entries?.length) {
+      const goldText = formatGoldStoryExemplars(goldPool);
+      if (goldText) {
+        const merged = `${similarForPass2Ar}\n\n---\n\n${goldText}`;
+        similarForPass2Ar = trimPromptText(merged, 5200);
       }
-    } catch { /* non-fatal */ }
+    } else if (similarStories?.length && config.tier !== 'free') {
+      const pat = formatArPatternLibraryFromSimilarStories(similarStories, requirement, 5);
+      if (pat.text) {
+        pass2ArPatternStoryKeys = pat.storyKeys;
+        const merged = `${similarStoriesText}\n\n---\n\n${pat.text}`;
+        similarForPass2Ar = trimPromptText(merged, 5200);
+      }
+    }
   } else if (!precomputedDraftFeatures?.length && similarStories?.length && config.tier !== 'free') {
     const pat = formatArPatternLibraryFromSimilarStories(similarStories, requirement, 5);
     if (pat.text) {
@@ -3125,7 +3123,7 @@ export async function generateFeatures(opts: {
       systemPrompt: pass2System,
       userMessage: pass2UserMessage,
       maxTokens: pass2MaxTokens,
-      reasoningEffort: pipelineReasoningEffort(generatorConfig.pipelineProfile),
+      reasoningEffort: acceptanceRequirementsReasoningEffort(generatorConfig.pipelineProfile),
       ...providerOpts,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();
@@ -3361,7 +3359,6 @@ export async function generateFeatures(opts: {
     generationContext: {
       projectKey: '',
       domainRolesUsed: [],
-      outputProfile,
       pass2BatchWiChunkCount: pass2BatchWiChunkCount || undefined,
       pass2ArPatternStoryKeys: pass2ArPatternStoryKeys.length ? pass2ArPatternStoryKeys : undefined,
       openDecisions,

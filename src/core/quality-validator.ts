@@ -39,6 +39,8 @@ const AR_COUNT_FLOOR_MIN_ARS = 3;
 
 const GENERIC_ROLE_DENYLIST_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bas\s+an?\s+any\s+authori[sz]ed\s+users?\b/i, label: 'any authorized user' },
+  { pattern: /\bas\s+an?\s+any\s+authori[sz]ed\b/i, label: 'composite "any authorized …" actor' },
+  { pattern: /\bas\s+an?\s+authori[sz]ed\s+.+?\s+(?:member|person|user|party)\b/i, label: 'generic authorized member bucket' },
   { pattern: /\bas\s+an?\s+various\s+roles?\b/i, label: 'various roles' },
   { pattern: /\bas\s+an?\s+different\s+roles?\b/i, label: 'different roles' },
   { pattern: /\bas\s+an?\s+(?:anyone|someone|everyone)\b/i, label: 'undefined actor' },

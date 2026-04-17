@@ -5,7 +5,24 @@
  * removed. Domain context is injected dynamically from tenant configuration.
  */
 
-import type { DiscoveryDimensionLevel, PipelineProfile, ProcessCode, WorkInstructionInsightItem } from '../types';
+import type { ClarifyCategoryKey, DiscoveryDimensionLevel, PipelineProfile, ProcessCode, WorkInstructionInsightItem } from '../types';
+import { CLARIFY_CATEGORY_LABELS, CLARIFY_CATEGORY_ORDER } from './discovery';
+
+const CLARIFY_DIMENSION_HINTS: Record<ClarifyCategoryKey, string> = {
+  context_trigger: 'the event or state that starts this; preconditions that must be true',
+  user_personas: 'who initiates, performs each step, approves, or only observes',
+  functional_flow: 'the step-by-step path; decisions, branches, and the resulting business state',
+  business_rules: 'validation rules; exceptions; thresholds; compliance constraints',
+  state_lifecycle: 'states and transitions; progression, hold, resume, reopen, or cancellation',
+  success_measurement: 'definition of done; how completion or quality would be judged in business terms',
+};
+
+function clarifyDiscoveryDimensionsBlock(): string {
+  return CLARIFY_CATEGORY_ORDER.map((key) => {
+    const label = CLARIFY_CATEGORY_LABELS[key];
+    return `   ${label} (categoryKey "${key}"): ${CLARIFY_DIMENSION_HINTS[key]}`;
+  }).join('\n');
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -76,12 +93,12 @@ export function buildDecompositionSystemPrompt(opts: {
   const includeTechnical = featureProfile.includeTechnicalEnablers ?? false;
   const includeCrossCutting = featureProfile.includeCrossCuttingRules ?? false;
 
-  const outputProfileGuidance = includeTechnical || includeCrossCutting
-    ? `OUTPUT PROFILE:
+  const featureDeliveryMixGuidance = includeTechnical || includeCrossCutting
+    ? `FEATURE DELIVERY MIX:
 - Prefer business-facing capabilities first.${includeTechnical ? '\n- Include standalone technical enablers (APIs, integrations, data migrations) as separate features when they are independently deliverable.' : '\n- Suppress standalone technical enablers unless explicitly requested as deliverables.'}${includeCrossCutting ? '\n- Include cross-cutting governance rules (access control, audit, compliance) as separate features when they are independently deliverable.' : ''}
 - Tag features as "business_capability", "technical_enabler", or "cross_cutting_rule".
 - Never promote unresolved discovery questions into confirmed features. Put them in open_decisions instead.`
-    : `OUTPUT PROFILE: BUSINESS_FIRST
+    : `FEATURE DELIVERY MIX:
 - Prefer business-facing capabilities and confirmed cross-cutting rules.
 - Suppress standalone technical enablers unless the requirement or answered Q&A explicitly asks for them as deliverables.
 - Tag features as "business_capability", "technical_enabler", or "cross_cutting_rule".
@@ -174,6 +191,7 @@ RULES:
 - A feature must represent independent business value, not just a supporting mechanism, side effect, analysis step, or operational convenience.
 - Each feature description MUST be: "As a [role], I need [action] so that [benefit]"
 - Resolve the role label from evidence in this order: requirement-stated actor, answered discovery Q&A, strongly supported configured role, else "authorized user"
+- Do NOT invent composite bucket actors such as "any authorized …", "any … team member", "relevant stakeholder", or "appropriate user" — those are not accountable roles. If evidence does not support a specific title, use "authorized user" or record the gap in open_decisions.
 - Requirement-stated actors outrank domain context and reference stories. If the requirement says "standard users" and "admins", preserve those labels unless the requirement explicitly asks to map them to named roles.
 - If the requirement describes different permissions or responsibilities for multiple actor groups, the feature set must reflect that breadth. Do not collapse everything into one persona.
 - Never turn an unanswered discovery question into a confirmed feature. If permissions, lifecycle handling, duplicate rules, ownership, or state transitions are still materially unresolved, return them in open_decisions instead.
@@ -195,7 +213,7 @@ RULES:
 - Do NOT write acceptance_requirements — leave them as empty arrays
 - Never return an empty "features" array. If the request is buildable at all, return at least one well-scoped feature.
 ${processRule}
-${outputProfileGuidance ? `\n${outputProfileGuidance}` : ''}
+${featureDeliveryMixGuidance ? `\n${featureDeliveryMixGuidance}` : ''}
 ${backlogDepthGuidance ? `\n${backlogDepthGuidance}` : ''}
 ${discoveryContextGuidance ? `\n${discoveryContextGuidance}` : ''}
 ${advisoryBlock}${discoveryGapBlock}${broadShapeBlock}${structuredFlowBlock}
@@ -242,7 +260,7 @@ RULES:
 - Each feature must represent independent business value, not an implementation step.
 - Each feature description MUST be: "As a [role], I need to [action] so that [benefit]".
 - If the user message includes a ROLE CONSTRAINT block, follow it as a soft but strong preference — use those labels verbatim when a feature clearly fits one of them, and only deviate when evidence requires a different named role.
-- Never invent generic actor placeholders like "any authorized user", "various roles", or "anyone"; resolve roles from requirement evidence and answered discovery, otherwise fall back to "authorized user" only when no grounded label exists.
+- Never invent generic actor placeholders like "any authorized user", "any authorized … member", "… team member" as a catch-all, "various roles", or "anyone"; resolve roles from requirement evidence and answered discovery, otherwise fall back to "authorized user" only when no grounded label exists.
 - Choose one role label per feature unless the role label is already collective.
 - No solution language: no buttons, screens, fields, forms, APIs, databases, queues, or system names.
 - Keep descriptions concise. Put detailed rules, sequencing, dependencies, and exceptions into acceptance requirements in pass 2.
@@ -500,17 +518,14 @@ APPROACH — work through these steps:
 2. Note what the evidence already establishes — roles named, triggers described, process steps documented, rules stated. Treat those as resolved. Do NOT re-ask them.
 3. Identify the remaining gaps across the DISCOVERY DIMENSIONS below (skip any dimension already covered by the evidence):
 
-   ROLES & PERSONAS: who initiates, who performs each step, who approves or only views
-   TRIGGER & CONTEXT: the event or state that causes this to begin; preconditions that must be true
-   FUNCTIONAL FLOW: the step-by-step path; decisions and branches; the final output or business state
-   BUSINESS RULES & EXCEPTIONS: validation rules; exception handling; volume, threshold, or compliance constraints
-   SUCCESS & MEASUREMENT: what a successful outcome looks like; how a tester would verify it
+${clarifyDiscoveryDimensionsBlock()}
 4. Ask the smallest set of questions that resolve those gaps. Each question must name the specific ambiguity using terms from the requirement.
-5. Keep categories in this exact order: Roles & Personas, Trigger & Context, Functional Flow, Business Rules & Exceptions, Success & Measurement.
+5. CATEGORY DISCIPLINE: Every question MUST use the single best-fitting categoryKey from the list above. Do not place actor or ownership questions under measurement, or sequencing questions under trigger, when a more specific category exists.
+6. QUESTION ORDER: Order the "questions" array by categoryKey in this exact sequence: ${CLARIFY_CATEGORY_ORDER.join(' → ')}. When you need multiple questions in one category, keep those entries adjacent.
 
 RULES:
 - Every question must be specific to THIS requirement and directly reference its subject matter — never generic discovery boilerplate.
-- For complex requirements, ensure the set spans all five categories above unless a category is already explicitly resolved by supplied evidence.
+- For complex requirements, ensure the set spans every category that still has material gaps unless that category is already fully resolved by supplied evidence.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Do NOT ask anything already clearly answered in the requirement or supplied evidence.
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
@@ -520,7 +535,10 @@ RULES:
 - Every question must be a complete sentence that ends with a question mark.
 
 OUTPUT FORMAT:
-{"ambiguity":{"level":"clear|medium|vague","score":1-10,"rationale":"one sentence explaining why"},"questions":[{"category":"Roles & Personas","question":"Question?","suggestions":["Option A","Option B","Option C"]}]}`;
+{"ambiguity":{"level":"clear|medium|vague","score":1-10,"rationale":"one sentence explaining why"},"questions":[{"categoryKey":"context_trigger","category":"Context & Trigger","question":"Question?","suggestions":["Option A","Option B","Option C"]}]}
+
+- categoryKey MUST be exactly one of: ${CLARIFY_CATEGORY_ORDER.join(', ')}
+- "category" MUST match the label for that categoryKey (see DISCOVERY DIMENSIONS)`;
 }
 
 export function buildStoryAssistantDiscoveryAssessmentSystemPrompt(opts: {
@@ -618,7 +636,6 @@ or
 
 export function buildDraftReviewSystemPrompt(opts: {
   domainContext: string;
-  outputProfile?: 'business_first' | 'balanced' | 'technical_first';
   processTaxonomyEnabled: boolean;
   action: 'broaden' | 'tighten' | 'merge_selected' | 'split_selected';
 }): string {
@@ -639,10 +656,7 @@ export function buildDraftReviewSystemPrompt(opts: {
 
   return `You are a principal business analyst revising a draft Jira feature breakdown before acceptance requirements are written.
 ${platformContextBlock(opts.domainContext)}
-Your job is to revise the draft feature structure in response to a user review action.
-
-OUTPUT PROFILE:
-- ${opts.outputProfile ?? 'business_first'}
+Your job is to revise the draft feature structure in response to a user review action. Keep all summaries and descriptions in plain business language.
 
 REVIEW ACTION:
 - ${actionInstruction}
@@ -780,6 +794,14 @@ SCENARIO DEPTH — go beyond status gates:
 - When a feature involves sequencing or dependencies, write ARs that test the dependency enforcement (e.g., "GIVEN a preceding activity has not been completed WHEN the subsequent activity is scheduled THEN scheduling is prevented").
 - When the requirement and evidence imply materially different branches or ordering, name them in distinct ARs. Use vocabulary from the supplied inputs only.
 
+CAPABILITY-SHAPED THEN (avoid implicit CRUD):
+- THEN must state the business capability, rule, or observable business truth the feature delivers — what can be expressed, decided, enforced, or understood in business terms — not merely that a record was stored or a field changed.
+- WHEN may name a lifecycle moment (e.g. while a plan is being drafted, before execution begins) when that clarifies the capability under test.
+- BAD: "GIVEN multiple work items must run in order WHEN a coordinator links them THEN the plan reflects the execution order" (THEN only restates persistence).
+- GOOD: "GIVEN multiple work items may need a fixed order WHEN the plan is being drafted THEN the relative order of those items can be expressed".
+- BAD: "GIVEN an active plan WHEN a user adds a line item THEN the item is added to the plan".
+- GOOD: "GIVEN an active plan WHEN a line item is selected from the approved catalog THEN that line item is available on the plan".
+
 ORDERING:
 - List acceptance_requirements in a coherent narrative flow (initiating context, main path, materially different branches, completion). Each AR still tests one distinct thing; ordering serves readability.
 
@@ -814,7 +836,7 @@ RULES:
 - Return EXACTLY ONE feature in the features array.
 - Preserve the feature summary, description, suggested_story_points, and process_code unless a trivial typo fix is unavoidable.
 - Preserve feature ownership and scope. Do not move rules to sibling features and do not invent new feature boundaries.
-- Keep valid existing intent, but expand weak AR wording into concrete business conditions, triggers, and outcomes.
+- Keep valid existing intent, but expand weak AR wording into concrete business conditions, triggers, and outcomes; rewrite THEN clauses that only mirror persistence so they state the business capability or rule realized.
 - If the evidence supports ambiguity handling, manual review, fallback, exclusions, routing, linkage, or carryover obligations, express those in business language rather than generic processing wording.
 - Do not invent domain-specific logic, product-specific categories, or internal implementation mechanisms that are not supported by the requirement, discovery answers, work instructions, or current valid AR meaning.
 - Remove duplicate or near-duplicate ARs by folding them into the strongest single valid AR.

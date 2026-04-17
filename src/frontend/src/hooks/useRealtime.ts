@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@forge/bridge';
 import type { PipelineAuditClientPollingStats } from '../../../types';
-import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationContextMeta, GenerationModelRoute, OutputProfile, PipelineLatencyBreakdown } from '../types';
+import type { AdvisoryTriageContract, ClarifyContextMeta, ClarifyFailureReasonCode, ClarifyProgressPayload, DraftReviewMetadata, EffectiveSizingContract, FeatureActorSource, FeatureClass, FeatureConfidence, GenerationContextMeta, GenerationModelRoute, PipelineLatencyBreakdown } from '../types';
 
 export interface GenerationProgress {
   type: 'progress' | 'complete' | 'error' | 'cancelled' | 'review' | 'needs_clarification';
@@ -43,7 +43,6 @@ export interface GenerationProgressPayload {
     similarStoriesCount?: number;
     referencedSimilarStories?: Array<{ key: string; summary: string; relevanceScore?: number; url?: string; jiraIssueUrl?: string }>;
   };
-  outputProfile?: OutputProfile;
 }
 
 const GENERATION_STAGE_ORDER: Array<NonNullable<GenerationProgressPayload['stage']>> = [
@@ -100,7 +99,6 @@ function mergeGenerationPayload(
     stageDurationsMs: next.stageDurationsMs ?? previous.stageDurationsMs,
     resumeContext: next.resumeContext ?? previous.resumeContext,
     sources: mergeGenerationSources(previous.sources, next.sources),
-    outputProfile: next.outputProfile ?? previous.outputProfile,
     latencyMs: next.latencyMs ?? previous.latencyMs,
     modelRoute: next.modelRoute ?? previous.modelRoute,
     pipelineProfile: next.pipelineProfile ?? previous.pipelineProfile,

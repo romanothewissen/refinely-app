@@ -23,7 +23,6 @@ import type {
   FeatureClass,
   FeatureConfidence,
   GenerationContextMeta,
-  OutputProfile,
   PipelineProfile,
   TokenUsageSummary,
   UndoableAiChange,
@@ -483,7 +482,6 @@ function LegacyApp({
   const [workspaceSelectionVersion, setWorkspaceSelectionVersion] = useState(0);
   const [availableProjects, setAvailableProjects] = useState<Array<{ key: string; name: string }>>([]);
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
-  const [runOutputProfileOverride, setRunOutputProfileOverride] = useState<OutputProfile>('business_first');
   const [pipelineProfile, setPipelineProfile] = useState<PipelineProfile>('balanced');
   const [reviewBeforeARs] = useState(false);
   const [wiDocs, setWiDocs] = useState<any[]>([]);
@@ -642,9 +640,6 @@ function LegacyApp({
         if (res?.pipelineProfile === 'fast' || res?.pipelineProfile === 'balanced' || res?.pipelineProfile === 'quality') {
           setPipelineProfile(res.pipelineProfile);
         }
-        const profile = res?.generationPreferences?.outputProfile;
-        const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
-        setRunOutputProfileOverride(normalizedProfile);
         setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
       })
       .catch(() => {});
@@ -772,9 +767,6 @@ function LegacyApp({
       if (res?.pipelineProfile === 'fast' || res?.pipelineProfile === 'balanced' || res?.pipelineProfile === 'quality') {
         setPipelineProfile(res.pipelineProfile);
       }
-      const profile = res?.generationPreferences?.outputProfile;
-      const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
-      setRunOutputProfileOverride(normalizedProfile);
       setSavedDefaultProjectKey(typeof res.defaultProjectKey === 'string' ? res.defaultProjectKey : null);
       setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
     }).catch(e => console.error('Config fetch failed', e));
@@ -1394,7 +1386,6 @@ function LegacyApp({
         })),
         clarifyFinalSufficiency: clarifyContext?.finalSufficiency ?? undefined,
         attachmentText,
-        outputProfileOverride: runOutputProfileOverride,
         projectKey: effectiveProjectKey,
         projectKeys: effectiveProjectKeys,
         selectedWiDocIds: scopedWiDocIds,
@@ -1805,9 +1796,6 @@ function LegacyApp({
                 if (res?.pipelineProfile === 'fast' || res?.pipelineProfile === 'balanced' || res?.pipelineProfile === 'quality') {
                   setPipelineProfile(res.pipelineProfile);
                 }
-                const profile = res?.generationPreferences?.outputProfile;
-                const normalizedProfile: OutputProfile = profile === 'balanced' || profile === 'technical_first' ? profile : 'business_first';
-                setRunOutputProfileOverride(normalizedProfile);
                 setWorkspacePipelineAuditEnabled(Boolean(res?.developerTools?.pipelineAuditEnabled));
               })
               .catch(() => {});

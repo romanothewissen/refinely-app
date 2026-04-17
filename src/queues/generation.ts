@@ -55,7 +55,6 @@ interface RealtimeEvent {
 
 interface GenerationProgressPayload {
   stage?: 'context' | 'decomposition' | 'acceptance_requirements';
-  outputProfile?: GenerationContextMeta['outputProfile'];
   triage?: EffectiveSizingContract;
   sizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
@@ -125,7 +124,6 @@ export function buildGenerationStartProgressUpdate(opts: {
   retryFeature?: Feature;
   retryFeatureIds?: string[];
   retryFeatures?: Feature[];
-  outputProfile?: GenerationContextMeta['outputProfile'];
   advisorySizingContract?: EffectiveSizingContract;
   advisoryTriage?: AdvisoryTriageContract;
   pipelineProfile?: GenerationContextMeta['pipelineProfile'];
@@ -137,7 +135,6 @@ export function buildGenerationStartProgressUpdate(opts: {
     retryFeature,
     retryFeatureIds,
     retryFeatures,
-    outputProfile,
     advisorySizingContract,
     advisoryTriage,
     pipelineProfile,
@@ -161,7 +158,6 @@ export function buildGenerationStartProgressUpdate(opts: {
     message,
     payload: {
       stage,
-      outputProfile,
       triage: advisorySizingContract,
       sizingContract: advisorySizingContract,
       advisoryTriage,
@@ -198,7 +194,6 @@ export async function handler(event: { body: GenerationEvent }) {
     clarifyScopeContract,
     sharedEvidenceSignature,
     priorStageDurationsMs,
-    outputProfileOverride,
     retryFeatureId,
     retryFeature,
     retryFeatureIds,
@@ -344,7 +339,6 @@ export async function handler(event: { body: GenerationEvent }) {
                 1,
                 {
                   stage: 'decomposition',
-                  outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
                   triage: advisorySizingContract,
                   sizingContract: advisorySizingContract,
                   advisoryTriage,
@@ -370,7 +364,6 @@ export async function handler(event: { body: GenerationEvent }) {
                 2,
                 {
                   stage: 'acceptance_requirements',
-                  outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
                   triage: advisorySizingContract,
                   sizingContract: advisorySizingContract,
                   advisoryTriage,
@@ -446,7 +439,6 @@ export async function handler(event: { body: GenerationEvent }) {
         retryFeature,
         retryFeatureIds: retryTargetIds,
         retryFeatures: targetedRetryFeatures,
-        outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
         advisorySizingContract,
         advisoryTriage,
         pipelineProfile,
@@ -507,7 +499,6 @@ export async function handler(event: { body: GenerationEvent }) {
         attachmentIncluded: sharedContext.sources.attachmentIncluded,
         similarStoriesCount: sharedContext.sources.similarStoriesCount,
         referencedSimilarStories: sharedContext.sources.referencedSimilarStories,
-        outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
         pipelineProfile,
         sizingContract: advisorySizingContract,
         advisoryTriage,
@@ -639,7 +630,6 @@ export async function handler(event: { body: GenerationEvent }) {
             userInputs: {
               requirement: maskedRequirement.text,
               attachmentText: maskedAttachment.text,
-              outputProfile: outputProfileOverride ?? config.generationPreferences?.outputProfile ?? 'business_first',
               clarifyDiscoveryProfile,
               clarifySizingContract,
               clarifyAdvisoryTriage,
