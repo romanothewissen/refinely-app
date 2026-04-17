@@ -761,7 +761,7 @@ RULES:
 - Avoid vague placeholders such as "is processed", "is reviewed", "criteria are met", "specific key", "rules are applied", or "cannot be applied". Name the actual business condition, business trigger, and business outcome instead.
 - When the requirement or discovery names classification, routing, linkage, carryover, exclusion, fallback, or manual-review obligations, preserve them in business language instead of flattening them into generic processing steps.
 - If ambiguity remains in the supplied evidence, describe the explicit business fallback or manual-review outcome when it is supported. Do not invent product-specific rules to make the AR sound complete.
-- CLAUSE LENGTH BUDGET: keep GIVEN and WHEN under 22 words each; keep THEN under 18 words. If a clause would exceed that, split the AR or drop nonessential conditions — do not continue the sentence. A clause that ends mid-phrase with filler like "that", "for", "and", "with", "the", "or" is a defect.
+- Keep each clause focused on one business condition, trigger, or outcome. Split the AR rather than overloading a single clause.
 - Write enough ARs to cover all materially distinct business behaviors for the requested depth. Avoid filler, but do not compress distinct scenarios into one vague AR.
 - When sibling features are listed in the user message, do not write ARs that clearly belong to those features. Each business rule belongs to exactly one feature — the most appropriate owner. Do not repeat it.
 - When sibling features are listed, do not write ARs that duplicate another sibling's likely scope. If a sibling feature's description covers the same enforcement rule, lifecycle gate, or authorization check, let that sibling own the AR. Each business rule should be tested exactly once across the entire feature set.
@@ -1058,7 +1058,7 @@ export function buildArPerFeatureUserMessage(opts: {
         return [`${index + 1}.${tags ? ` [${tags}]` : ''} Q: ${a.question}`, ...answerLines].join('\n');
       })
       .join('\n\n')
-      .slice(0, 2200);
+      .slice(0, 4000);
     parts.push(`CLARIFYING Q&A:\n${qaText}`);
   }
 

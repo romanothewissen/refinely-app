@@ -314,11 +314,11 @@ function summarizeAnswerForObligation(answer: ClarifyAnswer): string {
     answer.question,
     answer.answer,
     ...(answer.selectedSuggestions ?? []),
-  ].filter(Boolean).join(' | '), 220);
+  ].filter(Boolean).join(' | '), 400);
 }
 
 function uniquePromptSummaries(values: string[]): string[] {
-  return uniqueNonEmptyStrings(values).map((value) => trimForPrompt(value, 220));
+  return uniqueNonEmptyStrings(values).map((value) => trimForPrompt(value, 400));
 }
 
 export class GenerationCancelledError extends Error {
@@ -382,7 +382,7 @@ const PASS1_CONTEXT_LIMITS = {
 
 const PASS1_CONTEXT_LIMITS_COMPACT = {
   requirement: 4000,
-  clarify: 3000,
+  clarify: 4000,
   attachment: 25000,
   wi: 8000,
   similar: 3000,
@@ -610,8 +610,8 @@ function formatClarifyAnswersForPrompt(answers: ClarifyAnswer[]): string {
   return answers
     .map((answer, index) => {
       const question = trimPromptText(String(answer.question ?? ''), 220);
-      const main = trimPromptText(String(answer.answer ?? ''), 360);
-      const custom = trimPromptText(String(answer.customAnswer ?? ''), 280);
+      const main = trimPromptText(String(answer.answer ?? ''), 600);
+      const custom = trimPromptText(String(answer.customAnswer ?? ''), 500);
       const selectedSuggestions = uniqueNonEmptyStrings(
         (answer.selectedSuggestions ?? []).map((item) => trimPromptText(String(item ?? ''), 100)),
       ).slice(0, 4);
