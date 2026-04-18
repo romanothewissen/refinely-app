@@ -127,9 +127,10 @@ export async function handler(event: { body: ClarifyEvent }) {
         promptAssemblyMs,
       } = result;
       const orderedDiscoveryCategories = [
-        'user_personas',
         'context_trigger',
+        'user_personas',
         'functional_flow',
+        'state_lifecycle',
         'business_rules',
         'success_measurement',
       ] as const;

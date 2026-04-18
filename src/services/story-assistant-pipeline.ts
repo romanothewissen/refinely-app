@@ -157,6 +157,8 @@ export async function runStoryAssistantGenerationStage(input: {
     similarStories: sharedContext.similarStories,
     arPatternLibraryText: sharedContext.arPatternLibraryText,
     discoveryProfile: input.clarifyDiscoveryProfile,
+    projectKey: sharedContext.projectKey,
+    projectKeys: sharedContext.projectKeys,
     config: {
         ...input.config,
         domainContext: sharedContext.domainContext,

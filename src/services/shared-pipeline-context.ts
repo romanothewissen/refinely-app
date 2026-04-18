@@ -8,6 +8,7 @@ import type {
 import { formatArPatternLibraryFromSimilarStories } from '../core/similar-stories';
 import { buildWorkInstructionInsightArtifact, getWorkInstructionInsightCount } from '../core/wi-insights';
 import { isPlausibleRoleLabel } from '../core/story-assistant-default';
+import { getGenerationCredentialMode } from './billing';
 import {
   buildCombinedDomainContext,
   getCombinedPersonaRoles,
@@ -19,6 +20,7 @@ import {
   summarizeReferencedWiSections,
   type RetrievedWiContext,
 } from './project-selection';
+import { getStoryAssistantPipelineProfileConfig } from './model-strategy';
 import { deriveRetrievalQuery } from './retrieval-query';
 
 export interface SharedPipelineContextSources {
@@ -184,21 +186,18 @@ export async function loadSharedPipelineContext(input: {
     input.clarifyAnswers ?? [],
   );
   const includeSimilarStories = input.includeSimilarStories !== false;
-  const pipelineProfile = input.config.generatorConfig.pipelineProfile;
-  const similarMaxResults = pipelineProfile === 'fast'
-    ? 4
-    : pipelineProfile === 'quality'
-      ? 12
-      : 12; // raised so the quality scorer has a large enough pool to filter from
-  const arPatternMaxStories = pipelineProfile === 'fast'
-    ? 2
-    : pipelineProfile === 'quality'
-      ? 5
-      : 5;
+  const profileConfig = getStoryAssistantPipelineProfileConfig(input.config.generatorConfig);
+  const hostedPreview = getGenerationCredentialMode(input.config) === 'hosted_sampler';
+  const similarMaxResults = hostedPreview
+    ? Math.max(3, Math.min(profileConfig.similarStoryMaxResults, profileConfig.profile === 'quality' ? 8 : profileConfig.similarStoryMaxResults))
+    : profileConfig.similarStoryMaxResults;
+  const arPatternMaxStories = hostedPreview
+    ? Math.max(2, Math.min(profileConfig.arPatternMaxStories, profileConfig.profile === 'quality' ? 5 : profileConfig.arPatternMaxStories))
+    : profileConfig.arPatternMaxStories;
   const selectedWiDocIds = [...new Set((input.selectedWiDocIds ?? [])
     .map((id) => String(id ?? '').trim())
     .filter(Boolean))]
-    .slice(0, 3);
+    .slice(0, profileConfig.wiDocSelectionCap);
   const [wiContext, similarStories] = await Promise.all([
     input.config.wiConfig.enabled
       ? retrieveScopedWiContext(

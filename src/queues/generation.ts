@@ -20,7 +20,7 @@ import type {
 import { GenerationCancelledError } from '../core/feature-output';
 import { generateSessionTitle } from '../core/session-title';
 import { formatSimilarStoriesText } from '../core/similar-stories';
-import { recordGeneration, getEffectiveTier } from '../services/billing';
+import { getEffectiveTier, recordGeneration, releaseGenerationReservation } from '../services/billing';
 import { entityDelete, entityGet, entitySet, entitySetSmall, entitySetWithTtl, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
 import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
@@ -534,7 +534,7 @@ export async function handler(event: { body: GenerationEvent }) {
       };
       result.generationContext = generationContext;
 
-      await recordGeneration(eventConfig);
+      await recordGeneration(eventConfig, accountId, sessionId);
       const persistenceStartedAt = Date.now();
       await saveConversationTurn(
         sessionId,

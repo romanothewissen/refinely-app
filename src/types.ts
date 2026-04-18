@@ -13,6 +13,26 @@ export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'la
 export type GeneratorModelStrategy = 'simple' | 'advanced' | 'stable' | 'latest' | 'custom';
 export type GeneratorBucketClass = 'pro' | 'flash' | 'lite';
 export type PipelineProfile = 'fast' | 'balanced' | 'quality';
+export type PipelineReasoningLevel = 'low' | 'medium' | 'high';
+export type GenerationUsageSource = 'platform_free_credit' | 'user_api_key';
+export type GenerationAccessState =
+  | 'preview_available'
+  | 'profile_preview_exhausted'
+  | 'preview_exhausted_requires_api_key'
+  | 'allowed_byok';
+export type UsageWarningState = 'none' | 'last_preview_credit' | 'preview_exhausted';
+
+export interface PipelineProfileConfig {
+  profile: PipelineProfile;
+  clarifyReasoning: PipelineReasoningLevel;
+  decompositionReasoning: PipelineReasoningLevel;
+  arReasoning: PipelineReasoningLevel;
+  similarStoryMaxResults: number;
+  arPatternMaxStories: number;
+  wiDocSelectionCap: number;
+  generationOutputMaxTokens: number;
+  enableCoverageProbe: boolean;
+}
 
 export interface GeneratorBucketClasses {
   discovery: GeneratorBucketClass;
@@ -855,6 +875,15 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   goldExampleIssueKeys?: string[];
   /** Optional Jira label filter used to resolve gold exemplars. */
   goldExampleLabel?: string;
+  usageSource?: GenerationUsageSource;
+  freeCreditConsumed?: boolean;
+  selectedEvidenceSummary?: {
+    wiDocCount: number;
+    similarStoryCount: number;
+    arPatternStoryCount: number;
+    goldExampleIssueKeys?: string[];
+    goldExampleLabel?: string;
+  };
   sufficiencyStatus?: DiscoverySufficiencyResult['status'];
   sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
@@ -1353,6 +1382,8 @@ export interface GenerationEvent {
   auditRunId?: string;
   qualityMode?: GenerationQualityMode;
   modelOverrides?: GenerationModelOverrides;
+  usageSource?: GenerationUsageSource;
+  freeCreditConsumed?: boolean;
   enqueuedAt?: number;
 }
 
@@ -1407,6 +1438,12 @@ export interface TierLimits {
   maxConfiguredProjects: number;
   similarStories: boolean;
   exportExcel: boolean;
+}
+
+export interface PreviewUsageCredits {
+  fast: number;
+  balanced: number;
+  quality: number;
 }
 
 export const TIER_LIMITS: Record<TenantConfig['tier'], TierLimits> = {

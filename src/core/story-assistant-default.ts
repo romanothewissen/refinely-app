@@ -18,19 +18,25 @@ import type {
   WorkInstructionInsightArtifact,
 } from '../types';
 import { getTierModel } from '../services/billing';
-import { buildStoryAssistantModelRoute, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
+import { buildStoryAssistantModelRoute, getStoryAssistantPipelineProfileConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
 import { callLlmJsonWithUsage } from './llm';
 import {
   buildAddFeatureSystemPrompt,
-  buildArSystemPrompt,
-  buildCombinedDecompositionArSystemPrompt,
+  buildStoryAssistantArSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantDecompositionSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
 import { buildDiscoveryCoverageArtifact } from './discovery';
-import { formatSimilarStoriesText } from './similar-stories';
+import {
+  findGoldConfigForProject,
+  formatGoldStoryExemplars,
+  formatSimilarStoriesText,
+  getGoldStoryPool,
+  resolveGoldKeys,
+  resolveGoldKeysFromBacklog,
+} from './similar-stories';
 import {
   annotateFailedAcceptanceRequirementFeatures,
   findFeaturesMissingCompleteAcceptanceRequirements,
@@ -606,6 +612,11 @@ function formatGenerationBacklogEvidence(similarStories: SimilarStory[] = []): s
   return trimPromptText(formatted, 3000);
 }
 
+function buildBacklogPatternSummary(similarStories: SimilarStory[] = []): string {
+  if (!similarStories.length) return '';
+  return 'features tend to separate business capabilities, grounded role ownership, workflow gates, and concrete downstream effects into distinct scenarios';
+}
+
 function extractMustCarryRules(answers: ClarifyAnswer[]): string[] {
   return answers
     .filter((answer) => {
@@ -723,32 +734,6 @@ function buildGenerationContextMessage(input: {
   return parts.join('\n\n');
 }
 
-function shouldUseHighArReasoning(input: {
-  pipelineProfile: PipelineProfile;
-  discoveryProfile?: DiscoveryProfile;
-  requirement: string;
-  clarifyAnswers: ClarifyAnswer[];
-  wiEvidenceText: string;
-}): boolean {
-  if (input.pipelineProfile === 'quality') return true;
-  if (input.discoveryProfile?.complexity === 'high') return true;
-
-  const corpus = [
-    input.requirement,
-    input.wiEvidenceText,
-    ...input.clarifyAnswers.map((answer) => `${answer.question} ${answer.answer}`),
-  ].join('\n').toLowerCase();
-
-  const signals = [
-    /\bsequence|dependency|prerequisite|before|after|ordered\b/.test(corpus),
-    /\bquote|billing|billable|contract|entitlement|approval|authorize\b/.test(corpus),
-    /\bexception|fail|hold|cancel|blocked|invalid\b/.test(corpus),
-    /\bwork order|shipment|downstream|follow[- ]?on|initiat(?:e|ion)\b/.test(corpus),
-  ].filter(Boolean).length;
-
-  return signals >= 2;
-}
-
 function inferCategoryKey(question: string): ClarifyCategoryKey {
   const normalized = cleanText(question).toLowerCase();
   if (/\bwho\b|\brole\b|\bpersona\b|\bowner\b|\bapproval\b|\bescalation\b/.test(normalized)) {
@@ -758,7 +743,7 @@ function inferCategoryKey(question: string): ClarifyCategoryKey {
     return 'success_measurement';
   }
   if (/\bstatus\b|\blifecycle\b|\btransition\b|\breopen\b|\bretry\b/.test(normalized)) {
-    return 'functional_flow';
+    return 'state_lifecycle';
   }
   if (/\bsequence\b|\border\b|\bstep\b|\bbranch\b|\bpath\b|\bfinal output\b|\bstate after\b/.test(normalized)) {
     return 'functional_flow';
@@ -1463,6 +1448,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   const providerOpts = buildProviderOpts(opts.config);
   const usageByStage: Record<string, { input: number; output: number }> = {};
   const pipelineProfile = resolveStoryAssistantPipelineProfile(opts.config.generatorConfig);
+  const profileConfig = getStoryAssistantPipelineProfileConfig(opts.config.generatorConfig);
   const modelRoute = buildStoryAssistantModelRoute(opts.config.generatorConfig);
   let promptAssemblyMs = 0;
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
@@ -1503,7 +1489,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     }),
     userMessage: baseUserMessage,
     maxTokens: 4600,
-    reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
+    reasoningEffort: profileConfig.clarifyReasoning,
     ...providerOpts,
   });
   usageByStage.clarify = clarifyResult.usage;
@@ -1522,7 +1508,7 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       }),
       userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Each question must be complete, requirement-specific, and include 3 concise grounded suggestions.`,
       maxTokens: 4600,
-      reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
+      reasoningEffort: profileConfig.clarifyReasoning,
       ...providerOpts,
     });
     usageByStage.clarifyRetry = clarifyResult.usage;
@@ -1543,6 +1529,8 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
             ? 'Trigger & Context'
             : categoryKey === 'functional_flow'
               ? 'Functional Flow'
+              : categoryKey === 'state_lifecycle'
+                ? 'State & Lifecycle'
               : categoryKey === 'business_rules'
                 ? 'Business Rules & Exceptions'
                 : 'Success & Measurement'
@@ -1555,9 +1543,9 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
         domainRoles: opts.config.domainRoles,
         questionPlan,
       }),
-      userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Provide ${questionPlan.min}-${questionPlan.max} specific questions and cover categories in this order: Roles & Personas, Trigger & Context, Functional Flow, Business Rules & Exceptions, Success & Measurement.${missingLabels ? ` Missing in prior attempt: ${missingLabels}.` : ''}`,
+      userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Provide ${questionPlan.min}-${questionPlan.max} specific questions and cover categories in this order: Context & Trigger, Roles & Personas, Functional Flow, State & Lifecycle, Business Rules & Exceptions, Success & Measurement.${missingLabels ? ` Missing in prior attempt: ${missingLabels}.` : ''}`,
       maxTokens: 5200,
-      reasoningEffort: pipelineProfile === 'quality' ? 'high' : 'medium',
+      reasoningEffort: profileConfig.clarifyReasoning,
       ...providerOpts,
     });
     usageByStage.clarifyCoverageRetry = clarifyResult.usage;
@@ -1715,6 +1703,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   similarStories?: SimilarStory[];
   arPatternLibraryText?: string;
   arPatternStoryKeys?: string[];
+  projectKey?: string;
+  projectKeys?: string[];
   discoveryProfile?: DiscoveryProfile;
   config: TenantConfig;
   precomputedDraftFeatures?: Feature[];
@@ -1724,6 +1714,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
 }): Promise<GenerationResult> {
   const providerOpts = buildProviderOpts(opts.config);
   const pipelineProfile = resolveStoryAssistantPipelineProfile(opts.config.generatorConfig);
+  const profileConfig = getStoryAssistantPipelineProfileConfig(opts.config.generatorConfig);
   const modelRoute = buildStoryAssistantModelRoute(opts.config.generatorConfig);
   const stageDurationsMs = { ...(opts.priorStageDurationsMs ?? {}) } as Record<string, number>;
   const stageUsage: Record<string, { input: number; output: number }> = {};
@@ -1737,11 +1728,34 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText);
   const similarStoriesText = formatGenerationBacklogEvidence(opts.similarStories ?? []);
   const arPatternLibraryText = pipelineProfile === 'fast' ? undefined : opts.arPatternLibraryText;
+  const backlogPatternSummary = buildBacklogPatternSummary(opts.similarStories ?? []);
   let promptAssemblyMs = 0;
   let pass1Raw: RawFeature[] = [];
   let pass1Features: Feature[] = opts.precomputedDraftFeatures ?? [];
+  let goldExampleIssueKeys: string[] = [];
+  let goldExampleLabel: string | undefined;
+  let goldExamplesText = '';
 
   const maybeCancelled = async () => Boolean(await opts.shouldCancel?.());
+
+  if (!opts.precomputedDraftFeatures?.length) {
+    const activeProjectKey = opts.projectKeys?.[0] ?? opts.projectKey;
+    if (activeProjectKey) {
+      try {
+        const goldPool = await getGoldStoryPool(activeProjectKey);
+        if (goldPool?.entries?.length) {
+          const configuredGold = findGoldConfigForProject(activeProjectKey, opts.config.goldExampleConfigs);
+          const resolvedKeys = await resolveGoldKeysFromBacklog(activeProjectKey, opts.config.goldExampleConfigs)
+            ?? resolveGoldKeys(activeProjectKey, opts.config.goldExampleConfigs, goldPool);
+          goldExampleIssueKeys = (resolvedKeys?.length ? resolvedKeys : goldPool.entries.map((entry) => entry.key)).slice(0, 8);
+          goldExampleLabel = configuredGold?.label?.trim() || undefined;
+          goldExamplesText = formatGoldStoryExemplars(goldPool, resolvedKeys ?? undefined);
+        }
+      } catch {
+        // Non-blocking: gold exemplars sharpen output but should not stop generation.
+      }
+    }
+  }
 
   // Build the shared evidence block once so both pass 1 and pass 2 user
   // messages share a byte-identical leading prefix, enabling Gemini implicit
@@ -1758,59 +1772,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     arPatternLibraryText,
   });
 
-  // Single-pass gate: for low-complexity + low-ambiguity requirements, fuse
-  // decomposition and AR writing into one LLM call. Saves ~45-50s of wall-clock.
-  // Falls back to 2-pass when: precomputed drafts exist, fast profile is used,
-  // multi-activity signals are present, or when the combined call returns too few
-  // features or any feature has empty ARs.
-  const isSinglePassEligible = !pass1Features.length
-    && pipelineProfile !== 'fast'
-    && opts.discoveryProfile?.complexity === 'low'
-    && opts.discoveryProfile?.ambiguity === 'low'
-    && !isMultiActivityRequirement(opts.requirement, opts.wiInsightsArtifact);
-
-  let usedSinglePass = false;
-
-  if (isSinglePassEligible) {
-    const singlePassStartedAt = Date.now();
-    const singlePassMessage = `${sharedEvidenceBlock}\n\nDecompose this requirement into the distinct features needed to deliver it and immediately write complete GIVEN/WHEN/THEN acceptance requirements for each feature.`;
-    try {
-      const singlePassResult = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
-        model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
-        systemPrompt: buildCombinedDecompositionArSystemPrompt({
-          domainContext: opts.config.domainContext,
-          domainRoles: opts.config.domainRoles,
-          processTaxonomy: opts.config.processTaxonomy,
-          processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
-        }),
-        userMessage: singlePassMessage,
-        maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
-        reasoningEffort: 'medium',
-        ...providerOpts,
-      });
-      stageUsage.decomposition = singlePassResult.usage;
-      const singlePassRaw = extractRawFeaturesFromPayload(singlePassResult.data);
-      const singlePassHasArs = singlePassRaw.every(
-        (f) => Array.isArray(f.acceptance_requirements) && (f.acceptance_requirements as unknown[]).length >= 2,
-      );
-      if (singlePassRaw.length >= 2 && singlePassHasArs) {
-        pass1Raw = singlePassRaw;
-        pass1Features = singlePassRaw.map((feature) => normaliseFeature(feature, roleGrounding));
-        stageUsage.acceptanceRequirements = { input: 0, output: 0 };
-        stageDurationsMs.decomposition = Date.now() - singlePassStartedAt;
-        stageDurationsMs.acceptanceRequirements = 0;
-        usedSinglePass = true;
-        if (opts.onPass1DraftFeatures) {
-          await opts.onPass1DraftFeatures(pass1Features);
-        }
-      }
-      // On insufficient result: fall through to 2-pass below
-    } catch {
-      // Fall through to 2-pass on any error
-    }
-  }
-
-  if (!usedSinglePass && !pass1Features.length) {
+  if (!pass1Features.length) {
     const startedAt = Date.now();
     const decompositionPromptStartedAt = Date.now();
     const decompositionUserMessage = `${sharedEvidenceBlock}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
@@ -1824,8 +1786,8 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         processTaxonomyEnabled: opts.config.processTaxonomyEnabled,
       }),
       userMessage: decompositionUserMessage,
-      maxTokens: opts.config.generatorConfig.maxTokens,
-      reasoningEffort: 'medium',
+      maxTokens: Math.min(Math.max(opts.config.generatorConfig.maxTokens, 4096), profileConfig.generationOutputMaxTokens),
+      reasoningEffort: profileConfig.decompositionReasoning,
       ...providerOpts,
     });
     stageUsage.decomposition = pass1Result.usage;
@@ -1841,7 +1803,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     if (opts.onPass1DraftFeatures) {
       await opts.onPass1DraftFeatures(pass1Features);
     }
-  } else if (!usedSinglePass) {
+  } else {
     pass1Raw = pass1Features.map((feature) => featureToRaw(feature));
   }
 
@@ -1854,7 +1816,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   // profile. Adds missing dependency-enforcement, sequence-validation, or
   // consolidated-status features without re-running full decomposition.
   const probeNotes: string[] = [];
-  if (pipelineProfile !== 'fast') {
+  if (profileConfig.enableCoverageProbe) {
     const probeResult = await runMultiActivityCoverageProbe({
       features: pass1Features,
       requirement: opts.requirement,
@@ -1875,37 +1837,35 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   let features: Feature[];
   let pass2CoverageNotes: string[] = [];
   let failedIds = new Set<string>();
-  const rescueNotes: string[] = [];
   let autoRepairedIssues: string[] = [];
-
-  if (usedSinglePass) {
-    // Single-pass already produced features with ARs — skip the separate AR call.
-    features = dedupeExactAcceptanceRequirements(pass1Features).features;
-    const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
-    failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
-  } else {
   const pass2StartedAt = Date.now();
   const arPromptStartedAt = Date.now();
-  const arReasoningEffort = shouldUseHighArReasoning({
-    pipelineProfile,
-    discoveryProfile: opts.discoveryProfile,
-    requirement: opts.requirement,
-    clarifyAnswers: opts.clarifyAnswers,
-    wiEvidenceText,
-  }) ? 'high' : 'medium';
+  const arReferenceExamplesText = goldExamplesText ? `\n\n${goldExamplesText}` : '';
   const arUserMessage = `${sharedEvidenceBlock}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
     features: pass1Raw.map((feature) => ({
       ...feature,
       acceptance_requirements: [],
     })),
-  })}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
+  })}${arReferenceExamplesText}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
     model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
-    systemPrompt: buildArSystemPrompt({ domainContext: opts.config.domainContext }),
+    systemPrompt: buildStoryAssistantArSystemPrompt({
+      domainContext: opts.config.domainContext,
+      domainRoles: opts.config.domainRoles,
+      wiInsights: opts.wiInsightsArtifact
+        ? {
+            sequencingRules: opts.wiInsightsArtifact.sequencingRules,
+            splitVsSingleCaseRules: opts.wiInsightsArtifact.splitVsSingleCaseRules,
+            mustCoverBehaviors: opts.wiInsightsArtifact.mustCoverBehaviors,
+            businessRules: opts.wiInsightsArtifact.businessRules,
+          }
+        : undefined,
+      backlogPatternSummary,
+    }),
     userMessage: arUserMessage,
-    maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
-    reasoningEffort: arReasoningEffort,
+    maxTokens: profileConfig.generationOutputMaxTokens,
+    reasoningEffort: profileConfig.arReasoning,
     ...providerOpts,
   });
   stageUsage.acceptanceRequirements = pass2Result.usage;
@@ -1924,50 +1884,6 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   features = repairedOutput.features;
   const failedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   failedIds = new Set(failedIndexes.map((index) => features[index]?.id).filter(Boolean) as string[]);
-  if (failedIds.size === features.length && features.length > 0) {
-    const rescueStartedAt = Date.now();
-    const rescueResult = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
-      model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
-      systemPrompt: buildArSystemPrompt({ domainContext: opts.config.domainContext }),
-      userMessage: `${buildGenerationContextMessage({
-        requirement: opts.requirement,
-        clarifyAnswers: opts.clarifyAnswers,
-        attachmentText: '',
-        wiEvidenceText: trimPromptText(wiEvidenceText, 2200),
-        roleHint,
-        discoveryProfile: opts.discoveryProfile,
-        actorSets,
-        similarStoriesText: '',
-        arPatternLibraryText: '',
-      })}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
-        features: pass1Raw.map((feature) => ({
-          ...feature,
-          acceptance_requirements: [],
-        })),
-      })}\n\nEvery feature MUST contain complete GIVEN/WHEN/THEN acceptance requirements. Return strict JSON only and keep all feature summaries unchanged.`,
-      maxTokens: Math.max(opts.config.generatorConfig.maxTokens, 16384),
-      reasoningEffort: 'high',
-      ...providerOpts,
-    });
-    stageUsage.acceptanceRequirementsRescue = rescueResult.usage;
-    stageDurationsMs.backfill = (stageDurationsMs.backfill ?? 0) + (Date.now() - rescueStartedAt);
-    const rescueRaw = extractRawFeaturesFromPayload(rescueResult.data);
-    if (rescueRaw.length > 0) {
-      const mergedRescueRaw = mergePass2IntoPass1(pass1Raw, rescueRaw);
-      let rescueFeatures = mergedRescueRaw.map((feature) => normaliseFeature(feature, roleGrounding));
-      rescueFeatures = dedupeExactAcceptanceRequirements(rescueFeatures).features;
-      const rescueFailedIndexes = findFeaturesMissingCompleteAcceptanceRequirements(rescueFeatures);
-      const rescueFailedIds = new Set(rescueFailedIndexes.map((index) => rescueFeatures[index]?.id).filter(Boolean) as string[]);
-      if (rescueFailedIds.size < failedIds.size) {
-        features = rescueFeatures;
-        failedIds = rescueFailedIds;
-        rescueNotes.push(
-          `AR rescue fallback reduced incomplete features from ${failedIndexes.length} to ${rescueFailedIndexes.length}.`,
-        );
-      }
-    }
-  }
-  } // end else (two-pass path)
 
   if (failedIds.size > 0) {
     features = annotateFailedAcceptanceRequirementFeatures(features, failedIds) as Feature[];
@@ -1994,6 +1910,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       stageDurationsMs: {
         decomposition: stageDurationsMs.decomposition,
         acceptanceRequirements: stageDurationsMs.acceptanceRequirements,
+        ...(stageDurationsMs.coverageCheck ? { coverageCheck: stageDurationsMs.coverageCheck } : {}),
         total: stageDurationsMs.total,
       },
       pipelineProfile,
@@ -2003,15 +1920,19 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
         ? `Acceptance requirements could not be completed for ${failedIds.size} feature${failedIds.size === 1 ? '' : 's'}.`
         : undefined,
       autoRepairedIssues,
-      ...(pass2CoverageNotes.length
-        ? { mergeDiagnostics: pass2CoverageNotes }
-        : {}),
-      ...(rescueNotes.length
-        ? { mergeDiagnostics: [...pass2CoverageNotes, ...rescueNotes] }
-        : {}),
+      ...(pass2CoverageNotes.length ? { mergeDiagnostics: pass2CoverageNotes } : {}),
       ...(probeNotes.length ? { coverageProbeNotes: probeNotes } : {}),
       actorSets,
       pass2ArPatternStoryKeys: opts.arPatternStoryKeys,
+      goldExampleIssueKeys: goldExampleIssueKeys.length ? goldExampleIssueKeys : undefined,
+      goldExampleLabel,
+      selectedEvidenceSummary: {
+        wiDocCount: opts.wiInsightsArtifact?.sourceSpans?.length ?? 0,
+        similarStoryCount: opts.similarStories?.length ?? 0,
+        arPatternStoryCount: opts.arPatternStoryKeys?.length ?? 0,
+        ...(goldExampleIssueKeys.length ? { goldExampleIssueKeys } : {}),
+        ...(goldExampleLabel ? { goldExampleLabel } : {}),
+      },
       latencyMs: {
         promptAssemblyMs,
       },

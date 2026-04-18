@@ -5,6 +5,7 @@ import type {
   GeneratorBucketClasses,
   GeneratorConfig,
   LlmProvider,
+  PipelineProfileConfig,
   PipelineProfile,
   StoryAssistantModelAssignment,
 } from '../types';
@@ -26,6 +27,42 @@ export const DEFAULT_BUCKET_CLASSES: GeneratorBucketClasses = {
   discovery: 'flash',
   generation: 'pro',
   refinement: 'flash',
+};
+
+const STORY_ASSISTANT_PROFILE_CONFIGS: Record<PipelineProfile, PipelineProfileConfig> = {
+  fast: {
+    profile: 'fast',
+    clarifyReasoning: 'low',
+    decompositionReasoning: 'low',
+    arReasoning: 'low',
+    similarStoryMaxResults: 4,
+    arPatternMaxStories: 2,
+    wiDocSelectionCap: 2,
+    generationOutputMaxTokens: 8192,
+    enableCoverageProbe: false,
+  },
+  balanced: {
+    profile: 'balanced',
+    clarifyReasoning: 'low',
+    decompositionReasoning: 'low',
+    arReasoning: 'medium',
+    similarStoryMaxResults: 6,
+    arPatternMaxStories: 4,
+    wiDocSelectionCap: 3,
+    generationOutputMaxTokens: 12288,
+    enableCoverageProbe: false,
+  },
+  quality: {
+    profile: 'quality',
+    clarifyReasoning: 'high',
+    decompositionReasoning: 'medium',
+    arReasoning: 'high',
+    similarStoryMaxResults: 12,
+    arPatternMaxStories: 8,
+    wiDocSelectionCap: 3,
+    generationOutputMaxTokens: 16384,
+    enableCoverageProbe: true,
+  },
 };
 
 const DEFAULT_RESOLVED_MODELS: Pick<GeneratorConfig, GeneratorRoleModelField> = {
@@ -92,8 +129,8 @@ function resolveStoryAssistantProfileModels(
   }
   return {
     clarifyModel: lightModel,
-    decompositionModel: heavyModel,
-    arModel: heavyModel,
+    decompositionModel: lightModel,
+    arModel: lightModel,
   };
 }
 
@@ -256,6 +293,13 @@ export function resolveStoryAssistantPipelineProfile(
   generatorConfig: Partial<GeneratorConfig> | undefined,
 ): PipelineProfile {
   return resolveEffectiveGeneratorConfig(generatorConfig).pipelineProfile;
+}
+
+export function getStoryAssistantPipelineProfileConfig(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+): PipelineProfileConfig {
+  const profile = resolveStoryAssistantPipelineProfile(generatorConfig);
+  return STORY_ASSISTANT_PROFILE_CONFIGS[profile];
 }
 
 export function buildStoryAssistantModelRoute(

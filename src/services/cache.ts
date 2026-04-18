@@ -258,6 +258,9 @@ export const KEYS = {
   wiCorpusCache: 'wi_corpus_cache',
   usageCurrentMonth: 'usage_current_month',
   hostedSamplerUsageCurrentMonth: 'hosted_sampler_usage_current_month',
+  usageCurrentMonthForAccount: (accountId: string) => `usage_current_month_${accountId}`,
+  hostedSamplerUsageCurrentMonthForAccount: (accountId: string) => `hosted_sampler_usage_current_month_${accountId}`,
+  generationCreditReservation: (accountId: string, sessionId: string) => `generation_credit_reservation_${accountId}_${sessionId}`,
   // site-scoped (no accountId) — kept for backward compat
   conversations: (sessionId: string) => `conv_${sessionId}`,
   conversationIndex: 'conv_index',
