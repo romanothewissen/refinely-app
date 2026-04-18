@@ -181,7 +181,7 @@ export const api = {
   parseRunAttachment: (filename: string, fileBase64: string) =>
     invoke('parseRunAttachment', { filename, fileBase64 }),
   listWiDocs: (projectKey?: string) => invoke('listWiDocs', { projectKey }),
-  removeWiDoc: (docId: string) => invoke('removeWiDoc', { docId }),
+  removeWiDoc: (docId: string, projectKey?: string) => invoke('removeWiDoc', { docId, projectKey }),
 
   // Cache
   getBacklogCacheInfo: (projectKey: string) => invoke('getBacklogCacheInfo', { projectKey }),

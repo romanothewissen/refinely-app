@@ -340,8 +340,26 @@ function areStringArraysEqual(left: string[] = [], right: string[] = []) {
   return left.every((value, index) => value === right[index]);
 }
 
-export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance'; initialProjectKey?: string }) {
-  const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance'>(initialTab);
+type SettingsSurface = 'workspace' | 'project';
+type WorkspaceSettingsTab = 'models' | 'domain' | 'stats' | 'billing' | 'compliance';
+
+export function SettingsView({
+  onClose,
+  initialSurface = 'workspace',
+  initialTab = 'models',
+  initialProjectKey = '*',
+}: {
+  onClose: () => void;
+  initialSurface?: SettingsSurface;
+  initialTab?: 'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance';
+  initialProjectKey?: string;
+}) {
+  const [activeSurface, setActiveSurface] = useState<SettingsSurface>(initialSurface);
+  const [activeTab, setActiveTab] = useState<WorkspaceSettingsTab>(
+    initialTab === 'billing' || initialTab === 'stats' || initialTab === 'compliance' || initialTab === 'domain'
+      ? initialTab
+      : 'models',
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   // Models State
@@ -435,6 +453,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [domainContexts, setDomainContexts] = useState<ProjectDomainContextRow[]>([]);
   const [activeProjAdmin, setActiveProjAdmin] = useState<boolean>(false);
   const isHostedSampler = usage?.credentialMode === 'hosted_sampler';
+  const canManageProjectSettings = Boolean(isAdmin || activeProjAdmin);
+  const projectCapabilities = {
+    canManageProjectSettings,
+    canManageWi: canManageProjectSettings,
+    canManageGoldExamples: canManageProjectSettings,
+    canManageMapping: canManageProjectSettings,
+  } as const;
   
   // WIs State
   const [wiEnabled, setWiEnabled] = useState(true);
@@ -553,8 +578,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }, []);
 
   useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
+    setActiveSurface(initialSurface);
+    if (initialTab === 'billing' || initialTab === 'stats' || initialTab === 'compliance' || initialTab === 'domain') {
+      setActiveTab(initialTab);
+    } else {
+      setActiveTab('models');
+    }
+  }, [initialSurface, initialTab]);
 
   useEffect(() => {
     if (initialProjectKey) setActiveArProj(initialProjectKey);
@@ -702,7 +732,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }, [checkProjectAdmin]);
 
   useEffect(() => {
-    if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
+    if (activeSurface === 'project' && activeArProj && activeArProj !== '*') {
       void loadBacklogCacheInfo(activeArProj);
       void loadBacklogDiagnostics(activeArProj);
       void loadBacklogRefreshStatus(activeArProj);
@@ -711,15 +741,15 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       setBacklogDiagnostics(null);
       setBacklogRefreshStatus(null);
     }
-  }, [activeTab, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics, loadBacklogRefreshStatus]);
+  }, [activeSurface, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics, loadBacklogRefreshStatus]);
 
   useEffect(() => {
-    if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
+    if (activeSurface === 'project' && activeArProj && activeArProj !== '*') {
       loadBacklogStatuses(activeArProj);
     } else {
       setBacklogStatusOptions([]);
     }
-  }, [activeTab, activeArProj]);
+  }, [activeSurface, activeArProj]);
 
   async function handleRefreshBacklogCache(projectKey = activeArProj) {
     if (!projectKey || projectKey === '*') return null;
@@ -784,12 +814,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }
 
   useEffect(() => {
-    if (activeTab === 'jira' && activeArProj && activeArProj !== '*') {
+    if (activeSurface === 'project' && activeArProj && activeArProj !== '*') {
       void loadWiDocs();
     } else {
       setWiDocs([]);
     }
-  }, [activeTab, activeArProj, loadWiDocs]);
+  }, [activeSurface, activeArProj, loadWiDocs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -862,7 +892,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
   async function handleRemoveWiDoc(docId: string) {
     try {
-      await api.removeWiDoc(docId);
+      await api.removeWiDoc(docId, activeArProj);
       await loadWiDocs();
     } catch (e: any) { console.error('Remove failed', e); }
   }
@@ -1145,10 +1175,9 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, refineModel, themeModel, profileModels, storyAssistantAssignments]);
 
   const showComplianceTab = true;
-  const settingsNav = [
+  const workspaceNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
-    { id: 'jira', label: 'Project Setup', icon: Database, sub: 'Backlog, fields, docs' },
-    { id: 'domain', label: 'Personal', icon: Globe, sub: 'Your defaults and preferences' },
+    { id: 'domain', label: 'Personal', icon: Globe, sub: 'Defaults and preferences' },
     { id: 'stats', label: 'Stats', icon: BarChart3, sub: 'Usage and audit visibility' },
     { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
     ...(showComplianceTab ? [{ id: 'compliance', label: 'Compliance', icon: ShieldCheck, sub: 'Coming Soon' }] : []),
@@ -1172,10 +1201,30 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           >
             <ChevronLeft className="w-4 h-4" />
           </motion.button>
-          <h2 className="rf-pane-header-title">Settings</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="rf-pane-header-title">Settings</h2>
+            <div className="rounded-xl border border-[var(--rf-border)] bg-white/80 p-1 flex items-center gap-1 shadow-sm">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setActiveSurface('workspace')}
+                  className={`rounded-lg px-3 py-1.5 text-[12px] font-bold transition ${activeSurface === 'workspace' ? 'bg-[var(--rf-brand)] text-white shadow-sm' : 'text-[var(--rf-text-secondary)] hover:bg-[var(--rf-surface-soft)]'}`}
+                >
+                  Workspace Setup
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setActiveSurface('project')}
+                className={`rounded-lg px-3 py-1.5 text-[12px] font-bold transition ${activeSurface === 'project' ? 'bg-[var(--rf-brand)] text-white shadow-sm' : 'text-[var(--rf-text-secondary)] hover:bg-[var(--rf-surface-soft)]'}`}
+              >
+                Project Setup
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-1.5">
-            <span className={`text-[13px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${isAdmin ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
-              {isAdmin ? 'Admin' : 'Personal Only'}
+            <span className={`text-[13px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider border ${canManageProjectSettings ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)] border-[var(--rf-success-subtle)]' : 'bg-[var(--rf-danger-subtle)] text-[var(--rf-danger)] border-[var(--rf-danger-subtle)]'}`}>
+              {isAdmin ? 'Workspace Admin' : canManageProjectSettings ? 'Project Admin' : 'Read Only'}
             </span>
             <span className="text-[13px] text-[var(--rf-brand)] font-bold uppercase tracking-wider flex items-center gap-1 bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded-md border border-[rgba(43,89,74,0.12)] capitalize">
               {tier}
@@ -1183,25 +1232,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {isAdmin && activeTab === 'jira' && activeArProj !== '*' && (
-            <div className="flex items-center gap-2">
-              <motion.button
-                onClick={() => document.getElementById('jira-save-target')?.click()}
-                className="bg-white border border-[var(--rf-border)] text-[var(--rf-text-secondary)] hover:bg-[var(--rf-surface-soft)] text-[13px] font-bold px-4 py-1.5 rounded-lg shadow-sm transition-all flex items-center gap-2"
-                whileTap={{ scale: 0.98 }}
-              >
-                <Save className="w-3.5 h-3.5" /> Save
-              </motion.button>
-              <motion.button
-                onClick={() => document.getElementById('jira-save-rebuild-target')?.click()}
-                className="bg-[var(--rf-text)] hover:bg-black text-white text-[13px] font-bold px-4 py-1.5 rounded-lg shadow-sm transition-all flex items-center gap-2"
-                whileTap={{ scale: 0.98 }}
-              >
-                <RefreshCw className="w-3.5 h-3.5" /> Save & Rebuild
-              </motion.button>
-            </div>
-          )}
-          {(isAdmin || activeTab === 'domain') && activeTab !== 'jira' && activeTab !== 'compliance' && (
+          {activeSurface === 'workspace' && isAdmin && activeTab !== 'compliance' && (
             <motion.button
               onClick={handleSave}
               disabled={isSaving}
@@ -1216,12 +1247,14 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
       </header>
 
       <div className="flex-1 overflow-hidden flex">
-          <div className="w-44 shrink-0 border-r border-[rgba(43,89,74,0.10)] bg-[rgba(248,246,240,0.60)] backdrop-blur-xl px-3 py-3 flex flex-col gap-0.5 overflow-y-auto">
+          <input type="file" ref={wiFileInputRef} onChange={handleWiFileDrop} accept={WI_ACCEPT} multiple className="hidden" />
+          {activeSurface === 'workspace' && (
+          <div className="w-48 shrink-0 border-r border-[rgba(43,89,74,0.10)] bg-[rgba(248,246,240,0.60)] backdrop-blur-xl px-3 py-3 flex flex-col gap-0.5 overflow-y-auto">
             {/* Group: Core Setup */}
             <div className="px-2.5 pb-1 pt-0.5">
-              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] opacity-60">Setup</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] opacity-60">Workspace</span>
             </div>
-            {settingsNav.filter(t => ['models', 'jira', 'domain'].includes(t.id)).map((tab) => {
+            {workspaceNav.filter(t => ['models', 'domain'].includes(t.id)).map((tab) => {
               const status = completionStatus[tab.id as keyof typeof completionStatus];
               return (
                 <button
@@ -1249,7 +1282,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
             <div className="px-2.5 pb-1 pt-3">
               <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] opacity-60">Admin</span>
             </div>
-            {settingsNav.filter(t => ['stats', 'billing', 'compliance'].includes(t.id)).map((tab) => (
+            {workspaceNav.filter(t => ['stats', 'billing', 'compliance'].includes(t.id)).map((tab) => (
               <button
                 key={tab.id}
                 disabled={tab.id === 'compliance'}
@@ -1279,9 +1312,10 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               </div>
             </div>
           </div>
+          )}
 
           <div className="flex-1 overflow-y-auto p-5 custom-scrollbar bg-transparent">
-            {activeTab === 'models' && (
+            {activeSurface === 'workspace' && activeTab === 'models' && (
               <motion.div
                 className="max-w-3xl space-y-4"
                 initial={{ opacity: 0, y: 8 }}
@@ -1320,7 +1354,13 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                           <button
                             key={step.key}
                             type="button"
-                            onClick={() => setActiveTab(step.tab)}
+                            onClick={() => {
+                              if (step.tab === 'jira') {
+                                setActiveSurface('project');
+                                return;
+                              }
+                              setActiveTab(step.tab);
+                            }}
                             className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-all ${done ? 'opacity-60' : 'hover:bg-white/70'}`}
                           >
                             <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black border ${done ? 'bg-[var(--rf-success)] border-[var(--rf-success)] text-white' : 'border-[rgba(43,89,74,0.25)] bg-white/70 text-[var(--rf-brand)]'}`}>
@@ -1561,176 +1601,50 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               </motion.div>
             )}
 
-            {activeTab === 'jira' && (
-              <motion.div
-                className="max-w-3xl space-y-4"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                <div className="space-y-3">
-                  {/* Step 1 */}
-                  <div className="rf-card p-4 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <span className="w-5 h-5 rounded-full bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.15)] text-[var(--rf-brand)] text-[11px] font-black flex items-center justify-center shrink-0">1</span>
-                      <div>
-                        <div className="text-sm font-bold text-[var(--rf-text)]">Sync Jira</div>
-                        <div className="text-[12px] text-[var(--rf-text-tertiary)]">{projects.length} projects · {customFields.length} fields</div>
-                      </div>
-                    </div>
-                    <motion.button
-                      onClick={discoverJira}
-                      disabled={isDiscovering}
-                      className="flex items-center gap-1.5 text-[13px] font-bold text-[var(--rf-text-secondary)] bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-3 py-1.5 rounded-lg transition hover:bg-white disabled:opacity-50"
-                      whileTap={{ scale: 0.97 }}
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} /> Sync
-                    </motion.button>
-                  </div>
-
-                  {/* Step 2 Selection */}
-                  <div className="rf-card p-4 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <span className="w-5 h-5 rounded-full bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.15)] text-[var(--rf-brand)] text-[11px] font-black flex items-center justify-center shrink-0">2</span>
-                      <div className="text-sm font-bold text-[var(--rf-text)]">Select Project</div>
-                    </div>
-                    <SearchableSelect
-                      value={activeArProj}
-                      onChange={(value) => setActiveArProj(value || '*')}
-                      options={projectOptions}
-                      placeholder="Select a project..."
-                      searchPlaceholder="Search projects..."
-                      allowClear
-                      clearLabel="Clear project"
-                      className="w-64"
-                      buttonClassName="bg-[var(--rf-surface-soft)]"
-                    />
-                  </div>
-
-                  {activeArProj !== '*' ? (
-                    <ProjectConfigurationManager 
-                      projects={projects || []} customFields={customFields || []} arMappings={arMappings || []} setArMappings={setArMappings}
-                      domainContexts={domainContexts || []} setDomainContexts={setDomainContexts}
-                      backlogStatusScopes={backlogStatusScopes || []} setBacklogStatusScopes={setBacklogStatusScopes} backlogStatusOptions={backlogStatusOptions || []}
-                      detectDefaultStatuses={detectDefaultStatuses}
-                      activeArProj={activeArProj} setActiveArProj={setActiveArProj} isAdmin={isAdmin} isProjectAdmin={activeProjAdmin}
-                      backlogCacheInfo={backlogCacheInfo}
-                      backlogDiagnostics={backlogDiagnostics}
-                      backlogRefreshStatus={backlogRefreshStatus}
-                      isRefreshingBacklogCache={isRefreshingBacklogCache}
-                      onRefreshBacklogCache={handleRefreshBacklogCache}
-                      backlogThemeBudgetOverride={backlogThemeBudgetOverride}
-                      onBacklogThemeBudgetOverrideChange={setBacklogThemeBudgetOverride}
-                      goldExampleConfigs={goldExampleConfigs}
-                      setGoldExampleConfigs={setGoldExampleConfigs}
-                      goldStoryPool={goldStoryPool}
-                    />
-                  ) : (
-                    <div className="bg-white rounded-2xl p-12 text-center border-2 border-dashed border-[var(--rf-border)]">
-                      <Database className="w-12 h-12 text-[var(--rf-border-strong)] mx-auto mb-4" />
-                      <h4 className="text-lg font-bold text-[var(--rf-text)]">Select a project to configure</h4>
-                      <p className="text-sm font-medium text-[var(--rf-text-tertiary)] mt-2 max-w-md mx-auto">Define backlog indexing scope, work instructions, and project-specific guidance for the selected project.</p>
-                    </div>
-                  )}
-
-                  {/* Step 3 WIs */}
-                  <div className="rf-card p-4 space-y-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded-full bg-[var(--rf-brand-muted)] border border-[rgba(43,89,74,0.15)] text-[var(--rf-brand)] text-[11px] font-black flex items-center justify-center shrink-0">3</span>
-                        <div>
-                          <div className="text-sm font-bold text-[var(--rf-text)]">Work Instructions</div>
-                          <div className="text-[12px] text-[var(--rf-text-tertiary)]">{wiDocs.length} linked · PDFs, spreadsheets, text</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <motion.button
-                          onClick={() => wiFileInputRef.current?.click()}
-                          disabled={activeArProj === '*' || !!wiUploadState}
-                          className="flex items-center gap-1.5 text-[13px] font-bold text-white bg-[var(--rf-brand)] hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
-                          whileTap={{ scale: 0.97 }}
-                        >
-                          {wiUploadState ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Uploading…</> : 'Add docs'}
-                        </motion.button>
-                        <input type="file" ref={wiFileInputRef} onChange={handleWiFileDrop} accept={WI_ACCEPT} multiple className="hidden" disabled={activeArProj === '*' || !!wiUploadState} />
-                      </div>
-                    </div>
-
-                    {activeArProj === '*' ? (
-                      <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-sm font-medium text-[var(--rf-text-tertiary)] text-center">
-                        Select a project first to manage instructions.
-                      </div>
-                    ) : (
-                      <>
-                        {(wiUploadState || wiUploadError) && (
-                          <div className={`rounded-xl border p-4 ${wiUploadError ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]' : 'border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]'}`}>
-                            {wiUploadState && (
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between gap-3">
-                                  <div>
-                                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Upload In Progress</div>
-                                    <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadState.filename}</div>
-                                  </div>
-                                  <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-bold">
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                    {wiUploadCopy}
-                                  </div>
-                                </div>
-                                <div className="h-1.5 overflow-hidden rounded-full bg-[rgba(43,89,74,0.12)]">
-                                  <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
-                                </div>
-                              </div>
-                            )}
-                            {wiUploadError && (
-                              <div className="flex items-center justify-between gap-3">
-                                <div>
-                                  <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-danger)]">Upload Failed</div>
-                                  <p className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadError}</p>
-                                </div>
-                                <button type="button" onClick={() => setWiUploadError(null)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[var(--rf-danger)] border border-[var(--rf-danger-subtle)]">Dismiss</button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        <div className="overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white">
-                          {wiDocs.length === 0 ? (
-                            <div className="p-8 text-center border-2 border-dashed border-[var(--rf-border)] rounded-xl bg-[var(--rf-surface-soft)] m-3">
-                              <FileText className="w-8 h-8 text-[var(--rf-border-strong)] mx-auto mb-2" />
-                              <p className="text-sm font-semibold text-[var(--rf-text-tertiary)]">No work instructions linked to {activeArProj}.</p>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="grid grid-cols-[minmax(0,1fr)_90px_140px_56px] gap-3 border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                                <div>Document</div>
-                                <div>Chunks</div>
-                                <div>Uploaded</div>
-                                <div />
-                              </div>
-                              {wiDocs.map(doc => (
-                                <div key={doc.docId} className="grid grid-cols-[minmax(0,1fr)_90px_140px_56px] gap-3 border-b border-[var(--rf-border-subtle)] px-4 py-3 last:border-b-0">
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-semibold text-[var(--rf-text)]">{doc.filename}</p>
-                                    <p className="mt-0.5 text-[12px] text-[var(--rf-text-tertiary)]">{doc.revision}</p>
-                                  </div>
-                                  <div className="text-sm font-medium text-[var(--rf-text-secondary)]">{doc.chunkCount}</div>
-                                  <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">{new Date(doc.uploadedAt).toLocaleDateString()}</div>
-                                  <button onClick={() => handleRemoveWiDoc(doc.docId)} className="ml-auto rounded-lg p-2 text-[var(--rf-text-tertiary)] transition-colors hover:bg-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]">
-                                    <Trash className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
+            {activeSurface === 'project' && (
+              <ProjectSetupSurface
+                projects={projects}
+                projectOptions={projectOptions}
+                customFields={customFields}
+                isDiscovering={isDiscovering}
+                onDiscoverJira={discoverJira}
+                activeArProj={activeArProj}
+                setActiveArProj={setActiveArProj}
+                arMappings={arMappings}
+                setArMappings={setArMappings}
+                domainContexts={domainContexts}
+                setDomainContexts={setDomainContexts}
+                backlogStatusScopes={backlogStatusScopes}
+                setBacklogStatusScopes={setBacklogStatusScopes}
+                backlogStatusOptions={backlogStatusOptions}
+                detectDefaultStatuses={detectDefaultStatuses}
+                backlogCacheInfo={backlogCacheInfo}
+                backlogDiagnostics={backlogDiagnostics}
+                backlogRefreshStatus={backlogRefreshStatus}
+                isRefreshingBacklogCache={isRefreshingBacklogCache}
+                onRefreshBacklogCache={handleRefreshBacklogCache}
+                backlogThemeBudgetOverride={backlogThemeBudgetOverride}
+                onBacklogThemeBudgetOverrideChange={setBacklogThemeBudgetOverride}
+                goldExampleConfigs={goldExampleConfigs}
+                setGoldExampleConfigs={setGoldExampleConfigs}
+                goldStoryPool={goldStoryPool}
+                wiDocs={wiDocs}
+                wiUploadState={wiUploadState}
+                wiUploadError={wiUploadError}
+                wiUploadCopy={wiUploadCopy}
+                onUploadWi={() => wiFileInputRef.current?.click()}
+                onDismissWiUploadError={() => setWiUploadError(null)}
+                onRemoveWiDoc={handleRemoveWiDoc}
+                canManageProjectSettings={projectCapabilities.canManageProjectSettings}
+                canManageWi={projectCapabilities.canManageWi}
+                canManageGoldExamples={projectCapabilities.canManageGoldExamples}
+                canManageMapping={projectCapabilities.canManageMapping}
+                isAdmin={Boolean(isAdmin)}
+                isProjectAdmin={activeProjAdmin}
+              />
             )}
 
-            {activeTab === 'domain' && (
+            {activeSurface === 'workspace' && activeTab === 'domain' && (
               <motion.div
                 className="max-w-3xl space-y-4"
                 initial={{ opacity: 0, y: 8 }}
@@ -1764,7 +1678,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               </motion.div>
             )}
 
-            {activeTab === 'stats' && (
+            {activeSurface === 'workspace' && activeTab === 'stats' && (
               <motion.div
                 className="max-w-3xl space-y-4"
                 initial={{ opacity: 0, y: 8 }}
@@ -1836,7 +1750,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               </motion.div>
             )}
 
-            {activeTab === 'billing' && (
+            {activeSurface === 'workspace' && activeTab === 'billing' && (
               <motion.div
                 className="max-w-3xl space-y-4"
                 initial={{ opacity: 0, y: 8 }}
@@ -2043,7 +1957,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
               </motion.div>
             )}
 
-            {activeTab === 'compliance' && (
+            {activeSurface === 'workspace' && activeTab === 'compliance' && (
               <motion.div
                 className="max-w-3xl space-y-4"
                 initial={{ opacity: 0, y: 8 }}
@@ -2305,6 +2219,502 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   );
 }
 
+type ProjectSetupStep = 'backlog' | 'wi' | 'gold' | 'guidance' | 'mapping' | 'review';
+type ProjectSetupMode = 'guided' | 'overview' | 'edit';
+
+function ProjectWorkInstructionsPanel({
+  activeArProj,
+  wiDocs,
+  wiUploadState,
+  wiUploadError,
+  wiUploadCopy,
+  onUploadWi,
+  onDismissWiUploadError,
+  onRemoveWiDoc,
+  canManageWi,
+}: {
+  activeArProj: string;
+  wiDocs: WiDocRow[];
+  wiUploadState: { filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null;
+  wiUploadError: string | null;
+  wiUploadCopy: string | null;
+  onUploadWi: () => void;
+  onDismissWiUploadError: () => void;
+  onRemoveWiDoc: (docId: string) => void | Promise<void>;
+  canManageWi: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-[var(--rf-border)] bg-[rgba(248,246,240,0.7)] p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-brand)]">Work Instructions</div>
+            <h4 className="text-lg font-bold text-[var(--rf-text)]">Keep project guidance close to the setup flow.</h4>
+            <p className="max-w-2xl text-sm font-medium text-[var(--rf-text-tertiary)]">
+              Link operating procedures, SOPs, or team playbooks so the generator can ground features in the real workflow.
+            </p>
+          </div>
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            <button
+              type="button"
+              onClick={onUploadWi}
+              disabled={!canManageWi || activeArProj === '*' || Boolean(wiUploadState)}
+              className="rounded-xl bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50"
+            >
+              {wiUploadState ? 'Uploading...' : 'Add work instructions'}
+            </button>
+            <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+              {canManageWi ? 'Project admins can manage docs for this project.' : 'Only project admins can add or remove docs.'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {activeArProj === '*' ? (
+        <div className="rounded-2xl border-2 border-dashed border-[var(--rf-border)] bg-white px-6 py-10 text-center text-sm font-medium text-[var(--rf-text-tertiary)]">
+          Select a project first to manage its work instructions.
+        </div>
+      ) : (
+        <>
+          {(wiUploadState || wiUploadError) && (
+            <div className={`rounded-2xl border p-4 ${wiUploadError ? 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/50' : 'border-[var(--rf-brand-subtle)] bg-[var(--rf-brand-muted)]'}`}>
+              {wiUploadState && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Upload In Progress</div>
+                      <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadState.filename}</div>
+                    </div>
+                    <div className="inline-flex items-center gap-2 text-[var(--rf-brand)] text-xs font-bold">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      {wiUploadCopy}
+                    </div>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-[rgba(43,89,74,0.12)]">
+                    <div className="h-full w-1/2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+                  </div>
+                </div>
+              )}
+              {wiUploadError && (
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-danger)]">Upload Failed</div>
+                    <p className="mt-1 text-sm font-bold text-[var(--rf-text)]">{wiUploadError}</p>
+                  </div>
+                  <button type="button" onClick={onDismissWiUploadError} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-[var(--rf-danger)] border border-[var(--rf-danger-subtle)]">Dismiss</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="overflow-hidden rounded-2xl border border-[var(--rf-border)] bg-white">
+            {wiDocs.length === 0 ? (
+              <div className="m-4 rounded-2xl border-2 border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-6 py-10 text-center">
+                <FileText className="mx-auto mb-3 h-9 w-9 text-[var(--rf-border-strong)]" />
+                <p className="text-base font-bold text-[var(--rf-text)]">No work instructions linked yet.</p>
+                <p className="mt-2 text-sm font-medium text-[var(--rf-text-tertiary)]">
+                  Add a few high-signal documents your team actually follows. You can revisit this any time from the project overview.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <div className="grid grid-cols-[minmax(0,1fr)_90px_140px_72px] gap-3 border-b border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                  <div>Document</div>
+                  <div>Chunks</div>
+                  <div>Uploaded</div>
+                  <div className="text-right">Action</div>
+                </div>
+                {wiDocs.map((doc) => (
+                  <div key={doc.docId} className="grid grid-cols-[minmax(0,1fr)_90px_140px_72px] gap-3 border-b border-[var(--rf-border-subtle)] px-4 py-3 last:border-b-0">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--rf-text)]">{doc.filename}</p>
+                      <p className="mt-0.5 text-[12px] text-[var(--rf-text-tertiary)]">{doc.revision}</p>
+                    </div>
+                    <div className="text-sm font-medium text-[var(--rf-text-secondary)]">{doc.chunkCount}</div>
+                    <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">{new Date(doc.uploadedAt).toLocaleDateString()}</div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => onRemoveWiDoc(doc.docId)}
+                        disabled={!canManageWi}
+                        className="rounded-lg p-2 text-[var(--rf-text-tertiary)] transition-colors hover:bg-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)] disabled:opacity-40"
+                        title={canManageWi ? 'Remove work instruction' : 'Project admin only'}
+                      >
+                        <Trash className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProjectSetupSurface({
+  projects,
+  projectOptions,
+  customFields,
+  isDiscovering,
+  onDiscoverJira,
+  activeArProj,
+  setActiveArProj,
+  arMappings,
+  setArMappings,
+  domainContexts,
+  setDomainContexts,
+  backlogStatusScopes,
+  setBacklogStatusScopes,
+  backlogStatusOptions,
+  detectDefaultStatuses,
+  backlogCacheInfo,
+  backlogDiagnostics,
+  backlogRefreshStatus,
+  isRefreshingBacklogCache,
+  onRefreshBacklogCache,
+  backlogThemeBudgetOverride,
+  onBacklogThemeBudgetOverrideChange,
+  goldExampleConfigs,
+  setGoldExampleConfigs,
+  goldStoryPool,
+  wiDocs,
+  wiUploadState,
+  wiUploadError,
+  wiUploadCopy,
+  onUploadWi,
+  onDismissWiUploadError,
+  onRemoveWiDoc,
+  canManageProjectSettings,
+  canManageWi,
+  canManageGoldExamples,
+  canManageMapping,
+  isAdmin,
+  isProjectAdmin,
+}: {
+  projects: JiraProject[];
+  projectOptions: SearchableSelectOption[];
+  customFields: JiraField[];
+  isDiscovering: boolean;
+  onDiscoverJira: () => void;
+  activeArProj: string;
+  setActiveArProj: (value: string) => void;
+  arMappings: ProjectArMapping[];
+  setArMappings: (value: ProjectArMapping[]) => void;
+  domainContexts: ProjectDomainContextRow[];
+  setDomainContexts: (value: ProjectDomainContextRow[]) => void;
+  backlogStatusScopes: ProjectBacklogStatusScope[];
+  setBacklogStatusScopes: (value: ProjectBacklogStatusScope[]) => void;
+  backlogStatusOptions: JiraStatus[];
+  detectDefaultStatuses: (statuses: JiraStatus[]) => string[];
+  backlogCacheInfo: BacklogCacheInfoRow | null;
+  backlogDiagnostics: BacklogDiagnostics | null;
+  backlogRefreshStatus: BacklogRefreshStatusRow | null;
+  isRefreshingBacklogCache: boolean;
+  onRefreshBacklogCache: (projectKey?: string) => Promise<any>;
+  backlogThemeBudgetOverride: string;
+  onBacklogThemeBudgetOverrideChange: (value: string) => void;
+  goldExampleConfigs: ProjectGoldExampleConfig[];
+  setGoldExampleConfigs: (value: ProjectGoldExampleConfig[]) => void;
+  goldStoryPool: Array<{ key: string; summary: string; score: number }>;
+  wiDocs: WiDocRow[];
+  wiUploadState: { filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null;
+  wiUploadError: string | null;
+  wiUploadCopy: string | null;
+  onUploadWi: () => void;
+  onDismissWiUploadError: () => void;
+  onRemoveWiDoc: (docId: string) => void | Promise<void>;
+  canManageProjectSettings: boolean;
+  canManageWi: boolean;
+  canManageGoldExamples: boolean;
+  canManageMapping: boolean;
+  isAdmin: boolean;
+  isProjectAdmin: boolean;
+}) {
+  const [mode, setMode] = useState<ProjectSetupMode>('guided');
+  const [activeStep, setActiveStep] = useState<ProjectSetupStep>('backlog');
+
+  const mappingConfigured = useMemo(() => {
+    return arMappings.some((mapping) => (
+      mapping.projectKey === activeArProj
+      && (
+        Boolean(mapping.consolidatedFieldId)
+        || (mapping.iterativeFieldIds?.length ?? 0) > 0
+        || (mapping.outputMappings?.arFieldIds?.length ?? 0) > 0
+      )
+    ));
+  }, [arMappings, activeArProj]);
+
+  const backlogConfigured = useMemo(() => {
+    const scope = backlogStatusScopes.find((entry) => entry.projectKey === activeArProj);
+    return Boolean((scope?.statuses?.length ?? 0) > 0 || (backlogCacheInfo?.issueCount ?? 0) > 0);
+  }, [backlogStatusScopes, activeArProj, backlogCacheInfo]);
+
+  const goldConfigured = useMemo(() => {
+    const config = goldExampleConfigs.find((entry) => entry.projectKey === activeArProj);
+    return Boolean((config?.issueKeys?.length ?? 0) > 0 || config?.label?.trim());
+  }, [goldExampleConfigs, activeArProj]);
+
+  const guidanceConfigured = useMemo(() => {
+    const context = domainContexts.find((entry) => entry.projectKey === activeArProj);
+    return Boolean(
+      context?.context?.trim()
+      || (context?.personaRoles ?? []).some((row) => row.role?.trim() || row.activities?.trim()),
+    );
+  }, [domainContexts, activeArProj]);
+
+  const projectSetupComplete = backlogConfigured && mappingConfigured;
+  const projectSelected = Boolean(activeArProj && activeArProj !== '*');
+
+  useEffect(() => {
+    if (!projectSelected) {
+      setMode('guided');
+      setActiveStep('backlog');
+      return;
+    }
+    setMode(projectSetupComplete ? 'overview' : 'guided');
+    setActiveStep(projectSetupComplete ? 'review' : 'backlog');
+  }, [activeArProj, projectSelected, projectSetupComplete]);
+
+  const steps: StepConfig[] = [
+    { id: 'backlog', label: 'Backlog', description: 'Scope and cache readiness', required: true },
+    { id: 'wi', label: 'Work Instructions', description: 'Operational guidance and SOPs' },
+    { id: 'gold', label: 'Gold Examples', description: 'Reference stories that shape quality' },
+    { id: 'guidance', label: 'Guidance', description: 'Project-specific context and roles' },
+    { id: 'mapping', label: 'Field Mapping', description: 'Where generated ARs should go', required: true },
+    { id: 'review', label: 'Review', description: 'Finish setup and verify the project' },
+  ];
+
+  const completedSteps = new Set<ProjectSetupStep>([
+    ...(backlogConfigured ? ['backlog' as const] : []),
+    ...(wiDocs.length > 0 ? ['wi' as const] : []),
+    ...(goldConfigured ? ['gold' as const] : []),
+    ...(guidanceConfigured ? ['guidance' as const] : []),
+    ...(mappingConfigured ? ['mapping' as const] : []),
+    ...(projectSetupComplete ? ['review' as const] : []),
+  ]);
+
+  return (
+    <motion.div
+      className="max-w-5xl space-y-5"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+    >
+      <div className="rounded-[28px] border border-[rgba(43,89,74,0.12)] bg-[linear-gradient(135deg,rgba(248,246,240,0.96),rgba(255,255,255,0.92))] p-6 shadow-[0_20px_60px_rgba(43,89,74,0.06)]">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-3">
+            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-brand)]">Project Setup</div>
+            <div>
+              <h3 className="text-[28px] font-black leading-tight text-[var(--rf-text)]">Make project setup feel like a guided handoff, not a manual.</h3>
+              <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-[var(--rf-text-tertiary)]">
+                Start with the guided setup once, then come back to the project overview whenever you need to update work instructions, examples, or field behavior.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-3 py-1 text-[12px] font-bold ${isAdmin ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]' : 'bg-[var(--rf-brand-muted)] text-[var(--rf-brand)]'}`}>
+                {isAdmin ? 'Workspace admin access' : isProjectAdmin ? 'Project admin access' : 'Read only'}
+              </span>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+                {projects.length} projects discovered
+              </span>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">
+                {customFields.length} Jira fields available
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] xl:min-w-[420px]">
+            <SearchableSelect
+              value={activeArProj}
+              onChange={(value) => setActiveArProj(value || '*')}
+              options={projectOptions}
+              placeholder="Select a project..."
+              searchPlaceholder="Search projects..."
+              allowClear
+              clearLabel="Clear project"
+              className="w-full"
+              buttonClassName="bg-white"
+            />
+            <button
+              type="button"
+              onClick={onDiscoverJira}
+              disabled={isDiscovering}
+              className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)] disabled:opacity-50"
+            >
+              {isDiscovering ? 'Syncing...' : 'Sync Jira'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {!projectSelected ? (
+        <div className="rounded-[28px] border-2 border-dashed border-[var(--rf-border)] bg-white px-8 py-16 text-center">
+          <Database className="mx-auto mb-4 h-12 w-12 text-[var(--rf-border-strong)]" />
+          <h4 className="text-xl font-bold text-[var(--rf-text)]">Select a project to start guided setup</h4>
+          <p className="mx-auto mt-3 max-w-md text-sm font-medium text-[var(--rf-text-tertiary)]">
+            Once you choose a project, we’ll walk through backlog scope, work instructions, examples, guidance, and field mapping in one focused flow.
+          </p>
+        </div>
+      ) : mode === 'overview' ? (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 rounded-2xl border border-[var(--rf-border)] bg-white p-5 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-brand)]">Project Overview</div>
+              <h4 className="mt-1 text-xl font-bold text-[var(--rf-text)]">{activeArProj} is ready for fast updates.</h4>
+              <p className="mt-2 text-sm font-medium text-[var(--rf-text-tertiary)]">
+                Use these hubs to update the parts of setup people revisit often, without stepping through the entire wizard again.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('guided');
+                setActiveStep('backlog');
+              }}
+              className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-white"
+            >
+              Run setup again
+            </button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {[
+              {
+                id: 'backlog' as ProjectSetupStep,
+                label: 'Backlog scope',
+                ready: backlogConfigured,
+                helper: backlogConfigured
+                  ? `${backlogCacheInfo?.issueCount ?? backlogDiagnostics?.matchingScopeIssues ?? 0} indexed backlog items in scope`
+                  : 'Choose statuses and build backlog context',
+              },
+              {
+                id: 'wi' as ProjectSetupStep,
+                label: 'Work Instructions',
+                ready: wiDocs.length > 0,
+                helper: wiDocs.length > 0 ? `${wiDocs.length} linked document${wiDocs.length === 1 ? '' : 's'}` : 'No linked docs yet',
+              },
+              {
+                id: 'gold' as ProjectSetupStep,
+                label: 'Gold Examples',
+                ready: goldConfigured,
+                helper: goldConfigured ? 'Reference examples configured' : 'Still using automatic fallback only',
+              },
+              {
+                id: 'guidance' as ProjectSetupStep,
+                label: 'Guidance',
+                ready: guidanceConfigured,
+                helper: guidanceConfigured ? 'Project context and roles added' : 'No extra guidance yet',
+              },
+              {
+                id: 'mapping' as ProjectSetupStep,
+                label: 'Field Mapping',
+                ready: mappingConfigured,
+                helper: mappingConfigured ? 'Acceptance requirements have a destination field' : 'AR destination not configured yet',
+              },
+            ].map((card) => (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => {
+                  setMode('edit');
+                  setActiveStep(card.id);
+                }}
+                className="rounded-2xl border border-[var(--rf-border)] bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-[var(--rf-border-strong)] hover:shadow-lg"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[15px] font-bold text-[var(--rf-text)]">{card.label}</div>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ${card.ready ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]' : 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]'}`}>
+                    {card.ready ? 'Ready' : 'Needs attention'}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm font-medium leading-relaxed text-[var(--rf-text-tertiary)]">{card.helper}</p>
+                <div className="mt-4 text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--rf-brand)]">Open quick edit</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4">
+            <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-brand)]">
+                  {mode === 'guided' ? 'Guided setup' : 'Quick edit'}
+                </div>
+                <div className="mt-1 text-sm font-medium text-[var(--rf-text-tertiary)]">
+                  {mode === 'guided'
+                    ? 'Move through the setup in order. Each step has one clear job.'
+                    : 'You are editing one part of project setup. You can jump to another step at any time.'}
+                </div>
+              </div>
+              {mode === 'edit' && (
+                <button
+                  type="button"
+                  onClick={() => setMode('overview')}
+                  className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-white"
+                >
+                  Back to project overview
+                </button>
+              )}
+            </div>
+            <StepIndicator
+              steps={steps}
+              activeStep={activeStep}
+              completedSteps={completedSteps}
+              onStepClick={(stepId: string) => setActiveStep(stepId as ProjectSetupStep)}
+            />
+          </div>
+
+          <ProjectConfigurationManager
+            projects={projects}
+            customFields={customFields}
+            arMappings={arMappings}
+            setArMappings={setArMappings}
+            domainContexts={domainContexts}
+            setDomainContexts={setDomainContexts}
+            backlogStatusScopes={backlogStatusScopes}
+            setBacklogStatusScopes={setBacklogStatusScopes}
+            backlogStatusOptions={backlogStatusOptions}
+            detectDefaultStatuses={detectDefaultStatuses}
+            activeArProj={activeArProj}
+            isAdmin={isAdmin}
+            isProjectAdmin={isProjectAdmin}
+            backlogCacheInfo={backlogCacheInfo}
+            backlogDiagnostics={backlogDiagnostics}
+            backlogRefreshStatus={backlogRefreshStatus}
+            isRefreshingBacklogCache={isRefreshingBacklogCache}
+            onRefreshBacklogCache={onRefreshBacklogCache}
+            backlogThemeBudgetOverride={backlogThemeBudgetOverride}
+            onBacklogThemeBudgetOverrideChange={onBacklogThemeBudgetOverrideChange}
+            goldExampleConfigs={goldExampleConfigs}
+            setGoldExampleConfigs={setGoldExampleConfigs}
+            goldStoryPool={goldStoryPool}
+            activeStep={activeStep}
+            onActiveStepChange={setActiveStep}
+            mode={mode}
+            onEnterOverview={() => setMode('overview')}
+            projectSetupComplete={projectSetupComplete}
+            wiDocs={wiDocs}
+            wiUploadState={wiUploadState}
+            wiUploadError={wiUploadError}
+            wiUploadCopy={wiUploadCopy}
+            onUploadWi={onUploadWi}
+            onDismissWiUploadError={onDismissWiUploadError}
+            onRemoveWiDoc={onRemoveWiDoc}
+            canManageWi={canManageWi}
+            canManageProjectSettings={canManageProjectSettings}
+            canManageGoldExamples={canManageGoldExamples}
+            canManageMapping={canManageMapping}
+          />
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 function ProjectConfigurationManager({
   projects, customFields, arMappings, setArMappings, domainContexts, setDomainContexts,
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
@@ -2313,6 +2723,22 @@ function ProjectConfigurationManager({
   backlogThemeBudgetOverride, onBacklogThemeBudgetOverrideChange,
   goldExampleConfigs, setGoldExampleConfigs,
   goldStoryPool = [],
+  activeStep,
+  onActiveStepChange,
+  mode,
+  onEnterOverview,
+  projectSetupComplete,
+  wiDocs = [],
+  wiUploadState = null,
+  wiUploadError = null,
+  wiUploadCopy = null,
+  onUploadWi,
+  onDismissWiUploadError,
+  onRemoveWiDoc,
+  canManageWi = false,
+  canManageProjectSettings = false,
+  canManageGoldExamples = false,
+  canManageMapping = false,
 }: any) {
 const [issueTypes, setIssueTypes] = useState<any[]>([]);
   const [activeIssueType, setActiveIssueType] = useState<string>('*');
@@ -2428,17 +2854,19 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
   const [goldCandidateResults, setGoldCandidateResults] = useState<Array<{ key: string; summary: string; score: number }>>([]);
   const [selectedGoldKeys, setSelectedGoldKeys] = useState<string[]>([]);
   const [goldLabelDraft, setGoldLabelDraft] = useState('');
+  const [goldMode, setGoldMode] = useState<'auto' | 'label' | 'manual'>('auto');
   const [roleInferenceResult, setRoleInferenceResult] = useState<InferProjectPersonaRolesResult | null>(null);
   const [selectedRoleSuggestionKeys, setSelectedRoleSuggestionKeys] = useState<string[]>([]);
-  const [activeStep, setActiveStep] = useState<'backlog' | 'gold' | 'guidance' | 'mapping'>('backlog');
-  const [showAllSections, setShowAllSections] = useState(false);
+  const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
 
   // Track whether gold config has unsaved changes (for auto-save indicator)
   const hasUnsavedGoldChanges = useMemo(() => {
-    const keysChanged = JSON.stringify([...selectedGoldKeys].sort()) !== JSON.stringify([...(currentGoldIssueKeys ?? [])].sort());
-    const labelChanged = goldLabelDraft.trim() !== (currentGoldConfig.label ?? '').trim();
+    const normalizedKeys = goldMode === 'manual' ? [...selectedGoldKeys].sort() : [];
+    const normalizedLabel = goldMode === 'label' ? goldLabelDraft.trim() : '';
+    const keysChanged = JSON.stringify(normalizedKeys) !== JSON.stringify([...(currentGoldIssueKeys ?? [])].sort());
+    const labelChanged = normalizedLabel !== (currentGoldConfig.label ?? '').trim();
     return keysChanged || labelChanged;
-  }, [selectedGoldKeys, currentGoldIssueKeys, goldLabelDraft, currentGoldConfig.label]);
+  }, [selectedGoldKeys, currentGoldIssueKeys, goldLabelDraft, currentGoldConfig.label, goldMode]);
 
   useEffect(() => {
     setRoleInferenceResult(null);
@@ -2453,7 +2881,14 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     setGoldCandidateQuery('');
     setSelectedGoldKeys(currentGoldIssueKeys);
     setGoldLabelDraft(currentGoldConfig.label ?? '');
-  }, [activeArProj, currentGoldIssueKeysSignature]);
+    setGoldMode(
+      currentGoldIssueKeys.length > 0
+        ? 'manual'
+        : currentGoldConfig.label?.trim()
+          ? 'label'
+          : 'auto',
+    );
+  }, [activeArProj, currentGoldIssueKeysSignature, currentGoldConfig.label, currentGoldIssueKeys]);
 
   // When the pool loads/refreshes, update the default candidate list
   // (but do NOT reset the user's manual key selections).
@@ -2508,27 +2943,11 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     }, 300);
   }, [activeArProj, goldStoryPool]);
 
-  const searchGoldCandidates = async (query = goldCandidateQuery) => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setGoldCandidateResults(goldStoryPool.slice(0, 8));
-      return;
-    }
-    setIsSearchingGoldCandidates(true);
-    try {
-      const response = await api.searchBacklogForGoldCandidates({ projectKey: activeArProj, query: trimmed }) as any;
-      setGoldCandidateResults(response?.success ? (response.results ?? []) : []);
-    } catch (error: any) {
-      setProjectNotice(error?.message || 'Gold candidate search failed.');
-      setGoldCandidateResults([]);
-    } finally {
-      setIsSearchingGoldCandidates(false);
-    }
-  };
-
   const persistGoldConfig = async (options: { notice?: string } = {}) => {
-    const normalizedKeys = [...new Set(selectedGoldKeys.map((key) => key.trim()).filter(Boolean))];
-    const normalizedLabel = goldLabelDraft.trim();
+    const normalizedKeys = goldMode === 'manual'
+      ? [...new Set(selectedGoldKeys.map((key) => key.trim()).filter(Boolean))]
+      : [];
+    const normalizedLabel = goldMode === 'label' ? goldLabelDraft.trim() : '';
     const currentKeys = currentGoldIssueKeys;
     const currentLabel = currentGoldConfig.label ?? '';
     const keysChanged = !areStringArraysEqual(normalizedKeys, currentKeys);
@@ -2625,6 +3044,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
         throw new Error((saveRes as any)?.error || 'Project configuration could not be saved.');
       }
       setProjectNotice('Project configuration saved.');
+      onEnterOverview?.();
     } catch (e: any) { alert(e.message); }
     finally { setIsSavingProject(false); }
   };
@@ -2661,6 +3081,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
           setProjectNotice('Cache rebuilt: 0 matching issues found.');
         }
       }
+      onEnterOverview?.();
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -2682,39 +3103,11 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
       )}
 
       <div className="space-y-4">
-         {/* Step indicator */}
-         <div className="flex items-center justify-between gap-4">
-           <StepIndicator
-             steps={[
-               { id: 'backlog', label: 'Backlog', description: 'Define Jira statuses for AI context', required: true },
-               { id: 'gold', label: 'Gold Examples', description: 'Choose which stories shape AR quality' },
-               { id: 'guidance', label: 'Guidance', description: 'Project-specific rules and context' },
-               { id: 'mapping', label: 'Mapping', description: 'Map where Acceptance Criteria go' },
-             ]}
-             activeStep={activeStep}
-             completedSteps={new Set([
-               ...(indexedCount > 0 ? ['backlog' as const] : []),
-               ...(goldStoryPool.length > 0 || (currentGoldConfig.issueKeys?.length ?? 0) > 0 || currentGoldConfig.label ? ['gold' as const] : []),
-               ...(currentContext.context?.trim() ? ['guidance' as const] : []),
-               ...(currentMapping.consolidatedFieldId || currentMapping.iterativeFieldIds.length > 0 ? ['mapping' as const] : []),
-             ])}
-             onStepClick={(stepId: string) => setActiveStep(stepId as 'backlog' | 'gold' | 'guidance' | 'mapping')}
-           />
-           <button
-             type="button"
-             onClick={() => setShowAllSections(!showAllSections)}
-             className="text-[12px] font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text)] transition whitespace-nowrap"
-           >
-             {showAllSections ? 'Step view' : 'Show all'}
-           </button>
-         </div>
-
-         {/* Backlog Context section */}
-         {(showAllSections || activeStep === 'backlog') && (
+         {activeStep === 'backlog' && (
          <div className="space-y-3">
            <button
              type="button"
-             onClick={() => { setActiveStep('backlog'); if (showAllSections) return; }}
+             onClick={() => onActiveStepChange?.('backlog')}
              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
            >
              <div className="flex items-center gap-3">
@@ -2727,7 +3120,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                  <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Define Jira statuses for AI context.</p>
                </div>
              </div>
-             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${(showAllSections || activeStep === 'backlog') ? 'rotate-90' : ''}`} />
+             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${activeStep === 'backlog' ? 'rotate-90' : ''}`} />
            </button>
 
            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
@@ -2847,196 +3240,217 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                </div>
              </div>
 
-             <div className="rf-card px-4 py-4 space-y-4">
-               <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                 <div>
-                   <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Gold Exemplars</div>
-                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1 max-w-2xl">
-                     Choose which backlog stories shape AR quality for this project. Priority is manual issue keys first, then a Jira label filter, then the top ranked pool from the latest cache rebuild.
-                   </p>
-                 </div>
-                 <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                   Pool: {goldStoryPool.length} ranked stories
-                 </div>
-               </div>
-
-               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                 <div className="space-y-4">
-                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
-                     <div>
-                       <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Label Fallback</div>
-                       <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
-                         If no manual keys are selected, use this Jira label to resolve exemplars from the ranked pool.
-                       </div>
-                     </div>
-                     <div className="flex items-center gap-3">
-                       <input
-                         type="text"
-                         value={goldLabelDraft}
-                         onChange={(event) => setGoldLabelDraft(event.target.value)}
-                         onBlur={() => {
-                           if (goldLabelDraft.trim() !== (currentGoldConfig.label ?? '').trim()) {
-                             void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
-                           }
-                         }}
-                         onKeyDown={(event) => {
-                           if (event.key === 'Enter') {
-                             event.preventDefault();
-                             if (goldLabelDraft.trim() !== (currentGoldConfig.label ?? '').trim()) {
-                               void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
-                             }
-                           }
-                         }}
-                         placeholder="e.g. gold-example"
-                         className="flex-1 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
-                       />
-                       {isSavingGoldConfig && (
-                         <span className="text-[12px] text-[var(--rf-brand)] animate-pulse">Saving…</span>
-                       )}
-                     </div>
-                     <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                       Active label: <span className="font-semibold text-[var(--rf-text)]">{currentGoldConfig.label || 'none'}</span>
-                       <span className="ml-2 text-[var(--rf-text-tertiary)]">· Auto-saves on blur</span>
-                     </div>
-                   </div>
-
-                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
-                     <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                       <div>
-                         <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Manual Issue Keys</div>
-                         <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
-                           Pick exact stories when you want deterministic examples. These override the label fallback.
-                         </div>
-                       </div>
-                       <div className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">
-                         {selectedGoldKeys.length} selected
-                       </div>
-                     </div>
-
-                     <MultiSearchSelect
-                       selectedValues={selectedGoldKeys}
-                       onToggle={toggleGoldKey}
-                       onRemove={(key) => toggleGoldKey(key)}
-                       options={(goldCandidateResults.length > 0 ? goldCandidateResults : goldStoryPool.slice(0, 12)).map((entry: any) => ({
-                         value: entry.key,
-                         label: entry.key,
-                         description: entry.summary,
-                         score: entry.score,
-                       }))}
-                       onSearchChange={(query) => {
-                         setGoldCandidateQuery(query);
-                         debouncedSearchGoldCandidates(query);
-                       }}
-                       searchValue={goldCandidateQuery}
-                       isSearching={isSearchingGoldCandidates}
-                       placeholder="Search by key or summary…"
-                       searchPlaceholder="Type to search ranked pool…"
-                       emptyStateLabel={goldStoryPool.length === 0 ? 'Rebuild the backlog cache to populate candidates.' : 'No matches found.'}
-                     />
-
-                     <div className="flex flex-wrap items-center gap-2">
-                       <button
-                         type="button"
-                         onClick={() => {
-                           void persistGoldConfig({ notice: 'Gold exemplar settings saved.' }).catch((error) => alert(error.message));
-                         }}
-                         disabled={isSavingGoldConfig || !hasUnsavedGoldChanges}
-                         className={`rounded-xl px-4 py-2.5 text-[13px] font-bold transition disabled:opacity-50 ${hasUnsavedGoldChanges ? 'bg-[var(--rf-brand)] text-white hover:bg-[var(--rf-brand-hover)]' : 'bg-[var(--rf-text)] text-white hover:bg-black'}`}
-                       >
-                         {isSavingGoldConfig ? 'Saving…' : hasUnsavedGoldChanges ? 'Save changes' : 'Up to date'}
-                       </button>
-                       {selectedGoldKeys.length > 0 && (
-                         <button
-                           type="button"
-                           onClick={() => setSelectedGoldKeys([])}
-                           className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)]"
-                         >
-                           Clear all
-                         </button>
-                       )}
-                     </div>
-                   </div>
-                 </div>
-
-                 <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
-                   <div>
-                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Exemplar Source</div>
-                     <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
-                       Priority cascade: the generator uses the first source with data.
-                     </div>
-                   </div>
-                   <div className="space-y-2 text-[13px]">
-                     {(() => {
-                       const hasManual = (currentGoldConfig.issueKeys?.length ?? 0) > 0;
-                       const hasLabel = !!(currentGoldConfig.label?.trim());
-                       const hasPool = goldStoryPool.length > 0;
-                       const activeSource = hasManual ? 'manual' : hasLabel ? 'label' : 'pool';
-                       return (
-                         <>
-                           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between ${activeSource === 'manual' ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]' : 'border-[var(--rf-border)] bg-white'}`}>
-                             <div className="flex items-center gap-2">
-                               <span className={`w-2 h-2 rounded-full ${activeSource === 'manual' ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
-                               <span className="font-bold text-[var(--rf-text)]">Manual keys</span>
-                             </div>
-                             <span className={`text-[12px] font-semibold ${activeSource === 'manual' ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                               {hasManual ? `${currentGoldConfig.issueKeys!.length} selected` : 'none'}
-                               {activeSource === 'manual' && ' · Active'}
-                             </span>
-                           </div>
-                           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between ${activeSource === 'label' ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]' : 'border-[var(--rf-border)] bg-white'}`}>
-                             <div className="flex items-center gap-2">
-                               <span className={`w-2 h-2 rounded-full ${activeSource === 'label' ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
-                               <span className="font-bold text-[var(--rf-text)]">Label filter</span>
-                             </div>
-                             <span className={`text-[12px] font-semibold ${activeSource === 'label' ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                               {hasLabel ? currentGoldConfig.label : 'none'}
-                               {activeSource === 'label' && ' · Active'}
-                             </span>
-                           </div>
-                           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between ${activeSource === 'pool' ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]' : 'border-[var(--rf-border)] bg-white'}`}>
-                             <div className="flex items-center gap-2">
-                               <span className={`w-2 h-2 rounded-full ${activeSource === 'pool' ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
-                               <span className="font-bold text-[var(--rf-text)]">Auto-ranked pool</span>
-                             </div>
-                             <span className={`text-[12px] font-semibold ${activeSource === 'pool' ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                               {hasPool ? `${Math.min(goldStoryPool.length, 8)} top stories` : 'empty until cache rebuild'}
-                               {activeSource === 'pool' && ' · Active'}
-                             </span>
-                           </div>
-                         </>
-                       );
-                     })()}
-                   </div>
-
-                   <div className="pt-1 space-y-2">
-                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Top Ranked Pool</div>
-                     <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
-                       {goldStoryPool.length > 0 ? goldStoryPool.slice(0, 8).map((entry: any) => (
-                         <div key={entry.key} className="flex items-center gap-3 rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
-                           <span className="text-[11px] font-black tabular-nums rounded px-1.5 py-0.5 bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] min-w-[36px] text-center">{entry.score}</span>
-                           <span className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</span>
-                           <span className="text-xs font-medium text-[var(--rf-text-secondary)] truncate flex-1">{entry.summary}</span>
-                         </div>
-                       )) : (
-                         <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-white px-3 py-4 text-[12px] text-[var(--rf-text-tertiary)] text-center">
-                           Rebuild the backlog cache to populate ranked gold exemplars.
-                         </div>
-                       )}
-                     </div>
-                   </div>
-                 </div>
-               </div>
-             </div>
            </div>
          </div>
          )}
 
-         {/* Guidance section */}
-         {(showAllSections || activeStep === 'guidance') && (
+         {activeStep === 'wi' && (
+           <ProjectWorkInstructionsPanel
+             activeArProj={activeArProj}
+             wiDocs={wiDocs}
+             wiUploadState={wiUploadState}
+             wiUploadError={wiUploadError}
+             wiUploadCopy={wiUploadCopy}
+             onUploadWi={onUploadWi}
+             onDismissWiUploadError={onDismissWiUploadError}
+             onRemoveWiDoc={onRemoveWiDoc}
+             canManageWi={canManageWi}
+           />
+         )}
+
+         {activeStep === 'gold' && (
+         <div className="space-y-3">
+           <div className="rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm">
+             <div className="flex items-center gap-3">
+               <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)]"><Image className="w-4 h-4 text-[var(--rf-brand)]" /></div>
+               <div>
+                 <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
+                   Gold Examples
+                   <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">Optional</span>
+                 </h5>
+                 <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Choose one clear source for reference stories.</p>
+               </div>
+             </div>
+           </div>
+
+           <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
+             <div className="grid gap-3 md:grid-cols-3">
+               {[
+                 { id: 'auto', title: 'Auto-ranked backlog pool', helper: goldStoryPool.length > 0 ? `${Math.min(goldStoryPool.length, 8)} strong candidates ready` : 'Needs a backlog rebuild before candidates appear' },
+                 { id: 'label', title: 'Use Jira label', helper: 'Use one label when your team already curates example stories in Jira' },
+                 { id: 'manual', title: 'Pick specific stories', helper: 'Use exact issue keys when you want deterministic examples' },
+               ].map((option) => (
+                 <button
+                   key={option.id}
+                   type="button"
+                   disabled={!canManageGoldExamples}
+                   onClick={() => {
+                     setGoldMode(option.id as 'auto' | 'label' | 'manual');
+                     if (option.id === 'auto') {
+                       setGoldLabelDraft('');
+                       setSelectedGoldKeys([]);
+                     }
+                     if (option.id === 'label') {
+                       setSelectedGoldKeys([]);
+                     }
+                     if (option.id === 'manual') {
+                       setGoldLabelDraft('');
+                     }
+                   }}
+                   className={`rounded-2xl border px-4 py-4 text-left transition ${goldMode === option.id ? 'border-[var(--rf-brand)] bg-white shadow-sm' : 'border-[var(--rf-border)] bg-white/80 hover:border-[var(--rf-border-strong)]'} disabled:opacity-50`}
+                 >
+                   <div className="flex items-center justify-between gap-3">
+                     <div className="text-[14px] font-bold text-[var(--rf-text)]">{option.title}</div>
+                     <span className={`h-3 w-3 rounded-full ${goldMode === option.id ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-border-strong)]'}`} />
+                   </div>
+                   <p className="mt-2 text-[13px] font-medium leading-relaxed text-[var(--rf-text-tertiary)]">{option.helper}</p>
+                 </button>
+               ))}
+             </div>
+
+             {goldMode === 'auto' && (
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 space-y-3">
+                 <div className="flex items-center justify-between gap-3">
+                   <div>
+                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Automatic mode</div>
+                     <div className="mt-1 text-sm font-medium text-[var(--rf-text-secondary)]">
+                       The generator will use the best-ranked backlog stories automatically.
+                     </div>
+                   </div>
+                   <button
+                     type="button"
+                     disabled={!canManageGoldExamples || isSavingGoldConfig}
+                     onClick={() => {
+                       setGoldLabelDraft('');
+                       setSelectedGoldKeys([]);
+                       void persistGoldConfig({ notice: 'Gold examples set to automatic mode.' }).catch((error) => alert(error.message));
+                     }}
+                     className="rounded-xl bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50"
+                   >
+                     Use automatic mode
+                   </button>
+                 </div>
+                 <div className="space-y-2">
+                   {goldStoryPool.length > 0 ? goldStoryPool.slice(0, 6).map((entry: any) => (
+                     <div key={entry.key} className="flex items-center gap-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
+                       <span className="min-w-[36px] rounded px-1.5 py-0.5 text-center text-[11px] font-black text-[var(--rf-brand)] bg-[var(--rf-brand-muted)]">{entry.score}</span>
+                       <span className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</span>
+                       <span className="flex-1 truncate text-xs font-medium text-[var(--rf-text-secondary)]">{entry.summary}</span>
+                     </div>
+                   )) : (
+                     <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-5 text-center text-sm font-medium text-[var(--rf-text-tertiary)]">
+                       Rebuild the backlog cache to populate automatic candidates.
+                     </div>
+                   )}
+                 </div>
+               </div>
+             )}
+
+             {goldMode === 'label' && (
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 space-y-3">
+                 <div>
+                   <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Label-driven selection</div>
+                   <div className="mt-1 text-sm font-medium text-[var(--rf-text-secondary)]">Use a single Jira label when your examples are already curated inside the backlog.</div>
+                 </div>
+                 <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                   <input
+                     type="text"
+                     value={goldLabelDraft}
+                     onChange={(event) => setGoldLabelDraft(event.target.value)}
+                     placeholder="e.g. gold-example"
+                     disabled={!canManageGoldExamples}
+                     className="flex-1 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                   />
+                   <button
+                     type="button"
+                     disabled={!canManageGoldExamples || isSavingGoldConfig || !hasUnsavedGoldChanges}
+                     onClick={() => {
+                        setSelectedGoldKeys([]);
+                        void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
+                      }}
+                     className="rounded-xl bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50"
+                   >
+                     {isSavingGoldConfig ? 'Saving...' : 'Save label'}
+                   </button>
+                 </div>
+               </div>
+             )}
+
+             {goldMode === 'manual' && (
+               <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 space-y-3">
+                 <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                   <div>
+                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Manual story selection</div>
+                     <div className="mt-1 text-sm font-medium text-[var(--rf-text-secondary)]">Pick the exact stories you want the generator to learn from.</div>
+                   </div>
+                   <div className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">{selectedGoldKeys.length} selected</div>
+                 </div>
+
+                 <MultiSearchSelect
+                   selectedValues={selectedGoldKeys}
+                   onToggle={toggleGoldKey}
+                   onRemove={(key) => toggleGoldKey(key)}
+                   options={(goldCandidateResults.length > 0 ? goldCandidateResults : goldStoryPool.slice(0, 12)).map((entry: any) => ({
+                     value: entry.key,
+                     label: entry.key,
+                     description: entry.summary,
+                     score: entry.score,
+                   }))}
+                   onSearchChange={(query) => {
+                     setGoldCandidateQuery(query);
+                     debouncedSearchGoldCandidates(query);
+                   }}
+                   searchValue={goldCandidateQuery}
+                   isSearching={isSearchingGoldCandidates}
+                   placeholder="Search by key or summary..."
+                   searchPlaceholder="Type to search ranked pool..."
+                   emptyStateLabel={goldStoryPool.length === 0 ? 'Rebuild the backlog cache to populate candidates.' : 'No matches found.'}
+                 />
+
+                 {selectedGoldKeys.length > 0 && (
+                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Selected stories</div>
+                     <div className="mt-2 flex flex-wrap gap-2">
+                       {selectedGoldKeys.map((key) => (
+                         <span key={key} className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)] border border-[var(--rf-border)]">{key}</span>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+
+                 <div className="flex flex-wrap items-center gap-2">
+                   <button
+                     type="button"
+                     onClick={() => {
+                       setGoldLabelDraft('');
+                       void persistGoldConfig({ notice: 'Gold examples saved.' }).catch((error) => alert(error.message));
+                     }}
+                     disabled={!canManageGoldExamples || isSavingGoldConfig || !hasUnsavedGoldChanges}
+                     className="rounded-xl bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50"
+                   >
+                     {isSavingGoldConfig ? 'Saving...' : 'Save selected stories'}
+                   </button>
+                   {selectedGoldKeys.length > 0 && (
+                     <button
+                       type="button"
+                       onClick={() => setSelectedGoldKeys([])}
+                       className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)]"
+                     >
+                       Clear all
+                     </button>
+                   )}
+                 </div>
+               </div>
+             )}
+           </div>
+         </div>
+         )}
+
+         {activeStep === 'guidance' && (
          <div className="space-y-3">
            <button
              type="button"
-             onClick={() => { setActiveStep('guidance'); }}
+             onClick={() => { onActiveStepChange?.('guidance'); }}
              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
            >
              <div className="flex items-center gap-3">
@@ -3049,7 +3463,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                  <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Rules or context specific to this project.</p>
                </div>
              </div>
-             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${(showAllSections || activeStep === 'guidance') ? 'rotate-90' : ''}`} />
+             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${activeStep === 'guidance' ? 'rotate-90' : ''}`} />
            </button>
 
            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
@@ -3274,11 +3688,11 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
          )}
 
          {/* Mapping section */}
-         {(showAllSections || activeStep === 'mapping') && (
+         {activeStep === 'mapping' && (
          <div className="space-y-3">
             <button
               type="button"
-              onClick={() => setActiveStep('mapping')}
+              onClick={() => onActiveStepChange?.('mapping')}
               className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
             >
               <div className="flex items-center gap-3">
@@ -3291,7 +3705,7 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Map where Acceptance Criteria go.</p>
                 </div>
               </div>
-              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${(showAllSections || activeStep === 'mapping') ? 'rotate-90' : ''}`} />
+              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${activeStep === 'mapping' ? 'rotate-90' : ''}`} />
             </button>
             <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
                <div className="rf-card p-4 ">
@@ -3299,50 +3713,195 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                    <div>
                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Mapping</div>
                      <p className="mt-1 text-xs font-medium text-[var(--rf-text-tertiary)]">
-                       Input and output mappings stay separate so admins can point generated content into the right fields without switching modes.
+                       Start with one simple question: where should Acceptance Criteria be written?
                      </p>
                    </div>
                  </div>
-                 
-                 <div className="flex flex-wrap items-center gap-3 mt-4">
-                    <span className="text-[13px] font-bold text-[var(--rf-text)] pr-2">Issue Type Mapping:</span>
-                    <div className="relative">
-                      <select 
-                        value={activeIssueType}
-                        onChange={e => setActiveIssueType(e.target.value)}
-                        className="appearance-none bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg text-[13px] font-semibold pl-3 pr-8 py-1.5 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none"
-                      >
-                        <option value="*">General (All Types)</option>
-                        {issueTypes.map((it: any) => (
-                          <option key={it.id} value={it.id}>{it.name}</option>
-                        ))}
-                      </select>
-                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--rf-text-tertiary)] pointer-events-none" />
+
+                 <div className="mt-4 space-y-4">
+                   <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-[13px] font-bold text-[var(--rf-text)] pr-2">Issue Type:</span>
+                      <div className="relative">
+                        <select
+                          value={activeIssueType}
+                          onChange={e => setActiveIssueType(e.target.value)}
+                          className="appearance-none bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg text-[13px] font-semibold pl-3 pr-8 py-1.5 focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none"
+                        >
+                          <option value="*">General (All Types)</option>
+                          {issueTypes.map((it: any) => (
+                            <option key={it.id} value={it.id}>{it.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--rf-text-tertiary)] pointer-events-none" />
+                      </div>
+                      {isLoadingIssueTypes && <span className="text-xs text-[var(--rf-text-tertiary)] ml-2">Loading types...</span>}
                     </div>
-                    {isLoadingIssueTypes && <span className="text-xs text-[var(--rf-text-tertiary)] ml-2">Loading types...</span>}
+
+                    <div className="rounded-2xl border border-[var(--rf-border)] bg-white p-4 space-y-4">
+                      <div>
+                        <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Primary AR destination</div>
+                        <div className="mt-1 text-sm font-medium text-[var(--rf-text-secondary)]">
+                          Choose the Jira field that should receive the generated acceptance requirements.
+                        </div>
+                      </div>
+                      <FieldSelector
+                        value={currentMapping.outputMappings.arFieldIds[0] || currentMapping.consolidatedFieldId || 'description'}
+                        onChange={(nextFieldId: string) => {
+                          const nextOutput = { ...currentMapping.outputMappings, arFieldIds: [nextFieldId] };
+                          updateMapping({
+                            consolidatedFieldId: nextFieldId,
+                            iterativeFieldIds: [nextFieldId],
+                            outputMappings: nextOutput,
+                          });
+                        }}
+                        customFields={projectFields}
+                      />
+
+                      <label className="flex items-start gap-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={
+                            currentMapping.inputMappings.descriptionFieldId === currentMapping.outputMappings.descriptionFieldId
+                            && JSON.stringify(currentMapping.inputMappings.arFieldIds) === JSON.stringify(currentMapping.outputMappings.arFieldIds)
+                          }
+                          onChange={(event) => {
+                            if (!event.target.checked) return;
+                            updateMapping({
+                              inputMappings: {
+                                ...currentMapping.inputMappings,
+                                descriptionFieldId: currentMapping.outputMappings.descriptionFieldId,
+                                arFieldIds: [...currentMapping.outputMappings.arFieldIds],
+                              },
+                            });
+                          }}
+                          className="mt-0.5 rounded border-[var(--rf-border)]"
+                        />
+                        <div>
+                          <div className="text-sm font-semibold text-[var(--rf-text)]">Use the same field when reading existing Jira content</div>
+                          <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-tertiary)]">
+                            Keep read and write behavior aligned unless this project has a special case.
+                          </div>
+                        </div>
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvancedMapping((current) => !current)}
+                        className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)]"
+                      >
+                        {showAdvancedMapping ? 'Hide advanced mapping' : 'Edit advanced mapping'}
+                      </button>
+                    </div>
+
+                    {showAdvancedMapping && (
+                      <div className="grid grid-cols-1 gap-4">
+                        <FieldMappingEditor
+                          title="Output mapping"
+                          description="Advanced control for where generated content is written."
+                          mapping={currentMapping.outputMappings}
+                          onChange={(next: ProjectFieldMapping) => updateMapping({ outputMappings: next })}
+                          customFields={projectFields}
+                        />
+                        <FieldMappingEditor
+                          title="Input mapping"
+                          description="Advanced control for which fields are read when grounding existing issue content."
+                          mapping={currentMapping.inputMappings}
+                          onChange={(next: ProjectFieldMapping) => updateMapping({ inputMappings: next })}
+                          customFields={projectFields}
+                        />
+                      </div>
+                    )}
                   </div>
-
-                 <div className="mt-4 grid grid-cols-1 gap-4">
-                   <FieldMappingEditor
-
-                     title="Input mapping"
-                     description="Fields used when reading or grounding existing Jira content."
-                     mapping={currentMapping.inputMappings}
-                     onChange={(next: ProjectFieldMapping) => updateMapping({ inputMappings: next })}
-                     customFields={projectFields}
-                   />
-                   <FieldMappingEditor
-                     title="Output mapping"
-                     description="Fields used when writing generated content back to Jira."
-                     mapping={currentMapping.outputMappings}
-                     onChange={(next: ProjectFieldMapping) => updateMapping({ outputMappings: next })}
-                     customFields={projectFields}
-                   />
-                 </div>
                </div>
             </div>
          </div>
          )}
+
+         {activeStep === 'review' && (
+         <div className="space-y-3">
+           <div className="rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm">
+             <div className="flex items-center gap-3">
+               <div className="w-8 h-8 rounded-lg bg-[var(--rf-success-subtle)] flex items-center justify-center border border-emerald-100"><Check className="w-4 h-4 text-[var(--rf-success)]" /></div>
+               <div>
+                 <h5 className="text-sm font-bold text-[var(--rf-text)]">Review And Finish</h5>
+                 <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Confirm the setup shape, then save the project.</p>
+               </div>
+             </div>
+           </div>
+           <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-5 space-y-4">
+             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+               {[
+                 { label: 'Backlog scope', value: effectiveBacklogStatuses.length ? `${effectiveBacklogStatuses.length} statuses selected` : 'No statuses selected yet' },
+                 { label: 'Work instructions', value: wiDocs.length ? `${wiDocs.length} linked document${wiDocs.length === 1 ? '' : 's'}` : 'No linked docs yet' },
+                 { label: 'Gold examples', value: goldMode === 'manual' ? `${selectedGoldKeys.length} selected stories` : goldMode === 'label' ? (goldLabelDraft.trim() || 'Label not set') : 'Automatic ranked pool' },
+                 { label: 'Guidance', value: currentContext.context?.trim() ? 'Project context added' : 'No written context yet' },
+                 { label: 'Role guidance', value: currentPersonaRoles.some((row) => row.role?.trim() || row.activities?.trim()) ? `${currentPersonaRoles.filter((row) => row.role?.trim() || row.activities?.trim()).length} role rows` : 'No role rows yet' },
+                 { label: 'Field mapping', value: currentMapping.outputMappings.arFieldIds.length > 0 ? currentMapping.outputMappings.arFieldIds.join(', ') : currentMapping.consolidatedFieldId || 'Not configured' },
+               ].map((item) => (
+                 <div key={item.label} className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-3">
+                   <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{item.label}</div>
+                   <div className="mt-2 text-sm font-semibold text-[var(--rf-text)]">{item.value}</div>
+                 </div>
+               ))}
+             </div>
+             <div className="flex flex-wrap items-center gap-2">
+               <button
+                 type="button"
+                 onClick={handleSave}
+                 disabled={isSavingProject || !canManageProjectSettings}
+                 className="rounded-xl bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50"
+               >
+                 {isSavingProject ? 'Saving...' : projectSetupComplete ? 'Save project updates' : 'Finish project setup'}
+               </button>
+               <button
+                 type="button"
+                 onClick={handleSaveAndRefresh}
+                 disabled={isSavingProject || isRefreshingBacklogCache || !canManageProjectSettings}
+                 className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)] disabled:opacity-50"
+               >
+                 {isRefreshingBacklogCache ? 'Rebuilding...' : 'Save and rebuild backlog'}
+               </button>
+             </div>
+           </div>
+         </div>
+         )}
+
+         <div className="flex flex-col gap-3 rounded-2xl border border-[var(--rf-border)] bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
+           <div className="text-sm font-medium text-[var(--rf-text-tertiary)]">
+             {mode === 'guided'
+               ? 'Move in order if you are setting this project up for the first time.'
+               : 'Jump between steps or return to the project overview when you are done.'}
+           </div>
+           <div className="flex flex-wrap items-center gap-2">
+             <button
+               type="button"
+               onClick={() => {
+                 const order: ProjectSetupStep[] = ['backlog', 'wi', 'gold', 'guidance', 'mapping', 'review'];
+                 const index = order.indexOf(activeStep);
+                 if (index <= 0) {
+                   onEnterOverview?.();
+                   return;
+                 }
+                 onActiveStepChange?.(order[index - 1]);
+               }}
+               className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-2 text-[12px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-white"
+             >
+               Previous
+             </button>
+             <button
+               type="button"
+               onClick={() => {
+                 const order: ProjectSetupStep[] = ['backlog', 'wi', 'gold', 'guidance', 'mapping', 'review'];
+                 const index = order.indexOf(activeStep);
+                 if (index >= order.length - 1) return;
+                 onActiveStepChange?.(order[index + 1]);
+               }}
+               className="rounded-xl bg-[var(--rf-text)] px-4 py-2 text-[12px] font-bold text-white transition hover:bg-black"
+             >
+               {activeStep === 'mapping' ? 'Review setup' : 'Next step'}
+             </button>
+           </div>
+         </div>
       </div>
     </div>
   );

@@ -1849,7 +1849,12 @@ resolver.define('discoverStatuses', async ({ payload }) => {
 // ─── Work Instructions ────────────────────────────────────────────────────────
 
 resolver.define('uploadWi', async ({ payload, context }) => {
-  await ensureAdmin(context);
+  const projectKey = String(payload?.projectKey ?? '').trim();
+  if (projectKey && projectKey !== '*') {
+    await ensureAdmin(context, projectKey);
+  } else {
+    await ensureAdmin(context);
+  }
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   
@@ -1872,7 +1877,7 @@ resolver.define('uploadWi', async ({ payload, context }) => {
     filename: payload.filename,
     buffer,
     revision: payload.revision,
-    targetProjects: payload.projectKey ? [payload.projectKey] : ['*'],
+    targetProjects: projectKey && projectKey !== '*' ? [projectKey] : ['*'],
   });
 
   return { success: true, ...result };
@@ -2015,7 +2020,12 @@ resolver.define('getProjectActivitySummary', async ({ payload, context }) => {
 
 
 resolver.define('removeWiDoc', async ({ payload, context }) => {
-  await ensureAdmin(context);
+  const projectKey = String(payload?.projectKey ?? '').trim();
+  if (projectKey && projectKey !== '*') {
+    await ensureAdmin(context, projectKey);
+  } else {
+    await ensureAdmin(context);
+  }
   await removeDoc(payload.docId);
   return { success: true };
 });

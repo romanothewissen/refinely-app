@@ -365,16 +365,19 @@ async function fileToBase64(file: File): Promise<string> {
 
 function LegacyApp({
   initialViewMode = 'generate',
+  initialSettingsSurface = 'workspace',
   initialSettingsTab = 'models',
   initialRequirement = '',
   onCloseSettings,
 }: {
   initialViewMode?: 'generate' | 'settings';
+  initialSettingsSurface?: 'workspace' | 'project';
   initialSettingsTab?: 'models' | 'jira' | 'domain' | 'billing';
   initialRequirement?: string;
   onCloseSettings?: () => void;
 }) {
   const [viewMode, setViewMode] = useState<'generate' | 'settings'>(initialViewMode);
+  const [settingsStartSurface, setSettingsStartSurface] = useState<'workspace' | 'project'>(initialSettingsSurface);
   const [settingsStartTab, setSettingsStartTab] = useState<'models' | 'jira' | 'domain' | 'billing'>(initialSettingsTab);
   const [settingsStartProjectKey, setSettingsStartProjectKey] = useState<string>('*');
   const [requirement, setRequirement] = useState('');
@@ -433,6 +436,7 @@ function LegacyApp({
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [hasProjectSettingsAccess, setHasProjectSettingsAccess] = useState(false);
   const [tier, setTier] = useState('standard');
   const [workspacePipelineAuditEnabled, setWorkspacePipelineAuditEnabled] = useState(false);
   const [recordPipelineAuditForRun, setRecordPipelineAuditForRun] = useState(false);
@@ -520,6 +524,7 @@ function LegacyApp({
     return normalizeProjectKeys(inferProjectKeyFromIssueKey(originIssueKey));
   }, [originIssueKey, preferredProjectKeys, projectKeys]);
   const effectiveProjectKey = effectiveProjectKeys[0] ?? '*';
+  const settingsProjectKey = settingsStartProjectKey !== '*' ? settingsStartProjectKey : effectiveProjectKey;
   const setSelectedProjectKeys = useCallback((
     nextKeys: string[],
     options?: { collapseWorkspace?: boolean; nextContextMode?: 'undecided' | 'project' | 'global' },
@@ -542,6 +547,26 @@ function LegacyApp({
       bindIssueSession && issueKeyOverride ? api.setIssueSession(issueKeyOverride, nextSessionId) : Promise.resolve(),
     ]);
   };
+
+  useEffect(() => {
+    let active = true;
+    const candidateProjectKey = settingsProjectKey;
+    if (!candidateProjectKey || candidateProjectKey === '*') {
+      setHasProjectSettingsAccess(false);
+      return;
+    }
+    api.checkIsAdmin({ projectKey: candidateProjectKey })
+      .then((res: any) => {
+        if (!active) return;
+        setHasProjectSettingsAccess(Boolean(res?.isProjectAdmin));
+      })
+      .catch(() => {
+        if (active) setHasProjectSettingsAccess(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [settingsProjectKey]);
 
   // Fetch Atlassian account ID once on mount; detect issue context if launched via issueAction
   useEffect(() => {
@@ -1665,15 +1690,17 @@ function LegacyApp({
   };
 
   // Open settings: always collapse sidebar to give full screen
-  const openSettings = () => {
+  const openSettings = (surface: 'workspace' | 'project' = (isAdmin ? 'workspace' : 'project')) => {
+    setSettingsStartSurface(surface);
     setViewMode('settings');
     if (sidebarOpen) closeSidebar();
   };
 
   const openProjectSettings = (tab: 'models' | 'jira' | 'domain' | 'billing', projectKeyForSettings: string) => {
+    setSettingsStartSurface('project');
     setSettingsStartTab(tab);
     setSettingsStartProjectKey(projectKeyForSettings);
-    openSettings();
+    openSettings('project');
   };
 
   return (
@@ -1738,7 +1765,7 @@ function LegacyApp({
               isWorking={isWorking || isGenerating}
               onToggleSidebar={closeSidebar}
               onOpenHistory={() => setHistoryModalOpen(true)}
-              isAdmin={isAdmin}
+              isAdmin={isAdmin || hasProjectSettingsAccess}
               tier={tier}
               usage={usage}
               limits={limits}
@@ -1786,7 +1813,7 @@ function LegacyApp({
       </AnimatePresence>
 
       {/* Main Right Pane / Settings */}
-      {viewMode === 'settings' && isAdmin ? (
+      {viewMode === 'settings' && (isAdmin || hasProjectSettingsAccess) ? (
         <SettingsView
           onClose={() => {
             if (onCloseSettings) {
@@ -1808,6 +1835,7 @@ function LegacyApp({
               })
               .catch(() => {});
           }}
+          initialSurface={settingsStartSurface}
           initialTab={settingsStartTab}
           initialProjectKey={settingsStartProjectKey}
         />
@@ -2020,6 +2048,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [openLegacyWorkflow, setOpenLegacyWorkflow] = useState(false);
   const [legacyLaunchMode, setLegacyLaunchMode] = useState<'generate' | 'settings'>('generate');
+  const [legacySettingsSurface, setLegacySettingsSurface] = useState<'workspace' | 'project'>('workspace');
   const [legacySettingsTab, setLegacySettingsTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
   const [legacyPrefillRequirement, setLegacyPrefillRequirement] = useState('');
   const [quickRefineViewState, setQuickRefineViewState] = useState<QuickRefineViewState | null>(null);
@@ -2055,12 +2084,14 @@ export default function App() {
         onOpenFullWorkflow={(prefillInstruction) => {
           setLegacyPrefillRequirement(String(prefillInstruction ?? '').trim());
           setLegacyLaunchMode('generate');
+          setLegacySettingsSurface('workspace');
           setLegacySettingsTab('models');
           setReturnToQuickRefine(false);
           setOpenLegacyWorkflow(true);
         }}
         onOpenSettings={() => {
           setLegacyLaunchMode('settings');
+          setLegacySettingsSurface('project');
           setLegacySettingsTab('jira');
           setReturnToQuickRefine(true);
           setOpenLegacyWorkflow(true);
@@ -2072,6 +2103,7 @@ export default function App() {
   return (
     <LegacyApp
       initialViewMode={legacyLaunchMode}
+      initialSettingsSurface={legacySettingsSurface}
       initialSettingsTab={legacySettingsTab}
       initialRequirement={legacyPrefillRequirement}
       onCloseSettings={returnToQuickRefine ? () => {
