@@ -963,6 +963,7 @@ async function callOllama(opts: {
   systemPrompt: string;
   userMessage: string;
   maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
 }): Promise<LlmResponse> {
@@ -986,6 +987,12 @@ async function callOllama(opts: {
     stream: false,
     response_format: { type: 'json_object' },
   };
+  if (opts.reasoningEffort) {
+    // Ollama's OpenAI-compatible chat/completions endpoint accepts reasoning_effort
+    // for thinking-capable models and ignores it for others, which makes this a
+    // safe best-effort toggle across the whole provider.
+    body.reasoning_effort = opts.reasoningEffort;
+  }
 
   const { res, rawBody } = await fetchLlmWithRetry(url, {
     method: 'POST',
