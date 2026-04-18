@@ -26,6 +26,7 @@ import {
   buildStoryAssistantArSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
   buildStoryAssistantDecompositionSystemPrompt,
+  buildStoryAssistantDiscoveryAssessmentSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
 } from './prompts';
 import { validateFeatures } from './quality-validator';
@@ -1565,11 +1566,6 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     heuristicAssessment.ambiguityLevel,
     heuristicAssessment.recommendedQuestionRange,
   );
-  const discoveryAssessment: DiscoveryAssessment = {
-    ...heuristicAssessment,
-    recommendedQuestionRange: { min: questionPlan.min, max: questionPlan.max },
-    rationale: `Discovery depth inferred from requirement complexity with ${pipelineProfile} profile bounds.`,
-  };
   const baseUserMessageStartedAt = Date.now();
   const baseUserMessage = buildClarifyUserMessage({
     requirement: opts.requirement,
@@ -1579,6 +1575,38 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     similarStoriesText,
   });
   promptAssemblyMs += Date.now() - baseUserMessageStartedAt;
+
+  // LLM-led discovery assessment — calibrates depth and reasoning level from
+  // a semantic read of the requirement before clarify questions are generated.
+  let llmAssessment: DiscoveryAssessment | null = null;
+  try {
+    const assessmentResult = await callLlmJsonWithUsage<unknown>({
+      model: getTierModel(modelRoute.clarify ?? opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      systemPrompt: buildStoryAssistantDiscoveryAssessmentSystemPrompt({
+        domainContext: opts.config.domainContext,
+        domainRoles: opts.config.domainRoles,
+      }),
+      userMessage: baseUserMessage,
+      maxTokens: 1200,
+      // Bootstrap with heuristic level — the assessment itself benefits from
+      // reasoning but there is no prior signal to drive it yet.
+      reasoningEffort: capReasoningEffort(
+        mapReasoningDepthToEffort(heuristicAssessment.reasoningLevel) ?? 'low',
+        profileConfig.clarifyReasoning,
+      ),
+      ...providerOpts,
+    });
+    usageByStage.discoveryAssessment = assessmentResult.usage;
+    llmAssessment = parseDiscoveryAssessment(assessmentResult.data);
+  } catch {
+    // Non-fatal — fall back to heuristic if the LLM assessment call fails.
+  }
+  const mergedAssessment = mergeDiscoveryAssessments(llmAssessment, {
+    ...heuristicAssessment,
+    recommendedQuestionRange: { min: questionPlan.min, max: questionPlan.max },
+    rationale: `Discovery depth inferred from requirement complexity with ${pipelineProfile} profile bounds.`,
+  });
+  const discoveryAssessment = applyDiscoveryDepthFloor(mergedAssessment);
 
   const clarifyModel = getTierModel(modelRoute.clarify ?? opts.config.generatorConfig.clarifyModel, opts.config.tier);
   let clarifyResult = await callLlmJsonWithUsage<unknown>({
@@ -1590,7 +1618,10 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     }),
     userMessage: baseUserMessage,
     maxTokens: 4600,
-    reasoningEffort: profileConfig.clarifyReasoning,
+    reasoningEffort: capReasoningEffort(
+      mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
+      profileConfig.clarifyReasoning,
+    ),
     ...providerOpts,
   });
   usageByStage.clarify = clarifyResult.usage;
@@ -1609,7 +1640,10 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       }),
       userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Each question must be complete, requirement-specific, and include 3 concise grounded suggestions.`,
       maxTokens: 4600,
-      reasoningEffort: profileConfig.clarifyReasoning,
+      reasoningEffort: capReasoningEffort(
+      mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
+      profileConfig.clarifyReasoning,
+    ),
       ...providerOpts,
     });
     usageByStage.clarifyRetry = clarifyResult.usage;
@@ -1646,7 +1680,10 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
       }),
       userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Provide ${questionPlan.min}-${questionPlan.max} specific questions and cover categories in this order: Context & Trigger, Roles & Personas, Functional Flow, State & Lifecycle, Business Rules & Exceptions, Success & Measurement.${missingLabels ? ` Missing in prior attempt: ${missingLabels}.` : ''}`,
       maxTokens: 5200,
-      reasoningEffort: profileConfig.clarifyReasoning,
+      reasoningEffort: capReasoningEffort(
+      mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
+      profileConfig.clarifyReasoning,
+    ),
       ...providerOpts,
     });
     usageByStage.clarifyCoverageRetry = clarifyResult.usage;
@@ -1907,7 +1944,10 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       }),
       userMessage: decompositionUserMessage,
       maxTokens: Math.min(Math.max(opts.config.generatorConfig.maxTokens, 4096), profileConfig.generationOutputMaxTokens),
-      reasoningEffort: profileConfig.decompositionReasoning,
+      reasoningEffort: capReasoningEffort(
+      mapReasoningDepthToEffort(opts.discoveryProfile?.reasoningLevel ?? 'light') ?? 'low',
+      profileConfig.decompositionReasoning,
+    ),
       ...providerOpts,
     });
     stageUsage.decomposition = pass1Result.usage;

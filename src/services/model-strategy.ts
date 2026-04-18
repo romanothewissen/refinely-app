@@ -43,7 +43,7 @@ const STORY_ASSISTANT_PROFILE_CONFIGS: Record<PipelineProfile, PipelineProfileCo
   },
   balanced: {
     profile: 'balanced',
-    clarifyReasoning: 'low',
+    clarifyReasoning: 'medium',
     decompositionReasoning: 'low',
     arReasoning: 'medium',
     similarStoryMaxResults: 6,
