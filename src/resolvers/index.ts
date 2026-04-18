@@ -48,7 +48,7 @@ import { createFeatureIssue, createIssueLink, getIssueLinkTypes, searchUsers } f
 import { discoverAll, discoverStatuses, discoverIssueTypes } from '../core/jira-discovery';
 import { extractDocumentText } from '../core/document-parser';
 import { ingestPdf, listDocs, removeDoc } from '../core/wi-ingestion';
-import { getBacklogCacheInfo, diagnoseBacklogCache, getGoldStoryPool } from '../core/similar-stories';
+import { getBacklogCacheInfo, diagnoseBacklogCache, getGoldStoryPool, searchGoldCandidatesInBacklog } from '../core/similar-stories';
 import { inferProjectPersonaRolesFromBacklog } from '../core/persona-role-inference';
 import { buildAskSystemPrompt } from '../core/prompts';
 import { callLlm, discoverLlmModelCatalog } from '../core/llm';
@@ -2029,21 +2029,10 @@ resolver.define('getGoldStoryPool', async ({ payload, context }) => {
 resolver.define('searchBacklogForGoldCandidates', async ({ payload, context }) => {
   await ensureAdmin(context, payload?.projectKey);
   const projectKey = String(payload?.projectKey ?? '').trim();
-  const query = String(payload?.query ?? '').trim().toLowerCase();
+  const query = String(payload?.query ?? '').trim();
   if (!projectKey || projectKey === '*') return { success: false, results: [] };
   await ensureProjectBrowse(context, projectKey);
-  const pool = await getGoldStoryPool(projectKey);
-  const entries = pool?.entries ?? [];
-  const filtered = query
-    ? entries.filter((e) =>
-        e.key.toLowerCase().includes(query)
-        || e.summary.toLowerCase().includes(query))
-    : entries;
-  const results = filtered.slice(0, 50).map((e) => ({
-    key: e.key,
-    summary: e.summary,
-    score: e.score,
-  }));
+  const results = await searchGoldCandidatesInBacklog(projectKey, query);
   return { success: true, results };
 });
 

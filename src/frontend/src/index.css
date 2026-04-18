@@ -188,25 +188,20 @@
   /* ── Sidebar shell ───────────────────────────────────────────── */
   .rf-sidebar-shell {
     position: relative;
-    background: var(--rf-glass-sidebar);
-    backdrop-filter: blur(32px) saturate(140%);
-    -webkit-backdrop-filter: blur(32px) saturate(140%);
+    background: rgba(248, 249, 247, 0.96);
     border-right: 1px solid var(--rf-border);
-    /* Subtle inner highlight on right edge */
-    box-shadow: inset -1px 0 0 rgba(255,255,255,0.55);
+    box-shadow: inset -1px 0 0 rgba(255,255,255,0.40);
   }
 
   /* ── Sidebar card ────────────────────────────────────────────── */
   .rf-sidebar-card {
     position: relative;
-    background: var(--rf-glass-card);
+    background: rgba(255, 255, 255, 0.96);
     border: 1px solid var(--rf-border);
     border-radius: var(--rf-radius-2xl);
     box-shadow:
-      0 4px 16px -6px rgba(43, 89, 74, 0.08),
-      0 1px 4px -1px rgba(43, 89, 74, 0.05);
-    backdrop-filter: blur(20px) saturate(120%);
-    -webkit-backdrop-filter: blur(20px) saturate(120%);
+      0 4px 14px -10px rgba(43, 89, 74, 0.10),
+      0 1px 3px -2px rgba(43, 89, 74, 0.06);
     transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
@@ -215,16 +210,16 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(180deg, rgba(255,255,255,0.44) 0%, transparent 38%);
+    background: linear-gradient(180deg, rgba(255,255,255,0.34) 0%, transparent 38%);
     pointer-events: none;
   }
 
   .rf-sidebar-card:hover {
     border-color: var(--rf-border-strong);
-    background: var(--rf-glass-hover);
+    background: rgba(255, 255, 255, 0.98);
     box-shadow:
-      0 6px 22px -6px rgba(43, 89, 74, 0.11),
-      0 2px 6px -2px rgba(43, 89, 74, 0.06);
+      0 6px 18px -12px rgba(43, 89, 74, 0.11),
+      0 2px 6px -4px rgba(43, 89, 74, 0.06);
   }
 
   /* ── Pane header ─────────────────────────────────────────────── */

@@ -388,7 +388,8 @@ export async function refreshBacklogCache(projectKey: string, config: TenantConf
   }
 
   // Build and persist gold story pool (best-scored exemplars for AR generation)
-  const pool = selectGoldStories(projectKey, docs, builtAt);
+  const configuredGold = findGoldConfigForProject(projectKey, config.goldExampleConfigs);
+  const pool = selectGoldStories(projectKey, docs, builtAt, configuredGold?.label);
   await objectWrite(KEYS.goldStoryPool(projectKey), pool);
 
   return {
@@ -403,7 +404,7 @@ export async function refreshBacklogCache(projectKey: string, config: TenantConf
   };
 }
 
-function selectGoldStories(projectKey: string, docs: BacklogDoc[], builtAt: string): GoldStoryPool {
+function rankGoldDocs(docs: BacklogDoc[]): GoldStoryEntry[] {
   const MAX_GOLD = 15;
   const scored = docs
     .map((doc) => {
@@ -422,6 +423,21 @@ function selectGoldStories(projectKey: string, docs: BacklogDoc[], builtAt: stri
     arSample: r.doc.acceptanceCriteria.slice(0, 1200),
     labels: r.doc.labels,
   }));
+
+  return entries;
+}
+
+function selectGoldStories(
+  projectKey: string,
+  docs: BacklogDoc[],
+  builtAt: string,
+  preferredLabel?: string,
+): GoldStoryPool {
+  const normalizedLabel = String(preferredLabel ?? '').trim().toLowerCase();
+  const labelledDocs = normalizedLabel
+    ? docs.filter((doc) => (doc.labels ?? []).some((label) => label.toLowerCase() === normalizedLabel))
+    : [];
+  const entries = rankGoldDocs(labelledDocs.length ? labelledDocs : docs);
 
   return { projectKey, builtAt, entries };
 }
@@ -468,6 +484,61 @@ export function resolveGoldKeys(
   }
 
   return null;
+}
+
+async function loadAllBacklogDocs(projectKey: string): Promise<BacklogDoc[]> {
+  const index = await ensureBacklogIndex(projectKey);
+  if (index.manifest?.shards?.length) {
+    return loadDocsForShards(projectKey, index.manifest.shards.map((shard) => shard.shardId));
+  }
+  return index.legacy?.docs ?? [];
+}
+
+export async function resolveGoldKeysFromBacklog(
+  projectKey: string,
+  goldConfigs: ProjectGoldExampleConfig[] | undefined,
+): Promise<string[] | null> {
+  const config = findGoldConfigForProject(projectKey, goldConfigs);
+  if (!config) return null;
+
+  const manualKeys = (config.issueKeys ?? []).map((k) => String(k).trim()).filter(Boolean);
+  if (manualKeys.length) return manualKeys;
+
+  const labelFilter = String(config.label ?? '').trim().toLowerCase();
+  if (!labelFilter) return null;
+
+  const docs = await loadAllBacklogDocs(projectKey);
+  const matchedDocs = docs.filter((doc) => (doc.labels ?? []).some((label) => label.toLowerCase() === labelFilter));
+  if (!matchedDocs.length) return null;
+
+  const ranked = rankGoldDocs(matchedDocs);
+  if (ranked.length) return ranked.map((entry) => entry.key);
+
+  return matchedDocs
+    .slice()
+    .sort((left, right) => String(right.updated ?? '').localeCompare(String(left.updated ?? '')))
+    .slice(0, 15)
+    .map((doc) => doc.key);
+}
+
+export async function searchGoldCandidatesInBacklog(
+  projectKey: string,
+  query?: string,
+): Promise<Array<{ key: string; summary: string; score: number }>> {
+  const normalizedQuery = String(query ?? '').trim().toLowerCase();
+  const docs = await loadAllBacklogDocs(projectKey);
+  const filtered = normalizedQuery
+    ? docs.filter((doc) => doc.key.toLowerCase().includes(normalizedQuery) || doc.summary.toLowerCase().includes(normalizedQuery))
+    : docs;
+
+  return filtered
+    .map((doc) => ({
+      key: doc.key,
+      summary: doc.summary,
+      score: scoreExemplarQuality(String(doc.acceptanceCriteria ?? '')).score,
+    }))
+    .sort((left, right) => right.score - left.score || left.key.localeCompare(right.key))
+    .slice(0, 50);
 }
 
 export function formatGoldStoryExemplars(pool: GoldStoryPool, confirmedKeys?: string[]): string {

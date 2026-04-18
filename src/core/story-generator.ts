@@ -76,6 +76,7 @@ import {
   getGoldStoryPool,
   formatGoldStoryExemplars,
   resolveGoldKeys,
+  resolveGoldKeysFromBacklog,
   findGoldConfigForProject,
 } from './similar-stories';
 import { objectRead, KEYS } from '../services/cache';
@@ -3042,7 +3043,8 @@ export async function generateFeatures(opts: {
 
     if (goldPool?.entries?.length) {
       const configuredGold = findGoldConfigForProject(activeProjectKey, config.goldExampleConfigs);
-      const resolvedKeys = resolveGoldKeys(activeProjectKey, config.goldExampleConfigs, goldPool);
+      const resolvedKeys = await resolveGoldKeysFromBacklog(activeProjectKey, config.goldExampleConfigs)
+        ?? resolveGoldKeys(activeProjectKey, config.goldExampleConfigs, goldPool);
       goldExampleIssueKeys = (resolvedKeys?.length ? resolvedKeys : goldPool.entries.map((entry) => entry.key)).slice(0, 8);
       goldExampleLabel = configuredGold?.label?.trim() || undefined;
       const goldText = formatGoldStoryExemplars(goldPool, resolvedKeys ?? undefined);

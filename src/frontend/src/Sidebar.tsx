@@ -82,32 +82,26 @@ function profileCssVars(profile: PipelineProfile): React.CSSProperties {
     fast: {
       '--sidebar-accent': 'rgb(234, 138, 46)',
       '--sidebar-accent-subtle': 'rgba(234, 138, 46, 0.08)',
-      '--sidebar-accent-alpha': 'rgba(234, 138, 46, 0.06)',
-      '--sidebar-accent-border': 'rgba(234, 138, 46, 0.25)',
-      '--sidebar-cta-from': '#c47820',
-      '--sidebar-cta-mid': '#ea8a2e',
-      '--sidebar-cta-to': '#f0a04b',
-      '--sidebar-cta-shadow': 'rgba(234, 138, 46, 0.45)',
+      '--sidebar-accent-alpha': 'rgba(234, 138, 46, 0.05)',
+      '--sidebar-accent-border': 'rgba(234, 138, 46, 0.15)',
+      '--sidebar-cta': '#d48226',
+      '--sidebar-cta-shadow': 'rgba(234, 138, 46, 0.18)',
     },
     balanced: {
       '--sidebar-accent': 'rgb(43, 89, 74)',
       '--sidebar-accent-subtle': 'rgba(43, 89, 74, 0.08)',
       '--sidebar-accent-alpha': 'rgba(43, 89, 74, 0.04)',
-      '--sidebar-accent-border': 'rgba(43, 89, 74, 0.25)',
-      '--sidebar-cta-from': '#1e4035',
-      '--sidebar-cta-mid': '#2b594a',
-      '--sidebar-cta-to': '#3a7062',
-      '--sidebar-cta-shadow': 'rgba(43, 89, 74, 0.55)',
+      '--sidebar-accent-border': 'rgba(43, 89, 74, 0.15)',
+      '--sidebar-cta': '#2b594a',
+      '--sidebar-cta-shadow': 'rgba(43, 89, 74, 0.18)',
     },
     quality: {
       '--sidebar-accent': 'rgb(82, 58, 118)',
       '--sidebar-accent-subtle': 'rgba(82, 58, 118, 0.10)',
-      '--sidebar-accent-alpha': 'rgba(82, 58, 118, 0.07)',
-      '--sidebar-accent-border': 'rgba(82, 58, 118, 0.30)',
-      '--sidebar-cta-from': '#3d2868',
-      '--sidebar-cta-mid': '#523a76',
-      '--sidebar-cta-to': '#6b4d8f',
-      '--sidebar-cta-shadow': 'rgba(82, 58, 118, 0.60)',
+      '--sidebar-accent-alpha': 'rgba(82, 58, 118, 0.05)',
+      '--sidebar-accent-border': 'rgba(82, 58, 118, 0.16)',
+      '--sidebar-cta': '#523a76',
+      '--sidebar-cta-shadow': 'rgba(82, 58, 118, 0.18)',
     },
   };
   return themes[profile] as React.CSSProperties;
@@ -443,7 +437,7 @@ export function Sidebar({
       </motion.header>
 
       {/* ── Step indicator bar ── */}
-      <div className="shrink-0 px-4 pt-3 pb-2.5 border-b border-[var(--rf-border-subtle)] bg-white/40 backdrop-blur-sm">
+      <div className="shrink-0 px-4 pt-3 pb-2.5 border-b border-[var(--rf-border-subtle)] bg-white/72">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--sidebar-accent)]">
             {currentStepDef.label}
@@ -452,13 +446,13 @@ export function Sidebar({
             {currentStep + 1} / {steps.length}
           </span>
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
           {steps.map((step, idx) => (
             <React.Fragment key={step.id}>
               {idx > 0 && (
                 <div
                   className="flex-1 h-px transition-colors duration-300"
-                  style={{ backgroundColor: idx <= currentStep ? 'var(--sidebar-accent)' : 'var(--rf-border)' }}
+                  style={{ backgroundColor: idx <= currentStep ? 'var(--sidebar-accent-border)' : 'var(--rf-border)' }}
                 />
               )}
               <button
@@ -466,13 +460,9 @@ export function Sidebar({
                 onClick={() => goToStep(idx)}
                 disabled={idx > maxStep}
                 title={step.label}
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black transition-all duration-200 ${
-                  idx === currentStep
-                    ? 'scale-110 text-white shadow-sm'
-                    : idx < currentStep
-                      ? 'hover:scale-105'
-                      : ''
-                } ${idx > maxStep ? 'cursor-default' : idx < currentStep ? 'cursor-pointer' : ''}`}
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-black transition-all duration-200 ${
+                  idx > maxStep ? 'cursor-default' : idx < currentStep ? 'cursor-pointer' : ''
+                }`}
                 style={
                   idx === currentStep
                     ? { backgroundColor: 'var(--sidebar-accent)', color: 'white' }
@@ -490,7 +480,7 @@ export function Sidebar({
                         }
                 }
               >
-                {idx < currentStep ? <Check className="h-3 w-3" /> : step.number}
+                {idx < currentStep ? <Check className="h-2.5 w-2.5" /> : <span className="block h-1.5 w-1.5 rounded-full bg-current" />}
               </button>
             </React.Fragment>
           ))}
@@ -508,8 +498,7 @@ export function Sidebar({
             animate="center"
             exit="exit"
             transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute inset-0 overflow-y-auto custom-scrollbar px-4 py-4 flex flex-col gap-2"
-            style={{ background: `linear-gradient(to bottom, var(--sidebar-accent-alpha), transparent 220px)` }}
+            className="absolute inset-0 overflow-y-auto custom-scrollbar px-4 py-4 flex flex-col gap-2 bg-transparent"
           >
 
             {/* ── STEP: Scope ── */}
@@ -518,7 +507,7 @@ export function Sidebar({
                 className="rf-sidebar-card relative flex flex-col flex-1"
                 style={{
                   boxShadow: contextMode === 'undecided'
-                    ? `0 0 0 2px var(--sidebar-accent-border), 0 4px 16px -6px var(--sidebar-cta-shadow), 0 1px 4px -1px var(--sidebar-cta-shadow)`
+                    ? '0 0 0 1px var(--sidebar-accent-border)'
                     : undefined,
                 }}
                 variants={fadeUp}
@@ -526,21 +515,13 @@ export function Sidebar({
                 animate="visible"
                 custom={0}
               >
-                {contextMode === 'undecided' && (
-                  <motion.div
-                    className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full bg-[var(--sidebar-accent)]"
-                    animate={{ opacity: [0.4, 1, 0.4] }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                  />
-                )}
-
                 <div className="px-3 pt-3 pb-3 flex flex-col flex-1 min-h-0">
                   <motion.button
                     type="button"
                     onClick={() => setWorkspaceExpanded((prev) => !prev)}
                     aria-expanded={workspaceExpanded}
                     aria-controls="workspace-selector"
-                    className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white/72 px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--sidebar-accent-border)] hover:bg-white/92 hover:shadow-md"
+                    className="group w-full rounded-2xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-left shadow-sm transition-all hover:border-[var(--sidebar-accent-border)] hover:bg-white hover:shadow-sm"
                     whileTap={{ scale: 0.99 }}
                     title={workspaceExpanded ? 'Collapse project picker' : 'Expand project picker'}
                   >
@@ -632,11 +613,11 @@ export function Sidebar({
                               value={projectFilter}
                               onChange={(e) => setProjectFilter(e.target.value)}
                               placeholder="Search projects…"
-                              className="w-full rounded-xl border border-[var(--rf-border)] bg-white/65 px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--sidebar-accent)] focus:ring-2 focus:ring-[var(--sidebar-accent-subtle)] backdrop-blur-sm"
+                            className="w-full rounded-xl border border-[var(--rf-border)] bg-white px-3.5 py-2 text-[13px] font-medium text-[var(--rf-text)] outline-none transition-all placeholder:text-[var(--rf-text-tertiary)] focus:border-[var(--sidebar-accent)] focus:ring-2 focus:ring-[var(--sidebar-accent-subtle)]"
                             />
                           </div>
 
-                          <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white/55 p-1 custom-scrollbar backdrop-blur-sm">
+                          <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-[var(--rf-border)] bg-white p-1 custom-scrollbar">
                             {filteredProjects.length ? filteredProjects.map((project) => {
                               const selected = projectKeys.includes(project.key);
                               const disabled = !selected && projectKeys.length >= 2;
@@ -701,17 +682,14 @@ export function Sidebar({
                       disabled={isWorking}
                       className={`w-full flex items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition-all disabled:opacity-50 ${
                         selected
-                          ? 'shadow-sm'
-                          : 'bg-white/60 border-[var(--rf-border)] hover:bg-white/80'
+                          ? 'shadow-sm bg-white'
+                          : 'bg-white border-[var(--rf-border)] hover:bg-white'
                       }`}
                       style={selected ? {
-                        borderColor: profileRgba(option.id, 0.30),
-                        borderLeftWidth: '3px',
-                        borderLeftColor: profileAccentColor(option.id),
-                        background: `linear-gradient(135deg, ${profileRgba(option.id, 0.08)}, ${profileRgba(option.id, 0.03)})`,
+                        borderColor: profileRgba(option.id, 0.22),
+                        borderWidth: '2px',
                       } : {
-                        borderLeftWidth: '3px',
-                        borderLeftColor: profileRgba(option.id, 0.35),
+                        borderWidth: '1px',
                       }}
                       whileTap={{ scale: 0.98 }}
                       variants={fadeUp}
@@ -740,22 +718,8 @@ export function Sidebar({
                         <div className="text-[12px] text-[var(--rf-text-tertiary)] leading-snug mt-0.5">
                           {option.desc}
                         </div>
-                        <div className="flex items-center gap-1 mt-1.5">
-                          {[1, 2, 3].map((level) => (
-                            <div
-                              key={level}
-                              className="h-1.5 rounded-full transition-all duration-200"
-                              style={{
-                                width: level <= depthLevel ? '14px' : '8px',
-                                backgroundColor: level <= depthLevel
-                                  ? profileRgba(option.id, selected ? 0.7 : 0.35)
-                                  : profileRgba(option.id, 0.1),
-                              }}
-                            />
-                          ))}
-                          <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
-                            {depthLevel === 1 ? 'Quick' : depthLevel === 2 ? 'Standard' : 'Deep'}
-                          </span>
+                        <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
+                          {depthLevel === 1 ? 'Quick' : depthLevel === 2 ? 'Standard' : 'Deep'}
                         </div>
                       </div>
                       <AnimatePresence>
@@ -806,7 +770,7 @@ export function Sidebar({
                     </span>
                   </div>
 
-                  <div className="relative flex w-full rounded-2xl border border-[var(--sidebar-accent-border)] bg-white/72 p-1 shadow-sm backdrop-blur-sm">
+                  <div className="relative flex w-full rounded-2xl border border-[var(--sidebar-accent-border)] bg-white p-1 shadow-sm">
                     {([
                       { id: 'auto' as const, label: 'Auto' },
                       { id: 'selected' as const, label: 'Pick up to 3' },
@@ -1016,7 +980,7 @@ export function Sidebar({
       </div>
 
       {/* ── Footer navigation ── */}
-      <div className="shrink-0 border-t border-[var(--rf-border-subtle)] px-4 pb-4 pt-3 bg-white/35 backdrop-blur-sm">
+      <div className="shrink-0 border-t border-[var(--rf-border-subtle)] px-4 pb-4 pt-3 bg-white/72">
         {isLastStep ? (
           <div className="space-y-2">
             {workspacePipelineAuditEnabled && setRecordPipelineAuditForRun && (
@@ -1036,14 +1000,14 @@ export function Sidebar({
               onClick={onStartBrainstorm}
               disabled={brainstormDisabled}
               title={isAtLimit ? 'Included monthly usage has been reached. Generation is still available.' : ''}
-              className="brainstorm-shimmer w-full text-white text-[13px] font-bold py-[11px] rounded-[18px] transition-all flex items-center justify-center gap-2 border border-white/10 disabled:cursor-not-allowed"
+              className="w-full text-white text-[13px] font-bold py-[11px] rounded-[18px] transition-all flex items-center justify-center gap-2 border border-transparent disabled:cursor-not-allowed"
               style={{
                 background: brainstormDisabled
                   ? 'var(--rf-border-strong)'
-                  : 'linear-gradient(135deg, var(--sidebar-cta-from), var(--sidebar-cta-mid), var(--sidebar-cta-to))',
+                  : 'var(--sidebar-cta)',
                 boxShadow: brainstormDisabled
                   ? 'none'
-                  : '0 10px 32px -12px var(--sidebar-cta-shadow)',
+                  : '0 8px 18px -12px var(--sidebar-cta-shadow)',
                 color: brainstormDisabled ? 'rgba(255,255,255,0.4)' : 'white',
               }}
               whileHover={!brainstormDisabled ? { scale: 1.01 } : {}}
@@ -1118,9 +1082,9 @@ export function Sidebar({
               style={{
                 background: continueDisabled
                   ? 'var(--rf-border-strong)'
-                  : 'linear-gradient(135deg, var(--sidebar-cta-from), var(--sidebar-cta-mid), var(--sidebar-cta-to))',
+                  : 'var(--sidebar-cta)',
                 color: continueDisabled ? 'rgba(255,255,255,0.4)' : 'white',
-                boxShadow: continueDisabled ? 'none' : '0 6px 20px -8px var(--sidebar-cta-shadow)',
+                boxShadow: continueDisabled ? 'none' : '0 8px 18px -12px var(--sidebar-cta-shadow)',
               }}
               whileTap={!continueDisabled ? { scale: 0.98 } : {}}
             >
