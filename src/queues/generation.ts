@@ -534,7 +534,7 @@ export async function handler(event: { body: GenerationEvent }) {
       };
       result.generationContext = generationContext;
 
-      await recordGeneration();
+      await recordGeneration(eventConfig);
       const persistenceStartedAt = Date.now();
       await saveConversationTurn(
         sessionId,

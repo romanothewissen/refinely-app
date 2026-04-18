@@ -3,6 +3,13 @@ import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, Fil
 import { motion, AnimatePresence } from 'framer-motion';
 import type { PipelineProfile } from './types';
 
+type UsageSnapshot = {
+  currentMonth: number;
+  credentialMode?: 'byok' | 'hosted_sampler';
+  quotaScope?: 'tenant';
+  resetCadence?: 'calendar_month';
+} | null;
+
 interface SidebarProps {
   viewMode: 'generate' | 'settings';
   setViewMode: (mode: 'generate' | 'settings') => void;
@@ -18,7 +25,7 @@ interface SidebarProps {
   onOpenHistory: () => void;
   isAdmin?: boolean;
   tier: string;
-  usage: { currentMonth: number } | null;
+  usage: UsageSnapshot;
   limits: { generationsPerMonth: number } | null;
   brandingLogoUrl?: string | null;
   reviewBeforeARs?: boolean;
@@ -190,6 +197,7 @@ export function Sidebar({
   const totalCachedStories = cacheBreakdown.reduce((sum, entry) => sum + entry.count, 0);
   const usageCurrent = usage?.currentMonth ?? 0;
   const usageLimit = limits?.generationsPerMonth ?? 0;
+  const isHostedSampler = usage?.credentialMode === 'hosted_sampler';
   const usagePercentage = !usage || !limits || hasUnlimitedUsage || usageLimit <= 0
     ? 0
     : Math.min(100, (usageCurrent / usageLimit) * 100);
@@ -202,12 +210,16 @@ export function Sidebar({
     ? 'Usage syncing'
     : hasUnlimitedUsage
       ? 'Unlimited usage'
-      : `${Math.max(0, usageLimit - usageCurrent)} left before guidance`;
+      : isHostedSampler
+        ? `${Math.max(0, usageLimit - usageCurrent)} hosted trial runs left this month`
+        : `${Math.max(0, usageLimit - usageCurrent)} left before guidance`;
   const usageCompactLabel = !usage || !limits
     ? 'Syncing'
     : hasUnlimitedUsage
       ? 'Unlimited'
-      : `${Math.max(0, usageLimit - usageCurrent)} left`;
+      : isHostedSampler
+        ? `${Math.max(0, usageLimit - usageCurrent)} trial left`
+        : `${Math.max(0, usageLimit - usageCurrent)} left`;
   const shouldShowHeaderUsage = Boolean(usage && limits && !hasUnlimitedUsage);
 
   React.useEffect(() => {

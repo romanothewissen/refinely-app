@@ -10,7 +10,7 @@ import Resolver from '@forge/resolver';
 import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
-import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getEffectiveTier } from '../services/billing';
+import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getUsageLimits, getEffectiveTier } from '../services/billing';
 import { entityDelete, entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import { getUserPreferences, saveUserPreferences } from '../services/user-preferences';
@@ -514,6 +514,9 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const userPreferences = await getUserPreferences(accountId);
   const eventConfig = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
   const check = await checkGenerationAllowed(eventConfig, context);
+  if (!check.allowed) {
+    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
+  }
 
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
@@ -617,6 +620,9 @@ resolver.define('retryGeneration', async ({ payload, context }) => {
   const userPreferences = await getUserPreferences(accountId);
   const eventConfig = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
   const check = await checkGenerationAllowed(eventConfig, context);
+  if (!check.allowed) {
+    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
+  }
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
     projectKey: snapshot.projectKey,
     projectKeys: snapshot.projectKeys,
@@ -683,6 +689,9 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
   const userPreferences = await getUserPreferences(accountId);
   const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
   const check = await checkGenerationAllowed(config, context);
+  if (!check.allowed) {
+    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
+  }
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
     projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
     projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
@@ -745,6 +754,9 @@ resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) =>
   const userPreferences = await getUserPreferences(accountId);
   const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
   const check = await checkGenerationAllowed(config, context);
+  if (!check.allowed) {
+    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
+  }
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
     projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
     projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
@@ -2336,14 +2348,17 @@ resolver.define('setIssueSession', async ({ payload, context }) => {
 resolver.define('getUsage', async ({ context }) => {
   const config = await getConfig();
   const effectiveTier = getEffectiveTier(config, context);
-  const usage = await getUsage();
-  const limits = getLimits(effectiveTier);
+  const usage = await getUsage(config, context);
+  const limits = getUsageLimits(config, context);
   const license = context?.license ?? { active: true, licenseType: 'COMMERCIAL' }; // Default to active for dev/staging
   return {
     success: true,
     usage: {
       currentMonth: usage.generations,
       month: usage.month,
+      credentialMode: usage.credentialMode,
+      quotaScope: usage.quotaScope,
+      resetCadence: usage.resetCadence,
     },
     limits,
     tier: effectiveTier,
@@ -2354,6 +2369,7 @@ resolver.define('getUsage', async ({ context }) => {
 resolver.define('resetUsage', async ({ context }) => {
   await ensureAdmin(context);
   await entityDelete(KEYS.usageCurrentMonth);
+  await entityDelete(KEYS.hostedSamplerUsageCurrentMonth);
   return { success: true };
 });
 

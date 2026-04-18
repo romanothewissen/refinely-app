@@ -257,6 +257,7 @@ export const KEYS = {
   wiDocs: 'wi_docs',
   wiCorpusCache: 'wi_corpus_cache',
   usageCurrentMonth: 'usage_current_month',
+  hostedSamplerUsageCurrentMonth: 'hosted_sampler_usage_current_month',
   // site-scoped (no accountId) — kept for backward compat
   conversations: (sessionId: string) => `conv_${sessionId}`,
   conversationIndex: 'conv_index',

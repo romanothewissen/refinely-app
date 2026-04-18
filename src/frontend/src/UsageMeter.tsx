@@ -1,8 +1,15 @@
 import React from 'react';
 import { Zap, TrendingUp, AlertCircle, ExternalLink } from 'lucide-react';
 
+type UsageSnapshot = {
+  currentMonth: number;
+  credentialMode?: 'byok' | 'hosted_sampler';
+  quotaScope?: 'tenant';
+  resetCadence?: 'calendar_month';
+} | null;
+
 interface UsageMeterProps {
-  usage: { currentMonth: number } | null;
+  usage: UsageSnapshot;
   limits: { generationsPerMonth: number } | null;
   tier: string;
   isCompact?: boolean;
@@ -18,8 +25,11 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
   const percentage = isUnlimited ? 0 : Math.min(100, (current / max) * 100);
   const isNearLimit = !isUnlimited && percentage >= 80;
   const isAtLimit = !isUnlimited && current >= max;
+  const isHostedSampler = usage?.credentialMode === 'hosted_sampler';
 
-  const tierName = tier.charAt(0) ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Standard';
+  const tierName = isHostedSampler
+    ? 'Hosted Trial'
+    : (tier.charAt(0) ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Standard');
 
   if (isCompact) {
     const remaining = isUnlimited ? null : Math.max(0, max - current);
@@ -32,7 +42,11 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
           <div className="min-w-0">
             <div className="text-[10px] font-bold text-[var(--rf-text-secondary)] uppercase tracking-widest">{tierName} usage</div>
             <div className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">
-              {isUnlimited ? 'Unlimited plan' : `${remaining} included before warning`}
+              {isUnlimited
+                ? 'Unlimited plan'
+                : isHostedSampler
+                  ? `${remaining} hosted trial generations left`
+                  : `${remaining} included before warning`}
             </div>
           </div>
         </div>
@@ -70,7 +84,9 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
 
       <div className="space-y-2">
         <div className="flex justify-between items-end">
-          <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">Included generations</span>
+          <span className="text-[11px] font-semibold text-[var(--rf-text-tertiary)]">
+            {isHostedSampler ? 'Hosted trial generations' : 'Included generations'}
+          </span>
           <span className="text-sm font-bold text-[var(--rf-brand)] tracking-tight">
             {current} <span className="text-[var(--rf-text-tertiary)] font-medium text-[11px] ml-1">/ {isUnlimited ? '∞' : max}</span>
           </span>
@@ -89,12 +105,14 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
         )}
         {isAtLimit && (
           <p className="text-[11px] font-medium text-[var(--rf-warning)]">
-            Included monthly usage guidance reached. Generation remains available while you coordinate a higher soft threshold with support.
+            {isHostedSampler
+              ? 'Hosted trial limit reached for this workspace this month. Connect your own key in Settings to continue generating.'
+              : 'Included monthly usage guidance reached. Generation remains available while you coordinate a higher soft threshold with support.'}
           </p>
         )}
       </div>
 
-      {!isUnlimited && (
+      {!isUnlimited && !isHostedSampler && (
         <a
           href="mailto:support@smartif.ai?subject=Refinely%20higher%20limits"
           target="_blank"

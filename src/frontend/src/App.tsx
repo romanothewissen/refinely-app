@@ -744,7 +744,12 @@ function LegacyApp({
     };
   }, [sessionId, accountId, issueConversationBootstrapDone]); // eslint-disable-line
 
-  const [usage, setUsage] = useState<{ currentMonth: number } | null>(null);
+  const [usage, setUsage] = useState<{
+    currentMonth: number;
+    credentialMode?: 'byok' | 'hosted_sampler';
+    quotaScope?: 'tenant';
+    resetCadence?: 'calendar_month';
+  } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
   const [sidebarCacheCounts, setSidebarCacheCounts] = useState<Record<string, number>>({});
 
