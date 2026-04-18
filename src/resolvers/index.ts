@@ -2026,6 +2026,65 @@ resolver.define('getGoldStoryPool', async ({ payload, context }) => {
   return { success: true, entries: pool?.entries ?? [], builtAt: pool?.builtAt ?? null };
 });
 
+resolver.define('searchBacklogForGoldCandidates', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = String(payload?.projectKey ?? '').trim();
+  const query = String(payload?.query ?? '').trim().toLowerCase();
+  if (!projectKey || projectKey === '*') return { success: false, results: [] };
+  await ensureProjectBrowse(context, projectKey);
+  const pool = await getGoldStoryPool(projectKey);
+  const entries = pool?.entries ?? [];
+  const filtered = query
+    ? entries.filter((e) =>
+        e.key.toLowerCase().includes(query)
+        || e.summary.toLowerCase().includes(query))
+    : entries;
+  const results = filtered.slice(0, 50).map((e) => ({
+    key: e.key,
+    summary: e.summary,
+    score: e.score,
+  }));
+  return { success: true, results };
+});
+
+resolver.define('setGoldExampleKeys', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = String(payload?.projectKey ?? '').trim();
+  const keys = Array.isArray(payload?.issueKeys)
+    ? payload.issueKeys.map((k: unknown) => String(k ?? '').trim()).filter(Boolean)
+    : [];
+  if (!projectKey || projectKey === '*') return { success: false };
+  const config = await getConfig();
+  const existing = config.goldExampleConfigs ?? [];
+  const idx = existing.findIndex((c) => c.projectKey === projectKey);
+  const updatedEntry = { projectKey, issueKeys: keys, label: idx >= 0 ? existing[idx].label : undefined };
+  const nextConfigs = idx >= 0
+    ? existing.map((c, i) => (i === idx ? updatedEntry : c))
+    : [...existing, updatedEntry];
+  await patchConfig({ goldExampleConfigs: nextConfigs });
+  return { success: true };
+});
+
+resolver.define('setGoldExampleLabel', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = String(payload?.projectKey ?? '').trim();
+  const label = String(payload?.label ?? '').trim();
+  if (!projectKey || projectKey === '*') return { success: false };
+  const config = await getConfig();
+  const existing = config.goldExampleConfigs ?? [];
+  const idx = existing.findIndex((c) => c.projectKey === projectKey);
+  const updatedEntry = {
+    projectKey,
+    issueKeys: idx >= 0 ? existing[idx].issueKeys : undefined,
+    label: label || undefined,
+  };
+  const nextConfigs = idx >= 0
+    ? existing.map((c, i) => (i === idx ? updatedEntry : c))
+    : [...existing, updatedEntry];
+  await patchConfig({ goldExampleConfigs: nextConfigs });
+  return { success: true };
+});
+
 resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
   await ensureAdmin(context, payload?.projectKey);
   const eventConfig = await getConfig();

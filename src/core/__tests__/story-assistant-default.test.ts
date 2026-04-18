@@ -228,7 +228,7 @@ test('parseStoryAssistantQuestionCandidates splits numbered prompts into separat
   const questions = parseStoryAssistantQuestionCandidates([
     {
       category: 'Functional Flow',
-      question: 'For service planning, 1. what activities belong in one plan, 2. what details must be captured for each activity?',
+      question: 'Plan setup: 1. what activities belong in one plan, 2. what details must be captured for each activity?',
       suggestions: ['Single workflow', 'Per activity detail', 'Depends on service type'],
     },
   ]);
@@ -360,4 +360,3 @@ test('clarify quality evaluator penalizes generic admin questions when key ambig
   assert.ok(quality.score < 90);
   assert.match(quality.reasons.join(' '), /generic discovery coverage|fewer questions/i);
 });
-

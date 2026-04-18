@@ -14,7 +14,6 @@ import {
 } from '../discovery';
 import {
   buildArSystemPrompt,
-  buildArRepairSystemPrompt,
   buildArPerFeatureUserMessage,
   buildAddRequirementsSystemPrompt,
   buildClarifySystemPrompt,
@@ -121,10 +120,10 @@ test('buildDiscoveryCoverageArtifact tracks planned and actual discovery coverag
     openNonBlockingDecisions: ['Choose default priority handling'],
   });
 
-  assert.deepEqual(artifact.mustResolveThemes, ['Functional Flow', 'Business Rules']);
-  assert.deepEqual(artifact.coveredThemes, ['Context & Trigger', 'User Personas']);
+  assert.deepEqual(artifact.mustResolveThemes, ['Functional Flow', 'Business Rules & Exceptions']);
+  assert.deepEqual(artifact.coveredThemes, ['Context & Trigger', 'Roles & Personas']);
   assert.deepEqual(artifact.askedCategoryKeys, ['context_trigger', 'user_personas']);
-  assert.deepEqual(artifact.askedThemes, ['Context & Trigger', 'User Personas']);
+  assert.deepEqual(artifact.askedThemes, ['Context & Trigger', 'Roles & Personas']);
   assert.equal(artifact.plannedQuestionBudget, 12);
   assert.equal(artifact.actualQuestionsAsked, 9);
   assert.equal(artifact.actualAnswersReceived, 7);
@@ -484,20 +483,10 @@ test('buildArSystemPrompt explicitly pushes concrete business clauses over vague
     },
   });
 
-  assert.match(prompt, /CAPABILITY-SHAPED THEN/i);
+  assert.match(prompt, /CONFIGURATION-LANGUAGE ANTI-PATTERNS:/i);
   assert.match(prompt, /BAD GIVEN:/i);
-  assert.match(prompt, /Roles belong in WHEN \(who performs the action\), not GIVEN/i);
-});
-
-test('buildArRepairSystemPrompt keeps AR repair scoped and meaning-preserving', () => {
-  const prompt = buildArRepairSystemPrompt({
-    domainContext: 'Stay product agnostic.',
-  });
-
-  assert.match(prompt, /Preserve the feature summary, description, suggested_story_points, and process_code unless a trivial typo fix is unavoidable/i);
-  assert.match(prompt, /expand weak AR wording into concrete business conditions, triggers, and outcomes/i);
-  assert.match(prompt, /rewrite THEN clauses that only mirror persistence/i);
-  assert.match(prompt, /Do not invent domain-specific logic, product-specific categories, or internal implementation mechanisms/i);
+  assert.match(prompt, /Roles belong in WHEN, not GIVEN/i);
+  assert.match(prompt, /Treat any unresolved decisions from discovery as explicitly out of scope/i);
 });
 
 test('buildArPerFeatureUserMessage includes AR obligations and repair focus when provided', () => {
@@ -647,9 +636,9 @@ test('story assistant clarify prompt is ambiguity-driven with six discovery dime
   assert.match(prompt, /Frame all questions in business language/i);
   assert.match(prompt, /DISCOVERY DIMENSIONS/);
   assert.match(prompt, /Context & Trigger \(categoryKey "context_trigger"\)/);
-  assert.match(prompt, /User Personas \(categoryKey "user_personas"\)/);
+  assert.match(prompt, /Roles & Personas \(categoryKey "user_personas"\)/);
   assert.match(prompt, /Functional Flow \(categoryKey "functional_flow"\)/);
-  assert.match(prompt, /Business Rules \(categoryKey "business_rules"\)/);
+  assert.match(prompt, /Business Rules & Exceptions \(categoryKey "business_rules"\)/);
   assert.match(prompt, /State & Lifecycle \(categoryKey "state_lifecycle"\)/);
   assert.match(prompt, /Success & Measurement \(categoryKey "success_measurement"\)/);
   assert.match(prompt, /For each question, provide exactly 3/i);
@@ -719,7 +708,7 @@ test('ar prompt uses range guidance without exact-count pressure', () => {
 
   assert.match(prompt, /Let the feature's actual behavioral surface determine how many acceptance requirements are needed/i);
   assert.match(prompt, /Do not target a fixed count for its own sake/i);
-  assert.match(prompt, /CAPABILITY-SHAPED THEN/i);
+  assert.match(prompt, /Every AR's THEN must express a business capability/i);
   assert.match(prompt, /Do not under-specify broad or risky features/i);
   assert.match(prompt, /Do not over-specify very small, straightforward features/i);
   assert.doesNotMatch(prompt, /\(target 3\)/i);

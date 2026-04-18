@@ -16,17 +16,17 @@ export const CLARIFY_CATEGORY_ORDER: ClarifyCategoryKey[] = [
   'context_trigger',
   'user_personas',
   'functional_flow',
-  'business_rules',
   'state_lifecycle',
+  'business_rules',
   'success_measurement',
 ];
 
 export const CLARIFY_CATEGORY_LABELS: Record<ClarifyCategoryKey, string> = {
   context_trigger: 'Context & Trigger',
-  user_personas: 'User Personas',
+  user_personas: 'Roles & Personas',
   functional_flow: 'Functional Flow',
-  business_rules: 'Business Rules',
   state_lifecycle: 'State & Lifecycle',
+  business_rules: 'Business Rules & Exceptions',
   success_measurement: 'Success & Measurement',
 };
 

@@ -102,6 +102,9 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
   'context & trigger': 'context_trigger',
   'context and trigger': 'context_trigger',
   'functional flow': 'functional_flow',
+  'state & lifecycle': 'state_lifecycle',
+  'state and lifecycle': 'state_lifecycle',
+  'lifecycle': 'state_lifecycle',
   'business rules & exceptions': 'business_rules',
   'business rules and exceptions': 'business_rules',
   'business rules': 'business_rules',
@@ -111,26 +114,59 @@ const STORY_ASSISTANT_CATEGORY_LABELS: Record<string, ClarifyCategoryKey> = {
 };
 
 const DISCOVERY_CATEGORY_ORDER: ClarifyCategoryKey[] = [
-  'user_personas',
   'context_trigger',
+  'user_personas',
   'functional_flow',
+  'state_lifecycle',
   'business_rules',
   'success_measurement',
 ];
 
 function normalizeDiscoveryCategoryKey(categoryKey: ClarifyCategoryKey): ClarifyCategoryKey {
-  if (categoryKey === 'state_lifecycle') return 'functional_flow';
   return categoryKey;
+}
+
+// Extract 4-grams from the question stem for overlap detection.
+function extractQuestionNgrams(question: string, n = 4): Set<string> {
+  const tokens = cleanText(question)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const grams = new Set<string>();
+  for (let i = 0; i <= tokens.length - n; i += 1) {
+    grams.add(tokens.slice(i, i + n).join(' '));
+  }
+  return grams;
 }
 
 function sortDiscoveryQuestions(questions: ClarifyQuestion[]): ClarifyQuestion[] {
   const order = new Map(DISCOVERY_CATEGORY_ORDER.map((key, index) => [key, index]));
-  return [...questions].sort((left, right) => {
+  const sorted = [...questions].sort((left, right) => {
     const leftOrder = order.get(left.categoryKey) ?? Number.MAX_SAFE_INTEGER;
     const rightOrder = order.get(right.categoryKey) ?? Number.MAX_SAFE_INTEGER;
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
     return left.question.localeCompare(right.question);
   });
+
+  // Drop questions that share a 4-gram with a previously kept question. Keep
+  // the first occurrence (category order + length-sorted) as the canonical one.
+  const kept: ClarifyQuestion[] = [];
+  const seenGrams = new Set<string>();
+  for (const question of sorted) {
+    const grams = extractQuestionNgrams(question.question);
+    let overlap = false;
+    for (const gram of grams) {
+      if (seenGrams.has(gram)) {
+        overlap = true;
+        break;
+      }
+    }
+    if (overlap) continue;
+    for (const gram of grams) seenGrams.add(gram);
+    kept.push(question);
+  }
+  return kept;
 }
 
 function buildProviderOpts(config: TenantConfig) {
@@ -1073,8 +1109,9 @@ export function parseStoryAssistantQuestionCandidates(rawData: unknown): Clarify
       const categoryKey = normalizeDiscoveryCategoryKey(mapCategoryKey(candidate.categoryKey ?? candidate.category, rawQuestion));
       const category = cleanText(candidate.category)
         || (categoryKey === 'user_personas' ? 'Roles & Personas'
-          : categoryKey === 'context_trigger' ? 'Trigger & Context'
+          : categoryKey === 'context_trigger' ? 'Context & Trigger'
           : categoryKey === 'functional_flow' ? 'Functional Flow'
+          : categoryKey === 'state_lifecycle' ? 'State & Lifecycle'
           : categoryKey === 'business_rules' ? 'Business Rules & Exceptions'
           : 'Success & Measurement');
       const intent = cleanText(candidate.intent).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48)

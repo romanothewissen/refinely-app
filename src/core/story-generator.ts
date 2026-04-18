@@ -57,7 +57,6 @@ import {
   buildDraftDescriptionRepairSystemPrompt,
   buildDraftReviewSystemPrompt,
   buildArSystemPrompt,
-  buildArRepairSystemPrompt,
   buildArPerFeatureUserMessage,
   buildTriageSystemPrompt,
   buildClarifySystemPrompt,
@@ -72,7 +71,13 @@ import {
 import { detectFeatureOverlaps, validateFeatures } from './quality-validator';
 import { hasIncompleteAcceptanceRequirements } from './ar-validation';
 import { retrieveScopedWiContext } from '../services/project-selection';
-import { formatArPatternLibraryFromSimilarStories, getGoldStoryPool, formatGoldStoryExemplars } from './similar-stories';
+import {
+  formatArPatternLibraryFromSimilarStories,
+  getGoldStoryPool,
+  formatGoldStoryExemplars,
+  resolveGoldKeys,
+  findGoldConfigForProject,
+} from './similar-stories';
 import { objectRead, KEYS } from '../services/cache';
 import type { DomainPatterns } from './similar-stories';
 import {
@@ -255,13 +260,6 @@ interface ArObligations {
   wiMustCoverBehaviors: string[];
 }
 
-interface FeatureArRepairResult {
-  feature: Feature;
-  reasons: string[];
-  trigger: 'structural' | 'weak_signal';
-  usage: { input: number; output: number };
-}
-
 const AR_GENERATION_ATTEMPTS = 2;
 const AR_RETRY_DELAY_MS = 600;
 /** Caps parallel AR LLM calls (backfill path) so providers do not throttle. Reduced from 5 to 3 to avoid Gemini rate-limiting. */
@@ -281,7 +279,7 @@ function pipelineReasoningEffort(profile: PipelineProfile | undefined): 'none' |
   return 'low'; // 'balanced' or undefined → low
 }
 
-/** Pass-2 AR batch + repair: balanced needs enough reasoning to avoid templated shallow ARs. */
+/** Pass-2 AR generation needs enough reasoning to avoid templated shallow ARs. */
 function acceptanceRequirementsReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'low' | 'medium' {
   if (profile === 'fast') return 'none';
   return 'medium'; // balanced + quality
@@ -3008,6 +3006,8 @@ export async function generateFeatures(opts: {
   let similarForPass2Ar = similarStoriesText;
   let pass2BatchWiChunkCount = 0;
   let pass2ArPatternStoryKeys: string[] = [];
+  let goldExampleIssueKeys: string[] = [];
+  let goldExampleLabel: string | undefined;
 
   if (!precomputedDraftFeatures?.length && config.wiConfig.enabled && projectKeys?.length && pass1DraftFeatures.length >= 2) {
     try {
@@ -3041,7 +3041,11 @@ export async function generateFeatures(opts: {
     pass2DomainPatterns = domainPatterns;
 
     if (goldPool?.entries?.length) {
-      const goldText = formatGoldStoryExemplars(goldPool);
+      const configuredGold = findGoldConfigForProject(activeProjectKey, config.goldExampleConfigs);
+      const resolvedKeys = resolveGoldKeys(activeProjectKey, config.goldExampleConfigs, goldPool);
+      goldExampleIssueKeys = (resolvedKeys?.length ? resolvedKeys : goldPool.entries.map((entry) => entry.key)).slice(0, 8);
+      goldExampleLabel = configuredGold?.label?.trim() || undefined;
+      const goldText = formatGoldStoryExemplars(goldPool, resolvedKeys ?? undefined);
       if (goldText) {
         const merged = `${similarForPass2Ar}\n\n---\n\n${goldText}`;
         similarForPass2Ar = trimPromptText(merged, 5200);
@@ -3200,89 +3204,6 @@ export async function generateFeatures(opts: {
   }
 
   let features = rawFeatures.map((feature) => normaliseFeature(feature, roleGrounding));
-  const repairCandidates = features
-    .map((feature, index) => {
-      const weakReasons = collectWeakArReasons(feature);
-      const hasStructuralIssue = findFeaturesMissingCompleteAcceptanceRequirements([feature]).length > 0;
-      const reasons = hasStructuralIssue
-        ? uniqueNonEmptyStrings([
-            'Acceptance requirements must contain complete GIVEN, WHEN, and THEN clauses.',
-            ...weakReasons,
-          ])
-        : weakReasons;
-      if (!reasons.length) return null;
-      return {
-        index,
-        feature,
-        reasons,
-        trigger: hasStructuralIssue ? 'structural' as const : 'weak_signal' as const,
-      };
-    })
-    .filter((candidate): candidate is {
-      index: number;
-      feature: Feature;
-      reasons: string[];
-      trigger: 'structural' | 'weak_signal';
-    } => Boolean(candidate));
-
-  const repairedAcceptanceRequirementFeatureIds: string[] = [];
-  const repairedAcceptanceRequirementTriggers: Array<{
-    featureId: string;
-    trigger: 'structural' | 'weak_signal';
-    reasons: string[];
-  }> = [];
-  if (repairCandidates.length > 0) {
-    const repairStartedAt = Date.now();
-    const repairResults = await runOrderedConcurrentTasks<FeatureArRepairResult>({
-      tasks: repairCandidates.map((candidate) => async () => repairFeatureAcceptanceRequirements({
-        feature: candidate.feature,
-        siblingFeatures: features.filter((feature, index) => index !== candidate.index),
-        requirement,
-        clarifyAnswers,
-        attachmentText,
-        wiContextText: wiForPass2Ar,
-        similarStoriesText: similarForPass2Ar,
-        arObligations,
-        trigger: candidate.trigger,
-        reasons: candidate.reasons,
-        generatorConfig,
-        tier: config.tier,
-        providerOpts,
-        domainContext: config.domainContext,
-        roleGrounding,
-      })),
-      concurrency: 3,
-    });
-    stageDurationsMs.repair = (stageDurationsMs.repair ?? 0) + (Date.now() - repairStartedAt);
-    const repairUsage = repairResults.reduce(
-      (sum, result) => ({
-        input: sum.input + result.usage.input,
-        output: sum.output + result.usage.output,
-      }),
-      { input: 0, output: 0 },
-    );
-    pass2Usage = {
-      input: pass2Usage.input + repairUsage.input,
-      output: pass2Usage.output + repairUsage.output,
-    };
-    repairResults.forEach((result) => {
-      const featureIndex = features.findIndex((feature) => feature.id === result.feature.id);
-      if (featureIndex >= 0) features[featureIndex] = result.feature;
-      repairedAcceptanceRequirementFeatureIds.push(result.feature.id);
-      repairedAcceptanceRequirementTriggers.push({
-        featureId: result.feature.id,
-        trigger: result.trigger,
-        reasons: result.reasons,
-      });
-    });
-    if (repairResults.length > 0) {
-      autoRepairedIssues.push(
-        repairResults.length === 1
-          ? `Strengthened acceptance requirements for ${repairResults[0].feature.summary}.`
-          : `Strengthened acceptance requirements for ${repairResults.length} features before final review.`,
-      );
-    }
-  }
   const failedFeatureIndexes = findFeaturesMissingCompleteAcceptanceRequirements(features);
   const failedFeatureIds = new Set(
     failedFeatureIndexes
@@ -3361,6 +3282,8 @@ export async function generateFeatures(opts: {
       domainRolesUsed: [],
       pass2BatchWiChunkCount: pass2BatchWiChunkCount || undefined,
       pass2ArPatternStoryKeys: pass2ArPatternStoryKeys.length ? pass2ArPatternStoryKeys : undefined,
+      goldExampleIssueKeys: goldExampleIssueKeys.length ? goldExampleIssueKeys : undefined,
+      goldExampleLabel,
       openDecisions,
       roleCoverage: buildRoleCoverage(features),
       coverageFindings,
@@ -3370,8 +3293,6 @@ export async function generateFeatures(opts: {
       autoRepairedIssues: uniqueNonEmptyStrings(autoRepairedIssues),
       remainingBlockingIssues,
       requiresUserDecision,
-      repairedAcceptanceRequirementFeatureIds,
-      repairedAcceptanceRequirementTriggers,
       failedFeatureIds: [...failedFeatureIds],
       partialSuccess: failedFeatureIds.size > 0,
       partialSuccessMessage: failedFeatureIds.size > 0
@@ -4510,182 +4431,6 @@ function buildArObligations(input: {
     confirmedDataObligations,
     unresolvedDecisions,
     wiMustCoverBehaviors,
-  };
-}
-
-function buildCurrentArStrings(feature: Feature): string[] {
-  return (feature.acceptanceRequirements ?? []).map((ar) => `GIVEN ${ar.given} WHEN ${ar.when} THEN ${ar.then}`);
-}
-
-function looksLikeOpenDecisionText(text: string): boolean {
-  const normalized = String(text ?? '').trim();
-  if (!normalized) return false;
-  return [
-    /^\s*(what|how|who|when|should|do we|does it|is it|can it)\b/i,
-    /\bopen question\b/i,
-    /\bto be decided\b/i,
-    /\bdefine duplication criteria\b/i,
-  ].some((pattern) => pattern.test(normalized));
-}
-
-function collectWeakArReasons(feature: Feature): string[] {
-  const reasons = new Set<string>();
-  const ars = feature.acceptanceRequirements ?? [];
-
-  for (const ar of ars) {
-    const given = String(ar.given ?? '').trim();
-    const when = String(ar.when ?? '').trim();
-    const then = String(ar.then ?? '').trim();
-    const combined = `${given} ${when} ${then}`;
-    if (!given || !when || !then) reasons.add('Acceptance requirement is incomplete and needs a full GIVEN/WHEN/THEN rewrite.');
-    if (looksLikeOpenDecisionText(combined)) reasons.add('Acceptance requirement includes unresolved-decision wording instead of a confirmed rule.');
-    if (/\b(is processed|is reviewed|is handled|process completes|processing completes|is automatically processed)\b/i.test(combined)) {
-      reasons.add('Acceptance requirement uses generic processing wording instead of a concrete business trigger or outcome.');
-    }
-    if (/\b(specific key|criteria are met|rules are applied|cannot be applied|appropriate classification|relevant criteria)\b/i.test(combined)) {
-      reasons.add('Acceptance requirement relies on placeholder business logic wording rather than a concrete business condition.');
-    }
-    if (then && /^(it|the case|the record|the request)\s+is\s+(created|updated|classified|processed|reviewed)\.?$/i.test(then)) {
-      reasons.add('Acceptance requirement outcome is too shallow and should name the concrete business result.');
-    }
-  }
-
-  // CRUD-THEN detection: flag features where THEN clauses express persistence
-  // rather than business capability.
-  if (ars.length >= 2) {
-    const CRUD_THEN_PATTERNS: RegExp[] = [
-      /\bis\s+added\s+to\s+the\b/i,
-      /\bis\s+created\s+and\s+linked?\b/i,
-      /\breflects\s+the\b/i,
-      /\bis\s+updated\s+to\s+\w/i,
-      /\bis\s+visible\s+from\s+the\b/i,
-      /\bincludes\s+(?:the\s+)?(?:new|updated|required)\b/i,
-      /\bare\s+created\s+based\s+on\b/i,
-      /\bis\s+not\s+automatically\s+\w/i,
-    ];
-    let crudThenCount = 0;
-    for (const ar of ars) {
-      const thenText = String(ar.then ?? '');
-      if (CRUD_THEN_PATTERNS.some(p => p.test(thenText))) crudThenCount += 1;
-    }
-    if (crudThenCount >= Math.ceil(ars.length * 0.5)) {
-      reasons.add('AR THEN clauses express persistence/crud outcomes rather than business capabilities; reframe to state what the feature enables, decides, enforces, or makes possible.');
-    }
-  }
-
-  // WHEN-CRUD detection: flag features where WHEN clauses describe CRUD actions
-  // rather than business moments or triggers.
-  if (ars.length >= 2) {
-    const WHEN_CRUD_RE = /\b(?:adds?|removes?|creates?|updates?|deletes?|modifies?)\s+(?:an?\s+)?\w+\s+(?:to|from|on|in)\s+(?:the\s+)?/i;
-    let whenCrudCount = 0;
-    for (const ar of ars) {
-      const whenText = String(ar.when ?? '');
-      if (WHEN_CRUD_RE.test(whenText)) whenCrudCount += 1;
-    }
-    if (whenCrudCount >= Math.ceil(ars.length * 0.6)) {
-      reasons.add('AR WHEN clauses describe CRUD actions rather than business moments or triggers; reframe to express the business situation that triggers the behavior.');
-    }
-  }
-
-  // Generic actor detection: flag features where the description uses a
-  // generic authorized-role bucket instead of a specific business role.
-  const desc = feature.description ?? '';
-  const GENERIC_ACTOR_PATTERNS: RegExp[] = [
-    /\bas\s+an?\s+authori[sz]ed\s+\w+\s+team\s+member\b/i,
-    /\bas\s+an?\s+\w+\s+team\s+member\b/i,
-    /\bas\s+an?\s+member\s+of\s+the\b/i,
-  ];
-  if (GENERIC_ACTOR_PATTERNS.some(p => p.test(desc))) {
-    reasons.add('Feature actor is a generic authorized-role bucket, not an accountable business role; resolve to a specific job title or business responsibility grounded in the requirement or discovery answers.');
-  }
-
-  return [...reasons];
-}
-
-async function repairFeatureAcceptanceRequirements(input: {
-  requirement: string;
-  feature: Feature;
-  clarifyAnswers: ClarifyAnswer[];
-  attachmentText: string;
-  wiContextText: string;
-  similarStoriesText: string;
-  siblingFeatures: Feature[];
-  arObligations: ArObligations;
-  trigger: 'structural' | 'weak_signal';
-  reasons: string[];
-  generatorConfig: TenantConfig['generatorConfig'];
-  tier: TenantConfig['tier'];
-  providerOpts: ReturnType<typeof buildLlmProviderOpts>;
-  domainContext: string;
-  roleGrounding: RoleGroundingContext;
-}): Promise<FeatureArRepairResult> {
-  const userMessage = buildArPerFeatureUserMessage({
-    requirement: input.requirement,
-    clarifyAnswers: input.clarifyAnswers.map((a) => ({
-      question: a.question,
-      answer: a.answer,
-      customAnswer: a.customAnswer,
-      selectedSuggestions: a.selectedSuggestions,
-      categoryKey: a.categoryKey,
-      intent: a.intent,
-    })),
-    attachmentText: input.attachmentText,
-    wiContextText: input.wiContextText,
-    similarStoriesText: input.similarStoriesText,
-    feature: {
-      summary: input.feature.summary,
-      description: input.feature.description,
-      suggested_story_points: input.feature.storyPoints,
-      process_code: input.feature.processCode,
-      feature_class: input.feature.featureClass,
-      confidence: input.feature.confidence,
-      actor_source: input.feature.actorSource,
-    },
-    siblingFeatures: input.siblingFeatures.map((feature) => ({
-      summary: feature.summary,
-      description: feature.description,
-    })),
-    arObligations: input.arObligations,
-    currentAcceptanceRequirements: buildCurrentArStrings(input.feature),
-    repairReasons: input.reasons,
-  });
-
-  const result = await callLlmJsonWithUsage<{ features: RawFeature[] }>({
-    model: getTierModel(input.generatorConfig.arModel, input.tier),
-    systemPrompt: buildArRepairSystemPrompt({ domainContext: input.domainContext }),
-    userMessage,
-    maxTokens: 3072,
-    reasoningEffort: 'medium',
-    ...input.providerOpts,
-  });
-
-  const repairedRaw = result.data.features?.[0];
-  const repairedFeature = repairedRaw
-    ? applyFeatureOutputGuardrails(normaliseFeature({
-      ...repairedRaw,
-      summary: repairedRaw.summary ?? input.feature.summary,
-      description: repairedRaw.description ?? input.feature.description,
-      suggested_story_points: repairedRaw.suggested_story_points ?? input.feature.storyPoints,
-      process_code: repairedRaw.process_code ?? input.feature.processCode,
-    }, input.roleGrounding))
-    : input.feature;
-
-  return {
-    feature: {
-      ...input.feature,
-      ...repairedFeature,
-      id: input.feature.id,
-      summary: repairedFeature.summary || input.feature.summary,
-      description: repairedFeature.description || input.feature.description,
-      storyPoints: repairedFeature.storyPoints ?? input.feature.storyPoints,
-      processCode: repairedFeature.processCode ?? input.feature.processCode,
-      featureClass: repairedFeature.featureClass ?? input.feature.featureClass,
-      confidence: repairedFeature.confidence ?? input.feature.confidence,
-      actorSource: repairedFeature.actorSource ?? input.feature.actorSource,
-    },
-    reasons: input.reasons,
-    trigger: input.trigger,
-    usage: result.usage,
   };
 }
 

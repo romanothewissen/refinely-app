@@ -177,7 +177,7 @@ type GenerationProgressMeta = {
   featureProgress?: Array<{ id: string; status: 'pending' | 'active' | 'retrying' | 'complete' | 'failed' }>;
   failedFeatureIds?: string[];
   draftReview?: DraftReviewMetadata;
-  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; repair?: number; coverageCheck?: number; total?: number };
+  stageDurationsMs?: { triage?: number; decomposition?: number; acceptanceRequirements?: number; backfill?: number; coverageCheck?: number; total?: number };
   resumeContext?: unknown;
   sources?: {
     projectKey: string;

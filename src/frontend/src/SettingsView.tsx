@@ -12,6 +12,7 @@ import type {
   LlmModelCatalogEntry,
   LlmProvider,
   PipelineProfile,
+  ProjectGoldExampleConfig,
   ProjectActivitySummaryRow,
   ProjectPersonaRoleSuggestion,
   StoryAssistantModelAssignment,
@@ -323,6 +324,11 @@ function normalizeOptionalPositiveInt(value: string) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function areStringArraysEqual(left: string[] = [], right: string[] = []) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
 export function SettingsView({ onClose, initialTab = 'models', initialProjectKey = '*' }: { onClose: () => void; initialTab?: 'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance'; initialProjectKey?: string }) {
   const [activeTab, setActiveTab] = useState<'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance'>(initialTab);
   const [isSaving, setIsSaving] = useState(false);
@@ -385,6 +391,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
   const [backlogRefreshStatus, setBacklogRefreshStatus] = useState<BacklogRefreshStatusRow | null>(null);
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
   const [backlogThemeBudgetOverride, setBacklogThemeBudgetOverride] = useState('');
+  const [goldExampleConfigs, setGoldExampleConfigs] = useState<ProjectGoldExampleConfig[]>([]);
   const [goldStoryPool, setGoldStoryPool] = useState<{ key: string; summary: string; score: number }[]>([]);
 
   // Personal + workspace state
@@ -621,6 +628,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
           }]);
         }
         if (existingConfig.backlogStatusScopes) setBacklogStatusScopes(existingConfig.backlogStatusScopes);
+        setGoldExampleConfigs(existingConfig.goldExampleConfigs ?? []);
         if (existingConfig.backlogThemeBudgetOverride) {
           setBacklogThemeBudgetOverride(String(existingConfig.backlogThemeBudgetOverride));
         } else {
@@ -1599,6 +1607,8 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                       onRefreshBacklogCache={handleRefreshBacklogCache}
                       backlogThemeBudgetOverride={backlogThemeBudgetOverride}
                       onBacklogThemeBudgetOverrideChange={setBacklogThemeBudgetOverride}
+                      goldExampleConfigs={goldExampleConfigs}
+                      setGoldExampleConfigs={setGoldExampleConfigs}
                       goldStoryPool={goldStoryPool}
                     />
                   ) : (
@@ -2267,6 +2277,7 @@ function ProjectConfigurationManager({
   activeArProj, isAdmin, isProjectAdmin,
   backlogCacheInfo, backlogDiagnostics, backlogRefreshStatus, isRefreshingBacklogCache, onRefreshBacklogCache,
   backlogThemeBudgetOverride, onBacklogThemeBudgetOverrideChange,
+  goldExampleConfigs, setGoldExampleConfigs,
   goldStoryPool = [],
 }: any) {
 const [issueTypes, setIssueTypes] = useState<any[]>([]);
@@ -2331,6 +2342,10 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     ? currentContext.personaRoles
     : [{ role: '', activities: '' }];
   const currentBacklogScope = backlogStatusScopes.find((scope: any) => scope.projectKey === activeArProj) || { projectKey: activeArProj, statuses: [] };
+  const currentGoldConfig = (goldExampleConfigs as ProjectGoldExampleConfig[]).find((entry) => entry.projectKey === activeArProj)
+    || { projectKey: activeArProj, issueKeys: [], label: undefined };
+  const currentGoldIssueKeys = useMemo(() => currentGoldConfig.issueKeys ?? [], [currentGoldConfig.issueKeys]);
+  const currentGoldIssueKeysSignature = currentGoldIssueKeys.join('|');
   const effectiveBacklogStatuses = currentBacklogScope.statuses.length
     ? currentBacklogScope.statuses
     : detectDefaultStatuses(backlogStatusOptions);
@@ -2373,6 +2388,12 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
   const [isSavingProject, setIsSavingProject] = useState(false);
   const [projectNotice, setProjectNotice] = useState<string | null>(null);
   const [isInferringPersonaRoles, setIsInferringPersonaRoles] = useState(false);
+  const [isSearchingGoldCandidates, setIsSearchingGoldCandidates] = useState(false);
+  const [isSavingGoldConfig, setIsSavingGoldConfig] = useState(false);
+  const [goldCandidateQuery, setGoldCandidateQuery] = useState('');
+  const [goldCandidateResults, setGoldCandidateResults] = useState<Array<{ key: string; summary: string; score: number }>>([]);
+  const [selectedGoldKeys, setSelectedGoldKeys] = useState<string[]>([]);
+  const [goldLabelDraft, setGoldLabelDraft] = useState('');
   const [roleInferenceResult, setRoleInferenceResult] = useState<InferProjectPersonaRolesResult | null>(null);
   const [selectedRoleSuggestionKeys, setSelectedRoleSuggestionKeys] = useState<string[]>([]);
   const [expandedSections, setExpandedSections] = useState({
@@ -2390,7 +2411,84 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     setSelectedRoleSuggestionKeys([]);
   }, [activeArProj]);
 
+  useEffect(() => {
+    setGoldCandidateQuery('');
+    setGoldCandidateResults(goldStoryPool.slice(0, 8));
+    setSelectedGoldKeys(currentGoldIssueKeys);
+    setGoldLabelDraft(currentGoldConfig.label ?? '');
+  }, [activeArProj, currentGoldConfig.label, currentGoldIssueKeys, currentGoldIssueKeysSignature, goldStoryPool]);
+
   const inferButtonDisabled = !activeArProj || activeArProj === '*' || isInferringPersonaRoles || indexedCount <= 0;
+
+  const updateGoldConfigLocal = (patch: Partial<ProjectGoldExampleConfig>) => {
+    const nextIssueKeys = patch.issueKeys ?? currentGoldConfig.issueKeys ?? [];
+    const nextLabel = patch.label ?? currentGoldConfig.label;
+    const nextEntry: ProjectGoldExampleConfig = {
+      projectKey: activeArProj,
+      issueKeys: nextIssueKeys.length ? nextIssueKeys : undefined,
+      label: nextLabel?.trim() ? nextLabel.trim() : undefined,
+    };
+    const existing = (goldExampleConfigs as ProjectGoldExampleConfig[]).filter((entry) => entry.projectKey !== activeArProj);
+    const hasContent = Boolean(nextEntry.issueKeys?.length || nextEntry.label);
+    setGoldExampleConfigs(hasContent ? [...existing, nextEntry] : existing);
+  };
+
+  const toggleGoldKey = (key: string) => {
+    setSelectedGoldKeys((current) => (
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    ));
+  };
+
+  const searchGoldCandidates = async (query = goldCandidateQuery) => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setGoldCandidateResults(goldStoryPool.slice(0, 8));
+      return;
+    }
+    setIsSearchingGoldCandidates(true);
+    try {
+      const response = await api.searchBacklogForGoldCandidates({ projectKey: activeArProj, query: trimmed }) as any;
+      setGoldCandidateResults(response?.success ? (response.results ?? []) : []);
+    } catch (error: any) {
+      setProjectNotice(error?.message || 'Gold candidate search failed.');
+      setGoldCandidateResults([]);
+    } finally {
+      setIsSearchingGoldCandidates(false);
+    }
+  };
+
+  const persistGoldConfig = async (options: { notice?: string } = {}) => {
+    const normalizedKeys = [...new Set(selectedGoldKeys.map((key) => key.trim()).filter(Boolean))];
+    const normalizedLabel = goldLabelDraft.trim();
+    const currentKeys = currentGoldIssueKeys;
+    const currentLabel = currentGoldConfig.label ?? '';
+    const keysChanged = !areStringArraysEqual(normalizedKeys, currentKeys);
+    const labelChanged = normalizedLabel !== currentLabel;
+
+    if (!keysChanged && !labelChanged) return false;
+
+    setIsSavingGoldConfig(true);
+    try {
+      if (labelChanged) {
+        await api.setGoldExampleLabel({ projectKey: activeArProj, label: normalizedLabel || undefined });
+      }
+      if (keysChanged) {
+        await api.setGoldExampleKeys({ projectKey: activeArProj, issueKeys: normalizedKeys });
+      }
+      updateGoldConfigLocal({
+        issueKeys: normalizedKeys,
+        label: normalizedLabel || undefined,
+      });
+      setProjectNotice(options.notice ?? 'Gold exemplar settings saved.');
+      return true;
+    } catch (error: any) {
+      throw new Error(error?.message || 'Gold exemplar settings could not be saved.');
+    } finally {
+      setIsSavingGoldConfig(false);
+    }
+  };
 
   const handleSuggestPersonaRoles = async () => {
     if (inferButtonDisabled) return;
@@ -2442,6 +2540,9 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     setIsSavingProject(true);
     setProjectNotice(null);
     try {
+      await persistGoldConfig({ notice: 'Project configuration saved.' }).catch((error) => {
+        throw error;
+      });
       if (isAdmin) {
         await api.patchConfig({
           backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
@@ -2465,6 +2566,9 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     setIsSavingProject(true);
     setProjectNotice(null);
     try {
+      await persistGoldConfig({ notice: 'Backlog cache rebuild queued. This can take a little while on larger projects.' }).catch((error) => {
+        throw error;
+      });
       if (isAdmin) {
         await api.patchConfig({
           backlogThemeBudgetOverride: normalizeOptionalPositiveInt(backlogThemeBudgetOverride),
@@ -2648,25 +2752,196 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                </div>
              </div>
 
-             {goldStoryPool.length > 0 && (
-               <div className="rf-card px-4 py-4 space-y-3">
+             <div className="rf-card px-4 py-4 space-y-4">
+               <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                  <div>
-                   <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Gold Stories</div>
-                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">
-                     Auto-selected from your backlog as AR exemplars. These replace the generic anchor bundle. Rebuilt automatically on cache refresh.
+                   <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Gold Exemplars</div>
+                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1 max-w-2xl">
+                     Choose which backlog stories shape AR quality for this project. Priority is manual issue keys first, then a Jira label filter, then the top ranked pool from the latest cache rebuild.
                    </p>
                  </div>
-                 <div className="space-y-2">
-                   {goldStoryPool.map((entry: any) => (
-                     <div key={entry.key} className="flex items-center gap-3 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2">
-                       <span className="text-[11px] font-black tabular-nums rounded px-1.5 py-0.5 bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] min-w-[36px] text-center">{entry.score}</span>
-                       <span className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</span>
-                       <span className="text-xs font-medium text-[var(--rf-text-secondary)] truncate flex-1">{entry.summary}</span>
-                     </div>
-                   ))}
+                 <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                   Pool: {goldStoryPool.length} ranked stories
                  </div>
                </div>
-             )}
+
+               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                 <div className="space-y-4">
+                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
+                     <div>
+                       <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Label Fallback</div>
+                       <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
+                         If no manual keys are selected, use this Jira label to resolve exemplars from the ranked pool.
+                       </div>
+                     </div>
+                     <div className="flex flex-col gap-2 sm:flex-row">
+                       <input
+                         type="text"
+                         value={goldLabelDraft}
+                         onChange={(event) => setGoldLabelDraft(event.target.value)}
+                         placeholder="e.g. gold-example"
+                         className="flex-1 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                       />
+                       <button
+                         type="button"
+                         onClick={() => {
+                           void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
+                         }}
+                         disabled={isSavingGoldConfig}
+                         className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)] disabled:opacity-50"
+                       >
+                         {isSavingGoldConfig ? 'Saving…' : 'Save label'}
+                       </button>
+                     </div>
+                     <div className="text-[12px] text-[var(--rf-text-tertiary)]">
+                       Active label: <span className="font-semibold text-[var(--rf-text)]">{currentGoldConfig.label || 'none'}</span>
+                     </div>
+                   </div>
+
+                   <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
+                     <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                       <div>
+                         <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Manual Issue Keys</div>
+                         <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
+                           Pick exact stories when you want deterministic examples. These override the label fallback.
+                         </div>
+                       </div>
+                       <div className="text-[12px] font-semibold text-[var(--rf-text-tertiary)]">
+                         {selectedGoldKeys.length} selected
+                       </div>
+                     </div>
+
+                     <div className="flex flex-col gap-2 sm:flex-row">
+                       <input
+                         type="text"
+                         value={goldCandidateQuery}
+                         onChange={(event) => setGoldCandidateQuery(event.target.value)}
+                         onKeyDown={(event) => {
+                           if (event.key === 'Enter') {
+                             event.preventDefault();
+                             void searchGoldCandidates();
+                           }
+                         }}
+                         placeholder="Search ranked pool by key or summary"
+                         className="flex-1 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                       />
+                       <button
+                         type="button"
+                         onClick={() => { void searchGoldCandidates(); }}
+                         disabled={isSearchingGoldCandidates}
+                         className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)] disabled:opacity-50"
+                       >
+                         {isSearchingGoldCandidates ? 'Searching…' : 'Search'}
+                       </button>
+                     </div>
+
+                     <div className="flex flex-wrap gap-2">
+                       {selectedGoldKeys.length > 0 ? selectedGoldKeys.map((key) => (
+                         <button
+                           key={key}
+                           type="button"
+                           onClick={() => toggleGoldKey(key)}
+                           className="rounded-full border border-[rgba(43,89,74,0.14)] bg-white px-3 py-1 text-[12px] font-bold text-[var(--rf-brand)] transition hover:border-[var(--rf-brand)]"
+                         >
+                           {key} ×
+                         </button>
+                       )) : (
+                         <div className="text-[12px] text-[var(--rf-text-tertiary)]">No manual keys selected yet.</div>
+                       )}
+                     </div>
+
+                     <div className="space-y-2">
+                       {(goldCandidateResults.length > 0 ? goldCandidateResults : goldStoryPool.slice(0, 8)).map((entry: any) => {
+                         const selected = selectedGoldKeys.includes(entry.key);
+                         return (
+                           <button
+                             key={entry.key}
+                             type="button"
+                             onClick={() => toggleGoldKey(entry.key)}
+                             className={`w-full flex items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                               selected
+                                 ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]'
+                                 : 'border-[var(--rf-border)] bg-white hover:border-[var(--rf-border-strong)]'
+                             }`}
+                           >
+                             <span className="text-[11px] font-black tabular-nums rounded px-1.5 py-0.5 bg-white text-[var(--rf-brand)] min-w-[36px] text-center">
+                               {entry.score}
+                             </span>
+                             <div className="min-w-0 flex-1">
+                               <div className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</div>
+                               <div className="truncate text-[12px] text-[var(--rf-text-secondary)]">{entry.summary}</div>
+                             </div>
+                             <span className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-widest ${selected ? 'bg-white text-[var(--rf-brand)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'}`}>
+                               {selected ? 'Selected' : 'Add'}
+                             </span>
+                           </button>
+                         );
+                       })}
+                     </div>
+
+                     <div className="flex flex-wrap gap-2">
+                       <button
+                         type="button"
+                         onClick={() => {
+                           void persistGoldConfig({ notice: 'Gold issue keys saved.' }).catch((error) => alert(error.message));
+                         }}
+                         disabled={isSavingGoldConfig}
+                         className="rounded-xl bg-[var(--rf-text)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-black disabled:opacity-50"
+                       >
+                         {isSavingGoldConfig ? 'Saving…' : 'Save issue keys'}
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => setSelectedGoldKeys([])}
+                         className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)]"
+                       >
+                         Clear selection
+                       </button>
+                     </div>
+                   </div>
+                 </div>
+
+                 <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
+                   <div>
+                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Current Resolution</div>
+                     <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
+                       Preview of the cascade the generator will use on the next AR run.
+                     </div>
+                   </div>
+                   <div className="space-y-2 text-[13px]">
+                     <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
+                       <span className="font-bold text-[var(--rf-text)]">Manual keys:</span>{' '}
+                       <span className="text-[var(--rf-text-secondary)]">{currentGoldConfig.issueKeys?.length ? currentGoldConfig.issueKeys.join(', ') : 'none'}</span>
+                     </div>
+                     <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
+                       <span className="font-bold text-[var(--rf-text)]">Label fallback:</span>{' '}
+                       <span className="text-[var(--rf-text-secondary)]">{currentGoldConfig.label || 'none'}</span>
+                     </div>
+                     <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
+                       <span className="font-bold text-[var(--rf-text)]">Automatic fallback:</span>{' '}
+                       <span className="text-[var(--rf-text-secondary)]">{goldStoryPool.length ? `${Math.min(goldStoryPool.length, 8)} top-ranked stories` : 'empty until cache rebuild'}</span>
+                     </div>
+                   </div>
+
+                   <div className="pt-1 space-y-2">
+                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Top Ranked Pool</div>
+                     <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                       {goldStoryPool.length > 0 ? goldStoryPool.slice(0, 8).map((entry: any) => (
+                         <div key={entry.key} className="flex items-center gap-3 rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
+                           <span className="text-[11px] font-black tabular-nums rounded px-1.5 py-0.5 bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] min-w-[36px] text-center">{entry.score}</span>
+                           <span className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</span>
+                           <span className="text-xs font-medium text-[var(--rf-text-secondary)] truncate flex-1">{entry.summary}</span>
+                         </div>
+                       )) : (
+                         <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-white px-3 py-4 text-[12px] text-[var(--rf-text-tertiary)] text-center">
+                           Rebuild the backlog cache to populate ranked gold exemplars.
+                         </div>
+                       )}
+                     </div>
+                   </div>
+                 </div>
+               </div>
+             </div>
            </div>
            )}
          </div>

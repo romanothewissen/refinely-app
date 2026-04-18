@@ -9,7 +9,7 @@
 import { asApp, assumeTrustedRoute } from '@forge/api';
 import { callLlmJson } from './llm';
 import { buildRerankPrompt } from './prompts';
-import { ClarifyAnswer, SimilarStory, TenantConfig } from '../types';
+import { ClarifyAnswer, ProjectGoldExampleConfig, SimilarStory, TenantConfig } from '../types';
 import { objectDelete, objectRead, objectWrite, KEYS } from '../services/cache';
 import { resolveEffectiveGeneratorConfig } from '../services/model-strategy';
 import { ANCHOR_EXAMPLES, formatAnchorBundleText } from './ar-anchor-bundle';
@@ -20,6 +20,7 @@ interface BacklogDoc {
   description: string;
   acceptanceCriteria: string;
   updated: string;
+  labels?: string[];
 }
 
 interface LegacyBacklogIndexCache {
@@ -100,6 +101,7 @@ export interface GoldStoryEntry {
   summary: string;
   score: number;
   arSample: string;
+  labels?: string[];
 }
 
 export interface GoldStoryPool {
@@ -418,6 +420,7 @@ function selectGoldStories(projectKey: string, docs: BacklogDoc[], builtAt: stri
     summary: r.doc.summary,
     score: r.score,
     arSample: r.doc.acceptanceCriteria.slice(0, 1200),
+    labels: r.doc.labels,
   }));
 
   return { projectKey, builtAt, entries };
@@ -425,6 +428,46 @@ function selectGoldStories(projectKey: string, docs: BacklogDoc[], builtAt: stri
 
 export async function getGoldStoryPool(projectKey: string): Promise<GoldStoryPool | null> {
   return objectRead<GoldStoryPool>(KEYS.goldStoryPool(projectKey));
+}
+
+export function findGoldConfigForProject(
+  projectKey: string,
+  goldConfigs: ProjectGoldExampleConfig[] | undefined,
+): ProjectGoldExampleConfig | null {
+  if (!goldConfigs?.length) return null;
+  return goldConfigs.find((c) => c.projectKey === projectKey)
+    || goldConfigs.find((c) => c.projectKey === '*')
+    || null;
+}
+
+/**
+ * Resolve which gold-example keys to inject into the AR prompt.
+ *
+ * Cascade (priority order):
+ *   1. Manual `issueKeys` from per-project config.
+ *   2. Label filter — any gold-pool entry whose `labels` contain the configured label.
+ *   3. `null` → caller falls back to the auto-selected top pool entries.
+ */
+export function resolveGoldKeys(
+  projectKey: string,
+  goldConfigs: ProjectGoldExampleConfig[] | undefined,
+  pool: GoldStoryPool | null,
+): string[] | null {
+  const config = findGoldConfigForProject(projectKey, goldConfigs);
+  if (!config) return null;
+
+  const manualKeys = (config.issueKeys ?? []).map((k) => String(k).trim()).filter(Boolean);
+  if (manualKeys.length) return manualKeys;
+
+  const labelFilter = String(config.label ?? '').trim().toLowerCase();
+  if (labelFilter && pool?.entries?.length) {
+    const matched = pool.entries
+      .filter((entry) => (entry.labels ?? []).some((l) => l.toLowerCase() === labelFilter))
+      .map((entry) => entry.key);
+    if (matched.length) return matched;
+  }
+
+  return null;
 }
 
 export function formatGoldStoryExemplars(pool: GoldStoryPool, confirmedKeys?: string[]): string {
@@ -437,11 +480,10 @@ export function formatGoldStoryExemplars(pool: GoldStoryPool, confirmedKeys?: st
   if (!entries.length) return '';
 
   const lines: string[] = [
-    'GOLD STORY EXAMPLES from this workspace (match their specificity and depth — do not copy their scope):',
-    'Study the structure: compound preconditions in GIVEN, concrete business objects in THEN, distinct branch variants.',
+    'RELEVANT AR PATTERNS from similar deployed stories — study the specificity and level of detail and match this standard. Not more generic. Not more solution-specific.',
     '',
   ];
-  for (const entry of entries.slice(0, 5)) {
+  for (const entry of entries.slice(0, 8)) {
     lines.push(`— ${entry.summary}`);
     lines.push(entry.arSample.trim());
     lines.push('');
@@ -954,7 +996,7 @@ async function getApproximateCount(jql: string): Promise<number | null> {
 function buildFieldList(config: TenantConfig, projectKey: string): string[] {
   const mapping = config.arMappings?.find(m => m.projectKey === projectKey)
     || config.arMappings?.find(m => m.projectKey === '*');
-  const fieldIds = new Set<string>(['summary', 'description', 'updated']);
+  const fieldIds = new Set<string>(['summary', 'description', 'updated', 'labels']);
 
   if (mapping?.mode === 'consolidated' && mapping.consolidatedFieldId && mapping.consolidatedFieldId !== 'description') {
     fieldIds.add(mapping.consolidatedFieldId);
@@ -977,6 +1019,10 @@ function issueToBacklogDoc(
   const summary = String(issue.fields.summary ?? '').trim();
   const description = trimBacklogText(extractText(issue.fields.description), MAX_DESCRIPTION_CHARS);
   const acceptanceCriteria = trimBacklogText(extractAcceptanceCriteria(issue.fields, mapping), MAX_ACCEPTANCE_CRITERIA_CHARS);
+  const rawLabels = issue.fields.labels;
+  const labels = Array.isArray(rawLabels)
+    ? rawLabels.map((l) => String(l ?? '').trim()).filter(Boolean)
+    : undefined;
 
   return {
     key: issue.key,
@@ -984,6 +1030,7 @@ function issueToBacklogDoc(
     description,
     acceptanceCriteria,
     updated: String(issue.fields.updated ?? ''),
+    labels,
   };
 }
 

@@ -189,6 +189,12 @@ export const api = {
   refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),
   getBacklogRefreshStatus: (projectKey: string) => invoke('getBacklogRefreshStatus', { projectKey }),
   getGoldStoryPool: (projectKey: string) => invoke('getGoldStoryPool', { projectKey }),
+  searchBacklogForGoldCandidates: (payload: { projectKey: string; query?: string }) =>
+    invoke('searchBacklogForGoldCandidates', payload),
+  setGoldExampleKeys: (payload: { projectKey: string; issueKeys: string[] }) =>
+    invoke('setGoldExampleKeys', payload),
+  setGoldExampleLabel: (payload: { projectKey: string; label?: string }) =>
+    invoke('setGoldExampleLabel', payload),
   inferProjectPersonaRoles: (projectKey: string) => invoke('inferProjectPersonaRoles', { projectKey }),
 
   // History

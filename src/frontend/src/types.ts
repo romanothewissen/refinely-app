@@ -151,6 +151,12 @@ export interface ProjectDomainContext {
   personaRoles?: ProjectPersonaRole[];
 }
 
+export interface ProjectGoldExampleConfig {
+  projectKey: string;
+  issueKeys?: string[];
+  label?: string;
+}
+
 export interface TenantConfig {
   generatorConfig: GeneratorConfig;
   generationPreferences: GenerationPreferences;
@@ -181,6 +187,7 @@ export interface TenantConfig {
   issueLinkType: string;  // default: 'Relates to'
   arMappings: ProjectArMapping[];
   domainContexts?: ProjectDomainContext[];
+  goldExampleConfigs?: ProjectGoldExampleConfig[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
   developerTools?: {
@@ -820,7 +827,6 @@ export interface GenerationStageDurationsMs {
   decomposition?: number;
   acceptanceRequirements?: number;
   backfill?: number;
-  repair?: number;
   coverageCheck?: number;
   total?: number;
 }
@@ -828,6 +834,8 @@ export interface GenerationStageDurationsMs {
 export interface GenerationContextMeta extends ContextSourceMeta {
   pass2BatchWiChunkCount?: number;
   pass2ArPatternStoryKeys?: string[];
+  goldExampleIssueKeys?: string[];
+  goldExampleLabel?: string;
   sufficiencyStatus?: DiscoverySufficiencyResult['status'];
   sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
@@ -848,12 +856,6 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   autoRepairedIssues?: string[];
   remainingBlockingIssues?: string[];
   requiresUserDecision?: boolean;
-  repairedAcceptanceRequirementFeatureIds?: string[];
-  repairedAcceptanceRequirementTriggers?: Array<{
-    featureId: string;
-    trigger: 'structural' | 'weak_signal';
-    reasons: string[];
-  }>;
   failedFeatureIds?: string[];
   partialSuccess?: boolean;
   partialSuccessMessage?: string;

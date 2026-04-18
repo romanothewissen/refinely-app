@@ -128,6 +128,14 @@ export interface ProjectDomainContext {
   personaRoles?: ProjectPersonaRole[];
 }
 
+export interface ProjectGoldExampleConfig {
+  projectKey: string;
+  /** Manual gold issue keys chosen by the user. Highest precedence. */
+  issueKeys?: string[];
+  /** Jira label filter (e.g. "gold-example"). Second precedence. */
+  label?: string;
+}
+
 export interface ProjectBacklogStatusScope {
   projectKey: string;
   statuses: string[];
@@ -182,6 +190,7 @@ export interface TenantConfig {
   issueLinkType: string;  // default: 'Relates to'
   arMappings: ProjectArMapping[];
   domainContexts: ProjectDomainContext[];
+  goldExampleConfigs?: ProjectGoldExampleConfig[];
   backlogStatusScopes: ProjectBacklogStatusScope[];
   backlogThemeBudgetOverride?: number | null;
   /** Internal QA / prompt iteration — gate pipeline audit recording and export. */
@@ -268,6 +277,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
       context: '',
     }
   ],
+  goldExampleConfigs: [],
   backlogStatusScopes: [],
   backlogThemeBudgetOverride: null,
   developerTools: {
@@ -832,7 +842,6 @@ export interface GenerationStageDurationsMs {
   decomposition?: number;
   acceptanceRequirements?: number;
   backfill?: number;
-  repair?: number;
   coverageCheck?: number;
   total?: number;
 }
@@ -842,6 +851,10 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   pass2BatchWiChunkCount?: number;
   /** Backlog keys whose AR patterns were injected for Pass-2. */
   pass2ArPatternStoryKeys?: string[];
+  /** Gold exemplar backlog keys injected into Pass-2 AR generation. */
+  goldExampleIssueKeys?: string[];
+  /** Optional Jira label filter used to resolve gold exemplars. */
+  goldExampleLabel?: string;
   sufficiencyStatus?: DiscoverySufficiencyResult['status'];
   sufficiencyReasonCodes?: string[];
   similarStoriesCount?: number;
@@ -862,12 +875,6 @@ export interface GenerationContextMeta extends ContextSourceMeta {
   autoRepairedIssues?: string[];
   remainingBlockingIssues?: string[];
   requiresUserDecision?: boolean;
-  repairedAcceptanceRequirementFeatureIds?: string[];
-  repairedAcceptanceRequirementTriggers?: Array<{
-    featureId: string;
-    trigger: 'structural' | 'weak_signal';
-    reasons: string[];
-  }>;
   failedFeatureIds?: string[];
   partialSuccess?: boolean;
   partialSuccessMessage?: string;
