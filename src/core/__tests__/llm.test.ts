@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { extractJson, extractJsonWithMetadata } from '../json';
-import { buildLlmAuditMetadata, getRequestedThinkingBudget, mapReasoningDepthToEffort } from '../llm';
+import {
+  buildLlmAuditMetadata,
+  getRequestedThinkingBudget,
+  mapReasoningDepthToEffort,
+  openAIRequiresMaxCompletionTokens,
+  openAISupportsReasoning,
+} from '../llm';
 
 test('extractJson parses markdown-fenced JSON objects', () => {
   const parsed = extractJson<{
@@ -95,6 +101,20 @@ test('getRequestedThinkingBudget returns provider-specific budgets only when sup
   assert.equal(getRequestedThinkingBudget('gemini', 'gemini-1.5-flash', 'high'), undefined);
   assert.equal(getRequestedThinkingBudget('anthropic', 'claude-sonnet-4-0', 'medium'), 8192);
   assert.equal(getRequestedThinkingBudget('openai', 'gpt-4o', 'high'), undefined);
+});
+
+test('OpenAI GPT-5 models use reasoning controls and max_completion_tokens', () => {
+  assert.equal(openAISupportsReasoning('gpt-5.4'), true);
+  assert.equal(openAISupportsReasoning('gpt-5.4-mini'), true);
+  assert.equal(openAIRequiresMaxCompletionTokens('gpt-5.4'), true);
+  assert.equal(openAIRequiresMaxCompletionTokens('gpt-5.4-mini'), true);
+});
+
+test('legacy OpenAI chat models still avoid reasoning controls and max_completion_tokens', () => {
+  assert.equal(openAISupportsReasoning('gpt-4o'), false);
+  assert.equal(openAISupportsReasoning('gpt-4.1'), false);
+  assert.equal(openAIRequiresMaxCompletionTokens('gpt-4o'), false);
+  assert.equal(openAIRequiresMaxCompletionTokens('gpt-4.1'), false);
 });
 
 test('buildLlmAuditMetadata captures requested/resolved models and reasoning telemetry', () => {

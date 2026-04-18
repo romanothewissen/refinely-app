@@ -147,14 +147,15 @@ function anthropicSupportsThinking(model: string): boolean {
   return /claude-(3[-_]7|sonnet-4|opus-4|haiku-4|4[-_])/i.test(model);
 }
 
-function openAISupportsReasoning(model: string): boolean {
-  // reasoning: { effort } is only supported by o-series models (o1, o3, o4, o3-mini, etc.)
-  // GPT-4o and other chat models ignore or error on this parameter.
-  return /\bo\d/.test(model);
+export function openAISupportsReasoning(model: string): boolean {
+  // OpenAI reasoning controls are supported by o-series reasoning models and GPT-5 family models.
+  // GPT-4o / GPT-4.1 style chat models should continue to omit the reasoning block.
+  const normalized = model.trim().toLowerCase();
+  return normalized.startsWith('gpt-5') || /\bo\d/.test(normalized);
 }
 
-function openAIRequiresMaxCompletionTokens(model: string): boolean {
-  // o-series reasoning models use max_completion_tokens instead of max_tokens.
+export function openAIRequiresMaxCompletionTokens(model: string): boolean {
+  // GPT-5 and o-series models reject max_tokens and require max_completion_tokens instead.
   return openAISupportsReasoning(model);
 }
 
