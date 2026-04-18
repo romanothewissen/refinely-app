@@ -747,8 +747,11 @@ function LegacyApp({
   const [usage, setUsage] = useState<{
     currentMonth: number;
     credentialMode?: 'byok' | 'hosted_sampler';
-    quotaScope?: 'tenant';
+    quotaScope?: 'tenant' | 'user';
     resetCadence?: 'calendar_month';
+    remainingFastCredits?: number;
+    remainingBalancedCredits?: number;
+    remainingQualityCredits?: number;
   } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
   const [sidebarCacheCounts, setSidebarCacheCounts] = useState<Record<string, number>>({});

@@ -6,8 +6,11 @@ import type { PipelineProfile } from './types';
 type UsageSnapshot = {
   currentMonth: number;
   credentialMode?: 'byok' | 'hosted_sampler';
-  quotaScope?: 'tenant';
+  quotaScope?: 'tenant' | 'user';
   resetCadence?: 'calendar_month';
+  remainingFastCredits?: number;
+  remainingBalancedCredits?: number;
+  remainingQualityCredits?: number;
 } | null;
 
 interface SidebarProps {
@@ -211,14 +214,14 @@ export function Sidebar({
     : hasUnlimitedUsage
       ? 'Unlimited usage'
       : isHostedSampler
-        ? `${Math.max(0, usageLimit - usageCurrent)} hosted trial runs left this month`
+        ? `${usage.remainingFastCredits ?? 0}F / ${usage.remainingBalancedCredits ?? 0}B / ${usage.remainingQualityCredits ?? 0}Q preview runs left`
         : `${Math.max(0, usageLimit - usageCurrent)} left before guidance`;
   const usageCompactLabel = !usage || !limits
     ? 'Syncing'
     : hasUnlimitedUsage
       ? 'Unlimited'
       : isHostedSampler
-        ? `${Math.max(0, usageLimit - usageCurrent)} trial left`
+        ? `${Math.max(0, usageLimit - usageCurrent)} preview left`
         : `${Math.max(0, usageLimit - usageCurrent)} left`;
   const shouldShowHeaderUsage = Boolean(usage && limits && !hasUnlimitedUsage);
 

@@ -303,6 +303,7 @@ export async function handler(event: { body: GenerationEvent }) {
       for (let genAttempt = 0; genAttempt < maxGenAttempts; genAttempt++) {
         if (genAttempt > 0) {
           if (await isWorkflowCancelled(sessionId)) {
+            await releaseGenerationReservation(eventConfig, accountId, sessionId);
             await markCancelled(sessionId);
             return;
           }
@@ -399,6 +400,7 @@ export async function handler(event: { body: GenerationEvent }) {
             throw genErr;
           }
           if (await isWorkflowCancelled(sessionId)) {
+            await releaseGenerationReservation(eventConfig, accountId, sessionId);
             await markCancelled(sessionId);
             return;
           }
@@ -415,6 +417,7 @@ export async function handler(event: { body: GenerationEvent }) {
       const { sharedContext, result } = genOutcome;
 
       if (await isWorkflowCancelled(sessionId)) {
+        await releaseGenerationReservation(eventConfig, accountId, sessionId);
         await markCancelled(sessionId);
         return;
       }
@@ -485,6 +488,7 @@ export async function handler(event: { body: GenerationEvent }) {
       }
 
       if (await isWorkflowCancelled(sessionId)) {
+        await releaseGenerationReservation(eventConfig, accountId, sessionId);
         await markCancelled(sessionId);
         return;
       }
@@ -504,6 +508,9 @@ export async function handler(event: { body: GenerationEvent }) {
         advisoryTriage,
         pass1DraftFeatureCount: liveDraftFeatures.length || result.features.length,
         pass2ArPatternStoryKeys: result.generationContext?.pass2ArPatternStoryKeys ?? sharedContext.sources.arPatternStoryKeys,
+        goldExampleIssueKeys: result.generationContext?.goldExampleIssueKeys,
+        goldExampleLabel: result.generationContext?.goldExampleLabel,
+        selectedEvidenceSummary: result.generationContext?.selectedEvidenceSummary,
         failedFeatureIds: result.generationContext?.failedFeatureIds ?? [],
         partialSuccess: result.generationContext?.partialSuccess,
         partialSuccessMessage: result.generationContext?.partialSuccessMessage,
@@ -534,7 +541,9 @@ export async function handler(event: { body: GenerationEvent }) {
       };
       result.generationContext = generationContext;
 
-      await recordGeneration(eventConfig, accountId, sessionId);
+      const usageTracking = await recordGeneration(eventConfig, accountId, sessionId);
+      generationContext.usageSource = usageTracking.usageSource;
+      generationContext.freeCreditConsumed = usageTracking.freeCreditConsumed;
       const persistenceStartedAt = Date.now();
       await saveConversationTurn(
         sessionId,
@@ -575,6 +584,7 @@ export async function handler(event: { body: GenerationEvent }) {
             'Generated features with the Story Assistant bounded two-pass path.',
             `Reused one shared evidence bundle with ${sharedContext.sources.retrievedWiDocCount} work instruction documents and ${sharedContext.sources.similarStoriesCount} related backlog references.`,
             'Used pass 1 for feature decomposition and pass 2 for acceptance requirements only.',
+            `Usage source: ${usageTracking.usageSource}.`,
           ],
           contextUsage: {
             similarStoriesCount: sharedContext.sources.similarStoriesCount,
@@ -598,6 +608,7 @@ export async function handler(event: { body: GenerationEvent }) {
           projectKey: resolvePrimaryProjectKey(projectKey, projectKeys),
           model: modelRoute.ar ?? runConfig.generatorConfig.arModel,
           pipelineMode: 'story_assistant_default',
+          usageSource: usageTracking.usageSource,
         },
         enabled: Boolean(config.compliance?.enabled && config.compliance?.auditTrailEnabled),
       });
@@ -682,11 +693,13 @@ export async function handler(event: { body: GenerationEvent }) {
       });
     } catch (err) {
       if (await isWorkflowCancelled(sessionId) || err instanceof GenerationCancelledError) {
+        await releaseGenerationReservation(eventConfig, accountId, sessionId);
         await markCancelled(sessionId);
         return;
       }
 
       console.error('[generation-queue] Error:', err);
+      await releaseGenerationReservation(eventConfig, accountId, sessionId);
       await entitySetSmall(KEYS.generationProgress(sessionId), {
         type: 'error',
         sessionId,

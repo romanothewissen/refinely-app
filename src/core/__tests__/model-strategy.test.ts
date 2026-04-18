@@ -6,6 +6,7 @@ import {
   DEFAULT_BUCKET_CLASSES,
   MODEL_STRATEGY_VERSION,
   buildStoryAssistantModelRoute,
+  getStoryAssistantPipelineProfileConfig,
   resolveEffectiveGeneratorConfig,
   resolveGeneratorStrategyState,
   resolveStoryAssistantPipelineProfile,
@@ -29,7 +30,8 @@ test('uses the saved explicit role models for simple mode', () => {
 
   assert.equal(resolved.modelStrategy, 'simple');
   assert.equal(resolved.pipelineProfile, 'balanced');
-  assert.equal(resolved.decompositionModel, 'gpt-5.4');
+  assert.equal(resolved.decompositionModel, 'gpt-4o');
+  assert.equal(resolved.arModel, 'gpt-4o');
   assert.equal(resolved.clarifyModel, 'gpt-4o');
   assert.equal(resolved.refineModel, 'gpt-4o-mini');
   assert.equal(resolved.storyAssistantModelAssignments?.openai?.lightModel, 'gpt-4o');
@@ -99,8 +101,8 @@ test('defaults story assistant pipeline profile to balanced and resolves a deter
   assert.equal(route.clarify, resolved.clarifyModel);
   assert.equal(route.decomposition, resolved.decompositionModel);
   assert.equal(route.ar, resolved.arModel);
-  // Balanced route: decomposition and AR share the heavier model; clarify uses the lighter tier when the catalog distinguishes them.
   assert.equal(route.decomposition, route.ar);
+  assert.equal(route.clarify, route.decomposition);
 });
 
 test('infers quality and fast profiles from saved story assistant model families', () => {
@@ -150,4 +152,15 @@ test('honors explicit light and heavy story assistant assignments', () => {
   assert.equal(resolved.decompositionModel, 'claude-opus-4-6');
   assert.equal(resolved.arModel, 'claude-opus-4-6');
   assert.equal(resolved.storyAssistantModelAssignments?.anthropic?.lightModel, 'claude-haiku-4-5');
+});
+
+test('returns centralized story assistant profile config for each profile', () => {
+  const fast = getStoryAssistantPipelineProfileConfig({ pipelineProfile: 'fast' });
+  const balanced = getStoryAssistantPipelineProfileConfig({ pipelineProfile: 'balanced' });
+  const quality = getStoryAssistantPipelineProfileConfig({ pipelineProfile: 'quality' });
+
+  assert.equal(fast.generationOutputMaxTokens, 8192);
+  assert.equal(balanced.generationOutputMaxTokens, 12288);
+  assert.equal(quality.generationOutputMaxTokens, 16384);
+  assert.equal(quality.enableCoverageProbe, true);
 });

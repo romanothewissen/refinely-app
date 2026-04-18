@@ -140,8 +140,11 @@ interface PiiPreviewResult {
 type UsageSnapshot = {
   currentMonth: number;
   credentialMode?: 'byok' | 'hosted_sampler';
-  quotaScope?: 'tenant';
+  quotaScope?: 'tenant' | 'user';
   resetCadence?: 'calendar_month';
+  remainingFastCredits?: number;
+  remainingBalancedCredits?: number;
+  remainingQualityCredits?: number;
 } | null;
 const WI_ACCEPT = '.pdf,.csv,.eml,.txt,.md';
 const ROLE_GUIDANCE_MARKER = '\n\n[[role-guidance]]\n';
@@ -1271,7 +1274,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                   {isHostedSampler ? 'hosted trial' : tier}
                 </div>
                 <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                  {usage?.currentMonth ?? 0}<span className="text-[var(--rf-border-strong)]">/</span>{limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} {isHostedSampler ? 'hosted trial' : 'included'}
+                  {usage?.currentMonth ?? 0}<span className="text-[var(--rf-border-strong)]">/</span>{limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} {isHostedSampler ? 'preview credits' : 'included'}
                 </div>
               </div>
             </div>
@@ -1843,16 +1846,16 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                 <div className="rf-card p-4 flex items-center justify-between gap-6">
                   <div>
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Launch plan</div>
-                    <div className="text-xl font-black text-[var(--rf-brand)] capitalize mt-0.5">{isHostedSampler ? 'hosted trial' : tier}</div>
+                    <div className="text-xl font-black text-[var(--rf-brand)] capitalize mt-0.5">{isHostedSampler ? 'free preview' : tier}</div>
                     <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-1">
                       {isHostedSampler
-                        ? 'This workspace is using hosted sampler access: 5 generations per tenant per calendar month. Add your own provider key to continue past the hosted trial quota.'
+                        ? 'This workspace is using free preview access: 3 fast, 2 balanced, and 1 quality generation per user per calendar month. Add your own provider key to continue after the preview credits are used.'
                         : 'Refinely is launching with a single paid Standard tier and a 30-day Marketplace trial.'}
                     </div>
                   </div>
                   <div className="flex-1 max-w-xs space-y-1.5">
                     <div className="flex justify-between text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      <span>{isHostedSampler ? 'Hosted trial generations this month' : 'Included generations this month'}</span>
+                      <span>{isHostedSampler ? 'Preview generations this month' : 'Included generations this month'}</span>
                       <span>{usage?.currentMonth ?? 0}<span className="text-[var(--rf-text-tertiary)] font-medium"> / {limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0}</span></span>
                     </div>
                     {limits?.generationsPerMonth !== -1 && (
@@ -1873,12 +1876,12 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
                     </div>
                     <div className="text-sm font-semibold text-[var(--rf-text)]">
                       {isHostedSampler
-                        ? 'Connect your own Gemini, OpenAI, Anthropic, Azure OpenAI, or Ollama key in AI setup to keep generating after the 5-per-month hosted trial quota.'
+                        ? 'Connect your own Gemini, OpenAI, Anthropic, Azure OpenAI, or Ollama key in AI setup to keep generating after the 3/2/1 monthly preview credits are used.'
                         : 'Larger teams can contact support for a higher soft threshold and early access to advanced packaging.'}
                     </div>
                     <div className="text-[12px] text-[var(--rf-text-tertiary)]">
                       {isHostedSampler
-                        ? 'The hosted sampler is tenant-scoped and resets each calendar month. BYOK usage is not capped by this hosted trial quota.'
+                        ? 'Free preview credits are user-scoped and reset each calendar month. BYOK usage is not capped by these platform-funded preview credits.'
                         : 'We are keeping the launch offer simple, then expanding into larger-organization controls based on customer demand.'}
                     </div>
                   </div>
@@ -1901,7 +1904,7 @@ export function SettingsView({ onClose, initialTab = 'models', initialProjectKey
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { label: 'Generations', value: usage?.currentMonth ?? 0, sub: isHostedSampler ? `hosted trial ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} per month` : `included ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} before warning` },
+                      { label: 'Generations', value: usage?.currentMonth ?? 0, sub: isHostedSampler ? 'preview 3 fast / 2 balanced / 1 quality per month' : `included ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} before warning` },
                       { label: 'Tokens', value: workspaceTokenUsage.toLocaleString(), sub: 'approx.' },
                       { label: 'Projects', value: configuredProjectCount, sub: 'configured' },
                       { label: 'Records', value: transparencyReports.length + complianceEvents.length, sub: 'audit + transparency' },

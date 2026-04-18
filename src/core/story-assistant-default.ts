@@ -617,6 +617,11 @@ function buildBacklogPatternSummary(similarStories: SimilarStory[] = []): string
   return 'features tend to separate business capabilities, grounded role ownership, workflow gates, and concrete downstream effects into distinct scenarios';
 }
 
+function countWiDocsFromInsights(wiInsightsArtifact?: WorkInstructionInsightArtifact | null): number {
+  if (!wiInsightsArtifact?.sourceSpans?.length) return 0;
+  return new Set(wiInsightsArtifact.sourceSpans.map((span) => span.docId)).size;
+}
+
 function extractMustCarryRules(answers: ClarifyAnswer[]): string[] {
   return answers
     .filter((answer) => {
@@ -1927,7 +1932,7 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       goldExampleIssueKeys: goldExampleIssueKeys.length ? goldExampleIssueKeys : undefined,
       goldExampleLabel,
       selectedEvidenceSummary: {
-        wiDocCount: opts.wiInsightsArtifact?.sourceSpans?.length ?? 0,
+        wiDocCount: countWiDocsFromInsights(opts.wiInsightsArtifact),
         similarStoryCount: opts.similarStories?.length ?? 0,
         arPatternStoryCount: opts.arPatternStoryKeys?.length ?? 0,
         ...(goldExampleIssueKeys.length ? { goldExampleIssueKeys } : {}),

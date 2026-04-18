@@ -4,8 +4,11 @@ import { Zap, TrendingUp, AlertCircle, ExternalLink } from 'lucide-react';
 type UsageSnapshot = {
   currentMonth: number;
   credentialMode?: 'byok' | 'hosted_sampler';
-  quotaScope?: 'tenant';
+  quotaScope?: 'tenant' | 'user';
   resetCadence?: 'calendar_month';
+  remainingFastCredits?: number;
+  remainingBalancedCredits?: number;
+  remainingQualityCredits?: number;
 } | null;
 
 interface UsageMeterProps {
@@ -28,8 +31,11 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
   const isHostedSampler = usage?.credentialMode === 'hosted_sampler';
 
   const tierName = isHostedSampler
-    ? 'Hosted Trial'
+    ? 'Free Preview'
     : (tier.charAt(0) ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Standard');
+  const previewBreakdown = isHostedSampler
+    ? `${usage?.remainingFastCredits ?? 0}F / ${usage?.remainingBalancedCredits ?? 0}B / ${usage?.remainingQualityCredits ?? 0}Q left`
+    : null;
 
   if (isCompact) {
     const remaining = isUnlimited ? null : Math.max(0, max - current);
@@ -45,7 +51,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
               {isUnlimited
                 ? 'Unlimited plan'
                 : isHostedSampler
-                  ? `${remaining} hosted trial generations left`
+                  ? previewBreakdown ?? `${remaining} preview generations left`
                   : `${remaining} included before warning`}
             </div>
           </div>
@@ -106,7 +112,7 @@ export function UsageMeter({ usage, limits, tier, isCompact = false, className =
         {isAtLimit && (
           <p className="text-[11px] font-medium text-[var(--rf-warning)]">
             {isHostedSampler
-              ? 'Hosted trial limit reached for this workspace this month. Connect your own key in Settings to continue generating.'
+              ? 'Free preview credits are exhausted for this month. Connect your own key in Settings to continue generating.'
               : 'Included monthly usage guidance reached. Generation remains available while you coordinate a higher soft threshold with support.'}
           </p>
         )}

@@ -513,7 +513,10 @@ resolver.define('startGeneration', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const userPreferences = await getUserPreferences(accountId);
   const eventConfig = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
-  const check = await checkGenerationAllowed(eventConfig, context);
+  const check = await checkGenerationAllowed(eventConfig, context, {
+    sessionId: payload.sessionId,
+    reserveHostedPreview: true,
+  });
   if (!check.allowed) {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
@@ -619,7 +622,10 @@ resolver.define('retryGeneration', async ({ payload, context }) => {
 
   const userPreferences = await getUserPreferences(accountId);
   const eventConfig = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
-  const check = await checkGenerationAllowed(eventConfig, context);
+  const check = await checkGenerationAllowed(eventConfig, context, {
+    sessionId,
+    reserveHostedPreview: true,
+  });
   if (!check.allowed) {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
@@ -688,10 +694,6 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
 
   const userPreferences = await getUserPreferences(accountId);
   const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
-  const check = await checkGenerationAllowed(config, context);
-  if (!check.allowed) {
-    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
-  }
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
     projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
     projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
@@ -727,7 +729,7 @@ resolver.define('retryFailedFeatureGeneration', async ({ payload, context }) => 
 
   const generationQueue = new Queue({ key: 'generation-queue' });
   await generationQueue.push({ body: event });
-  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+  return { success: true, sessionId: payload.sessionId, warning: 'Retrying acceptance requirements without consuming an additional preview credit.' };
 });
 
 resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) => {
@@ -753,10 +755,6 @@ resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) =>
 
   const userPreferences = await getUserPreferences(accountId);
   const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
-  const check = await checkGenerationAllowed(config, context);
-  if (!check.allowed) {
-    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
-  }
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, {
     projectKey: retryContext?.projectKey ?? latestGenerateTurn?.generationContext?.projectKey,
     projectKeys: retryContext?.projectKeys ?? latestGenerateTurn?.generationContext?.projectKeys,
@@ -792,7 +790,7 @@ resolver.define('retryFailedFeatureGenerations', async ({ payload, context }) =>
 
   const generationQueue = new Queue({ key: 'generation-queue' });
   await generationQueue.push({ body: event });
-  return { success: true, sessionId: payload.sessionId, warning: check.reason };
+  return { success: true, sessionId: payload.sessionId, warning: 'Retrying acceptance requirements without consuming an additional preview credit.' };
 });
 
 async function cancelWorkflowProgress(
@@ -2359,6 +2357,13 @@ resolver.define('getUsage', async ({ context }) => {
       credentialMode: usage.credentialMode,
       quotaScope: usage.quotaScope,
       resetCadence: usage.resetCadence,
+      remainingFastCredits: usage.remainingFastCredits,
+      remainingBalancedCredits: usage.remainingBalancedCredits,
+      remainingQualityCredits: usage.remainingQualityCredits,
+      resetAt: usage.resetAt,
+      hasUserApiKey: usage.hasUserApiKey,
+      generationAccessState: usage.generationAccessState,
+      warningState: usage.warningState,
     },
     limits,
     tier: effectiveTier,
@@ -2368,8 +2373,11 @@ resolver.define('getUsage', async ({ context }) => {
 
 resolver.define('resetUsage', async ({ context }) => {
   await ensureAdmin(context);
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   await entityDelete(KEYS.usageCurrentMonth);
   await entityDelete(KEYS.hostedSamplerUsageCurrentMonth);
+  await entityDelete(KEYS.usageCurrentMonthForAccount(accountId));
+  await entityDelete(KEYS.hostedSamplerUsageCurrentMonthForAccount(accountId));
   return { success: true };
 });
 
