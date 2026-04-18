@@ -128,6 +128,56 @@ const DISCOVERY_CATEGORY_ORDER: ClarifyCategoryKey[] = [
   'success_measurement',
 ];
 
+const CATEGORY_PLACEHOLDER_TEMPLATES: Record<ClarifyCategoryKey, Pick<ClarifyQuestion, 'category' | 'intent' | 'question' | 'suggestions'>> = {
+  context_trigger: {
+    category: 'Context & Trigger',
+    intent: 'Identify the specific business event or precondition that starts this work.',
+    question: 'What specific business event or precondition must be present before this work begins?',
+    suggestions: ['A specific customer-facing event', 'A scheduled or periodic trigger', 'An upstream system state change'],
+  },
+  user_personas: {
+    category: 'Roles & Personas',
+    intent: 'Clarify which roles initiate, perform, approve, or only observe each step.',
+    question: 'Which roles initiate, perform, approve, or only observe the key steps in this flow?',
+    suggestions: ['Single accountable owner throughout', 'Separate initiator and approver', 'Distinct performer and observer roles'],
+  },
+  functional_flow: {
+    category: 'Functional Flow',
+    intent: 'Map the main path, decision points, and resulting business states.',
+    question: 'What is the step-by-step flow, including decision branches and the resulting business state at each step?',
+    suggestions: ['Linear flow with one decision point', 'Branching flow with multiple paths', 'Flow with parallel activities'],
+  },
+  state_lifecycle: {
+    category: 'State & Lifecycle',
+    intent: 'Define the states, transitions, and handling of hold, resume, reopen, or cancellation.',
+    question: 'What are the distinct states this item can be in, and how are hold, resume, reopen, or cancellation handled?',
+    suggestions: ['Simple linear state progression', 'States with reopen supported', 'States with hold and resume supported'],
+  },
+  business_rules: {
+    category: 'Business Rules & Exceptions',
+    intent: 'Surface validation rules, thresholds, exceptions, and compliance constraints.',
+    question: 'What validation rules, thresholds, or exception paths govern this behavior?',
+    suggestions: ['Hard-stop validation on specific criteria', 'Soft warnings with override', 'Exception routing to a different actor'],
+  },
+  success_measurement: {
+    category: 'Success & Measurement',
+    intent: 'Define what "done" looks like and how completion or quality is judged in business terms.',
+    question: 'How will we know this is working — what business outcome or measurement indicates success?',
+    suggestions: ['A specific throughput or cycle-time improvement', 'A reduction in a named failure mode', 'A qualitative outcome a stakeholder confirms'],
+  },
+};
+
+function buildCategoryPlaceholderQuestion(categoryKey: ClarifyCategoryKey): ClarifyQuestion {
+  const template = CATEGORY_PLACEHOLDER_TEMPLATES[categoryKey];
+  return {
+    categoryKey,
+    category: template.category,
+    intent: template.intent,
+    question: template.question,
+    suggestions: [...template.suggestions],
+  };
+}
+
 function normalizeDiscoveryCategoryKey(categoryKey: ClarifyCategoryKey): ClarifyCategoryKey {
   return categoryKey;
 }
@@ -685,12 +735,16 @@ function buildSufficiencyUserMessage(input: {
   attachmentText?: string;
   wiEvidenceText?: string;
   similarStoriesText?: string;
+  missingCategoryKeys?: ClarifyCategoryKey[];
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText ?? '');
   const parts = [
     `Requirement: ${trimPromptText(mergedRequirement, 12000)}`,
     `Questions and answers so far:\n${formatClarifyAnswers(input.answers) || '(none)'}`,
   ];
+  if (input.missingCategoryKeys?.length) {
+    parts.push(`Discovery categories NOT yet asked or answered: ${input.missingCategoryKeys.join(', ')}. If any materially affect what gets built or how ARs are written, return sufficient:false with a follow-up covering one of them.`);
+  }
   if (input.wiEvidenceText?.trim()) {
     parts.push(`Operational evidence from Work Instructions (treat as already-known domain context):\n${input.wiEvidenceText}`);
   }
@@ -967,14 +1021,14 @@ export function mergeDiscoveryAssessments(
   llmAssessment: DiscoveryAssessment | null,
   heuristicAssessment: DiscoveryAssessment,
 ): DiscoveryAssessment {
-  if (!llmAssessment) return heuristicAssessment;
+  if (!llmAssessment) return applyDiscoveryDepthFloor(heuristicAssessment);
   const discoveryDepth = DISCOVERY_DEPTH_ORDER[heuristicAssessment.discoveryDepth] > DISCOVERY_DEPTH_ORDER[llmAssessment.discoveryDepth]
     ? heuristicAssessment.discoveryDepth
     : llmAssessment.discoveryDepth;
   const reasoningLevel = DISCOVERY_DEPTH_ORDER[heuristicAssessment.reasoningLevel] > DISCOVERY_DEPTH_ORDER[llmAssessment.reasoningLevel]
     ? heuristicAssessment.reasoningLevel
     : llmAssessment.reasoningLevel;
-  return {
+  const merged: DiscoveryAssessment = {
     ...llmAssessment,
     discoveryDepth,
     reasoningLevel,
@@ -985,6 +1039,33 @@ export function mergeDiscoveryAssessments(
     recommendedQuestionRange: {
       min: Math.max(llmAssessment.recommendedQuestionRange.min, heuristicAssessment.recommendedQuestionRange.min),
       max: Math.max(llmAssessment.recommendedQuestionRange.max, heuristicAssessment.recommendedQuestionRange.max),
+    },
+  };
+  return applyDiscoveryDepthFloor(merged);
+}
+
+// Deterministic floor: prevents Flash-tier self-assessment from downgrading
+// a clearly-deep requirement to "standard". Triggers on any domain.
+export function applyDiscoveryDepthFloor(assessment: DiscoveryAssessment): DiscoveryAssessment {
+  const dims = [
+    assessment.workflowComplexity,
+    assessment.actorComplexity,
+    assessment.ruleDensity,
+    assessment.exceptionDensity,
+    assessment.lifecycleComplexity,
+  ];
+  const highCount = dims.filter((d) => d === 'high').length;
+  const obligationCount = assessment.coverageObligations?.length ?? 0;
+  if (highCount < 3 && obligationCount < 7) return assessment;
+  const floorMin = 12;
+  const floorMax = 16;
+  return {
+    ...assessment,
+    discoveryDepth: 'deep',
+    reasoningLevel: DISCOVERY_DEPTH_ORDER[assessment.reasoningLevel] >= DISCOVERY_DEPTH_ORDER.deep ? assessment.reasoningLevel : 'deep',
+    recommendedQuestionRange: {
+      min: Math.max(assessment.recommendedQuestionRange.min, floorMin),
+      max: Math.max(assessment.recommendedQuestionRange.max, floorMax),
     },
   };
 }
@@ -1556,6 +1637,18 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     usageByStage.clarifyCoverageRetry = clarifyResult.usage;
     questions = parseStoryAssistantQuestionCandidates(clarifyResult.data);
   }
+  // Deterministic category-coverage backstop: if the LLM retry still left any
+  // required category absent, append a generic placeholder question per missing
+  // category so downstream stages receive full category coverage. Templates are
+  // intentionally domain-agnostic — they reference structural concepts only.
+  const stillMissing = DISCOVERY_CATEGORY_ORDER.filter(
+    (categoryKey) => !questions.some((question) => question.categoryKey === categoryKey),
+  );
+  if (stillMissing.length > 0 && questions.length > 0) {
+    for (const categoryKey of stillMissing) {
+      questions.push(buildCategoryPlaceholderQuestion(categoryKey));
+    }
+  }
   const quality = evaluateClarifyQuestionSetQuality(questions, discoveryAssessment);
   const coverageQualityScore = quality.score;
   const qualityReasons = quality.reasons;
@@ -1603,6 +1696,12 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
     .map((item) => typeof item === 'string' ? '' : item.categoryKey ?? '')
     .filter(Boolean))
     .map((key) => key as ClarifyCategoryKey);
+  const answeredCategoryKeys = uniqueStrings(opts.answers
+    .map((answer) => answer.categoryKey ?? '')
+    .filter(Boolean))
+    .map((key) => key as ClarifyCategoryKey);
+  const coveredCategoryKeys = new Set<ClarifyCategoryKey>([...askedCategoryKeys, ...answeredCategoryKeys]);
+  const missingCategoryKeysForPrompt = DISCOVERY_CATEGORY_ORDER.filter((key) => !coveredCategoryKeys.has(key));
   const wiEvidenceText = formatWiEvidence(opts.wiInsightsArtifact, opts.wiContextText ?? '');
   const similarStoriesText = formatDiscoveryBacklogEvidence(opts.similarStories ?? []);
   const promptAssemblyStartedAt = Date.now();
@@ -1612,6 +1711,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
     attachmentText: opts.attachmentText,
     wiEvidenceText,
     similarStoriesText,
+    missingCategoryKeys: missingCategoryKeysForPrompt,
   });
   const promptAssemblyMs = Date.now() - promptAssemblyStartedAt;
   try {

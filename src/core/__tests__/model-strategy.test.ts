@@ -160,7 +160,7 @@ test('returns centralized story assistant profile config for each profile', () =
   const quality = getStoryAssistantPipelineProfileConfig({ pipelineProfile: 'quality' });
 
   assert.equal(fast.generationOutputMaxTokens, 8192);
-  assert.equal(balanced.generationOutputMaxTokens, 12288);
+  assert.equal(balanced.generationOutputMaxTokens, 8192);
   assert.equal(quality.generationOutputMaxTokens, 16384);
   assert.equal(quality.enableCoverageProbe, true);
 });

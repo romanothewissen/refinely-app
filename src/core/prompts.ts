@@ -482,6 +482,8 @@ RULES:
 - Write as business outcomes, not implementation steps.
 - Be conceptual, not example-based. Do not invent one-off sample values.
 - Each AR should test one distinct thing.
+- A WHEN or THEN clause that joins two or more distinct capabilities, activities, states, or business objects with "and" MUST be split into separate ARs. One AR expresses exactly one capability.
+- A THEN clause is INVALID if it uses a collective verb that bundles multiple outcomes, such as "can incorporate ...", "handles all ...", "supports all identified ...", "manages the full set of ...", "accommodates every ...". Replace each collective outcome with one AR per concrete business outcome.
 - GIVEN clauses must describe a real business situation, not a configuration/setup state.
 - Avoid abstract placeholders like "configured mode" or "trigger event"; state the actual business fact.
 - Keep role usage consistent with each feature description; only introduce a different actor when the scenario explicitly requires it.
@@ -497,9 +499,15 @@ AR QUALITY:
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" -> GOOD: "GIVEN an agreement is linked to an item that has already been shipped".
 - BAD GIVEN: "GIVEN the trigger event is configured" -> GOOD: "GIVEN the required business event has occurred".
+- BAD (compound): "GIVEN [business object] has been created / WHEN the [actor] identifies the need for capability-A, capability-B, and capability-C / THEN the [business object] can incorporate all identified capabilities".
+  GOOD: three separate ARs. Each AR has a GIVEN naming the distinct real-world situation that makes ONE capability relevant, a WHEN naming ONE business moment, and a THEN naming ONE concrete business outcome tied to that one capability.
 - Do not describe detection mechanics like keyword matching, rule engine checks, pattern scoring, or payload parsing.
 - Do not use negative pseudo-categories like "not eligible" when a positive business category is known.
 - Keep all other feature fields unchanged.
+
+SELF-CHECK (perform before emitting):
+- For each AR, scan the WHEN and THEN clauses. If either contains " and " joining two nouns or verbs that could stand as independent outcomes, split the AR into separate ARs.
+- If any THEN uses a forbidden collective verb ("can incorporate", "handles all", "supports all identified", "manages the full set of", "accommodates every"), rewrite it as one AR per concrete outcome.
 
 OUTPUT FORMAT:
 Return JSON only with the same features array and acceptance_requirements filled in.`;
@@ -551,6 +559,8 @@ RULES:
 - REPLACE WEAK VERBS: stems like "Who is responsible for creating/approving X" are too broad. Rewrite to name the specific decision point: "Who signs off before parts are ordered?", "Which role owns cancelling a plan once execution has started?"
 - NO OVERLAP: two questions must not share the same core 4-word fragment in the stem. If two drafts both lead with "Who is responsible for …", collapse them into one sharper question.
 - For complex requirements, ensure the set spans every category that still has material gaps unless that category is already fully resolved by supplied evidence.
+- CATEGORY COVERAGE: If a discovery category listed in DISCOVERY DIMENSIONS is not already fully resolved by supplied evidence, your question set MUST include at least one question mapped to that category's categoryKey. You may not emit a final set where a non-resolved category is absent.
+- CATEGORY DISCIPLINE: A question about "how we will know this is working" or "what outcome indicates success" is success_measurement — do not file it under functional_flow or business_rules. A question about states, transitions, reopen, cancellation, or hold is state_lifecycle. A question about who initiates, performs, approves, or only observes is user_personas.
 - Do NOT ask about timelines, budgets, project ownership, or technology choices.
 - Do NOT ask anything already clearly answered in the requirement or supplied evidence.
 - Frame all questions in business language. Never mention system names or technical implementation concepts.
@@ -563,6 +573,7 @@ SELF-REVIEW before finalising:
 - Scan your draft for pairs of questions that a stakeholder would answer with the same kind of information. Merge or drop the weaker one.
 - Scan for domain-template questions that could be asked of any requirement in this space ("how do we measure success", "who approves", "who creates"). Rewrite them to name the specific decision, or drop them.
 - Scan for questions whose stem has 4+ consecutive words in common with another question. Rewrite one to point at a distinct decision.
+- Verify every non-resolved categoryKey from the DISCOVERY DIMENSIONS block appears at least once in the questions array. If one is missing, add or rewrite a question to cover it.
 
 OUTPUT FORMAT:
 {"ambiguity":{"level":"clear|medium|vague","score":1-10,"rationale":"one sentence explaining why"},"questions":[{"categoryKey":"context_trigger","category":"Context & Trigger","question":"Question?","suggestions":["Option A","Option B","Option C"]}]}
@@ -647,6 +658,7 @@ Keep the evaluation domain-aware and process-grounded, but system-agnostic in it
 
 RULES:
 - Ask a follow-up question only when a specific unresolved gap would materially change what gets built or how ARs are written.
+- If the caller reports that a required discovery categoryKey was never asked or never answered, return sufficient:false and produce a follow-up question covering that category.
 - Ask at most ${Math.max(1, Math.min(5, Math.round(opts.followupCap ?? 1)))} follow-up question${Math.max(1, Math.min(5, Math.round(opts.followupCap ?? 1))) === 1 ? '' : 's'} when discovery is insufficient.
 - Follow-up questions must be delta-only and must not repeat what has already been answered.
 - If sufficient is false and you ask a follow-up, suggestions are REQUIRED and must include 1 to 3 grounded suggestions.

@@ -49,7 +49,7 @@ const STORY_ASSISTANT_PROFILE_CONFIGS: Record<PipelineProfile, PipelineProfileCo
     similarStoryMaxResults: 6,
     arPatternMaxStories: 4,
     wiDocSelectionCap: 3,
-    generationOutputMaxTokens: 12288,
+    generationOutputMaxTokens: 8192,
     enableCoverageProbe: false,
   },
   quality: {
