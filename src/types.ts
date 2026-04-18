@@ -1170,9 +1170,15 @@ export interface PipelineAuditLlmCallRecord {
   seq: number;
   phase: string;
   model: string;
+  requestedModel?: string;
+  resolvedModel?: string;
   provider?: LlmProvider;
   durationMs?: number;
   usage?: { input: number; output: number };
+  maxTokens?: number;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+  thinkingBudget?: number;
+  thoughtTokens?: number;
   systemPrompt: string;
   userMessage: string;
   responseText: string;
@@ -1221,6 +1227,11 @@ export interface PipelineAuditBundle {
     projectKeys?: string[];
     generatorModels?: {
       pipelineProfile?: PipelineProfile;
+      requestedPipelineProfile?: PipelineProfile;
+      resolvedPipelineProfile?: PipelineProfile;
+      requestedModelRoute?: GenerationModelRoute;
+      resolvedModelRoute?: GenerationModelRoute;
+      selectedModeHonored?: boolean;
       triageModel?: string;
       clarifyModel?: string;
       evaluateModel?: string;

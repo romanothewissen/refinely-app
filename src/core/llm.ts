@@ -9,6 +9,7 @@ import type {
   LlmProvider,
   LlmVendorModelCatalog,
   LatestModelSelector,
+  PipelineAuditLlmCallRecord,
   PiiMaskingStats,
 } from '../types';
 import { maskPiiText } from '../services/compliance';
@@ -20,6 +21,7 @@ export interface LlmResponse {
   text: string;
   inputTokens?: number;
   outputTokens?: number;
+  thoughtTokens?: number;
   piiMasking?: PiiMaskingStats;
 }
 
@@ -79,6 +81,44 @@ function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number
     default:
       return undefined;
   }
+}
+
+export function getRequestedThinkingBudget(
+  provider: LlmProvider | undefined,
+  model: string,
+  effort: LlmCallOptions['reasoningEffort'],
+): number | undefined {
+  if (!effort || effort === 'none') return undefined;
+  if (provider === 'gemini') {
+    return buildGeminiThinkingConfig(model, effort)?.thinkingBudget as number | undefined;
+  }
+  if (provider === 'anthropic' && anthropicSupportsThinking(model)) {
+    return geminiThinkingBudget(effort);
+  }
+  return undefined;
+}
+
+export function buildLlmAuditMetadata(input: {
+  requestedModel: string;
+  resolvedModel: string;
+  provider?: LlmProvider;
+  maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
+  thoughtTokens?: number;
+}): Pick<
+  PipelineAuditLlmCallRecord,
+  'model' | 'requestedModel' | 'resolvedModel' | 'provider' | 'maxTokens' | 'reasoningEffort' | 'thinkingBudget' | 'thoughtTokens'
+> {
+  return {
+    model: input.resolvedModel,
+    requestedModel: input.requestedModel,
+    resolvedModel: input.resolvedModel,
+    provider: input.provider,
+    maxTokens: input.maxTokens,
+    reasoningEffort: input.reasoningEffort,
+    thinkingBudget: getRequestedThinkingBudget(input.provider, input.resolvedModel, input.reasoningEffort),
+    thoughtTokens: input.thoughtTokens,
+  };
 }
 
 // ─── Model-Capability Helpers ─────────────────────────────────────────────────
@@ -242,6 +282,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     effectiveOpts.provider,
     effectiveOpts.modelCatalog ?? (effectiveOpts.provider ? effectiveOpts.modelCatalogs?.[effectiveOpts.provider] : undefined),
   );
+  const requestedThinkingBudget = getRequestedThinkingBudget(opts.provider, resolvedModel, opts.reasoningEffort);
 
   const startedAt = Date.now();
   let result: LlmResponse;
@@ -262,9 +303,17 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
 
   const audit = getPipelineAuditWriter();
   if (audit) {
-    audit.appendLlmCall({
-      model: resolvedModel,
+    const auditMeta = buildLlmAuditMetadata({
+      requestedModel: opts.model,
+      resolvedModel,
       provider: opts.provider,
+      maxTokens: opts.maxTokens,
+      reasoningEffort: opts.reasoningEffort,
+      thoughtTokens: result.thoughtTokens,
+    });
+    audit.appendLlmCall({
+      ...auditMeta,
+      thinkingBudget: requestedThinkingBudget ?? auditMeta.thinkingBudget,
       systemPrompt: effectiveOpts.systemPrompt,
       userMessage: effectiveOpts.userMessage,
       responseText: result.text,
@@ -675,14 +724,14 @@ async function callGemini(opts: {
   let payload: {
     error?: { message?: string };
     candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
-    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
   } = {};
 
   try {
     payload = JSON.parse(rawBody) as {
       error?: { message?: string };
       candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
-      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
     };
   } catch {
     // Some Forge/network errors come back as plain text, not JSON.
@@ -707,6 +756,7 @@ async function callGemini(opts: {
     text,
     inputTokens: payload.usageMetadata?.promptTokenCount,
     outputTokens: payload.usageMetadata?.candidatesTokenCount,
+    thoughtTokens: payload.usageMetadata?.thoughtsTokenCount,
   };
 }
 
@@ -830,7 +880,8 @@ async function callOpenAI(opts: {
   return {
     text,
     inputTokens: payload.usage?.prompt_tokens,
-    outputTokens: payload.usage?.completion_tokens
+    outputTokens: payload.usage?.completion_tokens,
+    thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
   };
 }
 
@@ -888,7 +939,11 @@ async function callAzureOpenAI(opts: {
 
   const payload = JSON.parse(rawBody) as {
     choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      completion_tokens_details?: { reasoning_tokens?: number };
+    };
   };
 
   const content = payload.choices?.[0]?.message?.content ?? '';
@@ -898,6 +953,7 @@ async function callAzureOpenAI(opts: {
     text: text.trim(),
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
+    thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
   };
 }
 

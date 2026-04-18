@@ -23,7 +23,12 @@ import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier, recordGeneration, releaseGenerationReservation } from '../services/billing';
 import { entityDelete, entityGet, entitySet, entitySetSmall, entitySetWithTtl, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
-import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
+import {
+  buildStoryAssistantAuditRouteSummary,
+  buildStoryAssistantModelRoute,
+  resolveEffectiveGeneratorConfig,
+  resolveStoryAssistantPipelineProfile,
+} from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import { recordProjectActivity } from '../services/project-activity';
 import {
@@ -206,6 +211,10 @@ export async function handler(event: { body: GenerationEvent }) {
   } = event.body;
 
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
+  const requestedGeneratorConfig = {
+    ...(eventConfig.generatorConfig ?? {}),
+    ...(modelOverrides ?? {}),
+  };
   const config = {
     ...eventConfig,
     generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
@@ -222,6 +231,7 @@ export async function handler(event: { body: GenerationEvent }) {
   };
   const modelRoute = buildStoryAssistantModelRoute(runConfig.generatorConfig);
   const pipelineProfile = resolveStoryAssistantPipelineProfile(runConfig.generatorConfig);
+  const auditRouteSummary = buildStoryAssistantAuditRouteSummary(requestedGeneratorConfig, runConfig.generatorConfig);
   const auditMeta = isPipelineAuditRequested(config, pipelineAudit, auditRunId)
     ? { sessionId, auditRunId: auditRunId!, accountId }
     : null;
@@ -632,6 +642,12 @@ export async function handler(event: { body: GenerationEvent }) {
               primaryProjectKey: sharedContext.projectKey,
               projectKeys: sharedContext.projectKeys,
               generatorModels: {
+                requestedPipelineProfile: auditRouteSummary.requestedPipelineProfile,
+                resolvedPipelineProfile: auditRouteSummary.resolvedPipelineProfile,
+                requestedModelRoute: auditRouteSummary.requestedModelRoute,
+                resolvedModelRoute: auditRouteSummary.resolvedModelRoute,
+                selectedModeHonored: auditRouteSummary.selectedModeHonored,
+                pipelineProfile: auditRouteSummary.resolvedPipelineProfile,
                 decompositionModel: modelRoute.decomposition,
                 arModel: modelRoute.ar,
               },

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { extractJson, extractJsonWithMetadata } from '../json';
-import { mapReasoningDepthToEffort } from '../llm';
+import { buildLlmAuditMetadata, getRequestedThinkingBudget, mapReasoningDepthToEffort } from '../llm';
 
 test('extractJson parses markdown-fenced JSON objects', () => {
   const parsed = extractJson<{
@@ -88,4 +88,30 @@ test('mapReasoningDepthToEffort translates provider-neutral reasoning levels', (
   assert.equal(mapReasoningDepthToEffort('light'), 'low');
   assert.equal(mapReasoningDepthToEffort('standard'), 'medium');
   assert.equal(mapReasoningDepthToEffort('deep'), 'high');
+});
+
+test('getRequestedThinkingBudget returns provider-specific budgets only when supported', () => {
+  assert.equal(getRequestedThinkingBudget('gemini', 'gemini-3-flash-preview', 'high'), 16384);
+  assert.equal(getRequestedThinkingBudget('gemini', 'gemini-1.5-flash', 'high'), undefined);
+  assert.equal(getRequestedThinkingBudget('anthropic', 'claude-sonnet-4-0', 'medium'), 8192);
+  assert.equal(getRequestedThinkingBudget('openai', 'gpt-4o', 'high'), undefined);
+});
+
+test('buildLlmAuditMetadata captures requested/resolved models and reasoning telemetry', () => {
+  const meta = buildLlmAuditMetadata({
+    requestedModel: 'latest-pro',
+    resolvedModel: 'gemini-3-flash-preview',
+    provider: 'gemini',
+    maxTokens: 16384,
+    reasoningEffort: 'high',
+    thoughtTokens: 1200,
+  });
+
+  assert.equal(meta.model, 'gemini-3-flash-preview');
+  assert.equal(meta.requestedModel, 'latest-pro');
+  assert.equal(meta.resolvedModel, 'gemini-3-flash-preview');
+  assert.equal(meta.maxTokens, 16384);
+  assert.equal(meta.reasoningEffort, 'high');
+  assert.equal(meta.thinkingBudget, 16384);
+  assert.equal(meta.thoughtTokens, 1200);
 });

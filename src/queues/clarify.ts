@@ -17,7 +17,12 @@ import { formatSimilarStoriesText } from '../core/similar-stories';
 import { getEffectiveTier } from '../services/billing';
 import { entityGet, entitySet, entitySetSmall, entitySetWithTtl, KEYS } from '../services/cache';
 import { appendComplianceAuditEvent, maskPiiInAnswers, maskPiiText, mergePiiMaskingStats, saveTransparencyReport } from '../services/compliance';
-import { buildStoryAssistantModelRoute, resolveEffectiveGeneratorConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
+import {
+  buildStoryAssistantAuditRouteSummary,
+  buildStoryAssistantModelRoute,
+  resolveEffectiveGeneratorConfig,
+  resolveStoryAssistantPipelineProfile,
+} from '../services/model-strategy';
 import { getPipelineAuditWriter, isPipelineAuditRequested, runWithPipelineAuditContext } from '../services/pipeline-audit-context';
 import { recordProjectActivity } from '../services/project-activity';
 import {
@@ -50,6 +55,7 @@ export async function handler(event: { body: ClarifyEvent }) {
   } = event.body;
 
   const selectedProjectKeys = normalizeProjectKeys(projectKey, projectKeys);
+  const requestedGeneratorConfig = eventConfig.generatorConfig;
   const config = {
     ...eventConfig,
     generatorConfig: resolveEffectiveGeneratorConfig(eventConfig.generatorConfig),
@@ -67,6 +73,7 @@ export async function handler(event: { body: ClarifyEvent }) {
     const queueWaitMs = Math.max(0, workflowStartedAt - Number(event.body.enqueuedAt ?? workflowStartedAt));
     const modelRoute = buildStoryAssistantModelRoute(config.generatorConfig);
     const pipelineProfile = resolveStoryAssistantPipelineProfile(config.generatorConfig);
+    const auditRouteSummary = buildStoryAssistantAuditRouteSummary(requestedGeneratorConfig, config.generatorConfig);
     let currentProgress: { message?: string; payload?: ClarifyProgressPayload } = {};
     let stopHeartbeat: (() => void) | null = null;
     let firstProgressSentAt: number | null = null;
@@ -336,6 +343,12 @@ export async function handler(event: { body: ClarifyEvent }) {
               primaryProjectKey: sharedContext.projectKey,
               projectKeys: sharedContext.projectKeys,
               generatorModels: {
+                requestedPipelineProfile: auditRouteSummary.requestedPipelineProfile,
+                resolvedPipelineProfile: auditRouteSummary.resolvedPipelineProfile,
+                requestedModelRoute: auditRouteSummary.requestedModelRoute,
+                resolvedModelRoute: auditRouteSummary.resolvedModelRoute,
+                selectedModeHonored: auditRouteSummary.selectedModeHonored,
+                pipelineProfile: auditRouteSummary.resolvedPipelineProfile,
                 clarifyModel: config.generatorConfig.clarifyModel,
               },
               piiMaskingEnabled: piiEnabled,

@@ -5,6 +5,7 @@ import { getTierModel } from '../../services/billing';
 import {
   DEFAULT_BUCKET_CLASSES,
   MODEL_STRATEGY_VERSION,
+  buildStoryAssistantAuditRouteSummary,
   buildStoryAssistantModelRoute,
   getStoryAssistantPipelineProfileConfig,
   resolveEffectiveGeneratorConfig,
@@ -31,7 +32,7 @@ test('uses the saved explicit role models for simple mode', () => {
   assert.equal(resolved.modelStrategy, 'simple');
   assert.equal(resolved.pipelineProfile, 'balanced');
   assert.equal(resolved.decompositionModel, 'gpt-4o');
-  assert.equal(resolved.arModel, 'gpt-4o');
+  assert.equal(resolved.arModel, 'gpt-5.4');
   assert.equal(resolved.clarifyModel, 'gpt-4o');
   assert.equal(resolved.refineModel, 'gpt-4o-mini');
   assert.equal(resolved.storyAssistantModelAssignments?.openai?.lightModel, 'gpt-4o');
@@ -83,7 +84,7 @@ test('applies free-tier downgrades after explicit user model selection', () => {
   assert.equal(getTierModel(resolved.refineModel, 'free'), 'gpt-4o-mini');
 });
 
-test('defaults story assistant pipeline profile to balanced and resolves a deterministic mixed route', () => {
+test('defaults story assistant pipeline profile to balanced and resolves a light/light/heavy route', () => {
   const resolved = resolveEffectiveGeneratorConfig({
     provider: 'anthropic',
     modelStrategy: 'simple',
@@ -101,8 +102,8 @@ test('defaults story assistant pipeline profile to balanced and resolves a deter
   assert.equal(route.clarify, resolved.clarifyModel);
   assert.equal(route.decomposition, resolved.decompositionModel);
   assert.equal(route.ar, resolved.arModel);
-  assert.equal(route.decomposition, route.ar);
   assert.equal(route.clarify, route.decomposition);
+  assert.notEqual(route.ar, route.decomposition);
 });
 
 test('infers quality and fast profiles from saved story assistant model families', () => {
@@ -163,4 +164,56 @@ test('returns centralized story assistant profile config for each profile', () =
   assert.equal(balanced.generationOutputMaxTokens, 8192);
   assert.equal(quality.generationOutputMaxTokens, 16384);
   assert.equal(quality.enableCoverageProbe, true);
+});
+
+test('balanced audit summary shows a profile-honoring light/light/heavy route', () => {
+  const requested = {
+    provider: 'openai' as const,
+    pipelineProfile: 'balanced' as const,
+    clarifyModel: 'gpt-4o',
+    decompositionModel: 'gpt-4o',
+    arModel: 'gpt-5.4',
+  };
+  const resolved = resolveEffectiveGeneratorConfig({
+    ...requested,
+    modelStrategy: 'simple',
+    bucketClasses: DEFAULT_BUCKET_CLASSES,
+    modelStrategyVersion: MODEL_STRATEGY_VERSION,
+    refineModel: 'gpt-4o-mini',
+    evaluateModel: 'gpt-4o-mini',
+    triageModel: 'gpt-4o-mini',
+    themeModel: 'gpt-4o-mini',
+    maxTokens: 8192,
+  });
+
+  const summary = buildStoryAssistantAuditRouteSummary(requested, resolved);
+  assert.equal(summary.requestedPipelineProfile, 'balanced');
+  assert.equal(summary.resolvedPipelineProfile, 'balanced');
+  assert.equal(summary.selectedModeHonored, true);
+  assert.equal(summary.resolvedModelRoute.clarify, resolved.clarifyModel);
+  assert.equal(summary.resolvedModelRoute.decomposition, resolved.decompositionModel);
+  assert.equal(summary.resolvedModelRoute.ar, resolved.arModel);
+});
+
+test('quality audit summary exposes route mismatch when a quality run resolves to flash-class models', () => {
+  const summary = buildStoryAssistantAuditRouteSummary(
+    {
+      provider: 'gemini',
+      pipelineProfile: 'quality',
+      clarifyModel: 'gemini-3-flash-preview',
+      decompositionModel: 'gemini-3-flash-preview',
+      arModel: 'gemini-3-flash-preview',
+    },
+    {
+      provider: 'gemini',
+      pipelineProfile: 'quality',
+      clarifyModel: 'gemini-3-flash-preview',
+      decompositionModel: 'gemini-3-flash-preview',
+      arModel: 'gemini-3-flash-preview',
+    },
+  );
+
+  assert.equal(summary.requestedPipelineProfile, 'quality');
+  assert.equal(summary.resolvedPipelineProfile, 'quality');
+  assert.equal(summary.selectedModeHonored, false);
 });

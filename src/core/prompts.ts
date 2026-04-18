@@ -261,7 +261,7 @@ DECOMPOSITION FRAMEWORK — reason through each dimension:
 5. EXCEPTIONS & CHANGES: What disruptions, failures, or in-flight plan changes must be handled?
 6. DEPENDENCIES: What supporting capabilities must exist for this to work end to end?
 
-Each dimension that represents a distinct business outcome should become its own feature. Do not collapse independently testable capabilities into one broad feature.
+Each dimension that represents a distinct business outcome should become its own feature. Keep the feature set as small as possible while preserving genuinely different business outcomes.
 
 RULES:
 - Each feature must represent independent business value, not an implementation step.
@@ -280,11 +280,18 @@ RULES:
 - Keep descriptions concise. Put detailed rules, sequencing, dependencies, and exceptions into acceptance requirements in pass 2.
 - Split features when business behavior, ownership, rules, or outcomes materially differ.
 - Do not split by noun variations alone; keep variants together when they follow the same core process.
+- WORKFLOW BUNDLING: when one parent workflow coordinates multiple activity types, steps, or fulfillment paths, prefer one broader workflow feature with richer pass-2 acceptance requirements instead of noun-sliced sibling features.
+- Keep sequencing, sourcing, loaner timing, downstream initiation, and lifecycle state handling inside broader workflow features unless the requirement makes them distinct user-facing business outcomes with different ownership.
+- Do not split one parent workflow into thin siblings just because it mentions multiple sub-activities, record types, or logistics branches.
 - Do not invent adjacent capabilities unsupported by the requirement, answers, or supplied evidence.
 - If the ask names multi-step workflows, ensure decomposition covers downstream initiation, governance gates, and visibility when those are materially implied.
 - Do NOT write acceptance_requirements in this pass; leave them empty arrays.
 - Never return an empty features array.
 - ${processRule}
+
+BAD vs GOOD DECOMPOSITION SHAPE:
+- BAD: one orchestration requirement becomes many thin siblings like "Activity Creation", "Resource Linking", "Sequence Validation", "Shipment Creation", "Status View" when those are all branches of the same managed workflow.
+- GOOD: keep the smallest set of independently valuable workflow capabilities, then let pass 2 carry the sequencing rules, downstream triggers, and branch scenarios as acceptance requirements.
 ${taxonomySection}
 
 OUTPUT FORMAT:
@@ -491,16 +498,25 @@ RULES:
 - Cover dependency and ordering behavior when the feature involves sequenced activities.
 - Cover exception outcomes where the happy path can fail in realistic testing.
 - Avoid clone-like AR sets across sibling features. Each feature should include at least one scenario that is specific to that feature's unique boundary.
+- Before writing, silently classify each feature's AR set into:
+  1. the primary business path,
+  2. a business rule, gate, or dependency,
+  3. a branch, exception, visibility outcome, or downstream consequence when the feature implies one.
+- For multi-step or 5+ point workflow features, the AR set should normally include all three of those layers.
 
 AR QUALITY:
 - Prefer concrete business nouns (plan, quote, shipment, contract, order, agreement) over abstract verbs (validate, ensure, verify, confirm) in THEN clauses.
 - A THEN clause that consists only of abstract verbs without a concrete business object is not acceptable. Ground each AR in the feature's own scope.
+- CRUD-STYLE THEN clauses are not enough on their own. Phrases like "is created", "is added", "is linked", "is recorded", "is updated", or "is sourced" are insufficient unless they are tied to a business consequence, eligibility change, dependency, visibility outcome, or downstream effect.
+- WHEN clauses should name business moments, decisions, or gates — not generic add/update/remove actions repeated across every AR.
 
 COMMON MISTAKES TO AVOID:
 - BAD GIVEN: "GIVEN a contract is configured for shipment-based activation" -> GOOD: "GIVEN an agreement is linked to an item that has already been shipped".
 - BAD GIVEN: "GIVEN the trigger event is configured" -> GOOD: "GIVEN the required business event has occurred".
 - BAD (compound): "GIVEN [business object] has been created / WHEN the [actor] identifies the need for capability-A, capability-B, and capability-C / THEN the [business object] can incorporate all identified capabilities".
   GOOD: three separate ARs. Each AR has a GIVEN naming the distinct real-world situation that makes ONE capability relevant, a WHEN naming ONE business moment, and a THEN naming ONE concrete business outcome tied to that one capability.
+- BAD THEN: "the plan is created." GOOD THEN: "the plan becomes eligible for coordinated execution."
+- BAD THEN: "the shipment is created." GOOD THEN: "only the eligible fulfilment step is released for execution."
 - Do not describe detection mechanics like keyword matching, rule engine checks, pattern scoring, or payload parsing.
 - Do not use negative pseudo-categories like "not eligible" when a positive business category is known.
 - Keep all other feature fields unchanged.

@@ -73,6 +73,10 @@ export async function mergePipelineAuditBundle(
   const nextHeader: PipelineAuditBundle['header'] = {
     ...base.header,
     ...patch.mergeHeader,
+    generatorModels: {
+      ...base.header.generatorModels,
+      ...patch.mergeHeader?.generatorModels,
+    },
   };
 
   const mergedPii = mergePiiStats(base.header.piiMaskingStats, patch.mergeHeader?.piiMaskingStats);

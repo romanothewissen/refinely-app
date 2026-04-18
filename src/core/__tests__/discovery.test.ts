@@ -25,6 +25,7 @@ import {
   buildSizingRepairSystemPrompt,
   buildStoryAssistantDiscoveryAssessmentSystemPrompt,
   buildStoryAssistantClarifySystemPrompt,
+  buildStoryAssistantDecompositionSystemPrompt,
   buildStoryAssistantArSystemPrompt,
   buildStoryAssistantSufficiencySystemPrompt,
   buildTriageSystemPrompt,
@@ -693,6 +694,26 @@ test('story assistant ar prompt mirrors the legacy GIVEN/WHEN/THEN contract with
   assert.match(prompt, /real business situation/i);
   assert.match(prompt, /Avoid abstract placeholders/i);
   assert.match(prompt, /ROLE CONSTRAINT/i);
+  assert.match(prompt, /silently classify each feature's AR set/i);
+  assert.match(prompt, /CRUD-STYLE THEN clauses are not enough on their own/i);
+  assert.match(prompt, /"is created", "is added", "is linked", "is recorded", "is updated", or "is sourced"/i);
+  assert.match(prompt, /BAD THEN: "the plan is created\." GOOD THEN:/i);
+  assert.match(prompt, /branch, exception, visibility outcome, or downstream consequence/i);
+});
+
+test('story assistant decomposition prompt prefers workflow bundling over thin noun-splitting', () => {
+  const prompt = buildStoryAssistantDecompositionSystemPrompt({
+    domainContext: '',
+    domainRoles: [],
+    processTaxonomy: [],
+    processTaxonomyEnabled: false,
+  });
+
+  assert.match(prompt, /WORKFLOW BUNDLING/i);
+  assert.match(prompt, /do not split one parent workflow into thin siblings/i);
+  assert.match(prompt, /sequencing, sourcing, loaner timing, downstream initiation, and lifecycle state handling/i);
+  assert.match(prompt, /BAD vs GOOD DECOMPOSITION SHAPE/i);
+  assert.match(prompt, /one orchestration requirement becomes many thin siblings/i);
 });
 
 test('ar prompt uses range guidance without exact-count pressure', () => {

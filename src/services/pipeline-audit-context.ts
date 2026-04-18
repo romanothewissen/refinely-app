@@ -20,12 +20,18 @@ class PipelineAuditWriter {
 
   appendLlmCall(input: {
     model: string;
+    requestedModel?: string;
+    resolvedModel?: string;
     provider?: PipelineAuditLlmCallRecord['provider'];
     systemPrompt: string;
     userMessage: string;
     responseText: string;
     durationMs?: number;
     usage?: { input: number; output: number };
+    maxTokens?: number;
+    reasoningEffort?: PipelineAuditLlmCallRecord['reasoningEffort'];
+    thinkingBudget?: number;
+    thoughtTokens?: number;
     piiMasking?: PiiMaskingStats;
     parseOutcome?: PipelineAuditLlmCallRecord['parseOutcome'];
   }): void {
@@ -33,9 +39,15 @@ class PipelineAuditWriter {
       seq: 0,
       phase: this.phase,
       model: input.model,
+      requestedModel: input.requestedModel,
+      resolvedModel: input.resolvedModel,
       provider: input.provider,
       durationMs: input.durationMs,
       usage: input.usage,
+      maxTokens: input.maxTokens,
+      reasoningEffort: input.reasoningEffort,
+      thinkingBudget: input.thinkingBudget,
+      thoughtTokens: input.thoughtTokens,
       systemPrompt: input.systemPrompt,
       userMessage: input.userMessage,
       responseText: truncateForAudit(input.responseText),

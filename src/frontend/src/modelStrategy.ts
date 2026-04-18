@@ -185,7 +185,7 @@ export function resolveProfileModelAssignments(
   }
   return {
     clarifyModel: lightModel,
-    decompositionModel: heavyModel,
+    decompositionModel: lightModel,
     arModel: heavyModel,
   };
 }
@@ -233,7 +233,7 @@ export function resolveStoryAssistantAssignments(
   const stored = config?.storyAssistantModelAssignments?.[normalizedProvider];
   return {
     lightModel: fallback?.lightModel || stored?.lightModel || savedModels.clarifyModel || pick('flash'),
-    heavyModel: fallback?.heavyModel || stored?.heavyModel || savedModels.decompositionModel || savedModels.arModel || pick('pro'),
+    heavyModel: fallback?.heavyModel || stored?.heavyModel || savedModels.arModel || savedModels.decompositionModel || pick('pro'),
   };
 }
 

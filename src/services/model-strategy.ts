@@ -130,8 +130,38 @@ function resolveStoryAssistantProfileModels(
   return {
     clarifyModel: lightModel,
     decompositionModel: lightModel,
-    arModel: lightModel,
+    arModel: heavyModel,
   };
+}
+
+function buildRequestedStoryAssistantModelRoute(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+): GenerationModelRoute {
+  const savedModels = getSavedResolvedModels(generatorConfig ?? {});
+  return {
+    clarify: savedModels.clarifyModel,
+    decomposition: savedModels.decompositionModel,
+    ar: savedModels.arModel,
+  };
+}
+
+function routeSatisfiesProfileShape(
+  route: GenerationModelRoute,
+  pipelineProfile: PipelineProfile,
+): boolean {
+  const isLight = (modelId?: string) => {
+    const family = inferModelFamily(modelId);
+    return family === 'flash' || family === 'lite';
+  };
+  const isHeavy = (modelId?: string) => inferModelFamily(modelId) === 'pro';
+
+  if (pipelineProfile === 'fast') {
+    return isLight(route.clarify) && isLight(route.decomposition) && isLight(route.ar);
+  }
+  if (pipelineProfile === 'quality') {
+    return isHeavy(route.clarify) && isHeavy(route.decomposition) && isHeavy(route.ar);
+  }
+  return isLight(route.clarify) && isLight(route.decomposition) && isHeavy(route.ar);
 }
 
 export interface ResolvedGeneratorStrategyState {
@@ -185,7 +215,7 @@ function deriveStoryAssistantAssignments(
   existing?: StoryAssistantModelAssignment,
 ): StoryAssistantModelAssignment {
   const lightFallback = savedModels.clarifyModel || pickPresetFamilyModel(provider, 'flash');
-  const heavyFallback = savedModels.decompositionModel || savedModels.arModel || pickPresetFamilyModel(provider, 'pro');
+  const heavyFallback = savedModels.arModel || savedModels.decompositionModel || pickPresetFamilyModel(provider, 'pro');
   return {
     lightModel: existing?.lightModel || lightFallback,
     heavyModel: existing?.heavyModel || heavyFallback,
@@ -310,6 +340,32 @@ export function buildStoryAssistantModelRoute(
     clarify: effective.clarifyModel,
     decomposition: effective.decompositionModel,
     ar: effective.arModel,
+  };
+}
+
+export function buildStoryAssistantAuditRouteSummary(
+  requestedConfig: Partial<GeneratorConfig> | undefined,
+  resolvedConfig: Partial<GeneratorConfig> | undefined,
+): {
+  requestedPipelineProfile: PipelineProfile;
+  resolvedPipelineProfile: PipelineProfile;
+  requestedModelRoute: GenerationModelRoute;
+  resolvedModelRoute: GenerationModelRoute;
+  selectedModeHonored: boolean;
+} {
+  const requestedPipelineProfile = normalizePipelineProfile(requestedConfig?.pipelineProfile);
+  const resolvedPipelineProfile = resolveStoryAssistantPipelineProfile(resolvedConfig);
+  const requestedModelRoute = buildRequestedStoryAssistantModelRoute(requestedConfig);
+  const resolvedModelRoute = buildStoryAssistantModelRoute(resolvedConfig);
+
+  return {
+    requestedPipelineProfile,
+    resolvedPipelineProfile,
+    requestedModelRoute,
+    resolvedModelRoute,
+    selectedModeHonored:
+      requestedPipelineProfile === resolvedPipelineProfile
+      && routeSatisfiesProfileShape(resolvedModelRoute, requestedPipelineProfile),
   };
 }
 
