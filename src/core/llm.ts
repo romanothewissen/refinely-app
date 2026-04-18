@@ -93,10 +93,9 @@ function buildGeminiThinkingConfig(
   if (!effort || effort === 'none') return undefined;
   const budget = geminiThinkingBudget(effort);
   if (budget === undefined || budget === 0) return undefined;
-  // Thinking-capable Gemini models: 2.x series, explicit "thinking" in name, or "exp"
+  // Thinking-capable Gemini models: 2.x and 3.x series, explicit "thinking" in name, or "exp"
   // Non-thinking models (e.g. gemini-1.5-flash, gemini-1.0) do not accept thinkingConfig.
-  // When Gemini 3.0+ changes its schema, add a version branch here.
-  const isThinkingCapable = /gemini-(2[._]|flash-2|pro-2|exp)/i.test(model)
+  const isThinkingCapable = /gemini-([23][._\-]|flash-[23]|pro-[23]|exp)/i.test(model)
     || model.toLowerCase().includes('thinking');
   if (!isThinkingCapable) return undefined;
   return { thinkingBudget: budget };

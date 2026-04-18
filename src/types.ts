@@ -560,6 +560,7 @@ export interface DiscoveryProfile {
   scope: 'narrow' | 'moderate' | 'broad' | 'very_broad';
   complexity: 'low' | 'medium' | 'high' | 'very_high';
   ambiguity: 'low' | 'medium' | 'high';
+  reasoningLevel?: DiscoveryDepth;
   missingCategoryKeys: ClarifyCategoryKey[];
   recommendedInitialCount: number;
   followupCap: number;

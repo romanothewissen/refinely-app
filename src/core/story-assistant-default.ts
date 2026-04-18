@@ -19,7 +19,8 @@ import type {
 } from '../types';
 import { getTierModel } from '../services/billing';
 import { buildStoryAssistantModelRoute, getStoryAssistantPipelineProfileConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
-import { callLlmJsonWithUsage } from './llm';
+import { callLlmJsonWithUsage, mapReasoningDepthToEffort } from './llm';
+import type { LlmCallOptions } from './llm';
 import {
   buildAddFeatureSystemPrompt,
   buildStoryAssistantArSystemPrompt,
@@ -1044,6 +1045,19 @@ export function mergeDiscoveryAssessments(
   return applyDiscoveryDepthFloor(merged);
 }
 
+const REASONING_EFFORT_ORDER: Record<NonNullable<LlmCallOptions['reasoningEffort']>, number> = {
+  none: 0, low: 1, medium: 2, high: 3,
+};
+
+// Returns the lower of two reasoningEffort values so callers can cap dynamically-
+// derived effort at the profile ceiling without exceeding it.
+function capReasoningEffort(
+  effort: NonNullable<LlmCallOptions['reasoningEffort']>,
+  ceiling: NonNullable<LlmCallOptions['reasoningEffort']>,
+): NonNullable<LlmCallOptions['reasoningEffort']> {
+  return REASONING_EFFORT_ORDER[effort] <= REASONING_EFFORT_ORDER[ceiling] ? effort : ceiling;
+}
+
 // Deterministic floor: prevents Flash-tier self-assessment from downgrading
 // a clearly-deep requirement to "standard". Triggers on any domain.
 export function applyDiscoveryDepthFloor(assessment: DiscoveryAssessment): DiscoveryAssessment {
@@ -1259,6 +1273,7 @@ function buildMinimalDiscoveryProfile(
     scope,
     complexity,
     ambiguity,
+    reasoningLevel: assessment?.reasoningLevel,
     missingCategoryKeys: [],
     recommendedInitialCount: questionCount,
     followupCap,
@@ -1970,7 +1985,12 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     }),
     userMessage: arUserMessage,
     maxTokens: profileConfig.generationOutputMaxTokens,
-    reasoningEffort: profileConfig.arReasoning,
+    // Use the discovery assessment's reasoning level (set by applyDiscoveryDepthFloor
+    // for complex requirements) but cap it at the profile's ceiling so cost stays bounded.
+    reasoningEffort: capReasoningEffort(
+      mapReasoningDepthToEffort(opts.discoveryProfile?.reasoningLevel ?? 'light') ?? 'low',
+      profileConfig.arReasoning,
+    ),
     ...providerOpts,
   });
   stageUsage.acceptanceRequirements = pass2Result.usage;
