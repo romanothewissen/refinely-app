@@ -19,6 +19,8 @@ import type {
 } from './types';
 import { REDACTED } from './types';
 import { SearchableSelect, type SearchableSelectOption } from './components/SearchableSelect';
+import { MultiSearchSelect } from './components/MultiSearchSelect';
+import { StepIndicator, type StepConfig } from './components/StepIndicator';
 import {
   getCatalogEntriesForProvider,
   normalizePipelineProfile,
@@ -2425,27 +2427,36 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
   const [goldLabelDraft, setGoldLabelDraft] = useState('');
   const [roleInferenceResult, setRoleInferenceResult] = useState<InferProjectPersonaRolesResult | null>(null);
   const [selectedRoleSuggestionKeys, setSelectedRoleSuggestionKeys] = useState<string[]>([]);
-  const [expandedSections, setExpandedSections] = useState({
-    backlog: true,
-    guidance: true,
-    mapping: false,
-  });
+  const [activeStep, setActiveStep] = useState<'backlog' | 'gold' | 'guidance' | 'mapping'>('backlog');
+  const [showAllSections, setShowAllSections] = useState(false);
 
-  const toggleSection = (section: 'backlog' | 'guidance' | 'mapping') => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  };
+  // Track whether gold config has unsaved changes (for auto-save indicator)
+  const hasUnsavedGoldChanges = useMemo(() => {
+    const keysChanged = JSON.stringify([...selectedGoldKeys].sort()) !== JSON.stringify([...(currentGoldIssueKeys ?? [])].sort());
+    const labelChanged = goldLabelDraft.trim() !== (currentGoldConfig.label ?? '').trim();
+    return keysChanged || labelChanged;
+  }, [selectedGoldKeys, currentGoldIssueKeys, goldLabelDraft, currentGoldConfig.label]);
 
   useEffect(() => {
     setRoleInferenceResult(null);
     setSelectedRoleSuggestionKeys([]);
   }, [activeArProj]);
 
+  // Reset gold config state when the active project changes.
+  // NOTE: We intentionally do NOT depend on goldStoryPool here —
+  // resetting selectedGoldKeys on every pool update would discard unsaved edits.
+  // Pool changes are reflected in the candidate list via a separate effect below.
   useEffect(() => {
     setGoldCandidateQuery('');
-    setGoldCandidateResults(goldStoryPool.slice(0, 8));
     setSelectedGoldKeys(currentGoldIssueKeys);
     setGoldLabelDraft(currentGoldConfig.label ?? '');
-  }, [activeArProj, currentGoldConfig.label, currentGoldIssueKeys, currentGoldIssueKeysSignature, goldStoryPool]);
+  }, [activeArProj, currentGoldIssueKeysSignature]);
+
+  // When the pool loads/refreshes, update the default candidate list
+  // (but do NOT reset the user's manual key selections).
+  useEffect(() => {
+    setGoldCandidateResults(goldStoryPool.slice(0, 8));
+  }, [goldStoryPool]);
 
   const inferButtonDisabled = !activeArProj || activeArProj === '*' || isInferringPersonaRoles || indexedCount <= 0;
 
@@ -2469,6 +2480,30 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
         : [...current, key]
     ));
   };
+
+  // Debounced gold candidate search — fires 300ms after the user stops typing
+  const goldSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedSearchGoldCandidates = useCallback((query: string) => {
+    if (goldSearchTimerRef.current) clearTimeout(goldSearchTimerRef.current);
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setGoldCandidateResults(goldStoryPool.slice(0, 8));
+      return;
+    }
+    goldSearchTimerRef.current = setTimeout(() => {
+      void (async () => {
+        setIsSearchingGoldCandidates(true);
+        try {
+          const response = await api.searchBacklogForGoldCandidates({ projectKey: activeArProj, query: trimmed }) as any;
+          setGoldCandidateResults(response?.success ? (response.results ?? []) : []);
+        } catch {
+          setGoldCandidateResults([]);
+        } finally {
+          setIsSearchingGoldCandidates(false);
+        }
+      })();
+    }, 300);
+  }, [activeArProj, goldStoryPool]);
 
   const searchGoldCandidates = async (query = goldCandidateQuery) => {
     const trimmed = query.trim();
@@ -2644,10 +2679,39 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
       )}
 
       <div className="space-y-4">
+         {/* Step indicator */}
+         <div className="flex items-center justify-between gap-4">
+           <StepIndicator
+             steps={[
+               { id: 'backlog', label: 'Backlog', description: 'Define Jira statuses for AI context', required: true },
+               { id: 'gold', label: 'Gold Examples', description: 'Choose which stories shape AR quality' },
+               { id: 'guidance', label: 'Guidance', description: 'Project-specific rules and context' },
+               { id: 'mapping', label: 'Mapping', description: 'Map where Acceptance Criteria go' },
+             ]}
+             activeStep={activeStep}
+             completedSteps={new Set([
+               ...(indexedCount > 0 ? ['backlog' as const] : []),
+               ...(goldStoryPool.length > 0 || (currentGoldConfig.issueKeys?.length ?? 0) > 0 || currentGoldConfig.label ? ['gold' as const] : []),
+               ...(currentContext.context?.trim() ? ['guidance' as const] : []),
+               ...(currentMapping.consolidatedFieldId || currentMapping.iterativeFieldIds.length > 0 ? ['mapping' as const] : []),
+             ])}
+             onStepClick={(stepId: string) => setActiveStep(stepId as 'backlog' | 'gold' | 'guidance' | 'mapping')}
+           />
+           <button
+             type="button"
+             onClick={() => setShowAllSections(!showAllSections)}
+             className="text-[12px] font-bold text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text)] transition whitespace-nowrap"
+           >
+             {showAllSections ? 'Step view' : 'Show all'}
+           </button>
+         </div>
+
+         {/* Backlog Context section */}
+         {(showAllSections || activeStep === 'backlog') && (
          <div className="space-y-3">
            <button
              type="button"
-             onClick={() => toggleSection('backlog')}
+             onClick={() => { setActiveStep('backlog'); if (showAllSections) return; }}
              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
            >
              <div className="flex items-center gap-3">
@@ -2660,10 +2724,9 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                  <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Define Jira statuses for AI context.</p>
                </div>
              </div>
-             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.backlog ? 'rotate-90' : ''}`} />
+             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${(showAllSections || activeStep === 'backlog') ? 'rotate-90' : ''}`} />
            </button>
 
-           {expandedSections.backlog && (
            <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                <div className="rf-card px-4 py-3 ">
@@ -2803,27 +2866,34 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                          If no manual keys are selected, use this Jira label to resolve exemplars from the ranked pool.
                        </div>
                      </div>
-                     <div className="flex flex-col gap-2 sm:flex-row">
+                     <div className="flex items-center gap-3">
                        <input
                          type="text"
                          value={goldLabelDraft}
                          onChange={(event) => setGoldLabelDraft(event.target.value)}
+                         onBlur={() => {
+                           if (goldLabelDraft.trim() !== (currentGoldConfig.label ?? '').trim()) {
+                             void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
+                           }
+                         }}
+                         onKeyDown={(event) => {
+                           if (event.key === 'Enter') {
+                             event.preventDefault();
+                             if (goldLabelDraft.trim() !== (currentGoldConfig.label ?? '').trim()) {
+                               void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
+                             }
+                           }
+                         }}
                          placeholder="e.g. gold-example"
                          className="flex-1 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
                        />
-                       <button
-                         type="button"
-                         onClick={() => {
-                           void persistGoldConfig({ notice: 'Gold label saved.' }).catch((error) => alert(error.message));
-                         }}
-                         disabled={isSavingGoldConfig}
-                         className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)] disabled:opacity-50"
-                       >
-                         {isSavingGoldConfig ? 'Saving…' : 'Save label'}
-                       </button>
+                       {isSavingGoldConfig && (
+                         <span className="text-[12px] text-[var(--rf-brand)] animate-pulse">Saving…</span>
+                       )}
                      </div>
                      <div className="text-[12px] text-[var(--rf-text-tertiary)]">
                        Active label: <span className="font-semibold text-[var(--rf-text)]">{currentGoldConfig.label || 'none'}</span>
+                       <span className="ml-2 text-[var(--rf-text-tertiary)]">· Auto-saves on blur</span>
                      </div>
                    </div>
 
@@ -2840,116 +2910,99 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                        </div>
                      </div>
 
-                     <div className="flex flex-col gap-2 sm:flex-row">
-                       <input
-                         type="text"
-                         value={goldCandidateQuery}
-                         onChange={(event) => setGoldCandidateQuery(event.target.value)}
-                         onKeyDown={(event) => {
-                           if (event.key === 'Enter') {
-                             event.preventDefault();
-                             void searchGoldCandidates();
-                           }
-                         }}
-                         placeholder="Search ranked pool by key or summary"
-                         className="flex-1 rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
-                       />
-                       <button
-                         type="button"
-                         onClick={() => { void searchGoldCandidates(); }}
-                         disabled={isSearchingGoldCandidates}
-                         className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)] disabled:opacity-50"
-                       >
-                         {isSearchingGoldCandidates ? 'Searching…' : 'Search'}
-                       </button>
-                     </div>
+                     <MultiSearchSelect
+                       selectedValues={selectedGoldKeys}
+                       onToggle={toggleGoldKey}
+                       onRemove={(key) => toggleGoldKey(key)}
+                       options={(goldCandidateResults.length > 0 ? goldCandidateResults : goldStoryPool.slice(0, 12)).map((entry: any) => ({
+                         value: entry.key,
+                         label: entry.key,
+                         description: entry.summary,
+                         score: entry.score,
+                       }))}
+                       onSearchChange={(query) => {
+                         setGoldCandidateQuery(query);
+                         debouncedSearchGoldCandidates(query);
+                       }}
+                       searchValue={goldCandidateQuery}
+                       isSearching={isSearchingGoldCandidates}
+                       placeholder="Search by key or summary…"
+                       searchPlaceholder="Type to search ranked pool…"
+                       emptyStateLabel={goldStoryPool.length === 0 ? 'Rebuild the backlog cache to populate candidates.' : 'No matches found.'}
+                     />
 
-                     <div className="flex flex-wrap gap-2">
-                       {selectedGoldKeys.length > 0 ? selectedGoldKeys.map((key) => (
-                         <button
-                           key={key}
-                           type="button"
-                           onClick={() => toggleGoldKey(key)}
-                           className="rounded-full border border-[rgba(43,89,74,0.14)] bg-white px-3 py-1 text-[12px] font-bold text-[var(--rf-brand)] transition hover:border-[var(--rf-brand)]"
-                         >
-                           {key} ×
-                         </button>
-                       )) : (
-                         <div className="text-[12px] text-[var(--rf-text-tertiary)]">No manual keys selected yet.</div>
-                       )}
-                     </div>
-
-                     <div className="space-y-2">
-                       {(goldCandidateResults.length > 0 ? goldCandidateResults : goldStoryPool.slice(0, 8)).map((entry: any) => {
-                         const selected = selectedGoldKeys.includes(entry.key);
-                         return (
-                           <button
-                             key={entry.key}
-                             type="button"
-                             onClick={() => toggleGoldKey(entry.key)}
-                             className={`w-full flex items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
-                               selected
-                                 ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]'
-                                 : 'border-[var(--rf-border)] bg-white hover:border-[var(--rf-border-strong)]'
-                             }`}
-                           >
-                             <span className="text-[11px] font-black tabular-nums rounded px-1.5 py-0.5 bg-white text-[var(--rf-brand)] min-w-[36px] text-center">
-                               {entry.score}
-                             </span>
-                             <div className="min-w-0 flex-1">
-                               <div className="text-xs font-bold text-[var(--rf-text)]">{entry.key}</div>
-                               <div className="truncate text-[12px] text-[var(--rf-text-secondary)]">{entry.summary}</div>
-                             </div>
-                             <span className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-widest ${selected ? 'bg-white text-[var(--rf-brand)]' : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]'}`}>
-                               {selected ? 'Selected' : 'Add'}
-                             </span>
-                           </button>
-                         );
-                       })}
-                     </div>
-
-                     <div className="flex flex-wrap gap-2">
+                     <div className="flex flex-wrap items-center gap-2">
                        <button
                          type="button"
                          onClick={() => {
-                           void persistGoldConfig({ notice: 'Gold issue keys saved.' }).catch((error) => alert(error.message));
+                           void persistGoldConfig({ notice: 'Gold exemplar settings saved.' }).catch((error) => alert(error.message));
                          }}
-                         disabled={isSavingGoldConfig}
-                         className="rounded-xl bg-[var(--rf-text)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-black disabled:opacity-50"
+                         disabled={isSavingGoldConfig || !hasUnsavedGoldChanges}
+                         className={`rounded-xl px-4 py-2.5 text-[13px] font-bold transition disabled:opacity-50 ${hasUnsavedGoldChanges ? 'bg-[var(--rf-brand)] text-white hover:bg-[var(--rf-brand-hover)]' : 'bg-[var(--rf-text)] text-white hover:bg-black'}`}
                        >
-                         {isSavingGoldConfig ? 'Saving…' : 'Save issue keys'}
+                         {isSavingGoldConfig ? 'Saving…' : hasUnsavedGoldChanges ? 'Save changes' : 'Up to date'}
                        </button>
-                       <button
-                         type="button"
-                         onClick={() => setSelectedGoldKeys([])}
-                         className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)]"
-                       >
-                         Clear selection
-                       </button>
+                       {selectedGoldKeys.length > 0 && (
+                         <button
+                           type="button"
+                           onClick={() => setSelectedGoldKeys([])}
+                           className="rounded-xl border border-[var(--rf-border)] bg-white px-4 py-2.5 text-[13px] font-bold text-[var(--rf-text-secondary)] transition hover:bg-[var(--rf-surface-soft)]"
+                         >
+                           Clear all
+                         </button>
+                       )}
                      </div>
                    </div>
                  </div>
 
                  <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-4 space-y-3">
                    <div>
-                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Current Resolution</div>
+                     <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Exemplar Source</div>
                      <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-secondary)]">
-                       Preview of the cascade the generator will use on the next AR run.
+                       Priority cascade: the generator uses the first source with data.
                      </div>
                    </div>
                    <div className="space-y-2 text-[13px]">
-                     <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
-                       <span className="font-bold text-[var(--rf-text)]">Manual keys:</span>{' '}
-                       <span className="text-[var(--rf-text-secondary)]">{currentGoldConfig.issueKeys?.length ? currentGoldConfig.issueKeys.join(', ') : 'none'}</span>
-                     </div>
-                     <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
-                       <span className="font-bold text-[var(--rf-text)]">Label fallback:</span>{' '}
-                       <span className="text-[var(--rf-text-secondary)]">{currentGoldConfig.label || 'none'}</span>
-                     </div>
-                     <div className="rounded-lg border border-[var(--rf-border)] bg-white px-3 py-2">
-                       <span className="font-bold text-[var(--rf-text)]">Automatic fallback:</span>{' '}
-                       <span className="text-[var(--rf-text-secondary)]">{goldStoryPool.length ? `${Math.min(goldStoryPool.length, 8)} top-ranked stories` : 'empty until cache rebuild'}</span>
-                     </div>
+                     {(() => {
+                       const hasManual = (currentGoldConfig.issueKeys?.length ?? 0) > 0;
+                       const hasLabel = !!(currentGoldConfig.label?.trim());
+                       const hasPool = goldStoryPool.length > 0;
+                       const activeSource = hasManual ? 'manual' : hasLabel ? 'label' : 'pool';
+                       return (
+                         <>
+                           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between ${activeSource === 'manual' ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]' : 'border-[var(--rf-border)] bg-white'}`}>
+                             <div className="flex items-center gap-2">
+                               <span className={`w-2 h-2 rounded-full ${activeSource === 'manual' ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
+                               <span className="font-bold text-[var(--rf-text)]">Manual keys</span>
+                             </div>
+                             <span className={`text-[12px] font-semibold ${activeSource === 'manual' ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                               {hasManual ? `${currentGoldConfig.issueKeys!.length} selected` : 'none'}
+                               {activeSource === 'manual' && ' · Active'}
+                             </span>
+                           </div>
+                           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between ${activeSource === 'label' ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]' : 'border-[var(--rf-border)] bg-white'}`}>
+                             <div className="flex items-center gap-2">
+                               <span className={`w-2 h-2 rounded-full ${activeSource === 'label' ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
+                               <span className="font-bold text-[var(--rf-text)]">Label filter</span>
+                             </div>
+                             <span className={`text-[12px] font-semibold ${activeSource === 'label' ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                               {hasLabel ? currentGoldConfig.label : 'none'}
+                               {activeSource === 'label' && ' · Active'}
+                             </span>
+                           </div>
+                           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between ${activeSource === 'pool' ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-muted)]' : 'border-[var(--rf-border)] bg-white'}`}>
+                             <div className="flex items-center gap-2">
+                               <span className={`w-2 h-2 rounded-full ${activeSource === 'pool' ? 'bg-[var(--rf-brand)]' : 'bg-[var(--rf-text-tertiary)]'}`} />
+                               <span className="font-bold text-[var(--rf-text)]">Auto-ranked pool</span>
+                             </div>
+                             <span className={`text-[12px] font-semibold ${activeSource === 'pool' ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                               {hasPool ? `${Math.min(goldStoryPool.length, 8)} top stories` : 'empty until cache rebuild'}
+                               {activeSource === 'pool' && ' · Active'}
+                             </span>
+                           </div>
+                         </>
+                       );
+                     })()}
                    </div>
 
                    <div className="pt-1 space-y-2">
@@ -2972,253 +3025,257 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                </div>
              </div>
            </div>
-           )}
          </div>
+         )}
 
+         {/* Guidance section */}
+         {(showAllSections || activeStep === 'guidance') && (
+         <div className="space-y-3">
+           <button
+             type="button"
+             onClick={() => { setActiveStep('guidance'); }}
+             className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
+           >
+             <div className="flex items-center gap-3">
+               <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)]"><Globe className="w-4 h-4 text-[var(--rf-brand)]" /></div>
+               <div>
+                 <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
+                   Project Guidance
+                   <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">Recommended</span>
+                 </h5>
+                 <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Rules or context specific to this project.</p>
+               </div>
+             </div>
+             <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${(showAllSections || activeStep === 'guidance') ? 'rotate-90' : ''}`} />
+           </button>
+
+           <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
+             <div className="rf-card p-4 space-y-4">
+               <div>
+                 <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Domain context</div>
+                 <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Answer these to give the AI platform awareness. All three are optional — fill in what you know.</p>
+               </div>
+               {(() => {
+                 const raw = currentContext.context ?? '';
+                 const fields = isStructuredDomainContext(raw)
+                   ? parseDomainContextFields(raw)
+                   : { platforms: '', businessObjects: '', handoffs: raw };
+                 const update = (patch: Partial<DomainContextFields>) => {
+                   updateContext({ context: formatDomainContextFields({ ...fields, ...patch }) });
+                 };
+                 return (
+                   <div className="space-y-3">
+                     <div>
+                       <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What platforms or systems does your work connect to?</label>
+                       <input
+                         type="text"
+                         value={fields.platforms}
+                         onChange={e => update({ platforms: e.target.value })}
+                         placeholder='e.g. "Salesforce/ServiceMax and SAP"'
+                         className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
+                       />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What are the main business objects in your domain?</label>
+                       <input
+                         type="text"
+                         value={fields.businessObjects}
+                         onChange={e => update({ businessObjects: e.target.value })}
+                         placeholder='e.g. "service plans, work orders, entitlements, parts shipments"'
+                         className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
+                       />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What are the key handoffs between teams or systems?</label>
+                       <input
+                         type="text"
+                         value={fields.handoffs}
+                         onChange={e => update({ handoffs: e.target.value })}
+                         placeholder='e.g. "When a service plan is approved, work orders and parts shipments are created in back-office"'
+                         className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
+                       />
+                     </div>
+                   </div>
+                 );
+               })()}
+             </div>
+
+             <div className="rf-card p-4 space-y-4">
+               <div className="flex items-center justify-between gap-3">
+                 <div>
+                   <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Persona roles</div>
+                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Define project-specific roles and the activities they commonly perform.</p>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <button
+                     type="button"
+                     onClick={handleSuggestPersonaRoles}
+                     disabled={inferButtonDisabled}
+                     className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1.5"
+                   >
+                     {isInferringPersonaRoles ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <BrainCircuit className="w-3.5 h-3.5" />}
+                     Suggest from backlog
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => updateContext({ personaRoles: [...(currentContext.personaRoles ?? []), { role: '', activities: '' }] })}
+                     className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-lg transition"
+                   >
+                     + Add row
+                   </button>
+                 </div>
+               </div>
+               {indexedCount <= 0 && (
+                 <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-[13px] font-medium text-[var(--rf-text-tertiary)]">
+                   Build backlog context first to infer roles from a broad cached backlog sample.
+                 </div>
+               )}
+               {roleInferenceResult && (
+                 <div className={`rounded-xl border px-4 py-4 space-y-3 ${roleInferenceResult.success ? 'border-[var(--rf-border)] bg-white' : 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35'}`}>
+                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                     <div>
+                       <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Backlog suggestions</div>
+                       <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
+                         Reviewed suggestions from {roleInferenceResult.sampledIssueCount} sampled backlog item{roleInferenceResult.sampledIssueCount === 1 ? '' : 's'} across the cached project backlog.
+                       </div>
+                       {(roleInferenceResult.message || roleInferenceResult.error) && (
+                         <div className={`mt-1 text-[13px] font-medium ${roleInferenceResult.error ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                           {roleInferenceResult.error || roleInferenceResult.message}
+                         </div>
+                       )}
+                     </div>
+                     <button
+                       type="button"
+                       onClick={() => {
+                         setRoleInferenceResult(null);
+                         setSelectedRoleSuggestionKeys([]);
+                       }}
+                       className="self-start rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-1.5 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border-strong)]"
+                     >
+                       Dismiss
+                     </button>
+                   </div>
+
+                   {roleInferenceResult.suggestions.length > 0 && (
+                     <>
+                       <div className="space-y-2">
+                         {roleInferenceResult.suggestions.map((suggestion) => {
+                           const suggestionKey = suggestion.role.trim().toLowerCase();
+                           const checked = selectedRoleSuggestionKeys.includes(suggestionKey);
+                           const confidenceTone = suggestion.confidence === 'high'
+                             ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]'
+                             : suggestion.confidence === 'medium'
+                               ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]'
+                               : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]';
+                           return (
+                             <label key={suggestion.role} className="flex gap-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3 cursor-pointer">
+                               <input
+                                 type="checkbox"
+                                 checked={checked}
+                                 onChange={() => toggleRoleSuggestion(suggestion.role)}
+                                 className="mt-1 h-4 w-4 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20"
+                               />
+                               <div className="min-w-0 flex-1 space-y-1.5">
+                                 <div className="flex flex-wrap items-center gap-2">
+                                   <div className="text-sm font-bold text-[var(--rf-text)]">{suggestion.role}</div>
+                                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.16em] ${confidenceTone}`}>
+                                     {suggestion.confidence}
+                                   </span>
+                                 </div>
+                                 <div className="text-sm font-medium text-[var(--rf-text-secondary)]">{suggestion.activities}</div>
+                                 {suggestion.evidenceIssueKeys.length > 0 && (
+                                   <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                                     Evidence: {suggestion.evidenceIssueKeys.join(', ')}
+                                   </div>
+                                 )}
+                               </div>
+                             </label>
+                           );
+                         })}
+                       </div>
+                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                         <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                           {selectedRoleSuggestionKeys.length} selected. Added suggestions stay editable until you save the project.
+                         </div>
+                         <button
+                           type="button"
+                           onClick={handleAddSelectedRoleSuggestions}
+                           disabled={selectedRoleSuggestionKeys.length === 0}
+                           className="rounded-lg bg-[var(--rf-brand)] text-white px-3 py-2 text-[12px] font-bold uppercase tracking-widest transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+                         >
+                           Add selected
+                         </button>
+                       </div>
+                     </>
+                   )}
+                 </div>
+               )}
+               <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-2.5">
+                 <div className="space-y-3">
+                   <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
+                     <div>Role</div>
+                     <div>Activities</div>
+                     <div />
+                   </div>
+                   {currentPersonaRoles.map((row, index, allRows) => (
+                     <div key={`project-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(160px,200px)_1fr_auto] gap-2.5 items-start rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
+                       <div className="space-y-1">
+                         <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
+                         <input
+                           value={row.role}
+                           onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item) })}
+                           placeholder="Operations Coordinator"
+                           className="w-full rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                         />
+                       </div>
+                       <div className="space-y-1">
+                         <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Activities</div>
+                         <textarea
+                           value={row.activities}
+                           onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item) })}
+                           placeholder="Coordinates intake, checks timing windows, and confirms completion."
+                           className="min-h-[64px] w-full resize-none rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
+                         />
+                       </div>
+                       <button
+                         type="button"
+                         onClick={() => updateContext({ personaRoles: allRows.length === 1 ? [] : allRows.filter((_, idx) => idx !== index) })}
+                         className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
+                       >
+                         Remove
+                       </button>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             </div>
+
+             <div className="rf-card p-4 flex items-center justify-between gap-4">
+               <div>
+                 <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Issue link type</div>
+                 <div className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Used when issues created from this project are linked back to the source issue.</div>
+               </div>
+               <div className="relative w-44">
+                 <select
+                   value={currentMapping.issueLinkType || 'Relates to'}
+                   onChange={e => updateMapping({ issueLinkType: e.target.value })}
+                   className="appearance-none pr-6 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-3 py-1.5 rounded-lg text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
+                 >
+                   {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
+                 </select>
+                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
+               </div>
+             </div>
+           </div>
+         </div>
+         )}
+
+         {/* Mapping section */}
+         {(showAllSections || activeStep === 'mapping') && (
          <div className="space-y-3">
             <button
               type="button"
-              onClick={() => toggleSection('guidance')}
-              className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-[var(--rf-brand-muted)] flex items-center justify-center border border-[rgba(43,89,74,0.12)]"><Globe className="w-4 h-4 text-[var(--rf-brand)]" /></div>
-                <div>
-                  <h5 className="text-sm font-bold text-[var(--rf-text)] flex items-center gap-2">
-                    Project Guidance
-                    <span className="rounded-md bg-[var(--rf-surface-soft)] px-2 py-0.5 text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] border border-[var(--rf-border)]">Recommended</span>
-                  </h5>
-                  <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Rules or context specific to this project.</p>
-                </div>
-              </div>
-              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.guidance ? 'rotate-90' : ''}`} />
-            </button>
-            {expandedSections.guidance && (
-              <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
-                <div className="rf-card p-4 space-y-4">
-                  <div>
-                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Domain context</div>
-                    <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Answer these to give the AI platform awareness. All three are optional — fill in what you know.</p>
-                  </div>
-                  {(() => {
-                    const raw = currentContext.context ?? '';
-                    const fields = isStructuredDomainContext(raw)
-                      ? parseDomainContextFields(raw)
-                      : { platforms: '', businessObjects: '', handoffs: raw };
-                    const update = (patch: Partial<DomainContextFields>) => {
-                      updateContext({ context: formatDomainContextFields({ ...fields, ...patch }) });
-                    };
-                    return (
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What platforms or systems does your work connect to?</label>
-                          <input
-                            type="text"
-                            value={fields.platforms}
-                            onChange={e => update({ platforms: e.target.value })}
-                            placeholder='e.g. "Salesforce/ServiceMax and SAP"'
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What are the main business objects in your domain?</label>
-                          <input
-                            type="text"
-                            value={fields.businessObjects}
-                            onChange={e => update({ businessObjects: e.target.value })}
-                            placeholder='e.g. "service plans, work orders, entitlements, parts shipments"'
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-bold text-[var(--rf-text-secondary)] mb-1 block">What are the key handoffs between teams or systems?</label>
-                          <input
-                            type="text"
-                            value={fields.handoffs}
-                            onChange={e => update({ handoffs: e.target.value })}
-                            placeholder='e.g. "When a service plan is approved, work orders and parts shipments are created in back-office"'
-                            className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-xl px-4 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                <div className="rf-card p-4 space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Persona roles</div>
-                      <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Define project-specific roles and the activities they commonly perform.</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleSuggestPersonaRoles}
-                        disabled={inferButtonDisabled}
-                        className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1 rounded-lg transition inline-flex items-center gap-1.5"
-                      >
-                        {isInferringPersonaRoles ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <BrainCircuit className="w-3.5 h-3.5" />}
-                        Suggest from backlog
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateContext({ personaRoles: [...(currentContext.personaRoles ?? []), { role: '', activities: '' }] })}
-                        className="text-[12px] font-bold text-[var(--rf-brand)] bg-[var(--rf-brand-muted)] hover:bg-[var(--rf-brand-subtle)] px-2.5 py-1 rounded-lg transition"
-                      >
-                        + Add row
-                      </button>
-                    </div>
-                  </div>
-                  {indexedCount <= 0 && (
-                    <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5 text-[13px] font-medium text-[var(--rf-text-tertiary)]">
-                      Build backlog context first to infer roles from a broad cached backlog sample.
-                    </div>
-                  )}
-                  {roleInferenceResult && (
-                    <div className={`rounded-xl border px-4 py-4 space-y-3 ${roleInferenceResult.success ? 'border-[var(--rf-border)] bg-white' : 'border-[var(--rf-danger-subtle)] bg-[var(--rf-danger-subtle)]/35'}`}>
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                        <div>
-                          <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Backlog suggestions</div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
-                            Reviewed suggestions from {roleInferenceResult.sampledIssueCount} sampled backlog item{roleInferenceResult.sampledIssueCount === 1 ? '' : 's'} across the cached project backlog.
-                          </div>
-                          {(roleInferenceResult.message || roleInferenceResult.error) && (
-                            <div className={`mt-1 text-[13px] font-medium ${roleInferenceResult.error ? 'text-[var(--rf-danger)]' : 'text-[var(--rf-text-tertiary)]'}`}>
-                              {roleInferenceResult.error || roleInferenceResult.message}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRoleInferenceResult(null);
-                            setSelectedRoleSuggestionKeys([]);
-                          }}
-                          className="self-start rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-1.5 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-border-strong)]"
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-
-                      {roleInferenceResult.suggestions.length > 0 && (
-                        <>
-                          <div className="space-y-2">
-                            {roleInferenceResult.suggestions.map((suggestion) => {
-                              const suggestionKey = suggestion.role.trim().toLowerCase();
-                              const checked = selectedRoleSuggestionKeys.includes(suggestionKey);
-                              const confidenceTone = suggestion.confidence === 'high'
-                                ? 'bg-[var(--rf-success-subtle)] text-[var(--rf-success)]'
-                                : suggestion.confidence === 'medium'
-                                  ? 'bg-[var(--rf-warning-subtle)] text-[var(--rf-warning)]'
-                                  : 'bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)]';
-                              return (
-                                <label key={suggestion.role} className="flex gap-3 rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-3 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleRoleSuggestion(suggestion.role)}
-                                    className="mt-1 h-4 w-4 rounded border-[var(--rf-border)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]/20"
-                                  />
-                                  <div className="min-w-0 flex-1 space-y-1.5">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="text-sm font-bold text-[var(--rf-text)]">{suggestion.role}</div>
-                                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.16em] ${confidenceTone}`}>
-                                        {suggestion.confidence}
-                                      </span>
-                                    </div>
-                                    <div className="text-sm font-medium text-[var(--rf-text-secondary)]">{suggestion.activities}</div>
-                                    {suggestion.evidenceIssueKeys.length > 0 && (
-                                      <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
-                                        Evidence: {suggestion.evidenceIssueKeys.join(', ')}
-                                      </div>
-                                    )}
-                                  </div>
-                                </label>
-                              );
-                            })}
-                          </div>
-                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                            <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
-                              {selectedRoleSuggestionKeys.length} selected. Added suggestions stay editable until you save the project.
-                            </div>
-                            <button
-                              type="button"
-                              onClick={handleAddSelectedRoleSuggestions}
-                              disabled={selectedRoleSuggestionKeys.length === 0}
-                              className="rounded-lg bg-[var(--rf-brand)] text-white px-3 py-2 text-[12px] font-bold uppercase tracking-widest transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Add selected
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  <div className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] p-3 space-y-2.5">
-                    <div className="space-y-3">
-                      <div className="hidden md:grid md:grid-cols-[minmax(180px,220px)_1fr_auto] gap-3 px-1 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                        <div>Role</div>
-                        <div>Activities</div>
-                        <div />
-                      </div>
-                      {currentPersonaRoles.map((row, index, allRows) => (
-                        <div key={`project-role-${index}`} className="grid grid-cols-1 md:grid-cols-[minmax(160px,200px)_1fr_auto] gap-2.5 items-start rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2.5">
-                          <div className="space-y-1">
-                            <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Role</div>
-                            <input
-                              value={row.role}
-                              onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, role: e.target.value } : item) })}
-                              placeholder="Operations Coordinator"
-                              className="w-full rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <div className="md:hidden text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Activities</div>
-                            <textarea
-                              value={row.activities}
-                              onChange={e => updateContext({ personaRoles: allRows.map((item, idx) => idx === index ? { ...item, activities: e.target.value } : item) })}
-                              placeholder="Coordinates intake, checks timing windows, and confirms completion."
-                              className="min-h-[64px] w-full resize-none rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-sm font-medium text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-2 focus:ring-[var(--rf-brand)]/20"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => updateContext({ personaRoles: allRows.length === 1 ? [] : allRows.filter((_, idx) => idx !== index) })}
-                            className="md:mt-1 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] transition hover:border-[var(--rf-danger-subtle)] hover:text-[var(--rf-danger)]"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rf-card p-4 flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-brand)]">Issue link type</div>
-                    <div className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-1">Used when issues created from this project are linked back to the source issue.</div>
-                  </div>
-                  <div className="relative w-44">
-                    <select
-                      value={currentMapping.issueLinkType || 'Relates to'}
-                      onChange={e => updateMapping({ issueLinkType: e.target.value })}
-                      className="appearance-none pr-6 w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] px-3 py-1.5 rounded-lg text-sm font-semibold text-[var(--rf-text)] focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] outline-none transition"
-                    >
-                      {['Relates to', 'Blocks', 'Clones', 'Duplicates'].map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--rf-text-tertiary)] pointer-events-none" />
-                  </div>
-                </div>
-              </div>
-            )}
-         </div>
-
-         <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => toggleSection('mapping')}
+              onClick={() => setActiveStep('mapping')}
               className="w-full flex items-center justify-between gap-4 rounded-xl border border-[var(--rf-border)] bg-white px-5 py-4 text-left shadow-sm hover:border-[var(--rf-border-strong)] transition"
             >
               <div className="flex items-center gap-3">
@@ -3231,9 +3288,8 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                   <p className="text-xs font-medium text-[var(--rf-text-tertiary)] mt-0.5">Map where Acceptance Criteria go.</p>
                 </div>
               </div>
-              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${expandedSections.mapping ? 'rotate-90' : ''}`} />
+              <ChevronRight className={`w-5 h-5 text-[var(--rf-text-tertiary)] transition-transform ${(showAllSections || activeStep === 'mapping') ? 'rotate-90' : ''}`} />
             </button>
-            {expandedSections.mapping && (
             <div className="bg-[var(--rf-surface-soft)] rounded-xl p-5 border border-[var(--rf-border)] space-y-5">
                <div className="rf-card p-4 ">
                  <div className="flex items-start justify-between gap-4">
@@ -3282,8 +3338,8 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                  </div>
                </div>
             </div>
-            )}
          </div>
+         )}
       </div>
     </div>
   );
