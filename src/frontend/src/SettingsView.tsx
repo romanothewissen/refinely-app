@@ -400,6 +400,10 @@ export function SettingsView({
   const [ollamaApiKey, setOllamaApiKey] = useState('');
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
   const [existingOllamaApiKey, setExistingOllamaApiKey] = useState('');
+
+  const [groqApiKey, setGroqApiKey] = useState('');
+  const [groqBaseUrl, setGroqBaseUrl] = useState('');
+  const [existingGroqApiKey, setExistingGroqApiKey] = useState('');
   const [modelCatalogs, setModelCatalogs] = useState<LlmModelCatalogByVendor>({});
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
   const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
@@ -485,13 +489,13 @@ export function SettingsView({
   }, [arMappings, domainContexts, backlogStatusScopes]);
 
   const completionStatus = useMemo(() => {
-    const hasApiKey = !!(existingAnthropicApiKey || existingGeminiApiKey || existingOpenaiApiKey || existingAzureOpenAIApiKey || existingOllamaApiKey);
+    const hasApiKey = !!(existingAnthropicApiKey || existingGeminiApiKey || existingOpenaiApiKey || existingAzureOpenAIApiKey || existingOllamaApiKey || existingGroqApiKey);
     return {
       models: provider === 'forge_llms' || hasApiKey ? 'complete' : hasApiKey === false && isAdmin !== null ? 'warning' : 'pending',
       jira: arMappings.length > 0 ? 'complete' : 'pending',
       domain: domainContexts.some(d => d.context?.trim()) ? 'complete' : 'pending',
     } as const;
-  }, [provider, existingAnthropicApiKey, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, existingOllamaApiKey, arMappings, domainContexts, isAdmin]);
+  }, [provider, existingAnthropicApiKey, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, existingOllamaApiKey, existingGroqApiKey, arMappings, domainContexts, isAdmin]);
 
   const projectUsageBreakdown = useMemo(() => {
     return projectActivityRows
@@ -634,6 +638,8 @@ export function SettingsView({
         if (gc.azureOpenAIApiVersion) setAzureOpenAIApiVersion(gc.azureOpenAIApiVersion);
         if (gc.ollamaApiKey) setExistingOllamaApiKey(gc.ollamaApiKey);
         if (gc.ollamaBaseUrl) setOllamaBaseUrl(gc.ollamaBaseUrl);
+        if (gc.groqApiKey) setExistingGroqApiKey(gc.groqApiKey);
+        if (gc.groqBaseUrl) setGroqBaseUrl(gc.groqBaseUrl);
         if (gc.modelCatalogs) {
           const nextCatalogs = { ...gc.modelCatalogs } as LlmModelCatalogByVendor;
           if (!nextCatalogs.anthropic && nextCatalogs.forge_llms) {
@@ -927,6 +933,8 @@ export function SettingsView({
           azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
           ollamaApiKey: ollamaApiKey.trim() || existingOllamaApiKey || "",
           ollamaBaseUrl: ollamaBaseUrl.trim() || undefined,
+          groqApiKey: groqApiKey.trim() || existingGroqApiKey || "",
+          groqBaseUrl: groqBaseUrl.trim() || undefined,
           modelCatalogs,
         },
         generationPreferences: {},
@@ -957,7 +965,8 @@ export function SettingsView({
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
       if (azureOpenAIApiKey.trim()) setExistingAzureOpenAIApiKey(REDACTED);
       if (ollamaApiKey.trim()) setExistingOllamaApiKey(REDACTED);
-      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey(''); setOllamaApiKey('');
+      if (groqApiKey.trim()) setExistingGroqApiKey(REDACTED);
+      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey(''); setOllamaApiKey(''); setGroqApiKey('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
@@ -986,6 +995,8 @@ export function SettingsView({
         azureOpenAIApiVersion: provider === 'azure_openai' ? (azureOpenAIApiVersion.trim() || undefined) : undefined,
         ollamaApiKey: provider === 'ollama' ? (ollamaApiKey.trim() || existingOllamaApiKey || undefined) : undefined,
         ollamaBaseUrl: provider === 'ollama' ? (ollamaBaseUrl.trim() || undefined) : undefined,
+        groqApiKey: provider === 'groq' ? (groqApiKey.trim() || existingGroqApiKey || undefined) : undefined,
+        groqBaseUrl: provider === 'groq' ? (groqBaseUrl.trim() || undefined) : undefined,
       }) as any;
       setLlmTestResult(res.success ? { ok: true, message: 'Connection successful.' } : { ok: false, message: res.error || 'Connection failed.' });
     } catch (err: any) { setLlmTestResult({ ok: false, message: err.message || 'Connection failed.' }); }
@@ -1021,6 +1032,8 @@ export function SettingsView({
         azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
         ollamaApiKey: ollamaApiKey.trim() || existingOllamaApiKey || undefined,
         ollamaBaseUrl: ollamaBaseUrl.trim() || undefined,
+        groqApiKey: groqApiKey.trim() || existingGroqApiKey || undefined,
+        groqBaseUrl: groqBaseUrl.trim() || undefined,
       }) as any;
       if (res?.success && res.catalog) {
         setModelCatalogs(prev => ({ ...prev, [provider]: res.catalog }));
@@ -1050,6 +1063,9 @@ export function SettingsView({
     ollamaApiKey,
     existingOllamaApiKey,
     ollamaBaseUrl,
+    groqApiKey,
+    existingGroqApiKey,
+    groqBaseUrl,
   ]);
 
   useEffect(() => {
@@ -1061,11 +1077,13 @@ export function SettingsView({
           ? Boolean(existingAzureOpenAIApiKey && azureOpenAIBaseUrl.trim())
           : provider === 'ollama'
             ? Boolean(existingOllamaApiKey)
-            : true;
+            : provider === 'groq'
+              ? Boolean(existingGroqApiKey)
+              : true;
     if (hasStoredCredential && !modelCatalogs[provider]) {
       void refreshModelCatalog();
     }
-  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, existingOllamaApiKey, modelCatalogs, refreshModelCatalog]);
+  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, existingOllamaApiKey, existingGroqApiKey, modelCatalogs, refreshModelCatalog]);
 
   const { entries: catalogEntries } = useMemo(
     () => getCatalogEntriesForProvider(provider, modelCatalogs),
@@ -1382,7 +1400,7 @@ export function SettingsView({
                   <div className="space-y-2">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">LLM Provider</div>
                     <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
-                      {(['anthropic', 'openai', 'azure_openai', 'gemini', 'ollama'] as const).map(p => (
+                      {(['anthropic', 'openai', 'azure_openai', 'gemini', 'ollama', 'groq'] as const).map(p => (
                         <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
                           {getProviderLabel(p)}
                         </button>
@@ -1460,6 +1478,22 @@ export function SettingsView({
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Base URL (optional)</label>
                         <input type="text" value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="https://ollama.com/v1" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {provider === 'groq' && (
+                    <motion.div className="space-y-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Groq API Key</label>
+                          {existingGroqApiKey && <button onClick={() => { setExistingGroqApiKey(''); setGroqApiKey(''); }} className="text-[12px] font-bold text-[var(--rf-danger)]">Clear</button>}
+                        </div>
+                        <input type="password" value={groqApiKey} onChange={e => setGroqApiKey(e.target.value)} placeholder={existingGroqApiKey ? '••••••••• (stored)' : 'gsk_…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Base URL (optional)</label>
+                        <input type="text" value={groqBaseUrl} onChange={e => setGroqBaseUrl(e.target.value)} placeholder="https://api.groq.com/openai/v1" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
                       </div>
                     </motion.div>
                   )}

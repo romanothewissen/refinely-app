@@ -115,6 +115,28 @@
           "lite":  ["qwen2.5:7b"]
         }
       }
+    },
+    "groq": {
+      "catalog": [
+        { "id": "llama-3.3-70b-versatile",        "displayName": "Llama 3.3 70B Versatile",        "family": "pro"   },
+        { "id": "llama-3.1-70b-versatile",        "displayName": "Llama 3.1 70B Versatile",        "family": "pro"   },
+        { "id": "deepseek-r1-distill-llama-70b",  "displayName": "DeepSeek R1 Distill Llama 70B",  "family": "pro"   },
+        { "id": "mixtral-8x7b-32768",             "displayName": "Mixtral 8x7B",                   "family": "flash" },
+        { "id": "llama-3.1-8b-instant",           "displayName": "Llama 3.1 8B Instant",           "family": "lite"  },
+        { "id": "gemma2-9b-it",                   "displayName": "Gemma 2 9B",                     "family": "lite"  }
+      ],
+      "presets": {
+        "stable": {
+          "pro":   ["llama-3.3-70b-versatile"],
+          "flash": ["mixtral-8x7b-32768"],
+          "lite":  ["llama-3.1-8b-instant"]
+        },
+        "latest": {
+          "pro":   ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b"],
+          "flash": ["mixtral-8x7b-32768"],
+          "lite":  ["llama-3.1-8b-instant"]
+        }
+      }
     }
   }
 }

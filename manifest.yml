@@ -71,3 +71,4 @@ permissions:
         - address: https://generativelanguage.googleapis.com
         - address: https://api.openai.com
         - address: https://ollama.com
+        - address: https://api.groq.com

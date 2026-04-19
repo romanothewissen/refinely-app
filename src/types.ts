@@ -6,7 +6,7 @@ const DEFAULT_ANTHROPIC_STABLE = strategyCatalog.providers.anthropic.presets.sta
 
 // ─── Tenant Configuration ────────────────────────────────────────────────────
 
-export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'azure_openai' | 'ollama';
+export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'azure_openai' | 'ollama' | 'groq';
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
@@ -92,6 +92,8 @@ export interface GeneratorConfig {
   azureOpenAIApiVersion?: string;
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
+  groqApiKey?: string;
+  groqBaseUrl?: string;
   modelCatalogs?: LlmModelCatalogByVendor;
   storyAssistantModelAssignments?: Partial<Record<LlmProvider, StoryAssistantModelAssignment>>;
   pauseForDraftReview?: boolean;

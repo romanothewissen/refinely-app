@@ -44,6 +44,8 @@ export interface LlmCallOptions {
   azureOpenAIApiVersion?: string;
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
+  groqApiKey?: string;
+  groqBaseUrl?: string;
   modelCatalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[];
   modelCatalogs?: LlmModelCatalogByVendor;
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
@@ -157,6 +159,11 @@ export function openAISupportsReasoning(model: string): boolean {
 export function openAIRequiresMaxCompletionTokens(model: string): boolean {
   // GPT-5 and o-series models reject max_tokens and require max_completion_tokens instead.
   return openAISupportsReasoning(model);
+}
+
+export function groqSupportsReasoning(model: string): boolean {
+  // Groq's reasoning_effort param is supported by DeepSeek R1 distill models only.
+  return /deepseek-r1/i.test(model.trim());
 }
 
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
@@ -298,8 +305,10 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     result = await callAzureOpenAI({ ...effectiveOpts, model: resolvedModel });
   } else if (opts.provider === 'ollama') {
     result = await callOllama({ ...effectiveOpts, model: resolvedModel });
+  } else if (opts.provider === 'groq') {
+    result = await callGroq({ ...effectiveOpts, model: resolvedModel });
   } else {
-    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, Azure OpenAI, or Ollama before calling callLlm.');
+    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, Azure OpenAI, Ollama, or Groq before calling callLlm.');
   }
 
   const audit = getPipelineAuditWriter();
@@ -442,7 +451,9 @@ function buildCatalog(
 
 function getStrategyCatalogEntries(provider: LlmProvider): LlmModelCatalogEntry[] {
   if (provider === 'forge_llms') return [];
-  return strategyCatalog.providers[provider].catalog.map((model) => ({
+  const providerCatalog = (strategyCatalog.providers as Record<string, { catalog: Array<{ id: string; displayName: string; family: string }> }>)[provider];
+  if (!providerCatalog) return [];
+  return providerCatalog.catalog.map((model) => ({
     id: model.id,
     displayName: model.displayName,
     family: model.family as ConcreteModelFamily,
@@ -454,6 +465,14 @@ export function getFallbackModelCatalog(provider: LlmProvider): LlmVendorModelCa
     return buildCatalog(provider, [], 'fallback');
   }
   return buildCatalog(provider, getStrategyCatalogEntries(provider), 'fallback');
+}
+
+function isChatCapableGroqModel(id: string): boolean {
+  const normalized = id.toLowerCase();
+  return !normalized.includes('whisper')
+    && !normalized.includes('-tts')
+    && !normalized.includes('transcribe')
+    && !normalized.includes('guard');
 }
 
 function isChatCapableOpenAiModel(id: string): boolean {
@@ -497,6 +516,8 @@ export async function discoverLlmModelCatalog(opts: {
   azureOpenAIApiVersion?: string;
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
+  groqApiKey?: string;
+  groqBaseUrl?: string;
 }): Promise<LlmVendorModelCatalog> {
   if (opts.provider === 'forge_llms') {
     return getFallbackModelCatalog('forge_llms');
@@ -623,6 +644,32 @@ export async function discoverLlmModelCatalog(opts: {
         source: 'discovered' as const,
       }));
     return models.length ? buildCatalog('ollama', models, 'discovered') : getFallbackModelCatalog('ollama');
+  }
+
+  if (opts.provider === 'groq') {
+    const apiKey = (opts.groqApiKey ?? process.env.GROQ_API_KEY ?? '').trim();
+    if (!apiKey) {
+      return getFallbackModelCatalog('groq');
+    }
+    const baseUrl = (opts.groqBaseUrl ?? process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
+    const url = `${baseUrl}/models`;
+    const res = await fetchWithTimeout(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    }, 'Groq model discovery');
+    const payload = await res.json() as { data?: Array<{ id?: string; created?: number }> };
+    if (!res.ok) {
+      throw new Error(`Groq model discovery failed with status ${res.status}`);
+    }
+    const models = (payload.data ?? [])
+      .filter((model) => model.id && isChatCapableGroqModel(String(model.id)))
+      .map((model) => ({
+        id: String(model.id),
+        displayName: toDisplayName(String(model.id)),
+        family: inferModelFamily(String(model.id)) === 'custom' ? undefined : inferModelFamily(String(model.id)),
+        releaseDate: model.created ? new Date(model.created * 1000).toISOString() : undefined,
+        source: 'discovered' as const,
+      }));
+    return models.length ? buildCatalog('groq', models, 'discovered') : getFallbackModelCatalog('groq');
   }
 
   const apiKey = (opts.azureOpenAIApiKey ?? process.env.AZURE_OPENAI_API_KEY ?? '').trim();
@@ -1019,6 +1066,61 @@ async function callOllama(opts: {
   };
 }
 
+async function callGroq(opts: {
+  model: string;
+  systemPrompt: string;
+  userMessage: string;
+  maxTokens?: number;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
+  groqApiKey?: string;
+  groqBaseUrl?: string;
+}): Promise<LlmResponse> {
+  const apiKey = (opts.groqApiKey ?? process.env.GROQ_API_KEY ?? '').trim();
+  if (!apiKey) {
+    throw new Error('Groq API key is not set.');
+  }
+
+  const baseUrl = (opts.groqBaseUrl ?? process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
+  const url = `${baseUrl}/chat/completions`;
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: [
+      { role: 'system', content: opts.systemPrompt },
+      { role: 'user', content: opts.userMessage },
+    ],
+    max_tokens: opts.maxTokens ?? 8192,
+    response_format: { type: 'json_object' },
+  };
+  if (groqSupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+    body.reasoning_effort = opts.reasoningEffort;
+  }
+
+  const { res, rawBody } = await fetchLlmWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  }, 'Groq request');
+
+  if (!res.ok) {
+    throw new Error(`Groq API error: ${rawBody}`);
+  }
+
+  const payload = JSON.parse(rawBody) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } };
+  };
+
+  return {
+    text: payload.choices?.[0]?.message?.content ?? '',
+    inputTokens: payload.usage?.prompt_tokens,
+    outputTokens: payload.usage?.completion_tokens,
+    thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
+  };
+}
+
 /**
  * Call LLM and extract JSON, with one retry on JSON parse failure.
  */
@@ -1040,6 +1142,8 @@ export async function callLlmJson<T>(opts: {
   azureOpenAIApiVersion?: string;
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
+  groqApiKey?: string;
+  groqBaseUrl?: string;
   modelCatalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[];
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;
@@ -1067,6 +1171,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
   azureOpenAIApiVersion?: string;
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
+  groqApiKey?: string;
+  groqBaseUrl?: string;
   modelCatalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[];
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;
