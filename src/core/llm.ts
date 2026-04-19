@@ -351,7 +351,7 @@ export function isConcreteModelFamily(value: string): value is ConcreteModelFami
 export function inferModelFamily(model: string): ConcreteModelFamily | 'custom' {
   const normalized = model.trim().toLowerCase();
   if (normalized.includes('flash')) return 'flash';
-  if (normalized.includes('lite') || normalized.includes('mini')) return 'lite';
+  if (normalized.includes('lite') || normalized.includes('mini') || normalized.includes('nano')) return 'lite';
   if (normalized.includes('pro')) return 'pro';
   if (normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
   if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4')) {
@@ -360,6 +360,10 @@ export function inferModelFamily(model: string): ConcreteModelFamily | 'custom' 
   if (normalized.includes('sonnet')) return 'flash';
   if (normalized.includes('haiku')) return 'lite';
   if (normalized.includes('opus')) return 'pro';
+  // Size-based inference for open-weight models (Llama, Mixtral, DeepSeek, Qwen, etc.)
+  if (/\b(70b|72b|65b|180b|405b|671b)\b/.test(normalized) || normalized.includes('large') || normalized.includes('versatile') || normalized.includes('ultra')) return 'pro';
+  if (/\b(13b|14b|27b|30b|32b|34b|40b|47b)\b/.test(normalized)) return 'flash';
+  if (/\b([1-9]b|10b|11b|12b)\b/.test(normalized) || normalized.includes('instant') || normalized.includes('small')) return 'lite';
   return 'custom';
 }
 
@@ -1089,8 +1093,13 @@ async function callGroq(opts: {
       { role: 'user', content: opts.userMessage },
     ],
     max_tokens: opts.maxTokens ?? 8192,
-    response_format: { type: 'json_object' },
   };
+  // Only enable JSON mode when the prompt explicitly asks for JSON.
+  // Groq enforces that the word "json" appears in the prompt when response_format is json_object.
+  const promptMentionsJson = /\bjson\b/i.test(opts.systemPrompt) || /\bjson\b/i.test(opts.userMessage);
+  if (promptMentionsJson) {
+    body.response_format = { type: 'json_object' };
+  }
   if (groqSupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning_effort = opts.reasoningEffort;
   }

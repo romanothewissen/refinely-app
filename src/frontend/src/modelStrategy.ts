@@ -264,6 +264,10 @@ export function inferModelFamily(modelId: string): ConcreteModelFamily | undefin
   if (normalized.startsWith('gpt-4.1') || normalized.startsWith('gpt-4o') || normalized.startsWith('o4') || normalized.includes('sonnet')) return hasToken('mini') ? 'lite' : 'flash';
   if (hasToken('lite') || hasToken('mini') || hasToken('nano') || normalized.includes('haiku')) return 'lite';
   if (hasToken('pro') || normalized.includes('opus') || normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3')) return 'pro';
+  // Size-based inference for open-weight models (Llama, Mixtral, DeepSeek, Qwen, Gemma, etc.)
+  if (/\b(70b|72b|65b|180b|405b|671b)\b/.test(normalized) || normalized.includes('large') || normalized.includes('versatile') || normalized.includes('ultra')) return 'pro';
+  if (/\b(13b|14b|27b|30b|32b|34b|40b|47b)\b/.test(normalized)) return 'flash';
+  if (/\b([1-9]b|10b|11b|12b)\b/.test(normalized) || normalized.includes('instant') || normalized.includes('small')) return 'lite';
   return undefined;
 }
 
