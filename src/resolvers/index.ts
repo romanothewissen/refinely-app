@@ -479,6 +479,7 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       systemPrompt: 'Respond with OK',
       userMessage: 'Test connection',
       noFallback: true,
+      maxTokens: 200,
     });
     return { success: true, reply: res.text };
   } catch (err) {
