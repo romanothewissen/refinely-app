@@ -15,6 +15,8 @@ function buildLlmProviderOpts(config: TenantConfig) {
     azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,
     ollamaApiKey: config.generatorConfig.ollamaApiKey,
     ollamaBaseUrl: config.generatorConfig.ollamaBaseUrl,
+    groqApiKey: config.generatorConfig.groqApiKey,
+    groqBaseUrl: config.generatorConfig.groqBaseUrl,
     modelCatalogs: config.generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;

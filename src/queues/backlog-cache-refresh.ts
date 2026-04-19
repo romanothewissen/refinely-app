@@ -46,6 +46,8 @@ async function extractDomainPatterns(projectKey: string, config: ReturnType<type
       azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
       ollamaApiKey: config.generatorConfig.ollamaApiKey,
       ollamaBaseUrl: config.generatorConfig.ollamaBaseUrl,
+      groqApiKey: config.generatorConfig.groqApiKey,
+      groqBaseUrl: config.generatorConfig.groqBaseUrl,
       modelCatalogs: config.generatorConfig.modelCatalogs,
       maxTokens: 512,
       reasoningEffort: 'none',
