@@ -115,6 +115,16 @@ function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number
   }
 }
 
+function groqReasoningEffort(
+  effort: LlmCallOptions['reasoningEffort'],
+): 'none' | 'default' | undefined {
+  if (!effort) return undefined;
+  if (effort === 'none') return 'none';
+  // Groq's OpenAI-compatible API currently accepts only `none` or `default`,
+  // so collapse our richer internal levels at the provider boundary.
+  return 'default';
+}
+
 export function getRequestedThinkingBudget(
   provider: LlmProvider | undefined,
   model: string,
@@ -1461,8 +1471,9 @@ async function callGroq(opts: {
   } else if (promptMentionsJson) {
     body.response_format = { type: 'json_object' };
   }
-  if (groqSupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
-    body.reasoning_effort = opts.reasoningEffort;
+  const groqEffort = groqReasoningEffort(opts.reasoningEffort);
+  if (groqSupportsReasoning(opts.model) && groqEffort && groqEffort !== 'none') {
+    body.reasoning_effort = groqEffort;
     body.reasoning_format = 'hidden';
   } else if (opts.jsonSchema) {
     body.reasoning_format = 'hidden';

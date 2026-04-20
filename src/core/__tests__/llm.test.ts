@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { extractJson, extractJsonWithMetadata } from '../json';
 import {
   buildLlmAuditMetadata,
+  callLlm,
   getRequestedThinkingBudget,
   mapReasoningDepthToEffort,
   openAIRequiresMaxCompletionTokens,
@@ -151,4 +152,36 @@ test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-
     tokenLimitParam: 'max_tokens',
     maxOutputTokens: 131072,
   }), 4096);
+});
+
+test('Groq reasoning requests collapse internal effort levels to default', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'ok' } }],
+      usage: { prompt_tokens: 12, completion_tokens: 34 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    await callLlm({
+      provider: 'groq',
+      model: 'deepseek-r1-distill-llama-70b',
+      systemPrompt: 'You are helpful.',
+      userMessage: 'Solve this carefully.',
+      reasoningEffort: 'high',
+      groqApiKey: 'test-key',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBody?.reasoning_effort, 'default');
+  assert.equal(requestBody?.reasoning_format, 'hidden');
 });
