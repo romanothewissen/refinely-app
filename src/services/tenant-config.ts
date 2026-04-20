@@ -7,6 +7,7 @@ const GENERATOR_SECRET_FIELDS = [
   { field: 'anthropicApiKey', provider: 'anthropic' },
   { field: 'geminiApiKey', provider: 'gemini' },
   { field: 'openaiApiKey', provider: 'openai' },
+  { field: 'openaiCompatibleApiKey', provider: 'openai_compatible' },
   { field: 'azureOpenAIApiKey', provider: 'azure_openai' },
   { field: 'ollamaApiKey', provider: 'ollama' },
   { field: 'groqApiKey', provider: 'groq' },
@@ -77,6 +78,7 @@ async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<Tenant
         field === 'anthropicApiKey' ? savedGeneratorConfig.anthropicApiKey
         : field === 'geminiApiKey' ? savedGeneratorConfig.geminiApiKey
         : field === 'openaiApiKey' ? savedGeneratorConfig.openaiApiKey
+        : field === 'openaiCompatibleApiKey' ? savedGeneratorConfig.openaiCompatibleApiKey
         : field === 'azureOpenAIApiKey' ? savedGeneratorConfig.azureOpenAIApiKey
         : field === 'ollamaApiKey' ? savedGeneratorConfig.ollamaApiKey
         : savedGeneratorConfig.groqApiKey;

@@ -39,6 +39,8 @@ export interface LlmCallOptions {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openaiCompatibleApiKey?: string;
+  openaiCompatibleBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -299,7 +301,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     result = await callGemini({ ...effectiveOpts, model: resolvedModel });
   } else if (opts.provider === 'anthropic') {
     result = await callAnthropic({ ...effectiveOpts, model: resolvedModel });
-  } else if (opts.provider === 'openai') {
+  } else if (opts.provider === 'openai' || opts.provider === 'openai_compatible') {
     result = await callOpenAI({ ...effectiveOpts, model: resolvedModel });
   } else if (opts.provider === 'azure_openai') {
     result = await callAzureOpenAI({ ...effectiveOpts, model: resolvedModel });
@@ -308,7 +310,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
   } else if (opts.provider === 'groq') {
     result = await callGroq({ ...effectiveOpts, model: resolvedModel });
   } else {
-    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Anthropic, Azure OpenAI, Ollama, or Groq before calling callLlm.');
+    throw new Error('LLM provider is required. Configure Gemini, OpenAI, OpenAI-compatible, Anthropic, Azure OpenAI, Ollama, or Groq before calling callLlm.');
   }
 
   const audit = getPipelineAuditWriter();
@@ -487,6 +489,17 @@ function isChatCapableOpenAiModel(id: string): boolean {
   return false;
 }
 
+function isTextCapableOpenAiCompatibleModel(id: string): boolean {
+  const normalized = id.toLowerCase();
+  return !normalized.includes('embedding')
+    && !normalized.includes('rerank')
+    && !normalized.includes('whisper')
+    && !normalized.includes('tts')
+    && !normalized.includes('transcribe')
+    && !normalized.includes('moderation')
+    && !normalized.includes('image');
+}
+
 function isTextCapableGeminiModel(id: string): boolean {
   const normalized = id.toLowerCase();
   return normalized.startsWith('gemini-')
@@ -515,6 +528,8 @@ export async function discoverLlmModelCatalog(opts: {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openaiCompatibleApiKey?: string;
+  openaiCompatibleBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -620,6 +635,34 @@ export async function discoverLlmModelCatalog(opts: {
         source: 'discovered' as const,
       }));
     return models.length ? buildCatalog('openai', models, 'discovered') : getFallbackModelCatalog('openai');
+  }
+
+  if (opts.provider === 'openai_compatible') {
+    const apiKey = (opts.openaiCompatibleApiKey ?? '').trim();
+    const baseUrl = (opts.openaiCompatibleBaseUrl ?? '').trim().replace(/\/+$/, '');
+    if (!apiKey || !baseUrl) {
+      return getFallbackModelCatalog('openai_compatible');
+    }
+    const url = `${baseUrl}/models`;
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    }, 'OpenAI-compatible model discovery');
+    const payload = await res.json() as { data?: Array<{ id?: string; created?: number }> };
+    if (!res.ok) {
+      throw new Error(`OpenAI-compatible model discovery failed with status ${res.status}`);
+    }
+    const models = (payload.data ?? [])
+      .filter((model) => model.id && isTextCapableOpenAiCompatibleModel(String(model.id)))
+      .map((model) => ({
+        id: String(model.id),
+        displayName: toDisplayName(String(model.id)),
+        family: inferModelFamily(String(model.id)) === 'custom' ? undefined : inferModelFamily(String(model.id)),
+        releaseDate: model.created ? new Date(model.created * 1000).toISOString() : undefined,
+        source: 'discovered' as const,
+      }));
+    return models.length ? buildCatalog('openai_compatible', models, 'discovered') : getFallbackModelCatalog('openai_compatible');
   }
 
   if (opts.provider === 'ollama') {
@@ -881,6 +924,7 @@ async function callAnthropic(opts: {
 }
 
 async function callOpenAI(opts: {
+  provider?: LlmProvider;
   model: string;
   systemPrompt: string;
   userMessage: string;
@@ -888,13 +932,27 @@ async function callOpenAI(opts: {
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openaiCompatibleApiKey?: string;
+  openaiCompatibleBaseUrl?: string;
 }): Promise<LlmResponse> {
-  const apiKey = (opts.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '').trim();
+  const isCompatible = opts.provider === 'openai_compatible';
+  const apiKey = (
+    isCompatible
+      ? (opts.openaiCompatibleApiKey ?? '')
+      : (opts.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '')
+  ).trim();
   if (!apiKey) {
-    throw new Error('OpenAI API key is not set.');
+    throw new Error(isCompatible ? 'OpenAI-compatible API key is not set.' : 'OpenAI API key is not set.');
   }
 
-  const baseUrl = opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+  const baseUrl = (
+    isCompatible
+      ? (opts.openaiCompatibleBaseUrl ?? '')
+      : (opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1')
+  ).trim().replace(/\/+$/, '');
+  if (!baseUrl) {
+    throw new Error('OpenAI-compatible base URL is not set.');
+  }
   const url = `${baseUrl}/chat/completions`;
   const body: Record<string, unknown> = {
     model: opts.model,
@@ -920,10 +978,10 @@ async function callOpenAI(opts: {
       'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify(body),
-  }, 'OpenAI request');
+  }, isCompatible ? 'OpenAI-compatible request' : 'OpenAI request');
 
   if (!res.ok) {
-    throw new Error(`OpenAI API error: ${rawBody}`);
+    throw new Error(`${isCompatible ? 'OpenAI-compatible' : 'OpenAI'} API error: ${rawBody}`);
   }
 
   const payload = JSON.parse(rawBody);
@@ -1146,6 +1204,8 @@ export async function callLlmJson<T>(opts: {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openaiCompatibleApiKey?: string;
+  openaiCompatibleBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -1175,6 +1235,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  openaiCompatibleApiKey?: string;
+  openaiCompatibleBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;

@@ -241,6 +241,8 @@ export const api = {
     geminiBaseUrl?: string;
     openaiApiKey?: string;
     openaiBaseUrl?: string;
+    openaiCompatibleApiKey?: string;
+    openaiCompatibleBaseUrl?: string;
     azureOpenAIApiKey?: string;
     azureOpenAIBaseUrl?: string;
     azureOpenAIApiVersion?: string;
@@ -257,6 +259,8 @@ export const api = {
     geminiBaseUrl?: string;
     openaiApiKey?: string;
     openaiBaseUrl?: string;
+    openaiCompatibleApiKey?: string;
+    openaiCompatibleBaseUrl?: string;
     azureOpenAIApiKey?: string;
     azureOpenAIBaseUrl?: string;
     azureOpenAIApiVersion?: string;

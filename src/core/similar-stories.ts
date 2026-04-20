@@ -1426,6 +1426,8 @@ function buildLlmProviderOpts(config: TenantConfig) {
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
     openaiApiKey: config.generatorConfig.openaiApiKey,
     openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
+    openaiCompatibleApiKey: config.generatorConfig.openaiCompatibleApiKey,
+    openaiCompatibleBaseUrl: config.generatorConfig.openaiCompatibleBaseUrl,
     azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,

@@ -327,6 +327,7 @@ resolver.define('getConfig', async ({ context }) => {
     if (gc.anthropicApiKey) gc.anthropicApiKey = REDACTED;
     if (gc.geminiApiKey) gc.geminiApiKey = REDACTED;
     if (gc.openaiApiKey) gc.openaiApiKey = REDACTED;
+    if (gc.openaiCompatibleApiKey) gc.openaiCompatibleApiKey = REDACTED;
     if (gc.azureOpenAIApiKey) gc.azureOpenAIApiKey = REDACTED;
     if (gc.ollamaApiKey) gc.ollamaApiKey = REDACTED;
     if (gc.groqApiKey) gc.groqApiKey = REDACTED;
@@ -354,6 +355,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
   if (ngc.anthropicApiKey === REDACTED) ngc.anthropicApiKey = egc.anthropicApiKey;
   if (ngc.geminiApiKey === REDACTED) ngc.geminiApiKey = egc.geminiApiKey;
   if (ngc.openaiApiKey === REDACTED) ngc.openaiApiKey = egc.openaiApiKey;
+  if (ngc.openaiCompatibleApiKey === REDACTED) ngc.openaiCompatibleApiKey = egc.openaiCompatibleApiKey;
   if (ngc.azureOpenAIApiKey === REDACTED) ngc.azureOpenAIApiKey = egc.azureOpenAIApiKey;
   if (ngc.ollamaApiKey === REDACTED) ngc.ollamaApiKey = egc.ollamaApiKey;
   if (ngc.groqApiKey === REDACTED) ngc.groqApiKey = egc.groqApiKey;
@@ -369,6 +371,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
     (ngc.anthropicApiKey && ngc.anthropicApiKey !== REDACTED && ngc.anthropicApiKey !== egc.anthropicApiKey) ||
     (ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED && ngc.geminiApiKey !== egc.geminiApiKey) ||
     (ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED && ngc.openaiApiKey !== egc.openaiApiKey) ||
+    (ngc.openaiCompatibleApiKey && ngc.openaiCompatibleApiKey !== REDACTED && ngc.openaiCompatibleApiKey !== egc.openaiCompatibleApiKey) ||
     (ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED && ngc.azureOpenAIApiKey !== egc.azureOpenAIApiKey) ||
     (ngc.ollamaApiKey && ngc.ollamaApiKey !== REDACTED && ngc.ollamaApiKey !== egc.ollamaApiKey) ||
     (ngc.groqApiKey && ngc.groqApiKey !== REDACTED && ngc.groqApiKey !== egc.groqApiKey),
@@ -393,6 +396,7 @@ resolver.define('saveConfig', async ({ payload, context }) => {
           ngc.anthropicApiKey && ngc.anthropicApiKey !== REDACTED ? 'anthropic' : null,
           ngc.geminiApiKey && ngc.geminiApiKey !== REDACTED ? 'gemini' : null,
           ngc.openaiApiKey && ngc.openaiApiKey !== REDACTED ? 'openai' : null,
+          ngc.openaiCompatibleApiKey && ngc.openaiCompatibleApiKey !== REDACTED ? 'openai_compatible' : null,
           ngc.azureOpenAIApiKey && ngc.azureOpenAIApiKey !== REDACTED ? 'azure_openai' : null,
           ngc.ollamaApiKey && ngc.ollamaApiKey !== REDACTED ? 'ollama' : null,
           ngc.groqApiKey && ngc.groqApiKey !== REDACTED ? 'groq' : null,
@@ -455,6 +459,7 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
     const isAnthropic = payload.provider === 'anthropic';
     const isGemini = payload.provider === 'gemini';
     const isOpenAI = payload.provider === 'openai';
+    const isOpenAICompatible = payload.provider === 'openai_compatible';
     const isAzureOpenAI = payload.provider === 'azure_openai';
     const isOllama = payload.provider === 'ollama';
     const isGroq = payload.provider === 'groq';
@@ -468,6 +473,8 @@ resolver.define('testLlmConnection', async ({ payload, context }) => {
       geminiBaseUrl: isGemini ? (payload.geminiBaseUrl?.trim() || gc.geminiBaseUrl) : undefined,
       openaiApiKey: isOpenAI ? (payload.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload.openaiApiKey?.trim() || gc.openaiApiKey)) : undefined,
       openaiBaseUrl: isOpenAI ? (payload.openaiBaseUrl?.trim() || gc.openaiBaseUrl) : undefined,
+      openaiCompatibleApiKey: isOpenAICompatible ? (payload.openaiCompatibleApiKey === REDACTED ? gc.openaiCompatibleApiKey : (payload.openaiCompatibleApiKey?.trim() || gc.openaiCompatibleApiKey)) : undefined,
+      openaiCompatibleBaseUrl: isOpenAICompatible ? (payload.openaiCompatibleBaseUrl?.trim() || gc.openaiCompatibleBaseUrl) : undefined,
       azureOpenAIApiKey: isAzureOpenAI ? (payload.azureOpenAIApiKey === REDACTED ? gc.azureOpenAIApiKey : (payload.azureOpenAIApiKey?.trim() || gc.azureOpenAIApiKey)) : undefined,
       azureOpenAIBaseUrl: isAzureOpenAI ? (payload.azureOpenAIBaseUrl?.trim() || gc.azureOpenAIBaseUrl) : undefined,
       azureOpenAIApiVersion: isAzureOpenAI ? (payload.azureOpenAIApiVersion?.trim() || gc.azureOpenAIApiVersion) : undefined,
@@ -502,6 +509,8 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
       geminiBaseUrl: payload?.geminiBaseUrl?.trim() || gc.geminiBaseUrl,
       openaiApiKey: payload?.openaiApiKey === REDACTED ? gc.openaiApiKey : (payload?.openaiApiKey?.trim() || gc.openaiApiKey),
       openaiBaseUrl: payload?.openaiBaseUrl?.trim() || gc.openaiBaseUrl,
+      openaiCompatibleApiKey: payload?.openaiCompatibleApiKey === REDACTED ? gc.openaiCompatibleApiKey : (payload?.openaiCompatibleApiKey?.trim() || gc.openaiCompatibleApiKey),
+      openaiCompatibleBaseUrl: payload?.openaiCompatibleBaseUrl?.trim() || gc.openaiCompatibleBaseUrl,
       azureOpenAIApiKey: payload?.azureOpenAIApiKey === REDACTED ? gc.azureOpenAIApiKey : (payload?.azureOpenAIApiKey?.trim() || gc.azureOpenAIApiKey),
       azureOpenAIBaseUrl: payload?.azureOpenAIBaseUrl?.trim() || gc.azureOpenAIBaseUrl,
       azureOpenAIApiVersion: payload?.azureOpenAIApiVersion?.trim() || gc.azureOpenAIApiVersion,

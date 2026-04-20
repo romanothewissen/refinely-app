@@ -60,6 +60,18 @@ test('uses the hosted sampler monthly quota only when relying on fallback creden
   assert.equal(getUsageLimits(byokConfig).generationsPerMonth, 150);
 });
 
+test('treats openai-compatible tenant credentials as byok mode', () => {
+  const config = buildConfig({
+    generatorConfig: {
+      provider: 'openai_compatible',
+      openaiCompatibleApiKey: 'tenant-fireworks-key',
+      openaiCompatibleBaseUrl: 'https://api.fireworks.ai/inference/v1',
+    },
+  });
+
+  assert.equal(getGenerationCredentialMode(config), 'byok');
+});
+
 test('exposes the per-profile preview caps through the pipeline profile config', () => {
   const fastProfile = getStoryAssistantPipelineProfileConfig({
     provider: 'gemini',

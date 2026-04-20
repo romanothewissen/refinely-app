@@ -10,6 +10,7 @@ import type {
   InferProjectPersonaRolesResult,
   LlmModelCatalogByVendor,
   LlmModelCatalogEntry,
+  LlmVendorModelCatalog,
   LlmProvider,
   PipelineProfile,
   ProjectGoldExampleConfig,
@@ -23,6 +24,7 @@ import { MultiSearchSelect } from './components/MultiSearchSelect';
 import { StepIndicator, type StepConfig } from './components/StepIndicator';
 import {
   getCatalogEntriesForProvider,
+  inferModelFamily,
   normalizePipelineProfile,
   resolveProfileModelAssignments,
   resolveStoryAssistantAssignments,
@@ -156,6 +158,7 @@ function getDisplayProvider(provider: LlmProvider): UiProvider {
 
 function getProviderLabel(provider: UiProvider) {
   if (provider === 'anthropic') return 'Anthropic';
+  if (provider === 'openai_compatible') return 'OpenAI-Compatible';
   if (provider === 'azure_openai') return 'Azure OpenAI';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
@@ -214,8 +217,68 @@ function isProviderModel(provider: LlmProvider, modelId: string) {
   if (!normalized) return false;
   if (provider === 'gemini') return normalized.startsWith('gemini-');
   if (provider === 'openai') return normalized.startsWith('gpt-') || normalized.startsWith('o');
+  if (provider === 'openai_compatible') return Boolean(normalized);
   if (provider === 'azure_openai') return true;
   return normalized.startsWith('claude-');
+}
+
+const FIREWORKS_COMPAT_BASE_URL = 'https://api.fireworks.ai/inference/v1';
+
+function parseCompatibleManualModelIds(raw: string): string[] {
+  return [...new Set(
+    raw
+      .split(/[\n,]+/)
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean),
+  )];
+}
+
+function buildCompatibleManualEntries(modelIds: string[]): LlmModelCatalogEntry[] {
+  return modelIds.map((id) => {
+    const family = inferModelFamily(id);
+    return {
+      id,
+      displayName: id,
+      family,
+      source: 'manual' as const,
+    };
+  });
+}
+
+function mergeCatalogModelEntries(
+  primary: LlmModelCatalogEntry[],
+  secondary: LlmModelCatalogEntry[],
+): LlmModelCatalogEntry[] {
+  const merged = new Map<string, LlmModelCatalogEntry>();
+  [...primary, ...secondary].forEach((entry) => {
+    const id = String(entry?.deploymentName || entry?.id || '').trim();
+    if (!id) return;
+    merged.set(id, { ...entry, id });
+  });
+  return [...merged.values()];
+}
+
+function buildOpenAiCompatibleCatalog(
+  current: LlmVendorModelCatalog | undefined,
+  manualModelIds: string[],
+  discovered?: LlmVendorModelCatalog,
+): LlmVendorModelCatalog | undefined {
+  const manualEntries = buildCompatibleManualEntries(manualModelIds);
+  const discoveredEntries = (discovered?.models ?? current?.models ?? []).filter((entry) => entry.source !== 'manual');
+  const models = mergeCatalogModelEntries(discoveredEntries, manualEntries);
+  if (!models.length) return undefined;
+  return {
+    vendor: 'openai_compatible',
+    source: discoveredEntries.length ? (discovered?.source ?? current?.source ?? 'discovered') : 'manual',
+    fetchedAt: discovered?.fetchedAt ?? current?.fetchedAt,
+    models,
+  };
+}
+
+function isModelPresentInEntries(entries: LlmModelCatalogEntry[], modelId?: string) {
+  const normalized = String(modelId ?? '').trim();
+  if (!normalized) return false;
+  return entries.some((entry) => getCatalogModelId(entry) === normalized);
 }
 
 function coerceRoleGuidanceRows(
@@ -391,6 +454,11 @@ export function SettingsView({
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
   const [existingOpenaiApiKey, setExistingOpenaiApiKey] = useState('');
+  const [openaiCompatibleApiKey, setOpenaiCompatibleApiKey] = useState('');
+  const [openaiCompatibleBaseUrl, setOpenaiCompatibleBaseUrl] = useState('');
+  const [openaiCompatibleLabel, setOpenaiCompatibleLabel] = useState('');
+  const [openaiCompatibleManualModels, setOpenaiCompatibleManualModels] = useState('');
+  const [existingOpenaiCompatibleApiKey, setExistingOpenaiCompatibleApiKey] = useState('');
 
   const [azureOpenAIApiKey, setAzureOpenAIApiKey] = useState('');
   const [azureOpenAIBaseUrl, setAzureOpenAIBaseUrl] = useState('');
@@ -489,13 +557,13 @@ export function SettingsView({
   }, [arMappings, domainContexts, backlogStatusScopes]);
 
   const completionStatus = useMemo(() => {
-    const hasApiKey = !!(existingAnthropicApiKey || existingGeminiApiKey || existingOpenaiApiKey || existingAzureOpenAIApiKey || existingOllamaApiKey || existingGroqApiKey);
+    const hasApiKey = !!(existingAnthropicApiKey || existingGeminiApiKey || existingOpenaiApiKey || existingOpenaiCompatibleApiKey || existingAzureOpenAIApiKey || existingOllamaApiKey || existingGroqApiKey);
     return {
       models: provider === 'forge_llms' || hasApiKey ? 'complete' : hasApiKey === false && isAdmin !== null ? 'warning' : 'pending',
       jira: arMappings.length > 0 ? 'complete' : 'pending',
       domain: domainContexts.some(d => d.context?.trim()) ? 'complete' : 'pending',
     } as const;
-  }, [provider, existingAnthropicApiKey, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, existingOllamaApiKey, existingGroqApiKey, arMappings, domainContexts, isAdmin]);
+  }, [provider, existingAnthropicApiKey, existingGeminiApiKey, existingOpenaiApiKey, existingOpenaiCompatibleApiKey, existingAzureOpenAIApiKey, existingOllamaApiKey, existingGroqApiKey, arMappings, domainContexts, isAdmin]);
 
   const projectUsageBreakdown = useMemo(() => {
     return projectActivityRows
@@ -633,6 +701,9 @@ export function SettingsView({
         if (gc.anthropicBaseUrl) setAnthropicBaseUrl(gc.anthropicBaseUrl);
         if (gc.openaiApiKey) setExistingOpenaiApiKey(gc.openaiApiKey);
         if (gc.openaiBaseUrl) setOpenaiBaseUrl(gc.openaiBaseUrl);
+        if (gc.openaiCompatibleApiKey) setExistingOpenaiCompatibleApiKey(gc.openaiCompatibleApiKey);
+        if (gc.openaiCompatibleBaseUrl) setOpenaiCompatibleBaseUrl(gc.openaiCompatibleBaseUrl);
+        if (gc.openaiCompatibleLabel) setOpenaiCompatibleLabel(gc.openaiCompatibleLabel);
         if (gc.azureOpenAIApiKey) setExistingAzureOpenAIApiKey(gc.azureOpenAIApiKey);
         if (gc.azureOpenAIBaseUrl) setAzureOpenAIBaseUrl(gc.azureOpenAIBaseUrl);
         if (gc.azureOpenAIApiVersion) setAzureOpenAIApiVersion(gc.azureOpenAIApiVersion);
@@ -649,6 +720,13 @@ export function SettingsView({
             };
           }
           setModelCatalogs(nextCatalogs);
+          const compatibleManualModels = (nextCatalogs.openai_compatible?.models ?? [])
+            .filter((entry) => entry.source === 'manual')
+            .map((entry) => getCatalogModelId(entry))
+            .filter(Boolean);
+          if (compatibleManualModels.length) {
+            setOpenaiCompatibleManualModels(compatibleManualModels.join('\n'));
+          }
         }
         if (gc.storyAssistantModelAssignments) {
           setStoryAssistantModelAssignments(gc.storyAssistantModelAssignments);
@@ -903,6 +981,19 @@ export function SettingsView({
     } catch (e: any) { console.error('Remove failed', e); }
   }
 
+  const openaiCompatibleManualModelIds = useMemo(
+    () => parseCompatibleManualModelIds(openaiCompatibleManualModels),
+    [openaiCompatibleManualModels],
+  );
+
+  const effectiveModelCatalogs = useMemo(() => {
+    const nextCatalogs = { ...modelCatalogs };
+    const compatibleCatalog = buildOpenAiCompatibleCatalog(nextCatalogs.openai_compatible, openaiCompatibleManualModelIds);
+    if (compatibleCatalog) nextCatalogs.openai_compatible = compatibleCatalog;
+    else delete nextCatalogs.openai_compatible;
+    return nextCatalogs;
+  }, [modelCatalogs, openaiCompatibleManualModelIds]);
+
   async function handleSave() {
     setIsSaving(true);
     try {
@@ -911,6 +1002,7 @@ export function SettingsView({
         alert('Personal settings saved successfully!');
         return;
       }
+      const persistedModelCatalogs = effectiveModelCatalogs;
       await api.saveConfig({
         generatorConfig: {
           provider,
@@ -928,6 +1020,9 @@ export function SettingsView({
           geminiBaseUrl: geminiBaseUrl.trim() || undefined,
           openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || "",
           openaiBaseUrl: openaiBaseUrl.trim() || undefined,
+          openaiCompatibleApiKey: openaiCompatibleApiKey.trim() || existingOpenaiCompatibleApiKey || "",
+          openaiCompatibleBaseUrl: openaiCompatibleBaseUrl.trim() || undefined,
+          openaiCompatibleLabel: openaiCompatibleLabel.trim() || undefined,
           azureOpenAIApiKey: azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || "",
           azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
           azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
@@ -935,7 +1030,7 @@ export function SettingsView({
           ollamaBaseUrl: ollamaBaseUrl.trim() || undefined,
           groqApiKey: groqApiKey.trim() || existingGroqApiKey || "",
           groqBaseUrl: groqBaseUrl.trim() || undefined,
-          modelCatalogs,
+          modelCatalogs: persistedModelCatalogs,
         },
         generationPreferences: {},
         domainContext: '',
@@ -963,10 +1058,11 @@ export function SettingsView({
       if (geminiApiKey.trim()) setExistingGeminiApiKey(REDACTED);
       if (anthropicApiKey.trim()) setExistingAnthropicApiKey(REDACTED);
       if (openaiApiKey.trim()) setExistingOpenaiApiKey(REDACTED);
+      if (openaiCompatibleApiKey.trim()) setExistingOpenaiCompatibleApiKey(REDACTED);
       if (azureOpenAIApiKey.trim()) setExistingAzureOpenAIApiKey(REDACTED);
       if (ollamaApiKey.trim()) setExistingOllamaApiKey(REDACTED);
       if (groqApiKey.trim()) setExistingGroqApiKey(REDACTED);
-      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setAzureOpenAIApiKey(''); setOllamaApiKey(''); setGroqApiKey('');
+      setGeminiApiKey(''); setAnthropicApiKey(''); setOpenaiApiKey(''); setOpenaiCompatibleApiKey(''); setAzureOpenAIApiKey(''); setOllamaApiKey(''); setGroqApiKey('');
       alert('Settings saved successfully!');
     } catch(e: any) { alert(`Failed to save configuration: ${e.message || 'Unknown error'}`); }
     finally { setIsSaving(false); }
@@ -976,20 +1072,32 @@ export function SettingsView({
     setIsTestingLlm(true); setLlmTestResult(null);
     try {
       const resolvedTestModel = (profileModels.clarifyModel || clarifyModel).trim();
-      if (!resolvedTestModel) {
+      const effectiveTestModel = provider === 'openai_compatible'
+        ? (
+          storyAssistantAssignments.lightModel
+          || storyAssistantAssignments.heavyModel
+          || availableModels[0]?.id
+          || ''
+        ).trim()
+        : resolvedTestModel;
+      if (!effectiveTestModel) {
         throw new Error(provider === 'azure_openai'
           ? 'No Azure OpenAI deployment is available yet. Refresh models and choose a concrete deployment first.'
+          : provider === 'openai_compatible'
+            ? 'Add at least one manual model ID or refresh models before testing the connection.'
           : 'Choose a concrete model before testing the connection.');
       }
       const res = await api.testLlmConnection({
         provider,
-        model: resolvedTestModel,
+        model: effectiveTestModel,
         anthropicApiKey: provider === 'anthropic' ? (anthropicApiKey.trim() || existingAnthropicApiKey || undefined) : undefined,
         anthropicBaseUrl: provider === 'anthropic' ? (anthropicBaseUrl.trim() || undefined) : undefined,
         geminiApiKey: provider === 'gemini' ? (geminiApiKey.trim() || existingGeminiApiKey || undefined) : undefined,
         geminiBaseUrl: provider === 'gemini' ? (geminiBaseUrl.trim() || undefined) : undefined,
         openaiApiKey: provider === 'openai' ? (openaiApiKey.trim() || existingOpenaiApiKey || undefined) : undefined,
         openaiBaseUrl: provider === 'openai' ? (openaiBaseUrl.trim() || undefined) : undefined,
+        openaiCompatibleApiKey: provider === 'openai_compatible' ? (openaiCompatibleApiKey.trim() || existingOpenaiCompatibleApiKey || undefined) : undefined,
+        openaiCompatibleBaseUrl: provider === 'openai_compatible' ? (openaiCompatibleBaseUrl.trim() || undefined) : undefined,
         azureOpenAIApiKey: provider === 'azure_openai' ? (azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || undefined) : undefined,
         azureOpenAIBaseUrl: provider === 'azure_openai' ? (azureOpenAIBaseUrl.trim() || undefined) : undefined,
         azureOpenAIApiVersion: provider === 'azure_openai' ? (azureOpenAIApiVersion.trim() || undefined) : undefined,
@@ -1027,6 +1135,8 @@ export function SettingsView({
         geminiBaseUrl: geminiBaseUrl.trim() || undefined,
         openaiApiKey: openaiApiKey.trim() || existingOpenaiApiKey || undefined,
         openaiBaseUrl: openaiBaseUrl.trim() || undefined,
+        openaiCompatibleApiKey: openaiCompatibleApiKey.trim() || existingOpenaiCompatibleApiKey || undefined,
+        openaiCompatibleBaseUrl: openaiCompatibleBaseUrl.trim() || undefined,
         azureOpenAIApiKey: azureOpenAIApiKey.trim() || existingAzureOpenAIApiKey || undefined,
         azureOpenAIBaseUrl: azureOpenAIBaseUrl.trim() || undefined,
         azureOpenAIApiVersion: azureOpenAIApiVersion.trim() || undefined,
@@ -1036,7 +1146,14 @@ export function SettingsView({
         groqBaseUrl: groqBaseUrl.trim() || undefined,
       }) as any;
       if (res?.success && res.catalog) {
-        setModelCatalogs(prev => ({ ...prev, [provider]: res.catalog }));
+        setModelCatalogs((prev) => {
+          if (provider !== 'openai_compatible') {
+            return { ...prev, [provider]: res.catalog };
+          }
+          const nextCatalog = buildOpenAiCompatibleCatalog(prev.openai_compatible, openaiCompatibleManualModelIds, res.catalog);
+          if (!nextCatalog) return prev;
+          return { ...prev, openai_compatible: nextCatalog };
+        });
       } else if (res?.error) {
         setModelCatalogError(res.error);
       }
@@ -1056,6 +1173,9 @@ export function SettingsView({
     openaiApiKey,
     existingOpenaiApiKey,
     openaiBaseUrl,
+    openaiCompatibleApiKey,
+    existingOpenaiCompatibleApiKey,
+    openaiCompatibleBaseUrl,
     azureOpenAIApiKey,
     existingAzureOpenAIApiKey,
     azureOpenAIBaseUrl,
@@ -1066,6 +1186,7 @@ export function SettingsView({
     groqApiKey,
     existingGroqApiKey,
     groqBaseUrl,
+    openaiCompatibleManualModelIds,
   ]);
 
   useEffect(() => {
@@ -1073,6 +1194,8 @@ export function SettingsView({
       ? Boolean(existingGeminiApiKey)
       : provider === 'openai'
         ? Boolean(existingOpenaiApiKey)
+        : provider === 'openai_compatible'
+          ? Boolean(existingOpenaiCompatibleApiKey && openaiCompatibleBaseUrl.trim())
         : provider === 'azure_openai'
           ? Boolean(existingAzureOpenAIApiKey && azureOpenAIBaseUrl.trim())
           : provider === 'ollama'
@@ -1080,14 +1203,14 @@ export function SettingsView({
             : provider === 'groq'
               ? Boolean(existingGroqApiKey)
               : true;
-    if (hasStoredCredential && !modelCatalogs[provider]) {
+    if (hasStoredCredential && !effectiveModelCatalogs[provider]) {
       void refreshModelCatalog();
     }
-  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, existingOllamaApiKey, existingGroqApiKey, modelCatalogs, refreshModelCatalog]);
+  }, [provider, existingGeminiApiKey, existingOpenaiApiKey, existingOpenaiCompatibleApiKey, openaiCompatibleBaseUrl, existingAzureOpenAIApiKey, azureOpenAIBaseUrl, existingOllamaApiKey, existingGroqApiKey, effectiveModelCatalogs, refreshModelCatalog]);
 
   const { entries: catalogEntries } = useMemo(
-    () => getCatalogEntriesForProvider(provider, modelCatalogs),
-    [provider, modelCatalogs],
+    () => getCatalogEntriesForProvider(provider, effectiveModelCatalogs),
+    [provider, effectiveModelCatalogs],
   );
 
   const currentCatalogEntries = useMemo(() => {
@@ -1125,6 +1248,7 @@ export function SettingsView({
     const proModel = getPreferredFamilyModel(currentCatalogEntries, 'pro');
     const liteModel = getPreferredFamilyModel(currentCatalogEntries, 'lite');
     const liteOrFlashModel = liteModel || flashModel;
+    const firstCatalogModel = getCatalogModelId(currentCatalogEntries[0]);
     const resolvedAssignments = resolveStoryAssistantAssignments(provider, {
       clarifyModel,
       decompositionModel,
@@ -1141,14 +1265,27 @@ export function SettingsView({
         || modelId.startsWith('claude-');
       if (shouldResetAzureModel(refineModel) && flashModel) setRefineModel(flashModel);
       if (shouldResetAzureModel(themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
+    } else if (provider === 'openai_compatible') {
+      const compatibleLight = flashModel || liteOrFlashModel || firstCatalogModel;
+      const compatibleHeavy = proModel || flashModel || firstCatalogModel;
+      if (!isModelPresentInEntries(currentCatalogEntries, refineModel) && compatibleLight) setRefineModel(compatibleLight);
+      if (!isModelPresentInEntries(currentCatalogEntries, themeModel) && (liteOrFlashModel || compatibleLight || compatibleHeavy)) {
+        setThemeModel(liteOrFlashModel || compatibleLight || compatibleHeavy);
+      }
     } else {
       if (!isProviderModel(provider, refineModel) && flashModel) setRefineModel(flashModel);
       if (!isProviderModel(provider, themeModel) && liteOrFlashModel) setThemeModel(liteOrFlashModel);
     }
     setStoryAssistantModelAssignments((prev) => {
       const current = prev[provider];
-      const nextLight = current?.lightModel || resolvedAssignments.lightModel || flashModel;
-      const nextHeavy = current?.heavyModel || resolvedAssignments.heavyModel || proModel || decompositionModel || arModel;
+      const suggestedLight = flashModel || liteOrFlashModel || firstCatalogModel;
+      const suggestedHeavy = proModel || flashModel || firstCatalogModel;
+      const nextLight = isModelPresentInEntries(currentCatalogEntries, current?.lightModel)
+        ? current?.lightModel
+        : (isModelPresentInEntries(currentCatalogEntries, resolvedAssignments.lightModel) ? resolvedAssignments.lightModel : suggestedLight);
+      const nextHeavy = isModelPresentInEntries(currentCatalogEntries, current?.heavyModel)
+        ? current?.heavyModel
+        : (isModelPresentInEntries(currentCatalogEntries, resolvedAssignments.heavyModel) ? resolvedAssignments.heavyModel : suggestedHeavy);
       if (!nextLight && !nextHeavy) return prev;
       if (current?.lightModel === nextLight && current?.heavyModel === nextHeavy) return prev;
       return {
@@ -1172,25 +1309,28 @@ export function SettingsView({
         });
       }
     });
-    [
-      clarifyModel,
-      decompositionModel,
-      arModel,
-      refineModel,
-      themeModel,
-      profileModels.clarifyModel,
-      profileModels.decompositionModel,
-      profileModels.arModel,
-      storyAssistantAssignments.lightModel,
-      storyAssistantAssignments.heavyModel,
-    ].forEach(modelId => {
+    const fallbackModelIds = provider === 'openai_compatible' && currentCatalogEntries.length === 0
+      ? []
+      : [
+        clarifyModel,
+        decompositionModel,
+        arModel,
+        refineModel,
+        themeModel,
+        profileModels.clarifyModel,
+        profileModels.decompositionModel,
+        profileModels.arModel,
+        storyAssistantAssignments.lightModel,
+        storyAssistantAssignments.heavyModel,
+      ];
+    fallbackModelIds.forEach(modelId => {
       if (modelId && !options.some(option => option.id === modelId)) {
         options.push({ id: modelId, label: modelId });
       }
     });
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
     return options.sort((left, right) => collator.compare(left.label, right.label));
-  }, [currentCatalogEntries, clarifyModel, decompositionModel, arModel, refineModel, themeModel, profileModels, storyAssistantAssignments]);
+  }, [provider, currentCatalogEntries, clarifyModel, decompositionModel, arModel, refineModel, themeModel, profileModels, storyAssistantAssignments]);
 
   const showComplianceTab = true;
   const workspaceNav = [
@@ -1400,7 +1540,7 @@ export function SettingsView({
                   <div className="space-y-2">
                     <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">LLM Provider</div>
                     <div className="flex p-0.5 bg-[var(--rf-surface-soft)] rounded-lg border border-[var(--rf-border)]">
-                      {(['anthropic', 'openai', 'azure_openai', 'gemini', 'ollama', 'groq'] as const).map(p => (
+                      {(['anthropic', 'openai', 'openai_compatible', 'azure_openai', 'gemini', 'ollama', 'groq'] as const).map(p => (
                         <button key={p} onClick={() => setProvider(p)} className={`flex-1 py-1.5 text-[12px] font-bold uppercase tracking-wide rounded-md transition-all ${provider === p ? 'bg-white text-[var(--rf-brand)] shadow-sm border border-[var(--rf-border)]/50' : 'text-[var(--rf-text-tertiary)] hover:text-[var(--rf-text-secondary)]'}`}>
                           {getProviderLabel(p)}
                         </button>
@@ -1431,6 +1571,45 @@ export function SettingsView({
                         {existingOpenaiApiKey && <button onClick={() => { setExistingOpenaiApiKey(''); setOpenaiApiKey(''); }} className="text-[12px] font-bold text-[var(--rf-danger)]">Clear</button>}
                       </div>
                       <input type="password" value={openaiApiKey} onChange={e => setOpenaiApiKey(e.target.value)} placeholder={existingOpenaiApiKey ? '••••••••• (stored)' : 'sk-…'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                    </motion.div>
+                  )}
+
+                  {provider === 'openai_compatible' && (
+                    <motion.div className="space-y-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <div className="rounded-xl border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] text-[var(--rf-text-secondary)]">
+                        Use this for Fireworks and other OpenAI-style vendors. Fireworks example base URL: <span className="font-semibold text-[var(--rf-text)]">{FIREWORKS_COMPAT_BASE_URL}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">API Key</label>
+                          {existingOpenaiCompatibleApiKey && <button onClick={() => { setExistingOpenaiCompatibleApiKey(''); setOpenaiCompatibleApiKey(''); }} className="text-[12px] font-bold text-[var(--rf-danger)]">Clear</button>}
+                        </div>
+                        <input type="password" value={openaiCompatibleApiKey} onChange={e => setOpenaiCompatibleApiKey(e.target.value)} placeholder={existingOpenaiCompatibleApiKey ? '••••••••• (stored)' : 'Paste vendor key'} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Base URL</label>
+                          <input type="text" value={openaiCompatibleBaseUrl} onChange={e => setOpenaiCompatibleBaseUrl(e.target.value)} placeholder={FIREWORKS_COMPAT_BASE_URL} disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Label (optional)</label>
+                          <input type="text" value={openaiCompatibleLabel} onChange={e => setOpenaiCompatibleLabel(e.target.value)} placeholder="Fireworks" disabled={!isAdmin} className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Manual Model IDs</label>
+                        <textarea
+                          value={openaiCompatibleManualModels}
+                          onChange={e => setOpenaiCompatibleManualModels(e.target.value)}
+                          placeholder={`accounts/fireworks/models/deepseek-v3p1\naccounts/fireworks/models/llama-v3p1-8b-instruct`}
+                          disabled={!isAdmin}
+                          rows={4}
+                          className="w-full resize-y bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none"
+                        />
+                        <div className="text-[12px] text-[var(--rf-text-tertiary)]">
+                          Enter one model per line. Manual IDs stay available even if provider discovery is incomplete.
+                        </div>
+                      </div>
                     </motion.div>
                   )}
 
@@ -1506,7 +1685,7 @@ export function SettingsView({
                     <div className="flex items-center gap-3">
                       {modelCatalogError && <span className="text-[12px] font-semibold text-[var(--rf-danger)]">{modelCatalogError}</span>}
                       <span className="text-[12px] text-[var(--rf-text-tertiary)]">
-                        {modelCatalogs[provider]?.models?.length ? `${modelCatalogs[provider]?.models?.length} models` : 'bundled catalog'}
+                        {effectiveModelCatalogs[provider]?.models?.length ? `${effectiveModelCatalogs[provider]?.models?.length} models` : 'bundled catalog'}
                       </span>
                       <motion.button
                         onClick={refreshModelCatalog}

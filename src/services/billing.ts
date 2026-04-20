@@ -51,6 +51,7 @@ const PROVIDER_KEY_FIELDS = {
   anthropic: 'anthropicApiKey',
   gemini: 'geminiApiKey',
   openai: 'openaiApiKey',
+  openai_compatible: 'openaiCompatibleApiKey',
   azure_openai: 'azureOpenAIApiKey',
   ollama: 'ollamaApiKey',
 } as const;
