@@ -82,20 +82,22 @@
     },
     "fireworks": {
       "catalog": [
-        { "id": "accounts/fireworks/models/deepseek-v3p2", "displayName": "DeepSeek V3.2", "family": "pro", "maxOutputTokens": 131072, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
-        { "id": "accounts/fireworks/models/glm-4p5", "displayName": "GLM 4.5", "family": "pro", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/qwen3-235b-a22b", "displayName": "Qwen3 235B", "family": "pro", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/deepseek-r1", "displayName": "DeepSeek R1", "family": "pro", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/deepseek-v3p2", "displayName": "DeepSeek V3.2", "family": "pro", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/glm-4p5", "displayName": "GLM 4.5", "family": "pro", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
         { "id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "displayName": "Llama 3.3 70B Instruct", "family": "flash", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "none", "reasoningVisibility": "unsupported", "tokenLimitParam": "max_tokens" },
-        { "id": "accounts/fireworks/models/qwen3-30b-a3b", "displayName": "Qwen 3 30B A3B", "family": "flash", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/qwen3-30b-a3b", "displayName": "Qwen 3 30B A3B", "family": "flash", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
         { "id": "accounts/fireworks/models/llama-v3p1-8b-instruct", "displayName": "Llama 3.1 8B Instruct", "family": "lite", "maxOutputTokens": 16384, "structuredOutputMode": "json_schema", "reasoningControlMode": "none", "reasoningVisibility": "unsupported", "tokenLimitParam": "max_tokens" }
       ],
       "presets": {
         "stable": {
-          "pro": ["accounts/fireworks/models/deepseek-v3p2", "accounts/fireworks/models/glm-4p5"],
+          "pro": ["accounts/fireworks/models/qwen3-235b-a22b", "accounts/fireworks/models/deepseek-r1", "accounts/fireworks/models/deepseek-v3p2"],
           "flash": ["accounts/fireworks/models/qwen3-30b-a3b", "accounts/fireworks/models/llama-v3p3-70b-instruct"],
           "lite": ["accounts/fireworks/models/llama-v3p1-8b-instruct"]
         },
         "latest": {
-          "pro": ["accounts/fireworks/models/deepseek-v3p2", "accounts/fireworks/models/glm-4p5"],
+          "pro": ["accounts/fireworks/models/qwen3-235b-a22b", "accounts/fireworks/models/deepseek-r1", "accounts/fireworks/models/deepseek-v3p2"],
           "flash": ["accounts/fireworks/models/qwen3-30b-a3b", "accounts/fireworks/models/llama-v3p3-70b-instruct"],
           "lite": ["accounts/fireworks/models/llama-v3p1-8b-instruct"]
         }
@@ -139,12 +141,12 @@
     },
     "groq": {
       "catalog": [
-        { "id": "llama-3.3-70b-versatile",        "displayName": "Llama 3.3 70B Versatile",        "family": "pro"   },
-        { "id": "llama-3.1-70b-versatile",        "displayName": "Llama 3.1 70B Versatile",        "family": "pro"   },
-        { "id": "deepseek-r1-distill-llama-70b",  "displayName": "DeepSeek R1 Distill Llama 70B",  "family": "pro"   },
-        { "id": "mixtral-8x7b-32768",             "displayName": "Mixtral 8x7B",                   "family": "flash" },
-        { "id": "llama-3.1-8b-instant",           "displayName": "Llama 3.1 8B Instant",           "family": "lite"  },
-        { "id": "gemma2-9b-it",                   "displayName": "Gemma 2 9B",                     "family": "lite"  }
+        { "id": "llama-3.3-70b-versatile",        "displayName": "Llama 3.3 70B Versatile",        "family": "pro",   "maxOutputTokens": 4096 },
+        { "id": "llama-3.1-70b-versatile",        "displayName": "Llama 3.1 70B Versatile",        "family": "pro",   "maxOutputTokens": 4096 },
+        { "id": "deepseek-r1-distill-llama-70b",  "displayName": "DeepSeek R1 Distill Llama 70B",  "family": "pro",   "maxOutputTokens": 1500 },
+        { "id": "mixtral-8x7b-32768",             "displayName": "Mixtral 8x7B",                   "family": "flash", "maxOutputTokens": 4096 },
+        { "id": "llama-3.1-8b-instant",           "displayName": "Llama 3.1 8B Instant",           "family": "lite",  "maxOutputTokens": 4096 },
+        { "id": "gemma2-9b-it",                   "displayName": "Gemma 2 9B",                     "family": "lite",  "maxOutputTokens": 4096 }
       ],
       "presets": {
         "stable": {

@@ -81,6 +81,8 @@ interface ModelCapability {
   unsupportedParams?: string[];
 }
 
+const FIREWORKS_NON_STREAMING_MAX_TOKENS = 4096;
+
 export type ProviderNeutralReasoningDepth = 'light' | 'standard' | 'deep';
 
 export function mapReasoningDepthToEffort(
@@ -333,12 +335,11 @@ function resolveModelCapability(
   };
 }
 
-function resolveEffectiveMaxTokens(opts: LlmCallOptions, capability: ModelCapability): number {
-  const configured = capability.maxOutputTokens;
-  if (typeof configured === 'number' && configured > 0) {
-    return configured;
-  }
-  return opts.maxTokens ?? 8192;
+export function resolveEffectiveMaxTokens(opts: LlmCallOptions, capability: ModelCapability): number {
+  const configured = typeof capability.maxOutputTokens === 'number' && capability.maxOutputTokens > 0
+    ? capability.maxOutputTokens
+    : (opts.maxTokens ?? 8192);
+  return configured;
 }
 
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
@@ -1119,6 +1120,44 @@ async function callAnthropic(opts: {
   };
 }
 
+function parseFireworksSSEBody(rawBody: string): {
+  text: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  thoughtTokens?: number;
+} {
+  let text = '';
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+  let thoughtTokens: number | undefined;
+
+  for (const line of rawBody.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const data = trimmed.slice(5).trim();
+    if (data === '[DONE]') break;
+    try {
+      const chunk = JSON.parse(data) as {
+        choices?: Array<{ delta?: { content?: string } }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          completion_tokens_details?: { reasoning_tokens?: number };
+        };
+      };
+      text += chunk.choices?.[0]?.delta?.content ?? '';
+      if (chunk.usage) {
+        inputTokens = chunk.usage.prompt_tokens;
+        outputTokens = chunk.usage.completion_tokens;
+        thoughtTokens = chunk.usage.completion_tokens_details?.reasoning_tokens;
+      }
+    } catch {
+      // malformed SSE chunk — skip
+    }
+  }
+  return { text, inputTokens, outputTokens, thoughtTokens };
+}
+
 async function callOpenAI(opts: {
   provider?: LlmProvider;
   model: string;
@@ -1182,6 +1221,14 @@ async function callOpenAI(opts: {
     }
   }
 
+  // Fireworks rejects max_tokens > 4096 for non-streaming requests.
+  // Use streaming for larger outputs and accumulate via SSE parsing.
+  const useStream = isFireworks && (opts.maxTokens ?? 8192) > FIREWORKS_NON_STREAMING_MAX_TOKENS;
+  if (useStream) {
+    body.stream = true;
+    body.stream_options = { include_usage: true };
+  }
+
   const { res, rawBody } = await fetchLlmWithRetry(url, {
     method: 'POST',
     headers: {
@@ -1195,14 +1242,30 @@ async function callOpenAI(opts: {
     throw new Error(`${isFireworks ? 'Fireworks' : 'OpenAI'} API error: ${rawBody}`);
   }
 
-  const payload = JSON.parse(rawBody);
-  const text = payload.choices?.[0]?.message?.content ?? '';
+  let text: string;
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+  let thoughtTokens: number | undefined;
+
+  if (useStream) {
+    const parsed = parseFireworksSSEBody(rawBody);
+    text = parsed.text;
+    inputTokens = parsed.inputTokens;
+    outputTokens = parsed.outputTokens;
+    thoughtTokens = parsed.thoughtTokens;
+  } else {
+    const payload = JSON.parse(rawBody);
+    text = payload.choices?.[0]?.message?.content ?? '';
+    inputTokens = payload.usage?.prompt_tokens;
+    outputTokens = payload.usage?.completion_tokens;
+    thoughtTokens = payload.usage?.completion_tokens_details?.reasoning_tokens;
+  }
 
   return {
     text,
-    inputTokens: payload.usage?.prompt_tokens,
-    outputTokens: payload.usage?.completion_tokens,
-    thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
+    inputTokens,
+    outputTokens,
+    thoughtTokens,
     structuredOutputMode: opts.jsonSchema ? 'json_schema' : (expectsJson ? 'json_object' : 'prompt_only'),
     reasoningControlMode: isFireworks
       ? (fireworksUsesThinkingBudget(opts.model) ? 'thinking_budget' : (fireworksSupportsReasoning(opts.model) ? 'reasoning_effort' : 'none'))

@@ -8,6 +8,7 @@ import {
   mapReasoningDepthToEffort,
   openAIRequiresMaxCompletionTokens,
   openAISupportsReasoning,
+  resolveEffectiveMaxTokens,
 } from '../llm';
 
 test('extractJson parses markdown-fenced JSON objects', () => {
@@ -134,4 +135,20 @@ test('buildLlmAuditMetadata captures requested/resolved models and reasoning tel
   assert.equal(meta.reasoningEffort, 'high');
   assert.equal(meta.thinkingBudget, 16384);
   assert.equal(meta.thoughtTokens, 1200);
+});
+
+test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-streaming limit', () => {
+  assert.equal(resolveEffectiveMaxTokens({
+    provider: 'fireworks',
+    model: 'accounts/fireworks/models/deepseek-v3p2',
+    systemPrompt: 'Return JSON',
+    userMessage: 'Test',
+    maxTokens: 131072,
+  }, {
+    structuredOutputMode: 'json_schema',
+    reasoningControlMode: 'reasoning_effort',
+    reasoningVisibility: 'separate_field',
+    tokenLimitParam: 'max_tokens',
+    maxOutputTokens: 131072,
+  }), 4096);
 });
