@@ -107,7 +107,6 @@ export const GENERATOR_ROLE_ORDER: GeneratorRoleDescriptor[] = [
 
 function getPresetProvider(provider: LlmProvider): StrategyCatalogProvider {
   if (provider === 'forge_llms') return 'anthropic';
-  if (provider === 'openai_compatible') return 'openai';
   return provider;
 }
 
@@ -273,11 +272,16 @@ export function inferModelFamily(modelId: string): ConcreteModelFamily | undefin
 }
 
 export function buildStaticCatalog(provider: LlmProvider): LlmModelCatalogEntry[] {
-  if (provider === 'openai_compatible') return [];
   return getProviderCatalogData(provider).catalog.map((model) => ({
     id: model.id,
     displayName: model.displayName,
     family: model.family as ConcreteModelFamily | undefined,
+    contextWindowTokens: 'contextWindowTokens' in model ? model.contextWindowTokens as number | undefined : undefined,
+    maxOutputTokens: 'maxOutputTokens' in model ? model.maxOutputTokens as number | undefined : undefined,
+    structuredOutputMode: 'structuredOutputMode' in model ? model.structuredOutputMode as LlmModelCatalogEntry['structuredOutputMode'] : undefined,
+    reasoningControlMode: 'reasoningControlMode' in model ? model.reasoningControlMode as LlmModelCatalogEntry['reasoningControlMode'] : undefined,
+    reasoningVisibility: 'reasoningVisibility' in model ? model.reasoningVisibility as LlmModelCatalogEntry['reasoningVisibility'] : undefined,
+    tokenLimitParam: 'tokenLimitParam' in model ? model.tokenLimitParam as LlmModelCatalogEntry['tokenLimitParam'] : undefined,
     source: 'fallback' as const,
   }));
 }

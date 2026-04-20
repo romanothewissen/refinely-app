@@ -51,9 +51,10 @@ const PROVIDER_KEY_FIELDS = {
   anthropic: 'anthropicApiKey',
   gemini: 'geminiApiKey',
   openai: 'openaiApiKey',
-  openai_compatible: 'openaiCompatibleApiKey',
+  fireworks: 'fireworksApiKey',
   azure_openai: 'azureOpenAIApiKey',
   ollama: 'ollamaApiKey',
+  groq: 'groqApiKey',
 } as const;
 
 function getCurrentMonthKey(): string {

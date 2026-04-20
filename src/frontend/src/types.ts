@@ -6,7 +6,7 @@ const DEFAULT_ANTHROPIC_STABLE = strategyCatalog.providers.anthropic.presets.sta
 
 // ─── Tenant Configuration ────────────────────────────────────────────────────
 
-export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'openai_compatible' | 'azure_openai' | 'ollama' | 'groq';
+export type LlmProvider = 'forge_llms' | 'anthropic' | 'gemini' | 'openai' | 'fireworks' | 'azure_openai' | 'ollama' | 'groq';
 export type ModelFamily = 'pro' | 'flash' | 'lite' | 'latest' | 'custom';
 export type ConcreteModelFamily = Exclude<ModelFamily, 'latest'>;
 export type LatestModelSelector = 'latest' | 'latest-pro' | 'latest-flash' | 'latest-lite';
@@ -28,6 +28,11 @@ export interface LlmModelCatalogEntry {
   releaseDate?: string;
   contextWindowTokens?: number;
   maxOutputTokens?: number;
+  structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
+  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'openai_reasoning' | 'auto' | 'none';
+  reasoningVisibility?: 'hidden' | 'separate_field' | 'inline' | 'unsupported';
+  tokenLimitParam?: 'max_tokens' | 'max_completion_tokens' | 'maxOutputTokens';
+  unsupportedParams?: string[];
   aliases?: string[];
   deploymentName?: string;
   source?: 'discovered' | 'manual' | 'fallback';
@@ -67,9 +72,8 @@ export interface GeneratorConfig {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiCompatibleApiKey?: string;
-  openaiCompatibleBaseUrl?: string;
-  openaiCompatibleLabel?: string;
+  fireworksApiKey?: string;
+  fireworksBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -224,7 +228,7 @@ export const DEFAULT_CONFIG: TenantConfig = {
     evaluateModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     triageModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
     themeModel: DEFAULT_ANTHROPIC_STABLE.flash[0],
-    maxTokens: 8192,
+    maxTokens: 131072,
   },
   generationPreferences: {},
   domainContext: '',

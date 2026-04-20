@@ -80,6 +80,27 @@
         }
       }
     },
+    "fireworks": {
+      "catalog": [
+        { "id": "accounts/fireworks/models/deepseek-v3p2", "displayName": "DeepSeek V3.2", "family": "pro", "maxOutputTokens": 131072, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/glm-4p5", "displayName": "GLM 4.5", "family": "pro", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "displayName": "Llama 3.3 70B Instruct", "family": "flash", "maxOutputTokens": 32768, "structuredOutputMode": "json_schema", "reasoningControlMode": "none", "reasoningVisibility": "unsupported", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/qwen3-30b-a3b", "displayName": "Qwen 3 30B A3B", "family": "flash", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "reasoning_effort", "reasoningVisibility": "separate_field", "tokenLimitParam": "max_tokens" },
+        { "id": "accounts/fireworks/models/llama-v3p1-8b-instruct", "displayName": "Llama 3.1 8B Instruct", "family": "lite", "maxOutputTokens": 16384, "structuredOutputMode": "json_schema", "reasoningControlMode": "none", "reasoningVisibility": "unsupported", "tokenLimitParam": "max_tokens" }
+      ],
+      "presets": {
+        "stable": {
+          "pro": ["accounts/fireworks/models/deepseek-v3p2", "accounts/fireworks/models/glm-4p5"],
+          "flash": ["accounts/fireworks/models/qwen3-30b-a3b", "accounts/fireworks/models/llama-v3p3-70b-instruct"],
+          "lite": ["accounts/fireworks/models/llama-v3p1-8b-instruct"]
+        },
+        "latest": {
+          "pro": ["accounts/fireworks/models/deepseek-v3p2", "accounts/fireworks/models/glm-4p5"],
+          "flash": ["accounts/fireworks/models/qwen3-30b-a3b", "accounts/fireworks/models/llama-v3p3-70b-instruct"],
+          "lite": ["accounts/fireworks/models/llama-v3p1-8b-instruct"]
+        }
+      }
+    },
     "azure_openai": {
       "catalog": [],
       "presets": {

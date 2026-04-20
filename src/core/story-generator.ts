@@ -92,6 +92,7 @@ import {
   validateAndRepairInitialDiscovery,
 } from './discovery';
 import { formatWorkInstructionInsightsForPrompt } from './wi-insights';
+import type { JsonSchema } from './json-schema';
 
 // ─── Types from LLM response ──────────────────────────────────────────────────
 
@@ -260,6 +261,149 @@ interface ArObligations {
   unresolvedDecisions: string[];
   wiMustCoverBehaviors: string[];
 }
+
+const RAW_ACCEPTANCE_REQUIREMENT_SCHEMA: JsonSchema = {
+  anyOf: [
+    { type: 'string' },
+    {
+      type: 'object',
+      properties: {
+        given: { type: 'string' },
+        when: { type: 'string' },
+        then: { type: 'string' },
+      },
+    },
+  ],
+};
+
+const RAW_FEATURE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    summary: { type: 'string' },
+    description: { type: 'string' },
+    acceptance_requirements: {
+      type: 'array',
+      items: RAW_ACCEPTANCE_REQUIREMENT_SCHEMA,
+    },
+    acceptanceRequirements: {
+      type: 'array',
+      items: RAW_ACCEPTANCE_REQUIREMENT_SCHEMA,
+    },
+    suggested_story_points: { type: 'number' },
+    process_code: { type: 'string' },
+    feature_class: { type: 'string' },
+    featureClass: { type: 'string' },
+    confidence: { type: 'string' },
+    actor_source: { type: 'string' },
+    actorSource: { type: 'string' },
+  },
+};
+
+const RAW_DRAFT_FEATURE_SCHEMA: JsonSchema = {
+  ...RAW_FEATURE_SCHEMA,
+  properties: {
+    ...(RAW_FEATURE_SCHEMA.properties ?? {}),
+    why_separate: { type: 'string' },
+    whySeparate: { type: 'string' },
+    possible_merge_with: { type: 'array', items: { type: 'string' } },
+    possibleMergeWith: { type: 'array', items: { type: 'string' } },
+    possible_split_note: { type: 'string' },
+    possibleSplitNote: { type: 'string' },
+  },
+};
+
+const RAW_DECOMPOSITION_RESPONSE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    reasoning_summary: { type: 'string' },
+    reasoningSummary: { type: 'string' },
+    unresolved_ambiguities: { type: 'array', items: { type: 'string' } },
+    unresolvedAmbiguities: { type: 'array', items: { type: 'string' } },
+    open_decisions: { type: 'array', items: { type: 'object' } },
+    openDecisions: { type: 'array', items: { type: 'object' } },
+    features: { type: 'array', items: RAW_DRAFT_FEATURE_SCHEMA },
+  },
+  required: ['features'],
+};
+
+const RAW_DESCRIPTION_REWRITE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    description: { type: 'string' },
+  },
+};
+
+const RAW_DESCRIPTION_REPAIR_RESPONSE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    rewrites: {
+      type: 'array',
+      items: RAW_DESCRIPTION_REWRITE_SCHEMA,
+    },
+  },
+  required: ['rewrites'],
+};
+
+const RAW_FEATURE_COLLECTION_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    features: {
+      type: 'array',
+      items: RAW_FEATURE_SCHEMA,
+    },
+  },
+  required: ['features'],
+};
+
+const REFINE_FEEDBACK_SUFFICIENCY_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    sufficient: { type: 'boolean' },
+    question: { type: 'string' },
+  },
+  required: ['sufficient'],
+};
+
+const RAW_COVERAGE_REVIEW_RESPONSE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    sufficient: { type: 'boolean' },
+    missingCoverage: { type: 'array', items: { type: 'string' } },
+    reasoning: { type: 'string' },
+  },
+  required: ['sufficient'],
+};
+
+const RAW_STRUCTURAL_FEATURE_PROPOSAL_SCHEMA: JsonSchema = {
+  ...RAW_FEATURE_SCHEMA,
+  properties: {
+    ...(RAW_FEATURE_SCHEMA.properties ?? {}),
+    source_feature_ids: { type: 'array', items: { type: 'string' } },
+    sourceAcceptanceRequirementRefs: { type: 'array', items: { type: 'string' } },
+    source_acceptance_requirement_refs: { type: 'array', items: { type: 'string' } },
+    primary_source_feature_id: { type: 'string' },
+    primarySourceFeatureId: { type: 'string' },
+    rationale: { type: 'string' },
+  },
+};
+
+const RAW_STRUCTURAL_RESTRUCTURE_RESPONSE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    proposed_features: { type: 'array', items: RAW_STRUCTURAL_FEATURE_PROPOSAL_SCHEMA },
+    proposedFeatures: { type: 'array', items: RAW_STRUCTURAL_FEATURE_PROPOSAL_SCHEMA },
+    removed_feature_ids: { type: 'array', items: { type: 'string' } },
+    removedFeatureIds: { type: 'array', items: { type: 'string' } },
+    removed_acceptance_requirement_refs: { type: 'array', items: { type: 'string' } },
+    removedAcceptanceRequirementRefs: { type: 'array', items: { type: 'string' } },
+  },
+  anyOf: [
+    { type: 'object', required: ['proposed_features'] },
+    { type: 'object', required: ['proposedFeatures'] },
+  ],
+};
 
 const AR_GENERATION_ATTEMPTS = 2;
 const AR_RETRY_DELAY_MS = 600;
@@ -689,6 +833,8 @@ async function runDecompositionPass(input: {
     systemPrompt: input.systemPrompt,
     userMessage: input.userMessage,
     maxTokens: input.generatorConfig.maxTokens,
+    schemaName: 'decomposition_response',
+    jsonSchema: RAW_DECOMPOSITION_RESPONSE_SCHEMA,
     reasoningEffort,
     ...input.providerOpts,
   });
@@ -707,6 +853,8 @@ async function runDecompositionPass(input: {
     systemPrompt: `${input.systemPrompt}\n\nFINAL REMINDER: Return at least 1 feature. Never return an empty features array.`,
     userMessage: `${input.userMessage}\n\nIMPORTANT: The previous result contained zero features. Return at least one well-scoped feature in valid JSON.`,
     maxTokens: input.generatorConfig.maxTokens,
+    schemaName: 'decomposition_response',
+    jsonSchema: RAW_DECOMPOSITION_RESPONSE_SCHEMA,
     reasoningEffort,
     ...input.providerOpts,
   });
@@ -955,6 +1103,8 @@ async function repairDraftFeatureDescriptions(opts: {
     systemPrompt: buildDraftDescriptionRepairSystemPrompt(),
     userMessage,
     maxTokens: 2048,
+    schemaName: 'description_repair_response',
+    jsonSchema: RAW_DESCRIPTION_REPAIR_RESPONSE_SCHEMA,
     reasoningEffort: 'medium',
     ...opts.providerOpts,
   });
@@ -1070,6 +1220,8 @@ async function generateAcceptanceRequirementsForFeature(input: {
         systemPrompt: input.systemPrompt,
         userMessage: input.userMessage,
         maxTokens: input.maxTokens,
+        schemaName: 'feature_collection',
+        jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
         reasoningEffort: 'medium',
         ...input.providerOpts,
       });
@@ -2236,6 +2388,8 @@ async function reviewDraftFeatureSet(opts: {
     }),
     userMessage,
     maxTokens: Math.max(opts.config.generatorConfig.maxTokens ?? 8192, 4096),
+    schemaName: 'draft_review_response',
+    jsonSchema: RAW_DECOMPOSITION_RESPONSE_SCHEMA,
     reasoningEffort: 'medium',
     ...opts.providerOpts,
   });
@@ -2819,8 +2973,8 @@ export async function generateFeatures(opts: {
     geminiBaseUrl: generatorConfig.geminiBaseUrl,
     openaiApiKey: generatorConfig.openaiApiKey,
     openaiBaseUrl: generatorConfig.openaiBaseUrl,
-    openaiCompatibleApiKey: generatorConfig.openaiCompatibleApiKey,
-    openaiCompatibleBaseUrl: generatorConfig.openaiCompatibleBaseUrl,
+    fireworksApiKey: generatorConfig.fireworksApiKey,
+    fireworksBaseUrl: generatorConfig.fireworksBaseUrl,
     azureOpenAIApiKey: generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: generatorConfig.azureOpenAIApiVersion,
@@ -3133,6 +3287,8 @@ export async function generateFeatures(opts: {
       systemPrompt: pass2System,
       userMessage: pass2UserMessage,
       maxTokens: pass2MaxTokens,
+      schemaName: 'feature_collection',
+      jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
       reasoningEffort: acceptanceRequirementsReasoningEffort(generatorConfig.pipelineProfile),
       ...providerOpts,
     });
@@ -3538,6 +3694,8 @@ export async function restructureFeatures(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: config.generatorConfig.maxTokens,
+    schemaName: 'structural_restructure_response',
+    jsonSchema: RAW_STRUCTURAL_RESTRUCTURE_RESPONSE_SCHEMA,
     reasoningEffort: 'high',
     ...buildLlmProviderOpts(config),
   });
@@ -3631,6 +3789,8 @@ export async function addFeaturesFromFeedback(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: Math.min(config.generatorConfig.maxTokens, 4096),
+    schemaName: 'feature_collection',
+    jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
     reasoningEffort: 'medium',
     ...buildLlmProviderOpts(config),
   });
@@ -3712,6 +3872,8 @@ async function addRequirementsToFeature(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: 3072,
+    schemaName: 'feature_collection',
+    jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
     reasoningEffort: 'low',
     ...buildLlmProviderOpts(config),
   });
@@ -3843,6 +4005,8 @@ export async function refineSingleFeature(opts: {
     systemPrompt: system,
     userMessage,
     maxTokens: allowSplit ? 4096 : 3072,
+    schemaName: 'feature_collection',
+    jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
     reasoningEffort: allowSplit ? 'medium' : 'low',
     ...buildLlmProviderOpts(config),
   });
@@ -3999,6 +4163,8 @@ export async function checkRefineFeedbackSufficiency(opts: {
     model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
     systemPrompt: buildRefineSufficiencyPrompt(),
     userMessage,
+    schemaName: 'refine_feedback_sufficiency',
+    jsonSchema: REFINE_FEEDBACK_SUFFICIENCY_SCHEMA,
     ...buildLlmProviderOpts(opts.config),
   });
 
@@ -4035,6 +4201,8 @@ async function checkCoverageAdvice(opts: {
     systemPrompt: buildCoverageCheckSystemPrompt({ domainContext: opts.config.domainContext }),
     userMessage,
     maxTokens: 2048,
+    schemaName: 'coverage_review_response',
+    jsonSchema: RAW_COVERAGE_REVIEW_RESPONSE_SCHEMA,
     reasoningEffort: 'medium',
     ...buildLlmProviderOpts(opts.config),
   });
@@ -4533,8 +4701,8 @@ function buildLlmProviderOpts(config: TenantConfig) {
     geminiBaseUrl: config.generatorConfig.geminiBaseUrl,
     openaiApiKey: config.generatorConfig.openaiApiKey,
     openaiBaseUrl: config.generatorConfig.openaiBaseUrl,
-    openaiCompatibleApiKey: config.generatorConfig.openaiCompatibleApiKey,
-    openaiCompatibleBaseUrl: config.generatorConfig.openaiCompatibleBaseUrl,
+    fireworksApiKey: config.generatorConfig.fireworksApiKey,
+    fireworksBaseUrl: config.generatorConfig.fireworksBaseUrl,
     azureOpenAIApiKey: config.generatorConfig.azureOpenAIApiKey,
     azureOpenAIBaseUrl: config.generatorConfig.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: config.generatorConfig.azureOpenAIApiVersion,

@@ -29,9 +29,12 @@ class PipelineAuditWriter {
     durationMs?: number;
     usage?: { input: number; output: number };
     maxTokens?: number;
+    effectiveMaxTokens?: number;
     reasoningEffort?: PipelineAuditLlmCallRecord['reasoningEffort'];
     thinkingBudget?: number;
     thoughtTokens?: number;
+    structuredOutputMode?: PipelineAuditLlmCallRecord['structuredOutputMode'];
+    reasoningControlMode?: PipelineAuditLlmCallRecord['reasoningControlMode'];
     piiMasking?: PiiMaskingStats;
     parseOutcome?: PipelineAuditLlmCallRecord['parseOutcome'];
   }): void {
@@ -45,9 +48,12 @@ class PipelineAuditWriter {
       durationMs: input.durationMs,
       usage: input.usage,
       maxTokens: input.maxTokens,
+      effectiveMaxTokens: input.effectiveMaxTokens,
       reasoningEffort: input.reasoningEffort,
       thinkingBudget: input.thinkingBudget,
       thoughtTokens: input.thoughtTokens,
+      structuredOutputMode: input.structuredOutputMode,
+      reasoningControlMode: input.reasoningControlMode,
       systemPrompt: input.systemPrompt,
       userMessage: input.userMessage,
       responseText: truncateForAudit(input.responseText),

@@ -60,12 +60,12 @@ test('uses the hosted sampler monthly quota only when relying on fallback creden
   assert.equal(getUsageLimits(byokConfig).generationsPerMonth, 150);
 });
 
-test('treats openai-compatible tenant credentials as byok mode', () => {
+test('treats fireworks tenant credentials as byok mode', () => {
   const config = buildConfig({
     generatorConfig: {
-      provider: 'openai_compatible',
-      openaiCompatibleApiKey: 'tenant-fireworks-key',
-      openaiCompatibleBaseUrl: 'https://api.fireworks.ai/inference/v1',
+      provider: 'fireworks',
+      fireworksApiKey: 'tenant-fireworks-key',
+      fireworksBaseUrl: 'https://api.fireworks.ai/inference/v1',
     },
   });
 

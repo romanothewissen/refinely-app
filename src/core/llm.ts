@@ -15,6 +15,8 @@ import type {
 import { maskPiiText } from '../services/compliance';
 import { getPipelineAuditWriter } from '../services/pipeline-audit-context';
 import { extractJsonWithMetadata } from './json';
+import type { JsonSchema } from './json-schema';
+import { validateJsonSchema } from './json-schema';
 import strategyCatalog from '../frontend/src/modelStrategyCatalog.json';
 
 export interface LlmResponse {
@@ -22,6 +24,9 @@ export interface LlmResponse {
   inputTokens?: number;
   outputTokens?: number;
   thoughtTokens?: number;
+  effectiveMaxTokens?: number;
+  structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
+  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'openai_reasoning' | 'auto' | 'none';
   piiMasking?: PiiMaskingStats;
 }
 
@@ -39,8 +44,8 @@ export interface LlmCallOptions {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiCompatibleApiKey?: string;
-  openaiCompatibleBaseUrl?: string;
+  fireworksApiKey?: string;
+  fireworksBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -53,6 +58,27 @@ export interface LlmCallOptions {
   /** When true, never fall back to Gemini/OpenAI — throw the Forge LLM error as-is. */
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
+}
+
+export interface LlmJsonOptions extends LlmCallOptions {
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
+  validate?: (data: unknown) => string | null;
+}
+
+type StructuredOutputMode = NonNullable<LlmModelCatalogEntry['structuredOutputMode']>;
+type ReasoningControlMode = NonNullable<LlmModelCatalogEntry['reasoningControlMode']>;
+type ReasoningVisibility = NonNullable<LlmModelCatalogEntry['reasoningVisibility']>;
+type TokenLimitParam = NonNullable<LlmModelCatalogEntry['tokenLimitParam']>;
+
+interface ModelCapability {
+  structuredOutputMode: StructuredOutputMode;
+  reasoningControlMode: ReasoningControlMode;
+  reasoningVisibility: ReasoningVisibility;
+  tokenLimitParam: TokenLimitParam;
+  maxOutputTokens?: number;
+  contextWindowTokens?: number;
+  unsupportedParams?: string[];
 }
 
 export type ProviderNeutralReasoningDepth = 'light' | 'standard' | 'deep';
@@ -107,11 +133,14 @@ export function buildLlmAuditMetadata(input: {
   resolvedModel: string;
   provider?: LlmProvider;
   maxTokens?: number;
+  effectiveMaxTokens?: number;
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   thoughtTokens?: number;
+  structuredOutputMode?: StructuredOutputMode;
+  reasoningControlMode?: ReasoningControlMode;
 }): Pick<
   PipelineAuditLlmCallRecord,
-  'model' | 'requestedModel' | 'resolvedModel' | 'provider' | 'maxTokens' | 'reasoningEffort' | 'thinkingBudget' | 'thoughtTokens'
+  'model' | 'requestedModel' | 'resolvedModel' | 'provider' | 'maxTokens' | 'effectiveMaxTokens' | 'reasoningEffort' | 'thinkingBudget' | 'thoughtTokens' | 'structuredOutputMode' | 'reasoningControlMode'
 > {
   return {
     model: input.resolvedModel,
@@ -119,9 +148,12 @@ export function buildLlmAuditMetadata(input: {
     resolvedModel: input.resolvedModel,
     provider: input.provider,
     maxTokens: input.maxTokens,
+    effectiveMaxTokens: input.effectiveMaxTokens,
     reasoningEffort: input.reasoningEffort,
     thinkingBudget: getRequestedThinkingBudget(input.provider, input.resolvedModel, input.reasoningEffort),
     thoughtTokens: input.thoughtTokens,
+    structuredOutputMode: input.structuredOutputMode,
+    reasoningControlMode: input.reasoningControlMode,
   };
 }
 
@@ -164,8 +196,149 @@ export function openAIRequiresMaxCompletionTokens(model: string): boolean {
 }
 
 export function groqSupportsReasoning(model: string): boolean {
-  // Groq's reasoning_effort param is supported by DeepSeek R1 distill models only.
-  return /deepseek-r1/i.test(model.trim());
+  const normalized = model.trim().toLowerCase();
+  return normalized.includes('deepseek-r1')
+    || normalized.includes('openai/gpt-oss')
+    || normalized.includes('qwen/qwen3');
+}
+
+function fireworksSupportsReasoning(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return normalized.includes('deepseek')
+    || normalized.includes('glm')
+    || normalized.includes('qwen3')
+    || normalized.includes('kimi');
+}
+
+function fireworksUsesThinkingBudget(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return normalized.includes('anthropic') || normalized.includes('claude');
+}
+
+function buildGenericJsonSchema(name: string, schema: JsonSchema): Record<string, unknown> {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name,
+      schema,
+      strict: true,
+    },
+  };
+}
+
+function requestExpectsJson(opts: { systemPrompt: string; userMessage: string; jsonSchema?: JsonSchema }): boolean {
+  return Boolean(
+    opts.jsonSchema
+    || /\bjson\b/i.test(opts.systemPrompt)
+    || /\bjson\b/i.test(opts.userMessage),
+  );
+}
+
+function getModelCatalogEntry(
+  provider: LlmProvider | undefined,
+  model: string,
+  catalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[],
+): LlmModelCatalogEntry | undefined {
+  if (!provider) return undefined;
+  const entries = normalizeCatalogEntries(catalog);
+  return entries.find((entry) => entry.id === model || entry.deploymentName === model || entry.aliases?.includes(model));
+}
+
+function buildFallbackCapability(provider: LlmProvider | undefined, model: string): ModelCapability {
+  const normalized = model.trim().toLowerCase();
+  const family = inferModelFamily(model);
+  const sharedOpenAiLikeMax = family === 'lite' ? 16384 : family === 'flash' ? 32768 : 65536;
+
+  if (provider === 'gemini') {
+    return {
+      structuredOutputMode: 'json_schema',
+      reasoningControlMode: buildGeminiThinkingConfig(model, 'low') ? 'thinking_budget' : 'none',
+      reasoningVisibility: 'hidden',
+      tokenLimitParam: 'maxOutputTokens',
+      maxOutputTokens: /gemini-3|gemini-2\.5/i.test(normalized) ? 65536 : 16384,
+    };
+  }
+  if (provider === 'anthropic') {
+    return {
+      structuredOutputMode: 'prompt_only',
+      reasoningControlMode: anthropicSupportsThinking(model) ? 'thinking_budget' : 'none',
+      reasoningVisibility: 'hidden',
+      tokenLimitParam: 'max_tokens',
+      maxOutputTokens: family === 'lite' ? 8192 : 32768,
+    };
+  }
+  if (provider === 'groq') {
+    return {
+      structuredOutputMode: 'json_schema',
+      reasoningControlMode: groqSupportsReasoning(model) ? 'reasoning_effort' : 'none',
+      reasoningVisibility: groqSupportsReasoning(model) ? 'hidden' : 'unsupported',
+      tokenLimitParam: /gpt-oss|qwen\/qwen3/i.test(normalized) ? 'max_completion_tokens' : 'max_tokens',
+      maxOutputTokens: /gpt-oss|qwen\/qwen3/i.test(normalized) ? 65536 : 32768,
+    };
+  }
+  if (provider === 'ollama') {
+    return {
+      structuredOutputMode: 'json_schema',
+      reasoningControlMode: /deepseek|qwen3|gpt-oss/i.test(normalized) ? 'reasoning_effort' : 'auto',
+      reasoningVisibility: /deepseek|qwen3|gpt-oss/i.test(normalized) ? 'hidden' : 'separate_field',
+      tokenLimitParam: 'max_tokens',
+      maxOutputTokens: family === 'lite' ? 8192 : family === 'flash' ? 16384 : 32768,
+    };
+  }
+  if (provider === 'fireworks') {
+    return {
+      structuredOutputMode: 'json_schema',
+      reasoningControlMode: fireworksUsesThinkingBudget(model)
+        ? 'thinking_budget'
+        : (fireworksSupportsReasoning(model) ? 'reasoning_effort' : 'none'),
+      reasoningVisibility: fireworksSupportsReasoning(model) ? 'separate_field' : 'unsupported',
+      tokenLimitParam: 'max_tokens',
+      maxOutputTokens: normalized.includes('deepseek') ? 131072 : sharedOpenAiLikeMax,
+    };
+  }
+  if (provider === 'azure_openai' || provider === 'openai') {
+    return {
+      structuredOutputMode: 'json_schema',
+      reasoningControlMode: openAISupportsReasoning(model) ? 'openai_reasoning' : 'none',
+      reasoningVisibility: openAISupportsReasoning(model) ? 'hidden' : 'unsupported',
+      tokenLimitParam: openAIRequiresMaxCompletionTokens(model) ? 'max_completion_tokens' : 'max_tokens',
+      maxOutputTokens: normalized.startsWith('gpt-5') ? 128000 : sharedOpenAiLikeMax,
+    };
+  }
+  return {
+    structuredOutputMode: 'json_object',
+    reasoningControlMode: 'none',
+    reasoningVisibility: 'unsupported',
+    tokenLimitParam: 'max_tokens',
+    maxOutputTokens: sharedOpenAiLikeMax,
+  };
+}
+
+function resolveModelCapability(
+  provider: LlmProvider | undefined,
+  model: string,
+  catalog?: LlmVendorModelCatalog | LlmModelCatalogEntry[],
+): ModelCapability {
+  const entry = getModelCatalogEntry(provider, model, catalog);
+  const fallback = buildFallbackCapability(provider, model);
+  return {
+    ...fallback,
+    structuredOutputMode: entry?.structuredOutputMode ?? fallback.structuredOutputMode,
+    reasoningControlMode: entry?.reasoningControlMode ?? fallback.reasoningControlMode,
+    reasoningVisibility: entry?.reasoningVisibility ?? fallback.reasoningVisibility,
+    tokenLimitParam: entry?.tokenLimitParam ?? fallback.tokenLimitParam,
+    maxOutputTokens: entry?.maxOutputTokens ?? fallback.maxOutputTokens,
+    contextWindowTokens: entry?.contextWindowTokens ?? fallback.contextWindowTokens,
+    unsupportedParams: entry?.unsupportedParams ?? fallback.unsupportedParams,
+  };
+}
+
+function resolveEffectiveMaxTokens(opts: LlmCallOptions, capability: ModelCapability): number {
+  const configured = capability.maxOutputTokens;
+  if (typeof configured === 'number' && configured > 0) {
+    return configured;
+  }
+  return opts.maxTokens ?? 8192;
 }
 
 const LLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
@@ -270,7 +443,7 @@ async function fetchLlmWithRetry(
   throw new Error(`${label} exhausted retries unexpectedly`);
 }
 
-export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
+export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<LlmResponse> {
   const maskedSystem = maskPiiText(opts.systemPrompt, !!opts.piiMaskingEnabled);
   const maskedUser = maskPiiText(opts.userMessage, !!opts.piiMaskingEnabled);
   const piiMasking: PiiMaskingStats = {
@@ -292,25 +465,32 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     effectiveOpts.provider,
     effectiveOpts.modelCatalog ?? (effectiveOpts.provider ? effectiveOpts.modelCatalogs?.[effectiveOpts.provider] : undefined),
   );
+  const capability = resolveModelCapability(
+    effectiveOpts.provider,
+    resolvedModel,
+    effectiveOpts.modelCatalog ?? (effectiveOpts.provider ? effectiveOpts.modelCatalogs?.[effectiveOpts.provider] : undefined),
+  );
+  const effectiveMaxTokens = resolveEffectiveMaxTokens(effectiveOpts, capability);
   const requestedThinkingBudget = getRequestedThinkingBudget(opts.provider, resolvedModel, opts.reasoningEffort);
 
   const startedAt = Date.now();
   let result: LlmResponse;
+  const resolvedOpts = { ...effectiveOpts, model: resolvedModel, maxTokens: effectiveMaxTokens };
 
   if (opts.provider === 'gemini') {
-    result = await callGemini({ ...effectiveOpts, model: resolvedModel });
+    result = await callGemini(resolvedOpts);
   } else if (opts.provider === 'anthropic') {
-    result = await callAnthropic({ ...effectiveOpts, model: resolvedModel });
-  } else if (opts.provider === 'openai' || opts.provider === 'openai_compatible') {
-    result = await callOpenAI({ ...effectiveOpts, model: resolvedModel });
+    result = await callAnthropic(resolvedOpts);
+  } else if (opts.provider === 'openai' || opts.provider === 'fireworks') {
+    result = await callOpenAI(resolvedOpts);
   } else if (opts.provider === 'azure_openai') {
-    result = await callAzureOpenAI({ ...effectiveOpts, model: resolvedModel });
+    result = await callAzureOpenAI(resolvedOpts);
   } else if (opts.provider === 'ollama') {
-    result = await callOllama({ ...effectiveOpts, model: resolvedModel });
+    result = await callOllama(resolvedOpts);
   } else if (opts.provider === 'groq') {
-    result = await callGroq({ ...effectiveOpts, model: resolvedModel });
+    result = await callGroq(resolvedOpts);
   } else {
-    throw new Error('LLM provider is required. Configure Gemini, OpenAI, OpenAI-compatible, Anthropic, Azure OpenAI, Ollama, or Groq before calling callLlm.');
+    throw new Error('LLM provider is required. Configure Gemini, OpenAI, Fireworks, Anthropic, Azure OpenAI, Ollama, or Groq before calling callLlm.');
   }
 
   const audit = getPipelineAuditWriter();
@@ -320,8 +500,11 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
       resolvedModel,
       provider: opts.provider,
       maxTokens: opts.maxTokens,
+      effectiveMaxTokens,
       reasoningEffort: opts.reasoningEffort,
       thoughtTokens: result.thoughtTokens,
+      structuredOutputMode: result.structuredOutputMode ?? capability.structuredOutputMode,
+      reasoningControlMode: result.reasoningControlMode ?? capability.reasoningControlMode,
     });
     audit.appendLlmCall({
       ...auditMeta,
@@ -338,7 +521,13 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResponse> {
     });
   }
 
-  return { ...result, piiMasking };
+  return {
+    ...result,
+    piiMasking,
+    effectiveMaxTokens,
+    structuredOutputMode: result.structuredOutputMode ?? capability.structuredOutputMode,
+    reasoningControlMode: result.reasoningControlMode ?? capability.reasoningControlMode,
+  };
 }
 
 export function isLatestModelSelector(model: string): model is LatestModelSelector {
@@ -447,22 +636,40 @@ function buildCatalog(
   models: LlmModelCatalogEntry[],
   source: 'discovered' | 'manual' | 'fallback',
 ): LlmVendorModelCatalog {
+  const enriched = models.map((model) => {
+    const capability = resolveModelCapability(vendor, model.deploymentName ?? model.id, [model]);
+    return {
+      ...model,
+      structuredOutputMode: model.structuredOutputMode ?? capability.structuredOutputMode,
+      reasoningControlMode: model.reasoningControlMode ?? capability.reasoningControlMode,
+      reasoningVisibility: model.reasoningVisibility ?? capability.reasoningVisibility,
+      tokenLimitParam: model.tokenLimitParam ?? capability.tokenLimitParam,
+      maxOutputTokens: model.maxOutputTokens ?? capability.maxOutputTokens,
+      contextWindowTokens: model.contextWindowTokens ?? capability.contextWindowTokens,
+    };
+  });
   return {
     vendor,
     source,
     fetchedAt: new Date().toISOString(),
-    models: markLatestModels(models),
+    models: markLatestModels(enriched),
   };
 }
 
 function getStrategyCatalogEntries(provider: LlmProvider): LlmModelCatalogEntry[] {
   if (provider === 'forge_llms') return [];
-  const providerCatalog = (strategyCatalog.providers as Record<string, { catalog: Array<{ id: string; displayName: string; family: string }> }>)[provider];
+  const providerCatalog = (strategyCatalog.providers as Record<string, { catalog: Array<Record<string, unknown>> }>)[provider];
   if (!providerCatalog) return [];
   return providerCatalog.catalog.map((model) => ({
-    id: model.id,
-    displayName: model.displayName,
+    id: String(model.id ?? ''),
+    displayName: typeof model.displayName === 'string' ? model.displayName : undefined,
     family: model.family as ConcreteModelFamily,
+    contextWindowTokens: typeof model.contextWindowTokens === 'number' ? model.contextWindowTokens : undefined,
+    maxOutputTokens: typeof model.maxOutputTokens === 'number' ? model.maxOutputTokens : undefined,
+    structuredOutputMode: model.structuredOutputMode as StructuredOutputMode | undefined,
+    reasoningControlMode: model.reasoningControlMode as ReasoningControlMode | undefined,
+    reasoningVisibility: model.reasoningVisibility as ReasoningVisibility | undefined,
+    tokenLimitParam: model.tokenLimitParam as TokenLimitParam | undefined,
   }));
 }
 
@@ -528,8 +735,8 @@ export async function discoverLlmModelCatalog(opts: {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiCompatibleApiKey?: string;
-  openaiCompatibleBaseUrl?: string;
+  fireworksApiKey?: string;
+  fireworksBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -609,24 +816,32 @@ export async function discoverLlmModelCatalog(opts: {
     return models.length ? buildCatalog('gemini', models, 'discovered') : getFallbackModelCatalog('gemini');
   }
 
-  if (opts.provider === 'openai') {
-    const apiKey = (opts.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '').trim();
+  if (opts.provider === 'openai' || opts.provider === 'fireworks') {
+    const isFireworks = opts.provider === 'fireworks';
+    const apiKey = (isFireworks
+      ? (opts.fireworksApiKey ?? process.env.FIREWORKS_API_KEY ?? '')
+      : (opts.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '')
+    ).trim();
     if (!apiKey) {
-      return getFallbackModelCatalog('openai');
+      return getFallbackModelCatalog(opts.provider);
     }
-    const baseUrl = opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+    const baseUrl = (
+      isFireworks
+        ? (opts.fireworksBaseUrl ?? process.env.FIREWORKS_BASE_URL ?? 'https://api.fireworks.ai/inference/v1')
+        : (opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1')
+    );
     const url = `${baseUrl.replace(/\/+$/, '')}/models`;
     const res = await fetchWithTimeout(url, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
-    }, 'OpenAI model discovery');
+    }, isFireworks ? 'Fireworks model discovery' : 'OpenAI model discovery');
     const payload = await res.json() as { data?: Array<{ id?: string; created?: number }> };
     if (!res.ok) {
-      throw new Error(`OpenAI model discovery failed with status ${res.status}`);
+      throw new Error(`${isFireworks ? 'Fireworks' : 'OpenAI'} model discovery failed with status ${res.status}`);
     }
     const models = (payload.data ?? [])
-      .filter((model) => model.id && isChatCapableOpenAiModel(model.id))
+      .filter((model) => model.id && (isFireworks ? isTextCapableOpenAiCompatibleModel(String(model.id)) : isChatCapableOpenAiModel(String(model.id))))
       .map((model) => ({
         id: String(model.id),
         displayName: toDisplayName(String(model.id)),
@@ -634,35 +849,7 @@ export async function discoverLlmModelCatalog(opts: {
         releaseDate: model.created ? new Date(model.created * 1000).toISOString() : undefined,
         source: 'discovered' as const,
       }));
-    return models.length ? buildCatalog('openai', models, 'discovered') : getFallbackModelCatalog('openai');
-  }
-
-  if (opts.provider === 'openai_compatible') {
-    const apiKey = (opts.openaiCompatibleApiKey ?? '').trim();
-    const baseUrl = (opts.openaiCompatibleBaseUrl ?? '').trim().replace(/\/+$/, '');
-    if (!apiKey || !baseUrl) {
-      return getFallbackModelCatalog('openai_compatible');
-    }
-    const url = `${baseUrl}/models`;
-    const res = await fetchWithTimeout(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    }, 'OpenAI-compatible model discovery');
-    const payload = await res.json() as { data?: Array<{ id?: string; created?: number }> };
-    if (!res.ok) {
-      throw new Error(`OpenAI-compatible model discovery failed with status ${res.status}`);
-    }
-    const models = (payload.data ?? [])
-      .filter((model) => model.id && isTextCapableOpenAiCompatibleModel(String(model.id)))
-      .map((model) => ({
-        id: String(model.id),
-        displayName: toDisplayName(String(model.id)),
-        family: inferModelFamily(String(model.id)) === 'custom' ? undefined : inferModelFamily(String(model.id)),
-        releaseDate: model.created ? new Date(model.created * 1000).toISOString() : undefined,
-        source: 'discovered' as const,
-      }));
-    return models.length ? buildCatalog('openai_compatible', models, 'discovered') : getFallbackModelCatalog('openai_compatible');
+    return models.length ? buildCatalog(opts.provider, models, 'discovered') : getFallbackModelCatalog(opts.provider);
   }
 
   if (opts.provider === 'ollama') {
@@ -776,6 +963,7 @@ async function callGemini(opts: {
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   geminiApiKey?: string;
   geminiBaseUrl?: string;
+  jsonSchema?: JsonSchema;
 }): Promise<LlmResponse> {
   const apiKey = (opts.geminiApiKey ?? process.env.GEMINI_API_KEY ?? '').trim();
   if (!apiKey) {
@@ -789,11 +977,15 @@ async function callGemini(opts: {
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort);
   const useThinking = thinkingConfig !== undefined;
+  const expectsJson = requestExpectsJson(opts);
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: opts.maxTokens ?? 8192,
   };
-  if (!useThinking) {
+  if (expectsJson) {
     generationConfig.responseMimeType = 'application/json';
+  }
+  if (opts.jsonSchema) {
+    generationConfig.responseJsonSchema = opts.jsonSchema;
   }
   if (thinkingConfig) {
     generationConfig.thinkingConfig = thinkingConfig;
@@ -852,6 +1044,8 @@ async function callGemini(opts: {
     inputTokens: payload.usageMetadata?.promptTokenCount,
     outputTokens: payload.usageMetadata?.candidatesTokenCount,
     thoughtTokens: payload.usageMetadata?.thoughtsTokenCount,
+    structuredOutputMode: opts.jsonSchema ? 'json_schema' : (expectsJson ? 'json_object' : 'prompt_only'),
+    reasoningControlMode: thinkingConfig ? 'thinking_budget' : 'none',
   };
 }
 
@@ -920,6 +1114,8 @@ async function callAnthropic(opts: {
     text,
     inputTokens: payload.usage?.input_tokens,
     outputTokens: payload.usage?.output_tokens,
+    structuredOutputMode: 'prompt_only',
+    reasoningControlMode: thinkingBudget !== undefined ? 'thinking_budget' : 'none',
   };
 }
 
@@ -932,43 +1128,58 @@ async function callOpenAI(opts: {
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiCompatibleApiKey?: string;
-  openaiCompatibleBaseUrl?: string;
+  fireworksApiKey?: string;
+  fireworksBaseUrl?: string;
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
 }): Promise<LlmResponse> {
-  const isCompatible = opts.provider === 'openai_compatible';
+  const isFireworks = opts.provider === 'fireworks';
   const apiKey = (
-    isCompatible
-      ? (opts.openaiCompatibleApiKey ?? '')
+    isFireworks
+      ? (opts.fireworksApiKey ?? process.env.FIREWORKS_API_KEY ?? '')
       : (opts.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '')
   ).trim();
   if (!apiKey) {
-    throw new Error(isCompatible ? 'OpenAI-compatible API key is not set.' : 'OpenAI API key is not set.');
+    throw new Error(isFireworks ? 'Fireworks API key is not set.' : 'OpenAI API key is not set.');
   }
 
   const baseUrl = (
-    isCompatible
-      ? (opts.openaiCompatibleBaseUrl ?? '')
+    isFireworks
+      ? (opts.fireworksBaseUrl ?? process.env.FIREWORKS_BASE_URL ?? 'https://api.fireworks.ai/inference/v1')
       : (opts.openaiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1')
   ).trim().replace(/\/+$/, '');
   if (!baseUrl) {
-    throw new Error('OpenAI-compatible base URL is not set.');
+    throw new Error(isFireworks ? 'Fireworks base URL is not set.' : 'OpenAI base URL is not set.');
   }
   const url = `${baseUrl}/chat/completions`;
+  const expectsJson = requestExpectsJson(opts);
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: [
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    response_format: { type: 'json_object' },
   };
-  if (openAIRequiresMaxCompletionTokens(opts.model)) {
+  if (expectsJson) {
+    body.response_format = opts.jsonSchema ? buildGenericJsonSchema(opts.schemaName ?? 'structured_response', opts.jsonSchema) : { type: 'json_object' };
+  }
+  if (!isFireworks && openAIRequiresMaxCompletionTokens(opts.model)) {
     body.max_completion_tokens = opts.maxTokens ?? 8192;
   } else {
     body.max_tokens = opts.maxTokens ?? 8192;
   }
-  if (openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+  if (!isFireworks && openAISupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning = { effort: opts.reasoningEffort };
+  }
+  if (isFireworks && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
+    if (fireworksUsesThinkingBudget(opts.model)) {
+      const budget = geminiThinkingBudget(opts.reasoningEffort);
+      if (budget) {
+        body.thinking = { type: 'enabled', budget_tokens: budget };
+      }
+    } else if (fireworksSupportsReasoning(opts.model)) {
+      body.reasoning_effort = opts.reasoningEffort;
+    }
   }
 
   const { res, rawBody } = await fetchLlmWithRetry(url, {
@@ -978,10 +1189,10 @@ async function callOpenAI(opts: {
       'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify(body),
-  }, isCompatible ? 'OpenAI-compatible request' : 'OpenAI request');
+  }, isFireworks ? 'Fireworks request' : 'OpenAI request');
 
   if (!res.ok) {
-    throw new Error(`${isCompatible ? 'OpenAI-compatible' : 'OpenAI'} API error: ${rawBody}`);
+    throw new Error(`${isFireworks ? 'Fireworks' : 'OpenAI'} API error: ${rawBody}`);
   }
 
   const payload = JSON.parse(rawBody);
@@ -992,6 +1203,10 @@ async function callOpenAI(opts: {
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
     thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
+    structuredOutputMode: opts.jsonSchema ? 'json_schema' : (expectsJson ? 'json_object' : 'prompt_only'),
+    reasoningControlMode: isFireworks
+      ? (fireworksUsesThinkingBudget(opts.model) ? 'thinking_budget' : (fireworksSupportsReasoning(opts.model) ? 'reasoning_effort' : 'none'))
+      : (openAISupportsReasoning(opts.model) ? 'openai_reasoning' : 'none'),
   };
 }
 
@@ -1004,6 +1219,8 @@ async function callAzureOpenAI(opts: {
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
 }): Promise<LlmResponse> {
   const apiKey = (opts.azureOpenAIApiKey ?? process.env.AZURE_OPENAI_API_KEY ?? '').trim();
   if (!apiKey) {
@@ -1024,6 +1241,7 @@ async function callAzureOpenAI(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
+    ...(opts.jsonSchema ? { response_format: buildGenericJsonSchema(opts.schemaName ?? 'structured_response', opts.jsonSchema) } : {}),
   };
   if (openAIRequiresMaxCompletionTokens(opts.model)) {
     body.max_completion_tokens = opts.maxTokens ?? 8192;
@@ -1064,6 +1282,8 @@ async function callAzureOpenAI(opts: {
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
     thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
+    structuredOutputMode: opts.jsonSchema ? 'json_schema' : 'prompt_only',
+    reasoningControlMode: openAISupportsReasoning(opts.model) ? 'openai_reasoning' : 'none',
   };
 }
 
@@ -1075,6 +1295,8 @@ async function callOllama(opts: {
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   ollamaApiKey?: string;
   ollamaBaseUrl?: string;
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
 }): Promise<LlmResponse> {
   const apiKey = (opts.ollamaApiKey ?? process.env.OLLAMA_API_KEY ?? '').trim();
   if (!apiKey) {
@@ -1086,6 +1308,7 @@ async function callOllama(opts: {
     'openai',
   );
   const url = `${baseUrl}/chat/completions`;
+  const expectsJson = requestExpectsJson(opts);
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: [
@@ -1094,8 +1317,10 @@ async function callOllama(opts: {
     ],
     max_tokens: opts.maxTokens ?? 8192,
     stream: false,
-    response_format: { type: 'json_object' },
   };
+  if (expectsJson) {
+    body.response_format = opts.jsonSchema ? buildGenericJsonSchema(opts.schemaName ?? 'structured_response', opts.jsonSchema) : { type: 'json_object' };
+  }
   if (opts.reasoningEffort) {
     // Ollama's OpenAI-compatible chat/completions endpoint accepts reasoning_effort
     // for thinking-capable models and ignores it for others, which makes this a
@@ -1125,6 +1350,8 @@ async function callOllama(opts: {
     text: payload.choices?.[0]?.message?.content ?? '',
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
+    structuredOutputMode: opts.jsonSchema ? 'json_schema' : (expectsJson ? 'json_object' : 'prompt_only'),
+    reasoningControlMode: opts.reasoningEffort && opts.reasoningEffort !== 'none' ? 'reasoning_effort' : 'auto',
   };
 }
 
@@ -1136,6 +1363,8 @@ async function callGroq(opts: {
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   groqApiKey?: string;
   groqBaseUrl?: string;
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
 }): Promise<LlmResponse> {
   const apiKey = (opts.groqApiKey ?? process.env.GROQ_API_KEY ?? '').trim();
   if (!apiKey) {
@@ -1150,16 +1379,23 @@ async function callGroq(opts: {
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    max_tokens: opts.maxTokens ?? 8192,
+    ...(opts.model.toLowerCase().includes('gpt-oss') || opts.model.toLowerCase().includes('qwen/qwen3')
+      ? { max_completion_tokens: opts.maxTokens ?? 8192 }
+      : { max_tokens: opts.maxTokens ?? 8192 }),
   };
   // Only enable JSON mode when the prompt explicitly asks for JSON.
   // Groq enforces that the word "json" appears in the prompt when response_format is json_object.
   const promptMentionsJson = /\bjson\b/i.test(opts.systemPrompt) || /\bjson\b/i.test(opts.userMessage);
-  if (promptMentionsJson) {
+  if (opts.jsonSchema) {
+    body.response_format = buildGenericJsonSchema(opts.schemaName ?? 'structured_response', opts.jsonSchema);
+  } else if (promptMentionsJson) {
     body.response_format = { type: 'json_object' };
   }
   if (groqSupportsReasoning(opts.model) && opts.reasoningEffort && opts.reasoningEffort !== 'none') {
     body.reasoning_effort = opts.reasoningEffort;
+    body.reasoning_format = 'hidden';
+  } else if (opts.jsonSchema) {
+    body.reasoning_format = 'hidden';
   }
 
   const { res, rawBody } = await fetchLlmWithRetry(url, {
@@ -1185,6 +1421,8 @@ async function callGroq(opts: {
     inputTokens: payload.usage?.prompt_tokens,
     outputTokens: payload.usage?.completion_tokens,
     thoughtTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
+    structuredOutputMode: opts.jsonSchema ? 'json_schema' : (promptMentionsJson ? 'json_object' : 'prompt_only'),
+    reasoningControlMode: groqSupportsReasoning(opts.model) ? 'reasoning_effort' : 'none',
   };
 }
 
@@ -1204,8 +1442,8 @@ export async function callLlmJson<T>(opts: {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiCompatibleApiKey?: string;
-  openaiCompatibleBaseUrl?: string;
+  fireworksApiKey?: string;
+  fireworksBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -1217,6 +1455,9 @@ export async function callLlmJson<T>(opts: {
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
+  validate?: (data: unknown) => string | null;
 }): Promise<T> {
   const result = await callLlmJsonWithUsage<T>(opts);
   return result.data;
@@ -1235,8 +1476,8 @@ export async function callLlmJsonWithUsage<T>(opts: {
   geminiBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
-  openaiCompatibleApiKey?: string;
-  openaiCompatibleBaseUrl?: string;
+  fireworksApiKey?: string;
+  fireworksBaseUrl?: string;
   azureOpenAIApiKey?: string;
   azureOpenAIBaseUrl?: string;
   azureOpenAIApiVersion?: string;
@@ -1248,6 +1489,9 @@ export async function callLlmJsonWithUsage<T>(opts: {
   modelCatalogs?: LlmModelCatalogByVendor;
   noFallback?: boolean;
   piiMaskingEnabled?: boolean;
+  jsonSchema?: JsonSchema;
+  schemaName?: string;
+  validate?: (data: unknown) => string | null;
 }): Promise<{
   data: T;
   usage: { input: number; output: number };
@@ -1275,6 +1519,11 @@ export async function callLlmJsonWithUsage<T>(opts: {
     }
     try {
       const parsed = extractJsonWithMetadata<T>(res.text);
+      const schemaError = opts.jsonSchema ? validateJsonSchema(parsed.data, opts.jsonSchema) : null;
+      const customError = opts.validate ? opts.validate(parsed.data) : null;
+      if (schemaError || customError) {
+        throw new Error(schemaError || customError || 'JSON validation failed');
+      }
       getPipelineAuditWriter()?.annotateLastJsonParse(parsed.parseMode);
       return {
         data: parsed.data,
@@ -1314,7 +1563,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
       if (attempt === 0) {
         opts = {
           ...opts,
-          userMessage: opts.userMessage + '\n\nIMPORTANT: Respond with valid JSON only. No prose before or after.',
+          userMessage: opts.userMessage + '\n\nIMPORTANT: Respond with valid JSON only. No prose before or after. Follow the required response schema exactly.',
         };
       }
     }

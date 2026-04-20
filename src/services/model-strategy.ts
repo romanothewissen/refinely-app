@@ -180,7 +180,6 @@ function normalizeProvider(provider?: LlmProvider): LlmProvider {
 }
 
 function getPresetProvider(provider: LlmProvider) {
-  if (provider === 'openai_compatible') return 'openai';
   return normalizeProvider(provider) as StrategyCatalogProvider;
 }
 
@@ -303,9 +302,8 @@ export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<Generat
     geminiBaseUrl: generatorConfig?.geminiBaseUrl,
     openaiApiKey: generatorConfig?.openaiApiKey,
     openaiBaseUrl: generatorConfig?.openaiBaseUrl,
-    openaiCompatibleApiKey: generatorConfig?.openaiCompatibleApiKey,
-    openaiCompatibleBaseUrl: generatorConfig?.openaiCompatibleBaseUrl,
-    openaiCompatibleLabel: generatorConfig?.openaiCompatibleLabel,
+    fireworksApiKey: generatorConfig?.fireworksApiKey,
+    fireworksBaseUrl: generatorConfig?.fireworksBaseUrl,
     azureOpenAIApiKey: generatorConfig?.azureOpenAIApiKey,
     azureOpenAIBaseUrl: generatorConfig?.azureOpenAIBaseUrl,
     azureOpenAIApiVersion: generatorConfig?.azureOpenAIApiVersion,

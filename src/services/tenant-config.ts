@@ -1,4 +1,4 @@
-import { GeneratorConfig, ProjectDomainContext, ProjectPersonaRole, TenantConfig, DEFAULT_CONFIG } from '../types';
+import { GeneratorConfig, LlmProvider, ProjectDomainContext, ProjectPersonaRole, TenantConfig, DEFAULT_CONFIG } from '../types';
 import { isPlausibleRoleLabel } from '../core/story-assistant-default';
 import { entityDeleteSecret, entityGet, entityGetSecret, entitySet, entitySetSecret, KEYS } from './cache';
 import { resolveEffectiveGeneratorConfig } from './model-strategy';
@@ -7,11 +7,60 @@ const GENERATOR_SECRET_FIELDS = [
   { field: 'anthropicApiKey', provider: 'anthropic' },
   { field: 'geminiApiKey', provider: 'gemini' },
   { field: 'openaiApiKey', provider: 'openai' },
-  { field: 'openaiCompatibleApiKey', provider: 'openai_compatible' },
+  { field: 'fireworksApiKey', provider: 'fireworks' },
   { field: 'azureOpenAIApiKey', provider: 'azure_openai' },
   { field: 'ollamaApiKey', provider: 'ollama' },
   { field: 'groqApiKey', provider: 'groq' },
 ] as const;
+
+const FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
+
+function isLegacyFireworksConfig(input: Record<string, unknown> | undefined): boolean {
+  const provider = String(input?.provider ?? '').trim();
+  const baseUrl = String(input?.openaiCompatibleBaseUrl ?? '').trim().toLowerCase();
+  const label = String(input?.openaiCompatibleLabel ?? '').trim().toLowerCase();
+  return provider === 'openai_compatible'
+    && (baseUrl.includes('api.fireworks.ai') || label === 'fireworks');
+}
+
+function migrateLegacyGeneratorConfig(
+  generatorConfig: Partial<GeneratorConfig> | undefined,
+): Partial<GeneratorConfig> | undefined {
+  if (!generatorConfig) return generatorConfig;
+  const raw = generatorConfig as Record<string, unknown>;
+  if (!isLegacyFireworksConfig(raw)) {
+    return generatorConfig;
+  }
+
+  const next = { ...generatorConfig } as Partial<GeneratorConfig> & Record<string, unknown>;
+  next.provider = 'fireworks';
+  next.fireworksApiKey = String(raw.fireworksApiKey ?? raw.openaiCompatibleApiKey ?? '').trim() || next.fireworksApiKey;
+  next.fireworksBaseUrl = String(raw.fireworksBaseUrl ?? raw.openaiCompatibleBaseUrl ?? '').trim() || FIREWORKS_BASE_URL;
+
+  const rawCatalogs = (next.modelCatalogs ?? {}) as Record<string, unknown>;
+  if (!rawCatalogs.fireworks && rawCatalogs.openai_compatible) {
+    const nextModelCatalogs = (next.modelCatalogs ?? {}) as NonNullable<GeneratorConfig['modelCatalogs']>;
+    next.modelCatalogs = {
+      ...nextModelCatalogs,
+      fireworks: rawCatalogs.openai_compatible as NonNullable<GeneratorConfig['modelCatalogs']>[LlmProvider],
+    };
+  }
+
+  const rawAssignments = (next.storyAssistantModelAssignments ?? {}) as Record<string, unknown>;
+  if (!rawAssignments.fireworks && rawAssignments.openai_compatible) {
+    const nextAssignments = (next.storyAssistantModelAssignments ?? {}) as NonNullable<GeneratorConfig['storyAssistantModelAssignments']>;
+    next.storyAssistantModelAssignments = {
+      ...nextAssignments,
+      fireworks: rawAssignments.openai_compatible as NonNullable<GeneratorConfig['storyAssistantModelAssignments']>[LlmProvider],
+    };
+  }
+
+  delete next.openaiCompatibleApiKey;
+  delete next.openaiCompatibleBaseUrl;
+  delete next.openaiCompatibleLabel;
+
+  return next;
+}
 
 export async function getConfig(): Promise<TenantConfig> {
   const saved = await entityGet<Partial<TenantConfig>>(KEYS.tenantConfig);
@@ -67,18 +116,22 @@ function deepMerge(base: Record<string, unknown>, override: Record<string, unkno
 }
 
 async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<TenantConfig>): Promise<TenantConfig> {
-  const generatorConfig = { ...(config.generatorConfig ?? {}) } as TenantConfig['generatorConfig'];
-  const savedGeneratorConfig = (saved?.generatorConfig ?? {}) as Partial<GeneratorConfig>;
+  const generatorConfig = { ...(migrateLegacyGeneratorConfig(config.generatorConfig) ?? {}) } as TenantConfig['generatorConfig'];
+  const savedGeneratorConfig = (migrateLegacyGeneratorConfig(saved?.generatorConfig as Partial<GeneratorConfig> | undefined) ?? {}) as Partial<GeneratorConfig>;
+  const legacySavedGeneratorConfig = ((saved?.generatorConfig ?? {}) as Record<string, unknown>);
   let legacySecretsDetected = false;
 
   const secretValues = await Promise.all(
     GENERATOR_SECRET_FIELDS.map(async ({ field, provider }) => {
       const secret = await entityGetSecret(KEYS.providerApiKey(provider));
+      const legacyFireworksSecret = field === 'fireworksApiKey'
+        ? await entityGetSecret(KEYS.providerApiKey('openai_compatible'))
+        : '';
       const legacy =
         field === 'anthropicApiKey' ? savedGeneratorConfig.anthropicApiKey
         : field === 'geminiApiKey' ? savedGeneratorConfig.geminiApiKey
         : field === 'openaiApiKey' ? savedGeneratorConfig.openaiApiKey
-        : field === 'openaiCompatibleApiKey' ? savedGeneratorConfig.openaiCompatibleApiKey
+        : field === 'fireworksApiKey' ? (savedGeneratorConfig.fireworksApiKey || String(legacySavedGeneratorConfig.openaiCompatibleApiKey ?? ''))
         : field === 'azureOpenAIApiKey' ? savedGeneratorConfig.azureOpenAIApiKey
         : field === 'ollamaApiKey' ? savedGeneratorConfig.ollamaApiKey
         : savedGeneratorConfig.groqApiKey;
@@ -89,7 +142,12 @@ async function withGeneratorSecrets(config: TenantConfig, saved?: Partial<Tenant
           await entitySetSecret(KEYS.providerApiKey(provider), normalizedLegacy);
         }
       }
-      return [field, secret ?? normalizedLegacy] as const;
+      const normalizedLegacySecret = typeof legacyFireworksSecret === 'string' ? legacyFireworksSecret.trim() : '';
+      if (field === 'fireworksApiKey' && normalizedLegacySecret && !secret) {
+        legacySecretsDetected = true;
+        await entitySetSecret(KEYS.providerApiKey('fireworks'), normalizedLegacySecret);
+      }
+      return [field, secret || normalizedLegacySecret || normalizedLegacy] as const;
     }),
   );
 
@@ -139,6 +197,7 @@ function stripGeneratorSecrets(config: TenantConfig): TenantConfig {
 function normalizeConfig(config: TenantConfig): TenantConfig {
   const withoutLegacy = { ...config };
   delete (withoutLegacy as { goldSources?: unknown }).goldSources;
+  const migratedGeneratorConfig = migrateLegacyGeneratorConfig(config.generatorConfig);
   const normalizedContexts = normalizeDomainContexts(withoutLegacy);
   const rawPrefs = { ...(config.generationPreferences ?? {}) } as Record<string, unknown>;
   delete rawPrefs.outputProfile;
@@ -153,7 +212,7 @@ function normalizeConfig(config: TenantConfig): TenantConfig {
 
   return {
     ...withoutLegacy,
-    generatorConfig: resolveEffectiveGeneratorConfig(config.generatorConfig),
+    generatorConfig: resolveEffectiveGeneratorConfig(migratedGeneratorConfig),
     generationPreferences: {
       ...(backlogDepth ? { backlogDepth } : {}),
       ...(featureProfile ? { featureProfile } : {}),
