@@ -275,7 +275,7 @@ function buildFallbackCapability(provider: LlmProvider | undefined, model: strin
       reasoningControlMode: groqSupportsReasoning(model) ? 'reasoning_effort' : 'none',
       reasoningVisibility: groqSupportsReasoning(model) ? 'hidden' : 'unsupported',
       tokenLimitParam: /gpt-oss|qwen\/qwen3/i.test(normalized) ? 'max_completion_tokens' : 'max_tokens',
-      maxOutputTokens: /gpt-oss|qwen\/qwen3/i.test(normalized) ? 65536 : 32768,
+      maxOutputTokens: /gpt-oss|qwen\/qwen3/i.test(normalized) ? 65536 : 8192,
     };
   }
   if (provider === 'ollama') {
