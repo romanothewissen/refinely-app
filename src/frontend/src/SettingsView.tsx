@@ -233,12 +233,20 @@ function parseFireworksManualModelIds(raw: string): string[] {
   )];
 }
 
+function normalizeFireworksModelId(id: string): string {
+  if (id.startsWith('accounts/')) return id;
+  if (id.startsWith('fireworks/models/')) return `accounts/${id}`;
+  if (id.startsWith('fireworks/')) return `accounts/fireworks/models/${id.slice('fireworks/'.length)}`;
+  return `accounts/fireworks/models/${id}`;
+}
+
 function buildFireworksManualEntries(modelIds: string[]): LlmModelCatalogEntry[] {
-  return modelIds.map((id) => {
+  return modelIds.map((raw) => {
+    const id = normalizeFireworksModelId(raw);
     const family = inferModelFamily(id);
     return {
       id,
-      displayName: id,
+      displayName: raw,
       family,
       source: 'manual' as const,
     };

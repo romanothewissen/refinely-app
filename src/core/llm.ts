@@ -209,7 +209,8 @@ function fireworksSupportsReasoning(model: string): boolean {
   return normalized.includes('deepseek')
     || normalized.includes('glm')
     || normalized.includes('qwen3')
-    || normalized.includes('kimi');
+    || normalized.includes('kimi')
+    || normalized.includes('minimax');
 }
 
 function fireworksUsesThinkingBudget(model: string): boolean {
@@ -850,6 +851,13 @@ export async function discoverLlmModelCatalog(opts: {
         releaseDate: model.created ? new Date(model.created * 1000).toISOString() : undefined,
         source: 'discovered' as const,
       }));
+    if (isFireworks) {
+      // Fireworks /v1/models only returns account-deployed models, not publicly available serverless models.
+      // Always include strategy catalog entries so well-known models remain visible after a refresh.
+      const discoveredIds = new Set(models.map((m) => m.id));
+      const catalogEntries = getStrategyCatalogEntries('fireworks').filter((e) => !discoveredIds.has(e.id));
+      return buildCatalog('fireworks', [...models, ...catalogEntries], 'discovered');
+    }
     return models.length ? buildCatalog(opts.provider, models, 'discovered') : getFallbackModelCatalog(opts.provider);
   }
 
@@ -977,7 +985,6 @@ async function callGemini(opts: {
   const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort);
-  const useThinking = thinkingConfig !== undefined;
   const expectsJson = requestExpectsJson(opts);
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: opts.maxTokens ?? 8192,
