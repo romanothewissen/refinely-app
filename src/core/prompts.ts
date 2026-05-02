@@ -1020,6 +1020,22 @@ Rules:
 - Do not default to medium values unless your reasoning truly supports them.`;
 }
 
+export function buildGenerationFinalConstraintBlock(stage: 'decomposition' | 'acceptance_requirements'): string {
+  if (stage === 'decomposition') {
+    return `FINAL OUTPUT CONSTRAINTS:
+- Use the Jira requirement, clarification answers, attachments, and work instructions above as the grounding context.
+- Keep similar backlog stories secondary to the requirement and work instructions.
+- Do not invent roles, business rules, workflows, or adjacent capabilities that are not supported by the provided context.
+- Return strict JSON only, matching the requested schema exactly.`;
+  }
+
+  return `FINAL OUTPUT CONSTRAINTS:
+- Use the Jira requirement, clarification answers, and work instructions above as the authoritative context for acceptance-requirement coverage.
+- Do not invent roles, business rules, states, or exception paths that are not supported by the provided context.
+- Keep all non-AR feature fields unchanged and fill acceptance_requirements only.
+- Return strict JSON only, matching the requested schema exactly.`;
+}
+
 // ─── Per-Feature AR User Message (for parallel AR generation) ────────────────
 
 export function buildArPerFeatureUserMessage(opts: {
@@ -1126,6 +1142,7 @@ export function buildArPerFeatureUserMessage(opts: {
   parts.push(
     'Order acceptance_requirements in a coherent narrative flow along this feature (context → main path → distinct branches → completion). Each AR remains one distinct test.',
   );
+  parts.push(buildGenerationFinalConstraintBlock('acceptance_requirements'));
 
   return parts.join('\n\n');
 }

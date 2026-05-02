@@ -1188,7 +1188,7 @@ export interface PipelineAuditLlmCallRecord {
   effectiveMaxTokens?: number;
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   thinkingBudget?: number;
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
   thoughtTokens?: number;
   structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
   reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'thinking_level' | 'openai_reasoning' | 'auto' | 'none';

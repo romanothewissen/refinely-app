@@ -21,6 +21,7 @@ import {
   buildCoverageRepairSystemPrompt,
   buildDecompositionSystemPrompt,
   buildEvaluateSystemPrompt,
+  buildGenerationFinalConstraintBlock,
   buildSizingAssessmentSystemPrompt,
   buildSizingRepairSystemPrompt,
   buildStoryAssistantDiscoveryAssessmentSystemPrompt,
@@ -793,6 +794,19 @@ test('per-feature AR prompt includes work instructions and clarifying context', 
   assert.match(message, /serial number is missing/i);
   assert.match(message, /manual review/i);
   assert.match(message, /RELATED BACKLOG CONTEXT/i);
+  assert.match(message, /FINAL OUTPUT CONSTRAINTS/i);
+  assert.match(message, /Do not invent roles, business rules, states, or exception paths/i);
+});
+
+test('generation final constraint blocks keep negative constraints at the tail', () => {
+  const decompositionTail = buildGenerationFinalConstraintBlock('decomposition');
+  const arTail = buildGenerationFinalConstraintBlock('acceptance_requirements');
+
+  assert.match(decompositionTail, /FINAL OUTPUT CONSTRAINTS/i);
+  assert.match(decompositionTail, /Do not invent roles, business rules, workflows, or adjacent capabilities/i);
+  assert.match(arTail, /FINAL OUTPUT CONSTRAINTS/i);
+  assert.match(arTail, /Keep all non-AR feature fields unchanged/i);
+  assert.match(arTail, /Return strict JSON only/i);
 });
 
 test('coverage prompts require WI-backed workflow branches to be checked and repaired', () => {

@@ -111,10 +111,10 @@ test('getRequestedThinkingBudget returns provider-specific budgets only when sup
 test('Gemini 3 models map reasoning effort to thinking levels', () => {
   assert.equal(isGeminiThreeFamilyModel('gemini-3-flash-preview'), true);
   assert.equal(isGeminiThreeFamilyModel('gemini-2.5-flash'), false);
-  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'none'), 'MINIMAL');
-  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'low'), 'LOW');
-  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'medium'), 'MEDIUM');
-  assert.equal(getRequestedGeminiThinkingLevel('gemini-3.1-pro-preview', 'none'), 'LOW');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'none'), 'minimal');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'low'), 'low');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'medium'), 'medium');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3.1-pro-preview', 'none'), 'low');
 });
 
 test('OpenAI GPT-5 models use reasoning controls and max_completion_tokens', () => {
@@ -147,11 +147,11 @@ test('buildLlmAuditMetadata captures requested/resolved models and reasoning tel
   assert.equal(meta.maxTokens, 16384);
   assert.equal(meta.reasoningEffort, 'high');
   assert.equal(meta.thinkingBudget, undefined);
-  assert.equal(meta.thinkingLevel, 'HIGH');
+  assert.equal(meta.thinkingLevel, 'high');
   assert.equal(meta.thoughtTokens, 1200);
 });
 
-test('Gemini 3 requests send thinking_level instead of thinkingBudget', async () => {
+test('Gemini 3 requests send documented thinkingLevel values instead of thinkingBudget', async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | undefined;
 
@@ -181,9 +181,43 @@ test('Gemini 3 requests send thinking_level instead of thinkingBudget', async ()
 
   const generationConfig = requestBody?.generationConfig as Record<string, unknown> | undefined;
   const thinkingConfig = generationConfig?.thinkingConfig as Record<string, unknown> | undefined;
-  assert.equal(thinkingConfig?.thinkingLevel, 'MEDIUM');
+  assert.equal(thinkingConfig?.thinkingLevel, 'medium');
   assert.equal('thinkingBudget' in (thinkingConfig ?? {}), false);
   assert.equal('reasoningControlMode' in (thinkingConfig ?? {}), false);
+});
+
+test('Gemini 3 requests can force high thinking for strict generation stages', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+      usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 5, thoughtsTokenCount: 2 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    await callLlm({
+      provider: 'gemini',
+      model: 'gemini-3-flash-preview',
+      systemPrompt: 'Return JSON.',
+      userMessage: 'Respond with {"ok":true}.',
+      reasoningEffort: 'medium',
+      geminiThinkingLevel: 'high',
+      geminiApiKey: 'test-key',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const generationConfig = requestBody?.generationConfig as Record<string, unknown> | undefined;
+  const thinkingConfig = generationConfig?.thinkingConfig as Record<string, unknown> | undefined;
+  assert.equal(thinkingConfig?.thinkingLevel, 'high');
 });
 
 test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-streaming limit', () => {

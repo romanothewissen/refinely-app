@@ -58,6 +58,7 @@ import {
   buildDraftReviewSystemPrompt,
   buildArSystemPrompt,
   buildArPerFeatureUserMessage,
+  buildGenerationFinalConstraintBlock,
   buildTriageSystemPrompt,
   buildClarifySystemPrompt,
   buildEvaluateSystemPrompt,
@@ -413,21 +414,21 @@ const AR_PARALLEL_CONCURRENCY = 3;
 /**
  * Maps the user-selected pipeline profile to a reasoning effort level.
  * fast → 'none'  (no thinking budget — fastest, lowest token cost)
- * balanced → 'low'  (~4k thinking tokens on Gemini 2.x; ignored on Ollama / non-thinking models)
- * quality → 'medium'  (~8k thinking tokens on Gemini 2.x)
+ * balanced → 'medium'  (balanced quality without forcing the deepest path)
+ * quality → 'high'  (deepest reasoning for decomposition-quality work)
  *
  * Non-thinking providers (Ollama, older Claude/Gemini/OpenAI) silently ignore reasoning effort.
  */
-function pipelineReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'low' | 'medium' {
+function pipelineReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'medium' | 'high' {
   if (profile === 'fast') return 'none';
-  if (profile === 'quality') return 'medium';
-  return 'low'; // 'balanced' or undefined → low
+  if (profile === 'quality') return 'high';
+  return 'medium'; // 'balanced' or undefined → medium
 }
 
 /** Pass-2 AR generation needs enough reasoning to avoid templated shallow ARs. */
-function acceptanceRequirementsReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'low' | 'medium' {
+function acceptanceRequirementsReasoningEffort(profile: PipelineProfile | undefined): 'none' | 'high' {
   if (profile === 'fast') return 'none';
-  return 'medium'; // balanced + quality
+  return 'high'; // balanced + quality
 }
 
 export class AcceptanceRequirementsGenerationError extends Error {
@@ -836,6 +837,7 @@ async function runDecompositionPass(input: {
     schemaName: 'decomposition_response',
     jsonSchema: RAW_DECOMPOSITION_RESPONSE_SCHEMA,
     reasoningEffort,
+    geminiThinkingLevel: reasoningEffort === 'none' ? undefined : 'high',
     ...input.providerOpts,
   });
 
@@ -856,6 +858,7 @@ async function runDecompositionPass(input: {
     schemaName: 'decomposition_response',
     jsonSchema: RAW_DECOMPOSITION_RESPONSE_SCHEMA,
     reasoningEffort,
+    geminiThinkingLevel: reasoningEffort === 'none' ? undefined : 'high',
     ...input.providerOpts,
   });
 
@@ -1222,7 +1225,8 @@ async function generateAcceptanceRequirementsForFeature(input: {
         maxTokens: input.maxTokens,
         schemaName: 'feature_collection',
         jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
-        reasoningEffort: 'medium',
+        reasoningEffort: 'high',
+        geminiThinkingLevel: 'high',
         ...input.providerOpts,
       });
 
@@ -3029,6 +3033,10 @@ export async function generateFeatures(opts: {
       similarStoriesText,
       limits: PASS1_CONTEXT_LIMITS,
     });
+    const pass1PromptWithFinalConstraints = [
+      pass1UserMessage,
+      buildGenerationFinalConstraintBlock('decomposition'),
+    ].join('\n\n---\n\n');
 
     const unansweredDiscoveryCategories = clarifyDiscoveryProfile?.missingCategoryKeys?.length
       ? clarifyDiscoveryProfile.missingCategoryKeys.map((k) => labelForCategoryKey(k)).join('; ')
@@ -3051,7 +3059,7 @@ export async function generateFeatures(opts: {
     });
 
     const pass1Result = await runDecompositionPass({
-      userMessage: pass1UserMessage,
+      userMessage: pass1PromptWithFinalConstraints,
       systemPrompt: pass1System,
       generatorConfig,
       tier: config.tier,
@@ -3272,6 +3280,7 @@ export async function generateFeatures(opts: {
       pass2ContextMessage,
       `AR OBLIGATIONS:\n${JSON.stringify(arObligations, null, 2)}`,
       `FEATURES FROM PASS 1 (fill in acceptance_requirements for each):\n${JSON.stringify(pass1Features, null, 2)}`,
+      buildGenerationFinalConstraintBlock('acceptance_requirements'),
     ].join('\n\n---\n\n');
 
     // Scale output token budget with feature count so batch calls never truncate.
@@ -3290,6 +3299,7 @@ export async function generateFeatures(opts: {
       schemaName: 'feature_collection',
       jsonSchema: RAW_FEATURE_COLLECTION_SCHEMA,
       reasoningEffort: acceptanceRequirementsReasoningEffort(generatorConfig.pipelineProfile),
+      geminiThinkingLevel: generatorConfig.pipelineProfile === 'fast' ? undefined : 'high',
       ...providerOpts,
     });
     if (await maybeCancelled(shouldCancel)) throw new GenerationCancelledError();

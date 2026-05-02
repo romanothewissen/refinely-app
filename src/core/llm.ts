@@ -27,7 +27,7 @@ export interface LlmResponse {
   effectiveMaxTokens?: number;
   structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
   reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'thinking_level' | 'openai_reasoning' | 'auto' | 'none';
-  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
   piiMasking?: PiiMaskingStats;
 }
 
@@ -43,6 +43,8 @@ export interface LlmCallOptions {
   anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
+  /** Explicit Gemini 3 thinking level override for calls that need stricter reasoning. */
+  geminiThinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   fireworksApiKey?: string;
@@ -85,7 +87,7 @@ interface ModelCapability {
 const FIREWORKS_NON_STREAMING_MAX_TOKENS = 4096;
 
 export type ProviderNeutralReasoningDepth = 'light' | 'standard' | 'deep';
-type GeminiThinkingLevel = 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
+type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
 interface GeminiThinkingConfig {
   reasoningControlMode: 'thinking_budget' | 'thinking_level';
@@ -151,13 +153,13 @@ export function getRequestedGeminiThinkingLevel(
 
   switch (effort) {
     case 'none':
-      return isGeminiFlashLiteModel(model) || inferModelFamily(model) === 'flash' ? 'MINIMAL' : 'LOW';
+      return isGeminiFlashLiteModel(model) || inferModelFamily(model) === 'flash' ? 'minimal' : 'low';
     case 'low':
-      return 'LOW';
+      return 'low';
     case 'medium':
-      return 'MEDIUM';
+      return 'medium';
     case 'high':
-      return 'HIGH';
+      return 'high';
     default:
       return undefined;
   }
@@ -234,6 +236,7 @@ export function buildLlmAuditMetadata(input: {
 function buildGeminiThinkingConfig(
   model: string,
   effort: LlmCallOptions['reasoningEffort'],
+  overrideLevel?: GeminiThinkingLevel,
 ): GeminiThinkingConfig | undefined {
   if (!effort) return undefined;
   // Thinking-capable Gemini models: 2.x and 3.x series, explicit "thinking" in name, or "exp"
@@ -242,7 +245,7 @@ function buildGeminiThinkingConfig(
     || model.toLowerCase().includes('thinking');
   if (!isThinkingCapable) return undefined;
   if (isGeminiThreeFamilyModel(model)) {
-    const thinkingLevel = getRequestedGeminiThinkingLevel(model, effort);
+    const thinkingLevel = overrideLevel ?? getRequestedGeminiThinkingLevel(model, effort);
     if (!thinkingLevel) return undefined;
     return {
       reasoningControlMode: 'thinking_level',
@@ -558,7 +561,7 @@ export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<Ll
   const effectiveMaxTokens = resolveEffectiveMaxTokens(effectiveOpts, capability);
   const requestedThinkingBudget = getRequestedThinkingBudget(opts.provider, resolvedModel, opts.reasoningEffort);
   const requestedGeminiThinking = opts.provider === 'gemini'
-    ? buildGeminiThinkingConfig(resolvedModel, opts.reasoningEffort)
+    ? buildGeminiThinkingConfig(resolvedModel, opts.reasoningEffort, opts.geminiThinkingLevel)
     : undefined;
 
   const startedAt = Date.now();
@@ -1059,6 +1062,7 @@ async function callGemini(opts: {
   reasoningEffort?: LlmCallOptions['reasoningEffort'];
   geminiApiKey?: string;
   geminiBaseUrl?: string;
+  geminiThinkingLevel?: LlmCallOptions['geminiThinkingLevel'];
   jsonSchema?: JsonSchema;
 }): Promise<LlmResponse> {
   const apiKey = (opts.geminiApiKey ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -1071,7 +1075,7 @@ async function callGemini(opts: {
   const model = mapModelForGemini(opts.model);
   const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort);
+  const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort, opts.geminiThinkingLevel);
   const expectsJson = requestExpectsJson(opts);
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: opts.maxTokens ?? 8192,
@@ -1600,6 +1604,7 @@ export async function callLlmJson<T>(opts: {
   anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
+  geminiThinkingLevel?: LlmCallOptions['geminiThinkingLevel'];
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   fireworksApiKey?: string;
@@ -1634,6 +1639,7 @@ export async function callLlmJsonWithUsage<T>(opts: {
   anthropicBaseUrl?: string;
   geminiApiKey?: string;
   geminiBaseUrl?: string;
+  geminiThinkingLevel?: LlmCallOptions['geminiThinkingLevel'];
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   fireworksApiKey?: string;
