@@ -93,6 +93,18 @@ interface GeminiThinkingConfig {
   thinkingLevel?: GeminiThinkingLevel;
 }
 
+function toGeminiApiThinkingConfig(
+  config: GeminiThinkingConfig | undefined,
+): Record<string, unknown> | undefined {
+  if (!config) return undefined;
+  if (config.reasoningControlMode === 'thinking_level') {
+    return config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : undefined;
+  }
+  return typeof config.thinkingBudget === 'number'
+    ? { thinkingBudget: config.thinkingBudget }
+    : undefined;
+}
+
 export function mapReasoningDepthToEffort(
   depth: ProviderNeutralReasoningDepth | undefined,
 ): LlmCallOptions['reasoningEffort'] {
@@ -1070,8 +1082,9 @@ async function callGemini(opts: {
   if (opts.jsonSchema) {
     generationConfig.responseJsonSchema = opts.jsonSchema;
   }
-  if (thinkingConfig) {
-    generationConfig.thinkingConfig = thinkingConfig;
+  const geminiApiThinkingConfig = toGeminiApiThinkingConfig(thinkingConfig);
+  if (geminiApiThinkingConfig) {
+    generationConfig.thinkingConfig = geminiApiThinkingConfig;
   }
 
   const { res, rawBody } = await fetchLlmWithRetry(url, {

@@ -183,6 +183,7 @@ test('Gemini 3 requests send thinking_level instead of thinkingBudget', async ()
   const thinkingConfig = generationConfig?.thinkingConfig as Record<string, unknown> | undefined;
   assert.equal(thinkingConfig?.thinkingLevel, 'MEDIUM');
   assert.equal('thinkingBudget' in (thinkingConfig ?? {}), false);
+  assert.equal('reasoningControlMode' in (thinkingConfig ?? {}), false);
 });
 
 test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-streaming limit', () => {
