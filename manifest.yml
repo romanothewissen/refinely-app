@@ -3,7 +3,7 @@ app:
   licensing:
     enabled: true
   runtime:
-    name: nodejs20.x
+    name: nodejs22.x
 
 modules:
   jira:globalPage:
