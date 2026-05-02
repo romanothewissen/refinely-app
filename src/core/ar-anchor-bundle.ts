@@ -25,6 +25,7 @@ export interface ArAnchorTriple {
 }
 
 export interface ArAnchorExample {
+  id: string;
   summary: string;
   triples: ArAnchorTriple[];
 }
@@ -36,6 +37,7 @@ export interface ArAnchorExample {
  */
 export const ANCHOR_EXAMPLES: ArAnchorExample[] = [
   {
+    id: 'approval_workflow',
     summary: 'Transition an active request through a phased approval workflow',
     triples: [
       {
@@ -61,6 +63,7 @@ export const ANCHOR_EXAMPLES: ArAnchorExample[] = [
     ],
   },
   {
+    id: 'follow_on_transactions',
     summary: 'Generate follow-on transactions from a finalised plan',
     triples: [
       {
@@ -86,6 +89,7 @@ export const ANCHOR_EXAMPLES: ArAnchorExample[] = [
     ],
   },
   {
+    id: 'dependency_ordering',
     summary: 'Enforce dependency ordering across sequenced activities',
     triples: [
       {
@@ -106,6 +110,7 @@ export const ANCHOR_EXAMPLES: ArAnchorExample[] = [
     ],
   },
   {
+    id: 'entitlement_rules',
     summary: 'Apply entitlement rules to determine billable items on a service record',
     triples: [
       {
@@ -131,6 +136,7 @@ export const ANCHOR_EXAMPLES: ArAnchorExample[] = [
     ],
   },
   {
+    id: 'consolidated_status',
     summary: 'Track and report consolidated status across related sub-records',
     triples: [
       {
@@ -158,18 +164,22 @@ export const ANCHOR_EXAMPLES: ArAnchorExample[] = [
  */
 export function formatAnchorBundleText(): string {
   const lines: string[] = [
-    'ACCEPTANCE REQUIREMENT QUALITY ANCHORS (these are reference examples only — match their specificity and depth, do not copy their scope):',
+    '<reference_examples purpose="anchor_acceptance_patterns">',
+    'These are reference examples only. Match their specificity and depth without copying their scope.',
     'Study the structure: compound preconditions in GIVEN, concrete business objects in THEN, distinct branch variants.',
-    '',
   ];
   for (const example of ANCHOR_EXAMPLES) {
-    lines.push(`— ${example.summary}`);
+    lines.push(`<example id="${example.id}">`);
+    lines.push(`<story_summary>${example.summary}</story_summary>`);
+    lines.push('<acceptance_requirements>');
     for (const t of example.triples) {
-      lines.push(`  GIVEN ${t.given}`);
-      lines.push(`  WHEN ${t.when}`);
-      lines.push(`  THEN ${t.then}`);
+      lines.push(`GIVEN ${t.given}`);
+      lines.push(`WHEN ${t.when}`);
+      lines.push(`THEN ${t.then}`);
     }
-    lines.push('');
+    lines.push('</acceptance_requirements>');
+    lines.push('</example>');
   }
+  lines.push('</reference_examples>');
   return lines.join('\n').trimEnd();
 }

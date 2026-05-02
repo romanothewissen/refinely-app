@@ -282,4 +282,5 @@ export const KEYS = {
   projectActivity: 'project_activity',
   providerApiKey: (provider: 'anthropic' | 'gemini' | 'openai' | 'fireworks' | 'openai_compatible' | 'azure_openai' | 'ollama' | 'groq') => `provider_api_key_${provider}`,
   pipelineAudit: (sessionId: string, auditRunId: string) => `pipeline_audit_${sessionId}_${auditRunId}`,
+  pipelineAuditIndex: 'pipeline_audit_index',
 } as const;

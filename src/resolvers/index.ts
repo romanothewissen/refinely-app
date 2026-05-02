@@ -72,7 +72,13 @@ import {
   RefineEvent,
 } from '../types';
 import { handleInferProjectPersonaRoles } from './project-persona-role-inference';
-import { deletePipelineAuditBundle, loadPipelineAuditBundle, mergePipelineAuditBundle } from '../services/pipeline-audit-store';
+import { buildPipelineAuditBenchmarkSuite } from '../services/pipeline-audit-benchmark';
+import {
+  deletePipelineAuditBundle,
+  listPipelineAuditIndexEntries,
+  loadPipelineAuditBundle,
+  mergePipelineAuditBundle,
+} from '../services/pipeline-audit-store';
 
 function applyPreferredPipelineProfile(config: any, pipelineProfile?: string) {
   if (pipelineProfile !== 'fast' && pipelineProfile !== 'balanced' && pipelineProfile !== 'quality') {
@@ -972,6 +978,26 @@ resolver.define('getPipelineAudit', async ({ payload, context }) => {
   return { success: true, bundle };
 });
 
+resolver.define('listPipelineAudits', async ({ payload, context }) => {
+  const cfg = await getConfig();
+  if (!cfg.developerTools?.pipelineAuditEnabled) {
+    return { success: false, error: 'Pipeline audit is not enabled for this workspace.' };
+  }
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const isAdmin = await checkAdmin(context);
+  const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
+  const limitRaw = Number(payload?.limit ?? 25);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.floor(limitRaw))) : 25;
+  const entries = await listPipelineAuditIndexEntries();
+  const audits = entries
+    .filter((entry) => (
+      (!entry.accountId || entry.accountId === accountId || isAdmin)
+      && (!sessionId || entry.sessionId === sessionId)
+    ))
+    .slice(0, limit);
+  return { success: true, audits };
+});
+
 resolver.define('deletePipelineAudit', async ({ payload, context }) => {
   const cfg = await getConfig();
   if (!cfg.developerTools?.pipelineAuditEnabled) {
@@ -993,6 +1019,53 @@ resolver.define('deletePipelineAudit', async ({ payload, context }) => {
   }
   await deletePipelineAuditBundle(sessionId, auditRunId);
   return { success: true };
+});
+
+resolver.define('buildPipelineAuditBenchmark', async ({ payload, context }) => {
+  const cfg = await getConfig();
+  if (!cfg.developerTools?.pipelineAuditEnabled) {
+    return { success: false, error: 'Pipeline audit is not enabled for this workspace.' };
+  }
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const isAdmin = await checkAdmin(context);
+  const limitRaw = Number(payload?.limit ?? 20);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, Math.floor(limitRaw))) : 20;
+  const requestedRefs = Array.isArray(payload?.auditRefs)
+    ? payload.auditRefs
+        .map((item: any) => ({
+          sessionId: String(item?.sessionId ?? '').trim(),
+          auditRunId: String(item?.auditRunId ?? '').trim(),
+        }))
+        .filter((item: { sessionId: string; auditRunId: string }) => item.sessionId && item.auditRunId)
+        .slice(0, limit)
+    : [];
+
+  let bundles = [];
+  if (requestedRefs.length > 0) {
+    const loaded = await Promise.all(
+      requestedRefs.map((ref: { sessionId: string; auditRunId: string }) =>
+        loadPipelineAuditBundle(ref.sessionId, ref.auditRunId)),
+    );
+    bundles = loaded.filter((bundle) => (
+      bundle
+      && (!bundle.accountId || bundle.accountId === accountId || isAdmin)
+    ));
+  } else {
+    const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
+    const entries = (await listPipelineAuditIndexEntries())
+      .filter((entry) => (
+        (!entry.accountId || entry.accountId === accountId || isAdmin)
+        && (!sessionId || entry.sessionId === sessionId)
+      ))
+      .slice(0, limit);
+    const loaded = await Promise.all(entries.map((entry) => loadPipelineAuditBundle(entry.sessionId, entry.auditRunId)));
+    bundles = loaded.filter(Boolean);
+  }
+
+  return {
+    success: true,
+    suite: buildPipelineAuditBenchmarkSuite(bundles),
+  };
 });
 
 resolver.define('mergePipelineAuditClientPolling', async ({ payload }) => {

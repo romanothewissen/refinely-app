@@ -551,14 +551,18 @@ export function formatGoldStoryExemplars(pool: GoldStoryPool, confirmedKeys?: st
   if (!entries.length) return '';
 
   const lines: string[] = [
-    'RELEVANT AR PATTERNS from similar deployed stories — study the specificity and level of detail and match this standard. Not more generic. Not more solution-specific.',
-    '',
+    '<reference_examples purpose="gold_acceptance_requirements">',
+    'Study the specificity and level of detail in these deployed stories and match that standard. Do not become more generic. Do not become more solution-specific.',
   ];
-  for (const entry of entries.slice(0, 8)) {
-    lines.push(`— ${entry.summary}`);
+  for (const entry of entries.slice(0, 3)) {
+    lines.push(`<example id="${entry.key}">`);
+    lines.push(`<story_summary>${entry.summary}</story_summary>`);
+    lines.push('<acceptance_requirements>');
     lines.push(entry.arSample.trim());
-    lines.push('');
+    lines.push('</acceptance_requirements>');
+    lines.push('</example>');
   }
+  lines.push('</reference_examples>');
   return lines.join('\n').trimEnd();
 }
 
@@ -1861,32 +1865,36 @@ export function formatArPatternLibraryFromSimilarStories(
     return (b.story.relevanceScore ?? 0) - (a.story.relevanceScore ?? 0);
   });
 
-  const topK = Math.min(maxStories, Math.ceil(rows.length * 0.4), rows.length);
+  const topK = Math.min(Math.min(maxStories, 3), Math.ceil(rows.length * 0.4), rows.length);
   const picked = rows.slice(0, Math.max(2, topK));
 
   // ── Step 4: format output ─────────────────────────────────────────────────
   const lines: string[] = [
-    'ACCEPTANCE REQUIREMENT EXAMPLES from this workspace (match their specificity and depth — do not copy their scope):',
+    '<reference_examples purpose="workspace_acceptance_patterns">',
+    'Match the specificity and depth of these examples without copying their scope.',
     'Study the structure: compound preconditions in GIVEN, concrete business objects in THEN, distinct branch variants.',
-    '',
   ];
   const storyKeys: string[] = [];
   for (const { story, triples } of picked) {
     storyKeys.push(story.key);
-    lines.push(`— ${story.key}: ${story.summary}`);
+    lines.push(`<example id="${story.key}">`);
+    lines.push(`<story_summary>${story.summary}</story_summary>`);
+    lines.push('<acceptance_requirements>');
     if (triples.length) {
       for (const gwt of triples) {
-        lines.push(`  GIVEN ${gwt.given}`);
-        lines.push(`  WHEN ${gwt.when}`);
-        lines.push(`  THEN ${gwt.then}`);
+        lines.push(`GIVEN ${gwt.given}`);
+        lines.push(`WHEN ${gwt.when}`);
+        lines.push(`THEN ${gwt.then}`);
       }
     } else {
       for (const raw of extractRawArFallbackLines(String(story.acceptanceCriteria ?? ''), 3)) {
-        lines.push(`  ${raw}`);
+        lines.push(raw);
       }
     }
-    lines.push('');
+    lines.push('</acceptance_requirements>');
+    lines.push('</example>');
   }
+  lines.push('</reference_examples>');
   return { text: lines.join('\n').trimEnd(), storyKeys, usedAnchorFallback: false };
 }
 

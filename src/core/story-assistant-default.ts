@@ -19,7 +19,7 @@ import type {
 } from '../types';
 import { getTierModel } from '../services/billing';
 import { buildStoryAssistantModelRoute, getStoryAssistantPipelineProfileConfig, resolveStoryAssistantPipelineProfile } from '../services/model-strategy';
-import { callLlmJsonWithUsage, mapReasoningDepthToEffort } from './llm';
+import { callLlmJsonWithUsage, isGeminiThreeFamilyModel, mapReasoningDepthToEffort } from './llm';
 import type { LlmCallOptions } from './llm';
 import {
   buildAddFeatureSystemPrompt,
@@ -45,6 +45,7 @@ import {
   GenerationCancelledError,
   normaliseFeature,
 } from './feature-output';
+import type { JsonSchema } from './json-schema';
 
 interface RawFeature {
   id?: string;
@@ -64,6 +65,159 @@ interface RawQuestionCandidate {
   details?: unknown;
   suggestions?: unknown[];
 }
+
+export const RAW_ACCEPTANCE_REQUIREMENT_TEXT_SCHEMA: JsonSchema = {
+  type: 'string',
+  minLength: 12,
+};
+
+export const STORY_ASSISTANT_FEATURE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    summary: { type: 'string', minLength: 3 },
+    description: { type: 'string', minLength: 8 },
+    acceptance_requirements: { type: 'array', items: RAW_ACCEPTANCE_REQUIREMENT_TEXT_SCHEMA },
+    acceptanceRequirements: { type: 'array', items: RAW_ACCEPTANCE_REQUIREMENT_TEXT_SCHEMA },
+    suggested_story_points: { type: 'integer', minimum: 1, maximum: 13 },
+    process_code: { type: 'string' },
+  },
+  required: ['summary', 'description'],
+  additionalProperties: false,
+};
+
+export const STORY_ASSISTANT_FEATURE_COLLECTION_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    features: {
+      type: 'array',
+      items: STORY_ASSISTANT_FEATURE_SCHEMA,
+    },
+  },
+  required: ['features'],
+  additionalProperties: false,
+};
+
+export const STORY_ASSISTANT_DISCOVERY_ASSESSMENT_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    discoveryDepth: { type: 'string', enum: ['light', 'standard', 'deep'] },
+    reasoningLevel: { type: 'string', enum: ['light', 'standard', 'deep'] },
+    workflowComplexity: { type: 'string', enum: ['low', 'medium', 'high'] },
+    actorComplexity: { type: 'string', enum: ['low', 'medium', 'high'] },
+    ruleDensity: { type: 'string', enum: ['low', 'medium', 'high'] },
+    exceptionDensity: { type: 'string', enum: ['low', 'medium', 'high'] },
+    lifecycleComplexity: { type: 'string', enum: ['low', 'medium', 'high'] },
+    ambiguityLevel: { type: 'string', enum: ['low', 'medium', 'high'] },
+    coverageObligations: { type: 'array', items: { type: 'string' } },
+    recommendedQuestionRange: {
+      type: 'object',
+      properties: {
+        min: { type: 'integer', minimum: 1 },
+        max: { type: 'integer', minimum: 1 },
+      },
+      required: ['min', 'max'],
+      additionalProperties: false,
+    },
+    rationale: { type: 'string', minLength: 8 },
+  },
+  required: [
+    'discoveryDepth',
+    'reasoningLevel',
+    'workflowComplexity',
+    'actorComplexity',
+    'ruleDensity',
+    'exceptionDensity',
+    'lifecycleComplexity',
+    'ambiguityLevel',
+    'coverageObligations',
+    'recommendedQuestionRange',
+    'rationale',
+  ],
+  additionalProperties: false,
+};
+
+export const STORY_ASSISTANT_CLARIFY_RESPONSE_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    ambiguity: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', enum: ['clear', 'medium', 'vague'] },
+        score: { type: 'integer', minimum: 1, maximum: 10 },
+        rationale: { type: 'string', minLength: 3 },
+      },
+      required: ['level', 'score', 'rationale'],
+      additionalProperties: false,
+    },
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          categoryKey: { type: 'string', enum: ['context_trigger', 'user_personas', 'functional_flow', 'state_lifecycle', 'business_rules', 'success_measurement'] },
+          category: { type: 'string', minLength: 3 },
+          intent: { type: 'string', minLength: 3 },
+          question: { type: 'string', minLength: 12 },
+          details: { type: 'string' },
+          suggestions: {
+            type: 'array',
+            items: { type: 'string', minLength: 1, maxLength: 120 },
+            minItems: 3,
+            maxItems: 3,
+          },
+        },
+        required: ['categoryKey', 'category', 'intent', 'question', 'suggestions'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['ambiguity', 'questions'],
+  additionalProperties: false,
+};
+
+export const STORY_ASSISTANT_SUFFICIENCY_RESPONSE_SCHEMA: JsonSchema = {
+  anyOf: [
+    {
+      type: 'object',
+      properties: {
+        sufficient: { type: 'boolean', enum: [true] },
+      },
+      required: ['sufficient'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        sufficient: { type: 'boolean', enum: [false] },
+        questions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              categoryKey: { type: 'string', enum: ['context_trigger', 'user_personas', 'functional_flow', 'state_lifecycle', 'business_rules', 'success_measurement'] },
+              category: { type: 'string' },
+              intent: { type: 'string' },
+              question: { type: 'string', minLength: 12 },
+              suggestions: {
+                type: 'array',
+                items: { type: 'string', minLength: 1, maxLength: 120 },
+                minItems: 1,
+                maxItems: 3,
+              },
+            },
+            required: ['question', 'suggestions'],
+            additionalProperties: false,
+          },
+          maxItems: 5,
+        },
+        reasonCodes: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['sufficient'],
+      additionalProperties: false,
+    },
+  ],
+};
 
 export interface StoryAssistantClarifyResult {
   questions: ClarifyQuestion[];
@@ -248,6 +402,76 @@ function buildProviderOpts(config: TenantConfig) {
     modelCatalogs: config.generatorConfig.modelCatalogs,
     piiMaskingEnabled: Boolean(config.compliance?.enabled && config.compliance?.piiMaskingEnabled),
   } as const;
+}
+
+type StoryAssistantReasoningStage =
+  | 'discovery_assessment'
+  | 'clarify'
+  | 'sufficiency'
+  | 'decomposition'
+  | 'coverage_probe'
+  | 'acceptance_requirements';
+
+function geminiThreeStageReasoningCap(
+  stage: StoryAssistantReasoningStage,
+  pipelineProfile?: PipelineProfile,
+): NonNullable<LlmCallOptions['reasoningEffort']> {
+  switch (stage) {
+    case 'acceptance_requirements':
+      return pipelineProfile === 'quality' ? 'high' : 'medium';
+    default:
+      return 'low';
+  }
+}
+
+function capStageReasoningForProvider(
+  opts: {
+    provider: TenantConfig['generatorConfig']['provider'];
+    model: string;
+    pipelineProfile?: PipelineProfile;
+    stage: StoryAssistantReasoningStage;
+    desired: NonNullable<LlmCallOptions['reasoningEffort']>;
+  },
+): NonNullable<LlmCallOptions['reasoningEffort']> {
+  if (opts.provider !== 'gemini' || !isGeminiThreeFamilyModel(opts.model)) {
+    return opts.desired;
+  }
+  return capReasoningEffort(
+    opts.desired,
+    geminiThreeStageReasoningCap(opts.stage, opts.pipelineProfile),
+  );
+}
+
+function validateDiscoveryAssessmentResponse(rawData: unknown): string | null {
+  return parseDiscoveryAssessment(rawData) ? null : 'Discovery assessment must contain a complete semantic complexity envelope.';
+}
+
+function validateClarifyQuestionResponse(rawData: unknown): string | null {
+  const parsed = parseStoryAssistantQuestionCandidates(rawData);
+  return parsed.length > 0 ? null : 'Clarify output must include at least one complete discovery question.';
+}
+
+function validateSufficiencyResponse(rawData: unknown): string | null {
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+    return 'Sufficiency output must be a JSON object.';
+  }
+  const payload = rawData as Record<string, unknown>;
+  if (typeof payload.sufficient !== 'boolean') {
+    return 'Sufficiency output must include a boolean sufficient flag.';
+  }
+  if (payload.sufficient === false && 'questions' in payload) {
+    const questions = normalizeSufficiencyFollowupQuestions(payload);
+    if ((payload.questions as unknown[] | undefined)?.length && questions.length === 0) {
+      return 'Sufficiency follow-up questions must be complete and usable.';
+    }
+  }
+  return null;
+}
+
+function validateNonEmptyFeatureCollection(rawData: unknown): string | null {
+  return extractRawFeaturesFromPayload(rawData).length > 0
+    ? null
+    : 'Feature response must include at least one feature.';
 }
 
 function toStageUsage(usage: { input: number; output: number }) {
@@ -713,7 +937,7 @@ function buildDiscoveryHandoff(input: {
   return parts.length > 1 ? parts.join('\n') : '';
 }
 
-function buildClarifyUserMessage(input: {
+export function buildClarifyUserMessage(input: {
   requirement: string;
   attachmentText: string;
   wiEvidenceText: string;
@@ -721,7 +945,7 @@ function buildClarifyUserMessage(input: {
   similarStoriesText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
-  const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
+  const parts = [`Requirement context:\n${trimPromptText(mergedRequirement, 16000)}`];
   const resolvedBullets = buildResolvedEvidenceBullets(input.wiInsightsArtifact, input.requirement);
   if (resolvedBullets) {
     parts.push(resolvedBullets);
@@ -732,10 +956,12 @@ function buildClarifyUserMessage(input: {
   if (input.similarStoriesText?.trim()) {
     parts.push(`Relevant backlog references from this workspace (use as evidence of what this requirement likely implies — domain norms, vocabulary, typical scope. Ask follow-ups only where they leave ambiguity):\n${input.similarStoriesText}`);
   }
+  parts.push('Based on the information above, ask only the discovery questions needed to resolve the remaining business ambiguities for this specific requirement.');
+  parts.push('Final constraints: do not re-ask evidence that is already resolved above; keep every question requirement-specific; respond using the provided response schema.');
   return parts.join('\n\n');
 }
 
-function buildSufficiencyUserMessage(input: {
+export function buildSufficiencyUserMessage(input: {
   requirement: string;
   answers: ClarifyAnswer[];
   attachmentText?: string;
@@ -744,23 +970,23 @@ function buildSufficiencyUserMessage(input: {
   missingCategoryKeys?: ClarifyCategoryKey[];
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText ?? '');
-  const parts = [
-    `Requirement: ${trimPromptText(mergedRequirement, 12000)}`,
-    `Questions and answers so far:\n${formatClarifyAnswers(input.answers) || '(none)'}`,
-  ];
-  if (input.missingCategoryKeys?.length) {
-    parts.push(`Discovery categories NOT yet asked or answered: ${input.missingCategoryKeys.join(', ')}. If any materially affect what gets built or how ARs are written, return sufficient:false with a follow-up covering one of them.`);
-  }
+  const parts = [`Requirement context:\n${trimPromptText(mergedRequirement, 12000)}`];
+  parts.push(`Questions and answers so far:\n${formatClarifyAnswers(input.answers) || '(none)'}`);
   if (input.wiEvidenceText?.trim()) {
     parts.push(`Operational evidence from Work Instructions (treat as already-known domain context):\n${input.wiEvidenceText}`);
   }
   if (input.similarStoriesText?.trim()) {
     parts.push(`Relevant backlog references from this workspace (use as evidence of what this requirement likely implies; ask follow-ups only where they leave ambiguity):\n${input.similarStoriesText}`);
   }
+  if (input.missingCategoryKeys?.length) {
+    parts.push(`Discovery categories NOT yet asked or answered: ${input.missingCategoryKeys.join(', ')}. If any materially affect what gets built or how ARs are written, return sufficient:false with a follow-up covering one of them.`);
+  }
+  parts.push('Based on the information above, decide whether discovery is sufficient to write strong features and acceptance requirements for this requirement.');
+  parts.push('Final constraints: ask only delta follow-up questions when the remaining gap would materially change scope or acceptance coverage; otherwise prefer explicit open decisions; respond using the provided response schema.');
   return parts.join('\n\n');
 }
 
-function buildGenerationContextMessage(input: {
+export function buildGenerationContextMessage(input: {
   requirement: string;
   clarifyAnswers: ClarifyAnswer[];
   attachmentText: string;
@@ -772,7 +998,7 @@ function buildGenerationContextMessage(input: {
   arPatternLibraryText?: string;
 }) {
   const mergedRequirement = mergeRequirementAndAttachment(input.requirement, input.attachmentText);
-  const parts = [`Requirement: ${trimPromptText(mergedRequirement, 16000)}`];
+  const parts = [`Requirement context:\n${trimPromptText(mergedRequirement, 16000)}`];
   if (input.roleHint.trim()) {
     parts.push(input.roleHint);
   }
@@ -1459,7 +1685,7 @@ async function runMultiActivityCoverageProbe(opts: {
 
   const existingSummaries = opts.features.map((f, i) => `${i + 1}. ${f.summary}`).join('\n');
   const gapList = gaps.map((g, i) => `${i + 1}. ${g}`).join('\n');
-  const userMessage = `Original requirement:\n${opts.requirement}\n\nExisting features already decomposed:\n${existingSummaries}\n\nThe following multi-activity workflow coverage is missing:\n${gapList}\n\nAdd only the features needed to cover these specific gaps. Return an empty array if any gap is already covered by the existing features. Do not rewrite or rename existing features.`;
+  const userMessage = `Original requirement context:\n${opts.requirement}\n\nExisting features already decomposed:\n${existingSummaries}\n\nThe following multi-activity workflow coverage is missing:\n${gapList}\n\nBased on the information above, add only the features needed to cover these specific gaps.\n\nFinal constraints: return an empty features array if every gap is already covered; do not rewrite or rename existing features; respond using the provided response schema.`;
 
   try {
     const result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
@@ -1472,7 +1698,15 @@ async function runMultiActivityCoverageProbe(opts: {
       }),
       userMessage,
       maxTokens: 4096,
-      reasoningEffort: 'medium',
+      reasoningEffort: capStageReasoningForProvider({
+        provider: opts.config.generatorConfig.provider,
+        model: opts.model,
+        pipelineProfile: opts.pipelineProfile,
+        stage: 'coverage_probe',
+        desired: 'medium',
+      }),
+      schemaName: 'story_assistant_feature_collection',
+      jsonSchema: STORY_ASSISTANT_FEATURE_COLLECTION_SCHEMA,
       ...opts.providerOpts,
     });
     const newRaw = extractRawFeaturesFromPayload(result.data);
@@ -1583,21 +1817,31 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   // LLM-led discovery assessment — calibrates depth and reasoning level from
   // a semantic read of the requirement before clarify questions are generated.
   let llmAssessment: DiscoveryAssessment | null = null;
+  const clarifyModel = getTierModel(modelRoute.clarify ?? opts.config.generatorConfig.clarifyModel, opts.config.tier);
   try {
     const assessmentResult = await callLlmJsonWithUsage<unknown>({
-      model: getTierModel(modelRoute.clarify ?? opts.config.generatorConfig.clarifyModel, opts.config.tier),
+      model: clarifyModel,
       systemPrompt: buildStoryAssistantDiscoveryAssessmentSystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
       }),
       userMessage: baseUserMessage,
       maxTokens: 1200,
+      schemaName: 'story_assistant_discovery_assessment',
+      jsonSchema: STORY_ASSISTANT_DISCOVERY_ASSESSMENT_SCHEMA,
+      validate: validateDiscoveryAssessmentResponse,
       // Bootstrap with heuristic level — the assessment itself benefits from
       // reasoning but there is no prior signal to drive it yet.
-      reasoningEffort: capReasoningEffort(
-        mapReasoningDepthToEffort(heuristicAssessment.reasoningLevel) ?? 'low',
-        profileConfig.clarifyReasoning,
-      ),
+      reasoningEffort: capStageReasoningForProvider({
+        provider: opts.config.generatorConfig.provider,
+        model: clarifyModel,
+        pipelineProfile,
+        stage: 'discovery_assessment',
+        desired: capReasoningEffort(
+          mapReasoningDepthToEffort(heuristicAssessment.reasoningLevel) ?? 'low',
+          profileConfig.clarifyReasoning,
+        ),
+      }),
       ...providerOpts,
     });
     usageByStage.discoveryAssessment = assessmentResult.usage;
@@ -1612,7 +1856,6 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
   });
   const discoveryAssessment = applyDiscoveryDepthFloor(mergedAssessment);
 
-  const clarifyModel = getTierModel(modelRoute.clarify ?? opts.config.generatorConfig.clarifyModel, opts.config.tier);
   let clarifyResult = await callLlmJsonWithUsage<unknown>({
     model: clarifyModel,
     systemPrompt: buildStoryAssistantClarifySystemPrompt({
@@ -1622,10 +1865,19 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
     }),
     userMessage: baseUserMessage,
     maxTokens: 4600,
-    reasoningEffort: capReasoningEffort(
-      mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
-      profileConfig.clarifyReasoning,
-    ),
+    schemaName: 'story_assistant_clarify',
+    jsonSchema: STORY_ASSISTANT_CLARIFY_RESPONSE_SCHEMA,
+    validate: validateClarifyQuestionResponse,
+    reasoningEffort: capStageReasoningForProvider({
+      provider: opts.config.generatorConfig.provider,
+      model: clarifyModel,
+      pipelineProfile,
+      stage: 'clarify',
+      desired: capReasoningEffort(
+        mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
+        profileConfig.clarifyReasoning,
+      ),
+    }),
     ...providerOpts,
   });
   usageByStage.clarify = clarifyResult.usage;
@@ -1642,12 +1894,21 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
         domainRoles: opts.config.domainRoles,
         questionPlan,
       }),
-      userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Each question must be complete, requirement-specific, and include 3 concise grounded suggestions.`,
+      userMessage: `${baseUserMessage}\n\nRepair the prior response by returning only complete, requirement-specific discovery questions with exactly 3 concise grounded suggestions each.`,
       maxTokens: 4600,
-      reasoningEffort: capReasoningEffort(
-      mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
-      profileConfig.clarifyReasoning,
-    ),
+      schemaName: 'story_assistant_clarify',
+      jsonSchema: STORY_ASSISTANT_CLARIFY_RESPONSE_SCHEMA,
+      validate: validateClarifyQuestionResponse,
+      reasoningEffort: capStageReasoningForProvider({
+        provider: opts.config.generatorConfig.provider,
+        model: clarifyModel,
+        pipelineProfile,
+        stage: 'clarify',
+        desired: capReasoningEffort(
+          mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
+          profileConfig.clarifyReasoning,
+        ),
+      }),
       ...providerOpts,
     });
     usageByStage.clarifyRetry = clarifyResult.usage;
@@ -1682,12 +1943,21 @@ export async function generateStoryAssistantDefaultClarifyingQuestions(opts: {
         domainRoles: opts.config.domainRoles,
         questionPlan,
       }),
-      userMessage: `${baseUserMessage}\n\nReturn strict JSON only. Provide ${questionPlan.min}-${questionPlan.max} specific questions and cover categories in this order: Context & Trigger, Roles & Personas, Functional Flow, State & Lifecycle, Business Rules & Exceptions, Success & Measurement.${missingLabels ? ` Missing in prior attempt: ${missingLabels}.` : ''}`,
+      userMessage: `${baseUserMessage}\n\nRepair the prior response by providing ${questionPlan.min}-${questionPlan.max} specific discovery questions and covering categories in this order: Context & Trigger, Roles & Personas, Functional Flow, State & Lifecycle, Business Rules & Exceptions, Success & Measurement.${missingLabels ? ` Missing in the prior attempt: ${missingLabels}.` : ''}\n\nFinal constraints: respond using the provided response schema and keep all questions complete.`,
       maxTokens: 5200,
-      reasoningEffort: capReasoningEffort(
-      mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
-      profileConfig.clarifyReasoning,
-    ),
+      schemaName: 'story_assistant_clarify',
+      jsonSchema: STORY_ASSISTANT_CLARIFY_RESPONSE_SCHEMA,
+      validate: validateClarifyQuestionResponse,
+      reasoningEffort: capStageReasoningForProvider({
+        provider: opts.config.generatorConfig.provider,
+        model: clarifyModel,
+        pipelineProfile,
+        stage: 'clarify',
+        desired: capReasoningEffort(
+          mapReasoningDepthToEffort(discoveryAssessment.reasoningLevel) ?? 'low',
+          profileConfig.clarifyReasoning,
+        ),
+      }),
       ...providerOpts,
     });
     usageByStage.clarifyCoverageRetry = clarifyResult.usage;
@@ -1779,7 +2049,16 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       }),
       userMessage: extraInstruction ? `${userMessage}\n\n${extraInstruction}` : userMessage,
       maxTokens: 2400,
-      reasoningEffort: 'low',
+      schemaName: 'story_assistant_sufficiency',
+      jsonSchema: STORY_ASSISTANT_SUFFICIENCY_RESPONSE_SCHEMA,
+      validate: validateSufficiencyResponse,
+      reasoningEffort: capStageReasoningForProvider({
+        provider: opts.config.generatorConfig.provider,
+        model: getTierModel(opts.config.generatorConfig.evaluateModel, opts.config.tier),
+        pipelineProfile: resolveStoryAssistantPipelineProfile(opts.config.generatorConfig),
+        stage: 'sufficiency',
+        desired: 'low',
+      }),
       ...providerOpts,
     });
     const usageByStage: Record<string, { input: number; output: number }> = {};
@@ -1791,7 +2070,7 @@ export async function evaluateStoryAssistantDefaultSufficiency(opts: {
       && (!Array.isArray(payload.questions) || parsedQuestions.length === 0);
     if (looksMalformedFollowup) {
       const retry = await evaluateOnce(
-        'Your previous follow-up output was malformed. Return strict JSON only. If sufficient is false and you provide questions, include exactly one complete question with 1-3 grounded suggestions.',
+        'Your previous follow-up output was malformed. Repair it by returning a schema-compliant sufficiency decision. If sufficient is false and you provide questions, include exactly one complete follow-up question with 1-3 grounded suggestions.',
       );
       result = retry;
       usageByStage.clarifyEvaluateRetry = retry.usage;
@@ -1936,10 +2215,11 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   if (!pass1Features.length) {
     const startedAt = Date.now();
     const decompositionPromptStartedAt = Date.now();
-    const decompositionUserMessage = `${sharedEvidenceBlock}\n\nDecompose this requirement into the distinct features needed to deliver it. Leave acceptance_requirements as empty arrays.`;
+    const decompositionModel = getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier);
+    const decompositionUserMessage = `${sharedEvidenceBlock}\n\nBased on the information above, decompose this requirement into the distinct features needed to deliver it.\n\nFinal constraints: leave acceptance_requirements as empty arrays, preserve evidence-grounded scope, and respond using the provided response schema.`;
     promptAssemblyMs += Date.now() - decompositionPromptStartedAt;
     const pass1Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
-      model: getTierModel(modelRoute.decomposition ?? opts.config.generatorConfig.decompositionModel, opts.config.tier),
+      model: decompositionModel,
       systemPrompt: buildStoryAssistantDecompositionSystemPrompt({
         domainContext: opts.config.domainContext,
         domainRoles: opts.config.domainRoles,
@@ -1948,10 +2228,19 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
       }),
       userMessage: decompositionUserMessage,
       maxTokens: Math.min(Math.max(opts.config.generatorConfig.maxTokens, 4096), profileConfig.generationOutputMaxTokens),
-      reasoningEffort: capReasoningEffort(
-      mapReasoningDepthToEffort(opts.discoveryProfile?.reasoningLevel ?? 'light') ?? 'low',
-      profileConfig.decompositionReasoning,
-    ),
+      schemaName: 'story_assistant_feature_collection',
+      jsonSchema: STORY_ASSISTANT_FEATURE_COLLECTION_SCHEMA,
+      validate: validateNonEmptyFeatureCollection,
+      reasoningEffort: capStageReasoningForProvider({
+        provider: opts.config.generatorConfig.provider,
+        model: decompositionModel,
+        pipelineProfile,
+        stage: 'decomposition',
+        desired: capReasoningEffort(
+          mapReasoningDepthToEffort(opts.discoveryProfile?.reasoningLevel ?? 'light') ?? 'low',
+          profileConfig.decompositionReasoning,
+        ),
+      }),
       ...providerOpts,
     });
     stageUsage.decomposition = pass1Result.usage;
@@ -2005,15 +2294,16 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
   const pass2StartedAt = Date.now();
   const arPromptStartedAt = Date.now();
   const arReferenceExamplesText = goldExamplesText ? `\n\n${goldExamplesText}` : '';
+  const arModel = getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier);
   const arUserMessage = `${sharedEvidenceBlock}\n\nFeatures to write acceptance requirements for:\n${JSON.stringify({
     features: pass1Raw.map((feature) => ({
       ...feature,
       acceptance_requirements: [],
     })),
-  })}${arReferenceExamplesText}\n\nFor each feature, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.`;
+  })}${arReferenceExamplesText}\n\nBased on the information above, write GIVEN/WHEN/THEN acceptance requirements that preserve concrete scenarios, gates, dependencies, validation safeguards, downstream actions, status visibility, and active-plan change handling where supported by the requirement, discovery answers, work instructions, or grounded backlog patterns.\n\nFinal constraints: keep the same features array, fill only acceptance_requirements, and respond using the provided response schema.`;
   promptAssemblyMs += Date.now() - arPromptStartedAt;
   const pass2Result = await callLlmJsonWithUsage<{ features?: RawFeature[] }>({
-    model: getTierModel(modelRoute.ar ?? opts.config.generatorConfig.arModel, opts.config.tier),
+    model: arModel,
     systemPrompt: buildStoryAssistantArSystemPrompt({
       domainContext: opts.config.domainContext,
       domainRoles: opts.config.domainRoles,
@@ -2029,12 +2319,21 @@ export async function generateStoryAssistantDefaultFeatures(opts: {
     }),
     userMessage: arUserMessage,
     maxTokens: profileConfig.generationOutputMaxTokens,
+    schemaName: 'story_assistant_feature_collection',
+    jsonSchema: STORY_ASSISTANT_FEATURE_COLLECTION_SCHEMA,
+    validate: validateNonEmptyFeatureCollection,
     // Use the discovery assessment's reasoning level (set by applyDiscoveryDepthFloor
     // for complex requirements) but cap it at the profile's ceiling so cost stays bounded.
-    reasoningEffort: capReasoningEffort(
-      mapReasoningDepthToEffort(opts.discoveryProfile?.reasoningLevel ?? 'light') ?? 'low',
-      profileConfig.arReasoning,
-    ),
+    reasoningEffort: capStageReasoningForProvider({
+      provider: opts.config.generatorConfig.provider,
+      model: arModel,
+      pipelineProfile,
+      stage: 'acceptance_requirements',
+      desired: capReasoningEffort(
+        mapReasoningDepthToEffort(opts.discoveryProfile?.reasoningLevel ?? 'light') ?? 'low',
+        profileConfig.arReasoning,
+      ),
+    }),
     ...providerOpts,
   });
   stageUsage.acceptanceRequirements = pass2Result.usage;

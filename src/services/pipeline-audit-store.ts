@@ -1,11 +1,17 @@
 import type {
   PipelineAuditBundle,
+  PipelineAuditIndexEntry,
   PipelineAuditLlmCallRecord,
   PipelineAuditPhase,
   PiiMaskingStats,
 } from '../types';
 import { entityDelete, entityGet, entitySet, KEYS } from './cache';
 import { buildPipelineAuditReviewerPack } from '../core/pipeline-audit-prompts';
+import {
+  buildPipelineAuditIndexEntry,
+  removePipelineAuditIndexEntry,
+  upsertPipelineAuditIndexEntries,
+} from './pipeline-audit-benchmark';
 
 const RESPONSE_TEXT_MAX = 48000;
 
@@ -30,6 +36,15 @@ export async function loadPipelineAuditBundle(
   const key = KEYS.pipelineAudit(sessionId, auditRunId);
   const b = await entityGet<PipelineAuditBundle>(key);
   return b ?? null;
+}
+
+export async function listPipelineAuditIndexEntries(): Promise<PipelineAuditIndexEntry[]> {
+  const rows = await entityGet<PipelineAuditIndexEntry[]>(KEYS.pipelineAuditIndex);
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function writePipelineAuditIndexEntries(entries: PipelineAuditIndexEntry[]): Promise<void> {
+  await entitySet(KEYS.pipelineAuditIndex, entries);
 }
 
 export type PipelineAuditMergePatch = {
@@ -140,6 +155,10 @@ export async function mergePipelineAuditBundle(
   };
 
   await entitySet(key, next);
+  const indexEntries = await listPipelineAuditIndexEntries();
+  await writePipelineAuditIndexEntries(
+    upsertPipelineAuditIndexEntries(indexEntries, buildPipelineAuditIndexEntry(next)),
+  );
 }
 
 function mergePiiStats(
@@ -161,4 +180,6 @@ function mergePiiStats(
 
 export async function deletePipelineAuditBundle(sessionId: string, auditRunId: string): Promise<void> {
   await entityDelete(KEYS.pipelineAudit(sessionId, auditRunId));
+  const indexEntries = await listPipelineAuditIndexEntries();
+  await writePipelineAuditIndexEntries(removePipelineAuditIndexEntry(indexEntries, sessionId, auditRunId));
 }

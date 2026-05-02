@@ -32,6 +32,7 @@ class PipelineAuditWriter {
     effectiveMaxTokens?: number;
     reasoningEffort?: PipelineAuditLlmCallRecord['reasoningEffort'];
     thinkingBudget?: number;
+    thinkingLevel?: PipelineAuditLlmCallRecord['thinkingLevel'];
     thoughtTokens?: number;
     structuredOutputMode?: PipelineAuditLlmCallRecord['structuredOutputMode'];
     reasoningControlMode?: PipelineAuditLlmCallRecord['reasoningControlMode'];
@@ -51,6 +52,7 @@ class PipelineAuditWriter {
       effectiveMaxTokens: input.effectiveMaxTokens,
       reasoningEffort: input.reasoningEffort,
       thinkingBudget: input.thinkingBudget,
+      thinkingLevel: input.thinkingLevel,
       thoughtTokens: input.thoughtTokens,
       structuredOutputMode: input.structuredOutputMode,
       reasoningControlMode: input.reasoningControlMode,

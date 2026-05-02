@@ -645,7 +645,7 @@ test('story assistant clarify prompt is ambiguity-driven with six discovery dime
   assert.match(prompt, /For each question, provide exactly 3/i);
   assert.match(prompt, /Return ONLY valid JSON/i);
   assert.match(prompt, /A practical target is 8-12/i);
-  assert.match(prompt, /ambiguity.*level.*score/i);
+  assert.match(prompt, /provided response schema/i);
   assert.doesNotMatch(prompt, /DISCOVERY DEPTH:/i);
   assert.doesNotMatch(prompt, /REASONING DEPTH:/i);
   assert.doesNotMatch(prompt, /QUESTION BOUNDS FOR THIS RUN/i);

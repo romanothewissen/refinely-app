@@ -5,7 +5,9 @@ import { extractJson, extractJsonWithMetadata } from '../json';
 import {
   buildLlmAuditMetadata,
   callLlm,
+  getRequestedGeminiThinkingLevel,
   getRequestedThinkingBudget,
+  isGeminiThreeFamilyModel,
   mapReasoningDepthToEffort,
   openAIRequiresMaxCompletionTokens,
   openAISupportsReasoning,
@@ -99,10 +101,20 @@ test('mapReasoningDepthToEffort translates provider-neutral reasoning levels', (
 });
 
 test('getRequestedThinkingBudget returns provider-specific budgets only when supported', () => {
-  assert.equal(getRequestedThinkingBudget('gemini', 'gemini-3-flash-preview', 'high'), 16384);
+  assert.equal(getRequestedThinkingBudget('gemini', 'gemini-3-flash-preview', 'high'), undefined);
+  assert.equal(getRequestedThinkingBudget('gemini', 'gemini-2.5-flash', 'high'), 16384);
   assert.equal(getRequestedThinkingBudget('gemini', 'gemini-1.5-flash', 'high'), undefined);
   assert.equal(getRequestedThinkingBudget('anthropic', 'claude-sonnet-4-0', 'medium'), 8192);
   assert.equal(getRequestedThinkingBudget('openai', 'gpt-4o', 'high'), undefined);
+});
+
+test('Gemini 3 models map reasoning effort to thinking levels', () => {
+  assert.equal(isGeminiThreeFamilyModel('gemini-3-flash-preview'), true);
+  assert.equal(isGeminiThreeFamilyModel('gemini-2.5-flash'), false);
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'none'), 'MINIMAL');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'low'), 'LOW');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3-flash-preview', 'medium'), 'MEDIUM');
+  assert.equal(getRequestedGeminiThinkingLevel('gemini-3.1-pro-preview', 'none'), 'LOW');
 });
 
 test('OpenAI GPT-5 models use reasoning controls and max_completion_tokens', () => {
@@ -134,8 +146,43 @@ test('buildLlmAuditMetadata captures requested/resolved models and reasoning tel
   assert.equal(meta.resolvedModel, 'gemini-3-flash-preview');
   assert.equal(meta.maxTokens, 16384);
   assert.equal(meta.reasoningEffort, 'high');
-  assert.equal(meta.thinkingBudget, 16384);
+  assert.equal(meta.thinkingBudget, undefined);
+  assert.equal(meta.thinkingLevel, 'HIGH');
   assert.equal(meta.thoughtTokens, 1200);
+});
+
+test('Gemini 3 requests send thinking_level instead of thinkingBudget', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+      usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7, thoughtsTokenCount: 3 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    await callLlm({
+      provider: 'gemini',
+      model: 'gemini-3-flash-preview',
+      systemPrompt: 'Return JSON.',
+      userMessage: 'Respond with {"ok":true}.',
+      reasoningEffort: 'medium',
+      geminiApiKey: 'test-key',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const generationConfig = requestBody?.generationConfig as Record<string, unknown> | undefined;
+  const thinkingConfig = generationConfig?.thinkingConfig as Record<string, unknown> | undefined;
+  assert.equal(thinkingConfig?.thinkingLevel, 'MEDIUM');
+  assert.equal('thinkingBudget' in (thinkingConfig ?? {}), false);
 });
 
 test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-streaming limit', () => {

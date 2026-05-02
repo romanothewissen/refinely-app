@@ -26,7 +26,8 @@ export interface LlmResponse {
   thoughtTokens?: number;
   effectiveMaxTokens?: number;
   structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
-  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'openai_reasoning' | 'auto' | 'none';
+  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'thinking_level' | 'openai_reasoning' | 'auto' | 'none';
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
   piiMasking?: PiiMaskingStats;
 }
 
@@ -84,6 +85,13 @@ interface ModelCapability {
 const FIREWORKS_NON_STREAMING_MAX_TOKENS = 4096;
 
 export type ProviderNeutralReasoningDepth = 'light' | 'standard' | 'deep';
+type GeminiThinkingLevel = 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
+
+interface GeminiThinkingConfig {
+  reasoningControlMode: 'thinking_budget' | 'thinking_level';
+  thinkingBudget?: number;
+  thinkingLevel?: GeminiThinkingLevel;
+}
 
 export function mapReasoningDepthToEffort(
   depth: ProviderNeutralReasoningDepth | undefined,
@@ -115,6 +123,34 @@ function geminiThinkingBudget(effort: LlmCallOptions['reasoningEffort']): number
   }
 }
 
+export function isGeminiThreeFamilyModel(model: string): boolean {
+  return /^gemini-3(?:[._-]|$)/i.test(model.trim());
+}
+
+function isGeminiFlashLiteModel(model: string): boolean {
+  return model.trim().toLowerCase().includes('flash-lite');
+}
+
+export function getRequestedGeminiThinkingLevel(
+  model: string,
+  effort: LlmCallOptions['reasoningEffort'],
+): GeminiThinkingLevel | undefined {
+  if (!isGeminiThreeFamilyModel(model) || !effort) return undefined;
+
+  switch (effort) {
+    case 'none':
+      return isGeminiFlashLiteModel(model) || inferModelFamily(model) === 'flash' ? 'MINIMAL' : 'LOW';
+    case 'low':
+      return 'LOW';
+    case 'medium':
+      return 'MEDIUM';
+    case 'high':
+      return 'HIGH';
+    default:
+      return undefined;
+  }
+}
+
 function groqReasoningEffort(
   effort: LlmCallOptions['reasoningEffort'],
 ): 'none' | 'default' | undefined {
@@ -132,7 +168,8 @@ export function getRequestedThinkingBudget(
 ): number | undefined {
   if (!effort || effort === 'none') return undefined;
   if (provider === 'gemini') {
-    return buildGeminiThinkingConfig(model, effort)?.thinkingBudget as number | undefined;
+    const config = buildGeminiThinkingConfig(model, effort);
+    return config?.reasoningControlMode === 'thinking_budget' ? config.thinkingBudget : undefined;
   }
   if (provider === 'anthropic' && anthropicSupportsThinking(model)) {
     return geminiThinkingBudget(effort);
@@ -152,8 +189,11 @@ export function buildLlmAuditMetadata(input: {
   reasoningControlMode?: ReasoningControlMode;
 }): Pick<
   PipelineAuditLlmCallRecord,
-  'model' | 'requestedModel' | 'resolvedModel' | 'provider' | 'maxTokens' | 'effectiveMaxTokens' | 'reasoningEffort' | 'thinkingBudget' | 'thoughtTokens' | 'structuredOutputMode' | 'reasoningControlMode'
+  'model' | 'requestedModel' | 'resolvedModel' | 'provider' | 'maxTokens' | 'effectiveMaxTokens' | 'reasoningEffort' | 'thinkingBudget' | 'thinkingLevel' | 'thoughtTokens' | 'structuredOutputMode' | 'reasoningControlMode'
 > {
+  const requestedThinking = input.provider === 'gemini'
+    ? buildGeminiThinkingConfig(input.resolvedModel, input.reasoningEffort)
+    : undefined;
   return {
     model: input.resolvedModel,
     requestedModel: input.requestedModel,
@@ -162,7 +202,12 @@ export function buildLlmAuditMetadata(input: {
     maxTokens: input.maxTokens,
     effectiveMaxTokens: input.effectiveMaxTokens,
     reasoningEffort: input.reasoningEffort,
-    thinkingBudget: getRequestedThinkingBudget(input.provider, input.resolvedModel, input.reasoningEffort),
+    thinkingBudget: requestedThinking?.reasoningControlMode === 'thinking_budget'
+      ? requestedThinking.thinkingBudget
+      : getRequestedThinkingBudget(input.provider, input.resolvedModel, input.reasoningEffort),
+    thinkingLevel: requestedThinking?.reasoningControlMode === 'thinking_level'
+      ? requestedThinking.thinkingLevel
+      : undefined,
     thoughtTokens: input.thoughtTokens,
     structuredOutputMode: input.structuredOutputMode,
     reasoningControlMode: input.reasoningControlMode,
@@ -177,16 +222,28 @@ export function buildLlmAuditMetadata(input: {
 function buildGeminiThinkingConfig(
   model: string,
   effort: LlmCallOptions['reasoningEffort'],
-): Record<string, unknown> | undefined {
-  if (!effort || effort === 'none') return undefined;
-  const budget = geminiThinkingBudget(effort);
-  if (budget === undefined || budget === 0) return undefined;
+): GeminiThinkingConfig | undefined {
+  if (!effort) return undefined;
   // Thinking-capable Gemini models: 2.x and 3.x series, explicit "thinking" in name, or "exp"
   // Non-thinking models (e.g. gemini-1.5-flash, gemini-1.0) do not accept thinkingConfig.
   const isThinkingCapable = /gemini-([23][._\-]|flash-[23]|pro-[23]|exp)/i.test(model)
     || model.toLowerCase().includes('thinking');
   if (!isThinkingCapable) return undefined;
-  return { thinkingBudget: budget };
+  if (isGeminiThreeFamilyModel(model)) {
+    const thinkingLevel = getRequestedGeminiThinkingLevel(model, effort);
+    if (!thinkingLevel) return undefined;
+    return {
+      reasoningControlMode: 'thinking_level',
+      thinkingLevel,
+    };
+  }
+  if (effort === 'none') return undefined;
+  const budget = geminiThinkingBudget(effort);
+  if (budget === undefined || budget === 0) return undefined;
+  return {
+    reasoningControlMode: 'thinking_budget',
+    thinkingBudget: budget,
+  };
 }
 
 function anthropicSupportsThinking(model: string): boolean {
@@ -263,9 +320,10 @@ function buildFallbackCapability(provider: LlmProvider | undefined, model: strin
   const sharedOpenAiLikeMax = family === 'lite' ? 16384 : family === 'flash' ? 32768 : 65536;
 
   if (provider === 'gemini') {
+    const geminiThinkingConfig = buildGeminiThinkingConfig(model, 'low');
     return {
       structuredOutputMode: 'json_schema',
-      reasoningControlMode: buildGeminiThinkingConfig(model, 'low') ? 'thinking_budget' : 'none',
+      reasoningControlMode: geminiThinkingConfig?.reasoningControlMode ?? 'none',
       reasoningVisibility: 'hidden',
       tokenLimitParam: 'maxOutputTokens',
       maxOutputTokens: /gemini-3|gemini-2\.5/i.test(normalized) ? 65536 : 16384,
@@ -350,6 +408,9 @@ export function resolveEffectiveMaxTokens(opts: LlmCallOptions, capability: Mode
   const configured = typeof capability.maxOutputTokens === 'number' && capability.maxOutputTokens > 0
     ? capability.maxOutputTokens
     : (opts.maxTokens ?? 8192);
+  if (opts.provider === 'fireworks' && capability.tokenLimitParam === 'max_tokens') {
+    return Math.min(configured, FIREWORKS_NON_STREAMING_MAX_TOKENS);
+  }
   return configured;
 }
 
@@ -484,6 +545,9 @@ export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<Ll
   );
   const effectiveMaxTokens = resolveEffectiveMaxTokens(effectiveOpts, capability);
   const requestedThinkingBudget = getRequestedThinkingBudget(opts.provider, resolvedModel, opts.reasoningEffort);
+  const requestedGeminiThinking = opts.provider === 'gemini'
+    ? buildGeminiThinkingConfig(resolvedModel, opts.reasoningEffort)
+    : undefined;
 
   const startedAt = Date.now();
   let result: LlmResponse;
@@ -521,6 +585,7 @@ export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<Ll
     audit.appendLlmCall({
       ...auditMeta,
       thinkingBudget: requestedThinkingBudget ?? auditMeta.thinkingBudget,
+      thinkingLevel: result.thinkingLevel ?? requestedGeminiThinking?.thinkingLevel ?? auditMeta.thinkingLevel,
       systemPrompt: effectiveOpts.systemPrompt,
       userMessage: effectiveOpts.userMessage,
       responseText: result.text,
@@ -1063,7 +1128,8 @@ async function callGemini(opts: {
     outputTokens: payload.usageMetadata?.candidatesTokenCount,
     thoughtTokens: payload.usageMetadata?.thoughtsTokenCount,
     structuredOutputMode: opts.jsonSchema ? 'json_schema' : (expectsJson ? 'json_object' : 'prompt_only'),
-    reasoningControlMode: thinkingConfig ? 'thinking_budget' : 'none',
+    reasoningControlMode: thinkingConfig?.reasoningControlMode ?? 'none',
+    thinkingLevel: thinkingConfig?.thinkingLevel,
   };
 }
 

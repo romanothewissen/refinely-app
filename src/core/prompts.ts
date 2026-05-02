@@ -295,8 +295,10 @@ BAD vs GOOD DECOMPOSITION SHAPE:
 ${taxonomySection}
 
 OUTPUT FORMAT:
-Return JSON only:
-{"features":[{"summary":"...","description":"As a ...","acceptance_requirements":[],"suggested_story_points":5${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ',"process_code":"7.x.x"' : ''}}]}`;
+Return only valid JSON using the provided response schema.
+- Use a top-level "features" array.
+- Each feature must include "summary", "description", "acceptance_requirements", and "suggested_story_points"${opts.processTaxonomyEnabled && opts.processTaxonomy.length ? ', plus "process_code".' : '.'}
+- Keep "acceptance_requirements" as empty arrays in this pass.`;
 }
 
 /**
@@ -526,7 +528,10 @@ SELF-CHECK (perform before emitting):
 - If any THEN uses a forbidden collective verb ("can incorporate", "handles all", "supports all identified", "manages the full set of", "accommodates every"), rewrite it as one AR per concrete outcome.
 
 OUTPUT FORMAT:
-Return JSON only with the same features array and acceptance_requirements filled in.`;
+Return only valid JSON using the provided response schema.
+- Keep the same top-level "features" array.
+- Fill "acceptance_requirements" in snake_case.
+- Keep all non-AR feature fields unchanged unless you must correct a typo.`;
 }
 
 export function buildStoryAssistantClarifySystemPrompt(opts: {
@@ -592,8 +597,7 @@ SELF-REVIEW before finalising:
 - Verify every non-resolved categoryKey from the DISCOVERY DIMENSIONS block appears at least once in the questions array. If one is missing, add or rewrite a question to cover it.
 
 OUTPUT FORMAT:
-{"ambiguity":{"level":"clear|medium|vague","score":1-10,"rationale":"one sentence explaining why"},"questions":[{"categoryKey":"context_trigger","category":"Context & Trigger","question":"Question?","suggestions":["Option A","Option B","Option C"]}]}
-
+Return only valid JSON using the provided response schema.
 - categoryKey MUST be exactly one of: ${CLARIFY_CATEGORY_ORDER.join(', ')}
 - "category" MUST match the label for that categoryKey (see DISCOVERY DIMENSIONS)`;
 }
@@ -633,20 +637,8 @@ RULES:
 - Recommend deep discovery when sequencing, handoffs, gating, exceptions, downstream initiation, or active-plan change handling materially affect scope.
 
 OUTPUT FORMAT:
-Return ONLY valid JSON:
-{
-  "discoveryDepth":"light|standard|deep",
-  "reasoningLevel":"light|standard|deep",
-  "workflowComplexity":"low|medium|high",
-  "actorComplexity":"low|medium|high",
-  "ruleDensity":"low|medium|high",
-  "exceptionDensity":"low|medium|high",
-  "lifecycleComplexity":"low|medium|high",
-  "ambiguityLevel":"low|medium|high",
-  "coverageObligations":["string"],
-  "recommendedQuestionRange":{"min":8,"max":12},
-  "rationale":"short explanation"
-}
+OUTPUT FORMAT:
+Return ONLY valid JSON using the provided response schema.
 
 Depth-to-count guidance:
 - light: 5–7 questions
@@ -686,10 +678,7 @@ RULES:
 - Prefer explicit open decisions over follow-up unless the missing answer would likely change feature boundaries, acceptance coverage, or a core business rule.
 
 OUTPUT FORMAT:
-Return ONLY valid JSON:
-{"sufficient": true}
-or
-{"sufficient": false, "questions": [{"question":"...","suggestions":["A","B","C"]}], "reasonCodes":["MISSING_BUSINESS_RULE"]}`;
+Return ONLY valid JSON using the provided response schema.`;
 }
 
 export function buildDraftReviewSystemPrompt(opts: {

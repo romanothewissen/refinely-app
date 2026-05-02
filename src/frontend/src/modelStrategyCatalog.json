@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-04",
+  "version": "2026-05-02",
   "providers": {
     "anthropic": {
       "catalog": [
@@ -29,14 +29,14 @@
     },
     "gemini": {
       "catalog": [
-        { "id": "gemini-3.1-pro", "displayName": "Gemini 3.1 Pro", "family": "pro" },
-        { "id": "gemini-3-flash", "displayName": "Gemini 3 Flash", "family": "flash" },
-        { "id": "gemini-3.1-flash-lite", "displayName": "Gemini 3.1 Flash-Lite", "family": "lite" },
-        { "id": "gemini-2.5-pro", "displayName": "Gemini 2.5 Pro", "family": "pro" },
-        { "id": "gemini-2.5-flash", "displayName": "Gemini 2.5 Flash", "family": "flash" },
-        { "id": "gemini-2.5-flash-lite", "displayName": "Gemini 2.5 Flash-Lite", "family": "lite" },
-        { "id": "gemini-2.0-flash", "displayName": "Gemini 2.0 Flash", "family": "flash" },
-        { "id": "gemini-2.0-flash-lite", "displayName": "Gemini 2.0 Flash-Lite", "family": "lite" }
+        { "id": "gemini-3.1-pro-preview", "displayName": "Gemini 3.1 Pro Preview", "family": "pro", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "thinking_level", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens", "aliases": ["gemini-3.1-pro"] },
+        { "id": "gemini-3-flash-preview", "displayName": "Gemini 3 Flash Preview", "family": "flash", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "thinking_level", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens", "aliases": ["gemini-3-flash", "gemini-3.0-flash"] },
+        { "id": "gemini-3.1-flash-lite", "displayName": "Gemini 3.1 Flash-Lite", "family": "lite", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "thinking_level", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens", "aliases": ["gemini-3-flash-lite"] },
+        { "id": "gemini-2.5-pro", "displayName": "Gemini 2.5 Pro", "family": "pro", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "thinking_budget", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens" },
+        { "id": "gemini-2.5-flash", "displayName": "Gemini 2.5 Flash", "family": "flash", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "thinking_budget", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens" },
+        { "id": "gemini-2.5-flash-lite", "displayName": "Gemini 2.5 Flash-Lite", "family": "lite", "maxOutputTokens": 65536, "structuredOutputMode": "json_schema", "reasoningControlMode": "thinking_budget", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens" },
+        { "id": "gemini-2.0-flash", "displayName": "Gemini 2.0 Flash", "family": "flash", "maxOutputTokens": 16384, "structuredOutputMode": "json_schema", "reasoningControlMode": "none", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens" },
+        { "id": "gemini-2.0-flash-lite", "displayName": "Gemini 2.0 Flash-Lite", "family": "lite", "maxOutputTokens": 16384, "structuredOutputMode": "json_schema", "reasoningControlMode": "none", "reasoningVisibility": "hidden", "tokenLimitParam": "maxOutputTokens" }
       ],
       "presets": {
         "stable": {
@@ -45,9 +45,9 @@
           "lite": ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]
         },
         "latest": {
-          "pro": ["gemini-3.1-pro", "gemini-3-pro"],
-          "flash": ["gemini-3-flash", "gemini-3.0-flash"],
-          "lite": ["gemini-3.1-flash-lite", "gemini-3-flash-lite"]
+          "pro": ["gemini-3.1-pro-preview", "gemini-2.5-pro"],
+          "flash": ["gemini-3-flash-preview", "gemini-2.5-flash"],
+          "lite": ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
         }
       }
     },

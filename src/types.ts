@@ -49,7 +49,7 @@ export interface LlmModelCatalogEntry {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
-  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'openai_reasoning' | 'auto' | 'none';
+  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'thinking_level' | 'openai_reasoning' | 'auto' | 'none';
   reasoningVisibility?: 'hidden' | 'separate_field' | 'inline' | 'unsupported';
   tokenLimitParam?: 'max_tokens' | 'max_completion_tokens' | 'maxOutputTokens';
   unsupportedParams?: string[];
@@ -1188,9 +1188,10 @@ export interface PipelineAuditLlmCallRecord {
   effectiveMaxTokens?: number;
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   thinkingBudget?: number;
+  thinkingLevel?: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
   thoughtTokens?: number;
   structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
-  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'openai_reasoning' | 'auto' | 'none';
+  reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'thinking_level' | 'openai_reasoning' | 'auto' | 'none';
   systemPrompt: string;
   userMessage: string;
   responseText: string;
@@ -1294,6 +1295,114 @@ export interface PipelineAuditBundle {
     generationContext?: GenerationContextMeta;
     completedAt?: string;
   };
+}
+
+export interface PipelineAuditIndexEntry {
+  sessionId: string;
+  auditRunId: string;
+  accountId?: string;
+  createdAt: string;
+  updatedAt: string;
+  primaryProjectKey?: string;
+  projectKeys?: string[];
+  completedPhases: PipelineAuditPhase[];
+  pipelineProfile?: PipelineProfile;
+  requestedPipelineProfile?: PipelineProfile;
+  resolvedPipelineProfile?: PipelineProfile;
+  requestedModelRoute?: GenerationModelRoute;
+  resolvedModelRoute?: GenerationModelRoute;
+  generatorModels?: NonNullable<PipelineAuditBundle['header']['generatorModels']>;
+  llmCallCount: number;
+  clarifyQuestionCount: number;
+  clarifyAnswerCount: number;
+  featureCount: number;
+  acceptanceRequirementCount: number;
+  requirementPreview?: string;
+}
+
+export interface PipelineAuditShadowRunInput {
+  caseId: string;
+  sessionId: string;
+  auditRunId: string;
+  projectKey?: string;
+  projectKeys?: string[];
+  requirement: string;
+  attachmentText: string;
+  clarifyAnswers: ClarifyAnswer[];
+  clarifyDiscoveryProfile?: unknown;
+  clarifySizingContract?: unknown;
+  clarifyAdvisoryTriage?: unknown;
+  replayableStages: {
+    clarify: boolean;
+    sufficiency: boolean;
+    generation: boolean;
+  };
+  recommendedStage: 'clarify' | 'generation';
+  generatorModels?: NonNullable<PipelineAuditBundle['header']['generatorModels']>;
+}
+
+export interface PipelineAuditBenchmarkCase {
+  caseId: string;
+  sessionId: string;
+  auditRunId: string;
+  createdAt: string;
+  updatedAt: string;
+  primaryProjectKey?: string;
+  projectKeys: string[];
+  baseline: {
+    completedPhases: PipelineAuditPhase[];
+    llmCallCount: number;
+    clarifyQuestionCount: number;
+    clarifyAnswerCount: number;
+    featureCount: number;
+    acceptanceRequirementCount: number;
+    sufficiencyStatus?: string;
+  };
+  inputs: {
+    requirement: string;
+    attachmentText: string;
+    clarifyAnswers: ClarifyAnswer[];
+    clarifyDiscoveryProfile?: unknown;
+    clarifySizingContract?: unknown;
+    clarifyAdvisoryTriage?: unknown;
+  };
+  shadowRunInput: PipelineAuditShadowRunInput;
+  reviewerPrompt?: string;
+  reviewerOutputSchema?: string;
+}
+
+export interface PipelineAuditBenchmarkSuite {
+  schemaVersion: 1;
+  generatedAt: string;
+  caseCount: number;
+  skippedMissingRequirementCount: number;
+  summary: {
+    totalLlmCalls: number;
+    totalFeatures: number;
+    totalAcceptanceRequirements: number;
+    replayableClarifyCount: number;
+    replayableGenerationCount: number;
+    phaseCoverage: Record<PipelineAuditPhase, number>;
+    providerCounts: Record<string, number>;
+  };
+  cases: PipelineAuditBenchmarkCase[];
+}
+
+export interface PipelineAuditShadowResultSnapshot {
+  clarifyQuestions?: ClarifyQuestion[];
+  sufficiencyEvaluation?: Record<string, unknown>;
+  features?: Feature[];
+  llmCallCount?: number;
+}
+
+export interface PipelineAuditShadowDiffSummary {
+  baselineSufficiencyStatus?: string;
+  candidateSufficiencyStatus?: string;
+  sufficiencyStatusChanged: boolean;
+  clarifyQuestionCountDelta: number;
+  featureCountDelta: number;
+  acceptanceRequirementCountDelta: number;
+  llmCallCountDelta: number;
 }
 
 export interface ComplianceAuditEvent {

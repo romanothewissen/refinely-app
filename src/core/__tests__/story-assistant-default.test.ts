@@ -2,14 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildClarifyUserMessage,
+  buildGenerationContextMessage,
+  buildSufficiencyUserMessage,
   buildHeuristicDiscoveryAssessment,
   evaluateClarifyQuestionSetQuality,
   extractActorSets,
   extractRoles,
   parseStoryAssistantQuestionCandidates,
   parseDiscoveryAssessment,
+  STORY_ASSISTANT_CLARIFY_RESPONSE_SCHEMA,
+  STORY_ASSISTANT_DISCOVERY_ASSESSMENT_SCHEMA,
+  STORY_ASSISTANT_FEATURE_COLLECTION_SCHEMA,
+  STORY_ASSISTANT_SUFFICIENCY_RESPONSE_SCHEMA,
   splitClearlyNumberedStoryAssistantQuestion,
 } from '../story-assistant-default';
+import { formatGoldStoryExemplars } from '../similar-stories';
+import { validateJsonSchema } from '../json-schema';
 
 test('splitClearlyNumberedStoryAssistantQuestion splits clearly numbered grouped prompts', () => {
   const questions = splitClearlyNumberedStoryAssistantQuestion(
@@ -239,6 +248,107 @@ test('parseStoryAssistantQuestionCandidates splits numbered prompts into separat
   assert.match(questions[0]?.question ?? '', /what activities belong in one plan/i);
   assert.match(questions[1]?.question ?? '', /what details must be captured for each activity/i);
   assert.deepEqual(questions[0]?.suggestions, ['Single workflow', 'Per activity detail', 'Depends on service type']);
+});
+
+test('story assistant user messages keep final task and constraints at the end', () => {
+  const clarifyMessage = buildClarifyUserMessage({
+    requirement: 'Create a coordinated service plan.',
+    attachmentText: 'Attachment details.',
+    wiEvidenceText: 'WI rule 1',
+    similarStoriesText: 'Story reference',
+  });
+  assert.match(clarifyMessage, /Based on the information above, ask only the discovery questions needed/i);
+  assert.match(clarifyMessage, /Final constraints: do not re-ask evidence/i);
+  assert.ok(clarifyMessage.indexOf('Story reference') < clarifyMessage.indexOf('Based on the information above'));
+
+  const sufficiencyMessage = buildSufficiencyUserMessage({
+    requirement: 'Create a coordinated service plan.',
+    answers: [{ question: 'Who approves the plan?', answer: 'Service Manager', selectedSuggestions: [] }],
+    wiEvidenceText: 'WI rule 1',
+    similarStoriesText: 'Story reference',
+  });
+  assert.match(sufficiencyMessage, /Based on the information above, decide whether discovery is sufficient/i);
+  assert.match(sufficiencyMessage, /Final constraints: ask only delta follow-up questions/i);
+
+  const generationMessage = buildGenerationContextMessage({
+    requirement: 'Create a coordinated service plan.',
+    clarifyAnswers: [{ question: 'Who approves the plan?', answer: 'Service Manager', selectedSuggestions: [] }],
+    attachmentText: '',
+    wiEvidenceText: 'WI rule 1',
+    roleHint: 'ROLE CONSTRAINT: Service Manager',
+    actorSets: {},
+    similarStoriesText: 'Story reference',
+    arPatternLibraryText: '<reference_examples>Example</reference_examples>',
+  });
+  assert.ok(generationMessage.indexOf('Story reference') < generationMessage.indexOf('<reference_examples>Example</reference_examples>'));
+});
+
+test('gold story exemplars are wrapped in XML-style delimiters', () => {
+  const text = formatGoldStoryExemplars({
+    projectKey: 'ABC',
+    builtAt: '2026-05-02T00:00:00.000Z',
+    entries: [
+      { key: 'ABC-1', summary: 'Coordinated plan creation', score: 10, arSample: 'GIVEN a request exists WHEN planning starts THEN a coordinated plan is created' },
+    ],
+  });
+
+  assert.match(text, /<reference_examples purpose="gold_acceptance_requirements">/);
+  assert.match(text, /<example id="ABC-1">/);
+  assert.match(text, /<story_summary>Coordinated plan creation<\/story_summary>/);
+  assert.match(text, /<acceptance_requirements>/);
+});
+
+test('story assistant schemas validate representative stage payloads', () => {
+  assert.equal(validateJsonSchema({
+    discoveryDepth: 'standard',
+    reasoningLevel: 'standard',
+    workflowComplexity: 'medium',
+    actorComplexity: 'low',
+    ruleDensity: 'medium',
+    exceptionDensity: 'low',
+    lifecycleComplexity: 'medium',
+    ambiguityLevel: 'medium',
+    coverageObligations: ['sequencing'],
+    recommendedQuestionRange: { min: 6, max: 10 },
+    rationale: 'Moderate workflow ambiguity.',
+  }, STORY_ASSISTANT_DISCOVERY_ASSESSMENT_SCHEMA), null);
+
+  assert.equal(validateJsonSchema({
+    ambiguity: { level: 'medium', score: 6, rationale: 'Some workflow gaps remain.' },
+    questions: [
+      {
+        categoryKey: 'functional_flow',
+        category: 'Functional Flow',
+        intent: 'workflow_order',
+        question: 'What sequence must the activities follow once the plan begins?',
+        suggestions: ['Strict prerequisite order', 'Order can be overridden', 'Only some steps depend on order'],
+      },
+    ],
+  }, STORY_ASSISTANT_CLARIFY_RESPONSE_SCHEMA), null);
+
+  assert.equal(validateJsonSchema({
+    sufficient: false,
+    questions: [
+      {
+        question: 'Which role approves the plan before execution starts?',
+        suggestions: ['Service Manager', 'Operations Lead', 'No approval is required'],
+      },
+    ],
+    reasonCodes: ['MISSING_APPROVER'],
+  }, STORY_ASSISTANT_SUFFICIENCY_RESPONSE_SCHEMA), null);
+
+  assert.equal(validateJsonSchema({
+    features: [
+      {
+        summary: 'Coordinate service plan',
+        description: 'As a planner, I need to coordinate the service plan so that execution can be managed end to end.',
+        acceptance_requirements: [
+          'GIVEN a service request is ready WHEN planning begins THEN a coordinated plan is prepared for execution',
+        ],
+        suggested_story_points: 5,
+      },
+    ],
+  }, STORY_ASSISTANT_FEATURE_COLLECTION_SCHEMA), null);
 });
 
 test('heuristic discovery assessment marks short but workflow-heavy asks as deep', () => {
