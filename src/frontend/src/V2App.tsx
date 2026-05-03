@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { api } from './hooks/useForge';
+import './styles/v2-compat.css';
 import type { LlmProvider, TenantConfig } from './types';
 import { DEFAULT_CONFIG } from './types';
 
@@ -402,7 +403,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
   }
 
   return (
-    <div className="h-full min-h-0 w-full p-4 md:p-6">
+    <div className="v2-root h-full min-h-0 w-full p-4 md:p-6">
       <div className="mx-auto flex h-full max-w-[1480px] gap-4">
         <aside className="rf-sidebar-card hidden w-[320px] shrink-0 overflow-hidden md:flex md:flex-col">
             <div className="border-b px-5 py-5" style={{ borderColor: 'var(--rf-border)' }}>
