@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { api } from './hooks/useForge';
+import type { LlmProvider, TenantConfig } from './types';
+import { DEFAULT_CONFIG } from './types';
 
 type DiscoveryMode = 'none' | 'light' | 'standard' | 'deep' | 'very_deep';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
@@ -117,6 +119,38 @@ interface DiscoveryAnswer {
   selectedSuggestion?: string;
 }
 
+type V2SettingsDraft = {
+  provider: LlmProvider;
+  clarifyModel: string;
+  decompositionModel: string;
+  arModel: string;
+  domainContext: string;
+  wiEnabled: boolean;
+};
+
+const PROVIDER_OPTIONS: Array<{ value: LlmProvider; label: string }> = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'fireworks', label: 'Fireworks' },
+  { value: 'azure_openai', label: 'Azure OpenAI' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'groq', label: 'Groq' },
+  { value: 'forge_llms', label: 'Forge LLMs' },
+];
+
+function buildSettingsDraft(config?: Partial<TenantConfig> | null): V2SettingsDraft {
+  const generatorConfig = config?.generatorConfig ?? DEFAULT_CONFIG.generatorConfig;
+  return {
+    provider: (generatorConfig.provider ?? DEFAULT_CONFIG.generatorConfig.provider) as LlmProvider,
+    clarifyModel: String(generatorConfig.clarifyModel ?? DEFAULT_CONFIG.generatorConfig.clarifyModel),
+    decompositionModel: String(generatorConfig.decompositionModel ?? DEFAULT_CONFIG.generatorConfig.decompositionModel),
+    arModel: String(generatorConfig.arModel ?? DEFAULT_CONFIG.generatorConfig.arModel),
+    domainContext: String(config?.domainContext ?? DEFAULT_CONFIG.domainContext ?? ''),
+    wiEnabled: Boolean(config?.wiConfig?.enabled ?? DEFAULT_CONFIG.wiConfig.enabled),
+  };
+}
+
 function createSessionId() {
   try {
     return crypto.randomUUID();
@@ -184,6 +218,10 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
   const [history, setHistory] = useState<ConversationHistoryEntry[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [discoveryAnswers, setDiscoveryAnswers] = useState<Record<string, DiscoveryAnswer>>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+  const [configDraft, setConfigDraft] = useState<V2SettingsDraft>(() => buildSettingsDraft(DEFAULT_CONFIG));
 
   const activeScopeHypothesis = result?.scopeHypothesis ?? null;
   const activeDiscoveryQuestions = result?.status === 'needs_discovery' ? result.discoveryQuestions : [];
@@ -200,6 +238,11 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
 
     void (async () => {
       try {
+        const configRes = await api.getConfig() as Partial<TenantConfig>;
+        if (!cancelled) {
+          setConfigDraft(buildSettingsDraft(configRes));
+        }
+
         const ctx = await view.getContext();
         const issueKey = ctx?.extension?.issue?.key as string | undefined;
         const projectKey =
@@ -231,6 +274,12 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
 
   const activeQuestionCount = useMemo(() => activeDiscoveryQuestions.length, [activeDiscoveryQuestions]);
 
+  const activeModelSummary = useMemo(() => ([
+    { label: 'Preview + discovery', value: configDraft.clarifyModel },
+    { label: 'Reasoning + formatting', value: configDraft.decompositionModel },
+    { label: 'Acceptance requirements', value: configDraft.arModel },
+  ]), [configDraft]);
+
   async function handlePreview() {
     setLoading(true);
     setError(null);
@@ -254,6 +303,32 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
       setError(err instanceof Error ? err.message : 'Preview failed.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveSettings() {
+    setSettingsSaving(true);
+    setSettingsNotice(null);
+    setError(null);
+    try {
+      await api.patchConfig({
+        generatorConfig: {
+          provider: configDraft.provider,
+          clarifyModel: configDraft.clarifyModel.trim(),
+          decompositionModel: configDraft.decompositionModel.trim(),
+          arModel: configDraft.arModel.trim(),
+        },
+        domainContext: configDraft.domainContext,
+        wiConfig: {
+          enabled: configDraft.wiEnabled,
+        },
+      });
+      setSettingsNotice('V2 test settings saved. New runs will use these models.');
+      setSettingsOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save V2 settings.');
+    } finally {
+      setSettingsSaving(false);
     }
   }
 
@@ -330,20 +405,30 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
     <div className="h-full min-h-0 w-full p-4 md:p-6">
       <div className="mx-auto flex h-full max-w-[1480px] gap-4">
         <aside className="rf-sidebar-card hidden w-[320px] shrink-0 overflow-hidden md:flex md:flex-col">
-          <div className="border-b px-5 py-5" style={{ borderColor: 'var(--rf-border)' }}>
+            <div className="border-b px-5 py-5" style={{ borderColor: 'var(--rf-border)' }}>
             <div className="text-xs uppercase tracking-[0.18em]" style={{ color: 'var(--rf-text-tertiary)' }}>Refinely Core V2</div>
             <h1 className="mt-2 text-2xl" style={{ color: 'var(--rf-text)' }}>Lean refinement</h1>
             <p className="mt-2 text-sm leading-6" style={{ color: 'var(--rf-text-secondary)' }}>
               Scope first, targeted discovery only when it matters, and SQL-backed history instead of giant KVS blobs.
             </p>
-            <button
-              className="mt-4 rounded-full px-4 py-2 text-sm font-medium"
-              style={{ background: 'var(--rf-brand)', color: '#fff' }}
-              onClick={startFresh}
-              type="button"
-            >
-              New session
-            </button>
+            <div className="mt-4 flex gap-2">
+              <button
+                className="rounded-full px-4 py-2 text-sm font-medium"
+                style={{ background: 'var(--rf-brand)', color: '#fff' }}
+                onClick={startFresh}
+                type="button"
+              >
+                New session
+              </button>
+              <button
+                className="rounded-full border px-4 py-2 text-sm font-medium"
+                style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-secondary)', background: 'rgba(255,255,255,0.82)' }}
+                onClick={() => setSettingsOpen(true)}
+                type="button"
+              >
+                Setup
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 py-3">
@@ -396,8 +481,18 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
                 <div className="text-xs uppercase tracking-[0.18em]" style={{ color: 'var(--rf-text-tertiary)' }}>Core workflow</div>
                 <h2 className="mt-2 text-3xl" style={{ color: 'var(--rf-text)' }}>Preview scope, then deepen only where needed</h2>
               </div>
-              <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)', color: 'var(--rf-text-secondary)' }}>
-                Session: <strong>{sessionId.slice(0, 8)}</strong>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  className="rounded-2xl border px-4 py-3 text-sm"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)', color: 'var(--rf-text-secondary)' }}
+                  onClick={() => setSettingsOpen(true)}
+                  type="button"
+                >
+                  Provider: <strong>{PROVIDER_OPTIONS.find((option) => option.value === configDraft.provider)?.label ?? configDraft.provider}</strong>
+                </button>
+                <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)', color: 'var(--rf-text-secondary)' }}>
+                  Session: <strong>{sessionId.slice(0, 8)}</strong>
+                </div>
               </div>
             </div>
 
@@ -435,6 +530,17 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
                   </div>
                 )}
 
+                <div className="rounded-[24px] border p-5" style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)' }}>
+                  <div className="text-xs uppercase tracking-[0.16em]" style={{ color: 'var(--rf-text-tertiary)' }}>Active model route</div>
+                  <div className="mt-3 space-y-2 text-sm leading-6" style={{ color: 'var(--rf-text-secondary)' }}>
+                    {activeModelSummary.map((item) => (
+                      <div key={item.label}>
+                        {item.label}: <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-3">
                   <button
                     className="rounded-full px-5 py-3 text-sm font-semibold"
@@ -468,6 +574,11 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
             {error && (
               <div className="mt-4 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'rgba(155,53,69,0.2)', background: 'rgba(155,53,69,0.08)', color: 'var(--rf-danger)' }}>
                 {error}
+              </div>
+            )}
+            {settingsNotice && (
+              <div className="mt-4 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'rgba(46,125,86,0.2)', background: 'rgba(46,125,86,0.10)', color: 'var(--rf-success)' }}>
+                {settingsNotice}
               </div>
             )}
           </section>
@@ -670,6 +781,128 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
           )}
         </main>
       </div>
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(18,24,22,0.24)] p-4">
+          <div className="rf-card w-full max-w-[760px] p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs uppercase tracking-[0.16em]" style={{ color: 'var(--rf-text-tertiary)' }}>V2 setup</div>
+                <h3 className="mt-2 text-2xl" style={{ color: 'var(--rf-text)' }}>Test model routing</h3>
+                <p className="mt-2 text-sm leading-6" style={{ color: 'var(--rf-text-secondary)' }}>
+                  This is intentionally small: just the V2 stage models and a little core context for testing.
+                </p>
+              </div>
+              <button
+                className="rounded-full border px-3 py-1 text-sm"
+                style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-secondary)', background: 'rgba(255,255,255,0.8)' }}
+                onClick={() => setSettingsOpen(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium" style={{ color: 'var(--rf-text-secondary)' }}>Provider</span>
+                <select
+                  className="w-full rounded-[18px] border px-4 py-3 text-sm"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.9)', color: 'var(--rf-text)' }}
+                  value={configDraft.provider}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, provider: event.target.value as LlmProvider }))}
+                >
+                  {PROVIDER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium" style={{ color: 'var(--rf-text-secondary)' }}>Work instructions</span>
+                <button
+                  className="flex w-full items-center justify-between rounded-[18px] border px-4 py-3 text-sm"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.9)', color: 'var(--rf-text)' }}
+                  onClick={() => setConfigDraft((prev) => ({ ...prev, wiEnabled: !prev.wiEnabled }))}
+                  type="button"
+                >
+                  <span>{configDraft.wiEnabled ? 'Enabled' : 'Disabled'}</span>
+                  <span style={{ color: 'var(--rf-text-tertiary)' }}>{configDraft.wiEnabled ? 'Use WI grounding' : 'Skip WI grounding'}</span>
+                </button>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium" style={{ color: 'var(--rf-text-secondary)' }}>Clarify / discovery model</span>
+                <input
+                  className="w-full rounded-[18px] border px-4 py-3 text-sm"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.9)', color: 'var(--rf-text)' }}
+                  value={configDraft.clarifyModel}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, clarifyModel: event.target.value }))}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium" style={{ color: 'var(--rf-text-secondary)' }}>Reasoning / formatting model</span>
+                <input
+                  className="w-full rounded-[18px] border px-4 py-3 text-sm"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.9)', color: 'var(--rf-text)' }}
+                  value={configDraft.decompositionModel}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, decompositionModel: event.target.value }))}
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <span className="mb-2 block text-sm font-medium" style={{ color: 'var(--rf-text-secondary)' }}>Acceptance requirements model</span>
+                <input
+                  className="w-full rounded-[18px] border px-4 py-3 text-sm"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.9)', color: 'var(--rf-text)' }}
+                  value={configDraft.arModel}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, arModel: event.target.value }))}
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <span className="mb-2 block text-sm font-medium" style={{ color: 'var(--rf-text-secondary)' }}>Workspace domain context</span>
+                <textarea
+                  className="min-h-[120px] w-full rounded-[18px] border px-4 py-3 text-sm leading-7"
+                  style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.9)', color: 'var(--rf-text)' }}
+                  value={configDraft.domainContext}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, domainContext: event.target.value }))}
+                  placeholder="Optional global context for testing. Project-specific context still wins when configured."
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex items-center justify-between gap-4">
+              <div className="text-sm leading-6" style={{ color: 'var(--rf-text-tertiary)' }}>
+                Changes apply to new V2 runs. This is a temporary testing surface, not the final admin experience.
+              </div>
+              <div className="flex gap-3">
+                <button
+                  className="rounded-full border px-5 py-3 text-sm font-semibold"
+                  style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-secondary)', background: 'rgba(255,255,255,0.82)' }}
+                  onClick={() => {
+                    setConfigDraft(buildSettingsDraft(DEFAULT_CONFIG));
+                    setSettingsNotice(null);
+                  }}
+                  type="button"
+                >
+                  Reset to defaults
+                </button>
+                <button
+                  className="rounded-full px-5 py-3 text-sm font-semibold"
+                  style={{ background: 'var(--rf-brand)', color: '#fff', opacity: settingsSaving ? 0.7 : 1 }}
+                  disabled={settingsSaving}
+                  onClick={() => void saveSettings()}
+                  type="button"
+                >
+                  {settingsSaving ? 'Saving…' : 'Save settings'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
