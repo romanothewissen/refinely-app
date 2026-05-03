@@ -21,6 +21,33 @@ export const api = {
   // Generation progress (polling)
   getProgress: (sessionId: string) => invoke('getProgress', { sessionId }),
 
+  // V2 core flow
+  v2Preview: (payload: {
+    sessionId?: string;
+    requirement: string;
+    attachmentText?: string;
+    projectKey?: string;
+    projectKeys?: string[];
+    selectedWiDocIds?: string[];
+    includeWiContext?: boolean;
+    includeSimilarStories?: boolean;
+  }) => invoke('v2Preview', payload),
+  v2Generate: (payload: {
+    sessionId?: string;
+    requirement: string;
+    attachmentText?: string;
+    projectKey?: string;
+    projectKeys?: string[];
+    selectedWiDocIds?: string[];
+    includeWiContext?: boolean;
+    includeSimilarStories?: boolean;
+    confirmedScopeHypothesis?: unknown;
+    discoveryAnswers?: unknown[];
+  }) => invoke('v2Generate', payload),
+  v2GetHistory: (limit?: number) => invoke('v2GetHistory', { limit }),
+  v2GetConversation: (sessionId: string) => invoke('v2GetConversation', { sessionId }),
+  v2DeleteConversation: (sessionId: string) => invoke('v2DeleteConversation', { sessionId }),
+
   // Generation
   startGeneration: (payload: {
     sessionId: string;

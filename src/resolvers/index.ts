@@ -10,7 +10,7 @@ import Resolver from '@forge/resolver';
 import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
-import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getUsageLimits, getEffectiveTier } from '../services/billing';
+import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getUsageLimits, getEffectiveTier, recordGeneration } from '../services/billing';
 import { entityDelete, entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import { getUserPreferences, saveUserPreferences } from '../services/user-preferences';
@@ -31,10 +31,14 @@ import {
 } from '../services/model-strategy';
 import {
   buildCombinedDomainContext,
+  getCombinedPersonaRoles,
   normalizeProjectKeys,
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
 } from '../services/project-selection';
+import { runV2Pipeline } from '../v2/pipeline';
+import { createSqlConversationStore } from '../v2/storage';
+import { deleteV2Conversation, getV2Conversation, listV2Conversations } from '../services/v2-sql';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resolver: any = new Resolver();
@@ -310,6 +314,82 @@ function countConfiguredProjects(config: { arMappings?: any[]; domainContexts?: 
   return keys.size;
 }
 
+function formatV2SimilarStories(stories: Array<{ summary?: string; description?: string }> = []) {
+  return stories
+    .slice(0, 3)
+    .map((story) => {
+      const summary = String(story?.summary ?? '').trim();
+      const description = String(story?.description ?? '').replace(/\s+/g, ' ').trim();
+      if (!summary) return '';
+      return description ? `${summary}: ${description.slice(0, 140)}` : summary;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function formatV2DomainRoles(rows: Array<{ role?: string; activities?: string }> = []) {
+  return rows
+    .slice(0, 8)
+    .map((row) => {
+      const role = String(row?.role ?? '').trim();
+      const activities = String(row?.activities ?? '').replace(/\s+/g, ' ').trim();
+      if (!role) return '';
+      return activities ? `${role}: ${activities.slice(0, 120)}` : role;
+    })
+    .filter(Boolean);
+}
+
+async function buildV2RequestContext(payload: any, context: any) {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const userPreferences = await getUserPreferences(accountId);
+  const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
+  const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
+  const selectedProjectKeys = authorizedProjects.projectKeys;
+  const selectedWiDocIds = [...new Set((payload?.selectedWiDocIds ?? [])
+    .map((id: unknown) => String(id ?? '').trim())
+    .filter(Boolean))]
+    .slice(0, 3);
+  const domainContext = buildCombinedDomainContext(config, selectedProjectKeys);
+  const domainRoles = formatV2DomainRoles(getCombinedPersonaRoles(config, selectedProjectKeys));
+  const requirement = String(payload?.requirement ?? '').trim();
+  const attachmentText = String(payload?.attachmentText ?? '').trim();
+
+  const [wiContext, similarStories] = await Promise.all([
+    config.wiConfig.enabled && selectedProjectKeys.length && payload?.includeWiContext !== false
+      ? retrieveScopedWiContext(
+        requirement,
+        Math.min(config.wiConfig.topKChunks || 3, 3),
+        Math.min(config.wiConfig.maxChars || 4000, 4000),
+        selectedProjectKeys,
+        selectedWiDocIds,
+      )
+      : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
+    payload?.includeSimilarStories === false || !selectedProjectKeys.length
+      ? Promise.resolve([])
+      : retrieveScopedSimilarStories({
+        requirement,
+        attachmentText,
+        config,
+        projectKeys: selectedProjectKeys,
+        maxResults: 3,
+      }),
+  ]);
+
+  return {
+    accountId,
+    config,
+    sessionId: String(payload?.sessionId ?? '').trim() || `v2_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: selectedProjectKeys,
+    requirement,
+    attachmentText,
+    domainContext,
+    domainRoles,
+    wiContextText: wiContext.text,
+    similarStoriesText: formatV2SimilarStories(similarStories),
+  };
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 resolver.define('checkIsAdmin', async ({ context, payload }) => {
@@ -530,6 +610,132 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
     const message = String((err as { message?: unknown })?.message ?? err ?? 'Unknown error');
     return { success: false, error: message };
   }
+});
+
+// ─── V2 Core Flow ─────────────────────────────────────────────────────────────
+
+resolver.define('v2Preview', async ({ payload, context }) => {
+  const requestContext = await buildV2RequestContext(payload, context);
+  if (!requestContext.requirement) {
+    return { success: false, error: 'Requirement is required.' };
+  }
+  const conversationStore = createSqlConversationStore();
+
+  const check = await checkGenerationAllowed(requestContext.config, context, {
+    sessionId: requestContext.sessionId,
+    profile: requestContext.config.generatorConfig.pipelineProfile,
+    reserveHostedPreview: false,
+  });
+  if (!check.allowed) {
+    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
+  }
+
+  const result = await runV2Pipeline({
+    requirement: requestContext.requirement,
+    attachmentText: requestContext.attachmentText,
+    config: requestContext.config,
+    domainContext: requestContext.domainContext,
+    domainRoles: requestContext.domainRoles,
+    similarStoriesText: requestContext.similarStoriesText,
+    wiContextText: requestContext.wiContextText,
+    previewOnly: true,
+  });
+
+  await conversationStore.savePreview(requestContext.sessionId, requestContext.accountId, {
+    sessionId: requestContext.sessionId,
+    projectKey: requestContext.projectKey,
+    projectKeys: requestContext.projectKeys,
+    requirement: requestContext.requirement,
+    status: result.status,
+    turnType: 'preview',
+    result,
+  });
+
+  return {
+    success: true,
+    sessionId: requestContext.sessionId,
+    result,
+    warning: check.reason,
+  };
+});
+
+resolver.define('v2Generate', async ({ payload, context }) => {
+  const requestContext = await buildV2RequestContext(payload, context);
+  if (!requestContext.requirement) {
+    return { success: false, error: 'Requirement is required.' };
+  }
+  const conversationStore = createSqlConversationStore();
+
+  const check = await checkGenerationAllowed(requestContext.config, context, {
+    sessionId: requestContext.sessionId,
+    profile: requestContext.config.generatorConfig.pipelineProfile,
+    reserveHostedPreview: true,
+  });
+  if (!check.allowed) {
+    return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
+  }
+
+  const result = await runV2Pipeline({
+    requirement: requestContext.requirement,
+    attachmentText: requestContext.attachmentText,
+    config: requestContext.config,
+    domainContext: requestContext.domainContext,
+    domainRoles: requestContext.domainRoles,
+    similarStoriesText: requestContext.similarStoriesText,
+    wiContextText: requestContext.wiContextText,
+    confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
+    discoveryAnswers: payload?.discoveryAnswers,
+  });
+
+  await conversationStore.saveGeneration(requestContext.sessionId, requestContext.accountId, {
+    sessionId: requestContext.sessionId,
+    projectKey: requestContext.projectKey,
+    projectKeys: requestContext.projectKeys,
+    requirement: requestContext.requirement,
+    status: result.status,
+    turnType: result.status === 'complete' ? 'generation' : 'discovery',
+    result,
+  });
+
+  const response: Record<string, unknown> = {
+    success: true,
+    sessionId: requestContext.sessionId,
+    result,
+    warning: check.reason,
+  };
+
+  if (result.status === 'complete') {
+    response.usageTracking = await recordGeneration(
+      requestContext.config,
+      requestContext.accountId,
+      payload?.sessionId,
+    );
+  }
+
+  return response;
+});
+
+resolver.define('v2GetHistory', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const limit = Number(payload?.limit ?? 30);
+  const conversations = await listV2Conversations(accountId, Number.isFinite(limit) ? Math.max(1, Math.min(limit, 100)) : 30);
+  return { success: true, conversations };
+});
+
+resolver.define('v2GetConversation', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const sessionId = String(payload?.sessionId ?? '').trim();
+  if (!sessionId) return { success: false, error: 'sessionId is required.' };
+  const conversation = await getV2Conversation(accountId, sessionId);
+  return { success: true, conversation };
+});
+
+resolver.define('v2DeleteConversation', async ({ payload, context }) => {
+  const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
+  const sessionId = String(payload?.sessionId ?? '').trim();
+  if (!sessionId) return { success: false, error: 'sessionId is required.' };
+  await deleteV2Conversation(accountId, sessionId);
+  return { success: true };
 });
 
 // ─── Generation (queue dispatch) ─────────────────────────────────────────────

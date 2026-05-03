@@ -18,7 +18,8 @@
     "src/core/**/*.ts",
     "src/queues/**/*.ts",
     "src/resolvers/**/*.ts",
-    "src/services/**/*.ts"
+    "src/services/**/*.ts",
+    "src/v2/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

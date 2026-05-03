@@ -10,7 +10,7 @@ import { api } from './hooks/useForge';
 import { useGenerationRealtime, useClarifyRealtime, type GenerationProgressPayload } from './hooks/useRealtime';
 import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { HistoryModal } from './HistoryModal';
-import QuickRefineApp, { type QuickRefineViewState } from './QuickRefineApp';
+import V2App from './V2App';
 import type {
   CanvasEditIntent,
   ClarifyAnswer,
@@ -2031,37 +2031,13 @@ function LegacyApp({
   );
 }
 
-function detectQuickRefineSurface(ctx: any): 'issue-panel' | 'issue-action' | null {
-  const moduleKey = String(
-    ctx?.moduleKey
-    || ctx?.extension?.moduleKey
-    || ctx?.localId
-    || '',
-  );
-
-  if (moduleKey.includes('quick-refine-issue-panel')) return 'issue-panel';
-  return null;
-}
-
 export default function App() {
-  const [surface, setSurface] = useState<'issue-panel' | 'issue-action' | null>(null);
   const [ready, setReady] = useState(false);
-  const [openLegacyWorkflow, setOpenLegacyWorkflow] = useState(false);
-  const [legacyLaunchMode, setLegacyLaunchMode] = useState<'generate' | 'settings'>('generate');
-  const [legacySettingsSurface, setLegacySettingsSurface] = useState<'workspace' | 'project'>('workspace');
-  const [legacySettingsTab, setLegacySettingsTab] = useState<'models' | 'jira' | 'domain' | 'billing'>('models');
-  const [legacyPrefillRequirement, setLegacyPrefillRequirement] = useState('');
-  const [quickRefineViewState, setQuickRefineViewState] = useState<QuickRefineViewState | null>(null);
-  const [returnToQuickRefine, setReturnToQuickRefine] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     view.getContext()
-      .then((ctx: any) => {
-        if (cancelled) return;
-        setSurface(detectQuickRefineSurface(ctx));
-      })
       .finally(() => {
         if (!cancelled) setReady(true);
       });
@@ -2075,41 +2051,5 @@ export default function App() {
     return <div className="h-full w-full" />;
   }
 
-  if (surface && !openLegacyWorkflow) {
-    return (
-      <QuickRefineApp
-        surface={surface}
-        initialState={quickRefineViewState}
-        onStateChange={setQuickRefineViewState}
-        onOpenFullWorkflow={(prefillInstruction) => {
-          setLegacyPrefillRequirement(String(prefillInstruction ?? '').trim());
-          setLegacyLaunchMode('generate');
-          setLegacySettingsSurface('workspace');
-          setLegacySettingsTab('models');
-          setReturnToQuickRefine(false);
-          setOpenLegacyWorkflow(true);
-        }}
-        onOpenSettings={() => {
-          setLegacyLaunchMode('settings');
-          setLegacySettingsSurface('project');
-          setLegacySettingsTab('jira');
-          setReturnToQuickRefine(true);
-          setOpenLegacyWorkflow(true);
-        }}
-      />
-    );
-  }
-
-  return (
-    <LegacyApp
-      initialViewMode={legacyLaunchMode}
-      initialSettingsSurface={legacySettingsSurface}
-      initialSettingsTab={legacySettingsTab}
-      initialRequirement={legacyPrefillRequirement}
-      onCloseSettings={returnToQuickRefine ? () => {
-        setOpenLegacyWorkflow(false);
-        setReturnToQuickRefine(false);
-      } : undefined}
-    />
-  );
+  return <V2App />;
 }

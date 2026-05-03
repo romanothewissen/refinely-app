@@ -11,7 +11,7 @@
     "audit:frontend": "cd src/frontend && npm audit --omit=dev --audit-level=high",
     "audit": "npm run audit:backend && npm run audit:frontend",
     "test": "npm run test:backend",
-    "test:backend": "npm run build:backend && node --test dist/core/__tests__/*.test.js",
+    "test:backend": "npm run build:backend && node --test dist/core/__tests__/*.test.js dist/v2/__tests__/*.test.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run audit"
@@ -23,6 +23,7 @@
     "@forge/kvs": "^0.1.4",
     "@forge/llm": "^0.6.1",
     "@forge/resolver": "^1.7.1",
+    "@forge/sql": "^3.0.23",
     "@forge/storage": "^2.0.3",
     "pdf-parse": "^1.1.1",
     "uuid": "^10.0.0"

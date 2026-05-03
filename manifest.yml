@@ -20,6 +20,9 @@ modules:
         function: resolver
       title: Generate Backlog
       viewportSize: max
+  sql:
+    - key: main
+      engine: mysql
   function:
     - key: resolver
       handler: resolvers/index.handler
