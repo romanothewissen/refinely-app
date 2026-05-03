@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node scripts/serve-build.mjs",
     "start:dev": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "node scripts/build-esbuild.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -39,6 +39,7 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "autoprefixer": "^10.4.27",
+    "esbuild": "^0.28.0",
     "postcss": "^8.5.8",
     "react-scripts": "5.0.1",
     "tailwindcss": "^3.4.19",
