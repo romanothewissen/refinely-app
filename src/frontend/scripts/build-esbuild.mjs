@@ -12,6 +12,22 @@ const srcDir = join(root, 'src');
 const publicDir = join(root, 'public');
 const buildDir = join(root, 'build');
 
+const postCssPlugin = {
+  name: 'postcss-tailwind',
+  setup(buildContext) {
+    buildContext.onLoad({ filter: /\.css$/ }, async (args) => {
+      const source = readFileSync(args.path, 'utf8');
+      const processed = await postcss([tailwindcss(), autoprefixer()]).process(source, {
+        from: args.path,
+      });
+      return {
+        contents: processed.css,
+        loader: 'css',
+      };
+    });
+  },
+};
+
 rmSync(buildDir, { recursive: true, force: true });
 mkdirSync(buildDir, { recursive: true });
 
@@ -42,6 +58,7 @@ const result = await build({
   define: {
     'process.env.NODE_ENV': '"production"',
   },
+  plugins: [postCssPlugin],
 });
 
 const outputs = Object.keys(result.metafile.outputs);
@@ -50,16 +67,6 @@ const cssOutput = outputs.find((output) => output.endsWith('.css'));
 
 if (!jsOutput) {
   throw new Error('esbuild did not emit a JS bundle.');
-}
-
-if (cssOutput) {
-  const cssOutputPath = join(root, cssOutput);
-  const cssSource = readFileSync(cssOutputPath, 'utf8');
-  const processedCss = await postcss([tailwindcss(), autoprefixer()]).process(cssSource, {
-    from: join(srcDir, 'index.css'),
-    to: cssOutputPath,
-  });
-  writeFileSync(cssOutputPath, processedCss.css, 'utf8');
 }
 
 const htmlTemplate = readFileSync(join(publicDir, 'index.html'), 'utf8');
