@@ -2,6 +2,9 @@ import { build } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import postcss from 'postcss';
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -47,6 +50,16 @@ const cssOutput = outputs.find((output) => output.endsWith('.css'));
 
 if (!jsOutput) {
   throw new Error('esbuild did not emit a JS bundle.');
+}
+
+if (cssOutput) {
+  const cssOutputPath = join(root, cssOutput);
+  const cssSource = readFileSync(cssOutputPath, 'utf8');
+  const processedCss = await postcss([tailwindcss(), autoprefixer()]).process(cssSource, {
+    from: join(srcDir, 'index.css'),
+    to: cssOutputPath,
+  });
+  writeFileSync(cssOutputPath, processedCss.css, 'utf8');
 }
 
 const htmlTemplate = readFileSync(join(publicDir, 'index.html'), 'utf8');
