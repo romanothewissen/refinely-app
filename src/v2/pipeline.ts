@@ -514,9 +514,10 @@ export async function runV2Pipeline(
   if (!scopeHypothesis) {
     throw new Error('V2 pipeline cannot continue without a confirmed scope hypothesis.');
   }
+  const confirmedScopeHypothesis = scopeHypothesis;
 
   const classifiedAnswers = classifyDiscoveryAnswers(input.discoveryAnswers ?? []);
-  if (shouldAskDiscovery(triage, scopeHypothesis, classifiedAnswers)) {
+  if (shouldAskDiscovery(triage, confirmedScopeHypothesis, classifiedAnswers)) {
     const executeDiscoveryRound = async (repairNote?: string) => executeStage<{ questions: V2DiscoveryQuestion[] }>({
       stage: 'discover',
       model: input.config.generatorConfig.clarifyModel,
@@ -524,7 +525,7 @@ export async function runV2Pipeline(
       userMessage: buildDiscoveryUserMessage({
         requirement: input.requirement,
         triage,
-        scopeHypothesis,
+        scopeHypothesis: confirmedScopeHypothesis,
         groundedEvidenceText: discoveryGroundedEvidenceText,
         repairNote,
       }),
@@ -551,7 +552,7 @@ export async function runV2Pipeline(
     return {
       status: 'needs_discovery',
       triage,
-      scopeHypothesis,
+      scopeHypothesis: confirmedScopeHypothesis,
       discoveryQuestions: normalizeDiscoveryQuestionsForReturn(discovery.data.questions, triage.questionBudget),
       materialityHints: [
         'Answer only the questions that change capability boundaries, actor accountability, rules, lifecycle handling, exceptions, or success measures.',
@@ -579,7 +580,7 @@ export async function runV2Pipeline(
     userMessage: buildSynthesisUserMessage({
       requirement: input.requirement,
       triage,
-      scopeHypothesis,
+      scopeHypothesis: confirmedScopeHypothesis,
       classifiedAnswers,
       groundedEvidenceText: synthesisEvidenceText,
     }),
@@ -589,7 +590,7 @@ export async function runV2Pipeline(
     validate: validateSynthesis,
   });
   addUsage(promptUsage, 'discovery_synthesis', synthesisResponse.usage);
-  const synthesis = normalizeSynthesis(synthesisResponse.data, triage, scopeHypothesis);
+  const synthesis = normalizeSynthesis(synthesisResponse.data, triage, confirmedScopeHypothesis);
 
   const finalEvidenceText = renderGroundedEvidencePack(synthesisEvidencePack, 'final_generation');
   await reportProgress('final_generation', 'Drafting capability-first backlog features…');
@@ -655,10 +656,10 @@ export async function runV2Pipeline(
   );
   const finalScopeHypothesis = enrichScopeHypothesis(
     {
-      ...scopeHypothesis,
+      ...confirmedScopeHypothesis,
       actorSlots: Object.keys(synthesis.actorMap ?? {}).length
         ? synthesis.actorMap
-        : scopeHypothesis.actorSlots,
+        : confirmedScopeHypothesis.actorSlots,
     },
     synthesisEvidencePack,
     { classifiedAnswers, preserveActorSlots: true },
