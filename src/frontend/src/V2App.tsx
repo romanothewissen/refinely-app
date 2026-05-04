@@ -5,7 +5,7 @@ import './styles/v2-compat.css';
 import type { LlmProvider, TenantConfig } from './types';
 import { DEFAULT_CONFIG } from './types';
 
-type DiscoveryMode = 'none' | 'light' | 'standard' | 'deep' | 'very_deep';
+type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
 
 interface ScopeCapability {
@@ -59,7 +59,7 @@ interface V2ResultBase {
 
 interface PreviewResult extends V2ResultBase {
   status: 'preview_ready' | 'needs_scope_confirmation';
-  recommendedNextStep: 'confirm_scope' | 'proceed_to_generation' | 'run_discovery';
+  recommendedNextStep: 'confirm_scope' | 'run_discovery';
 }
 
 interface DiscoveryResult extends V2ResultBase {

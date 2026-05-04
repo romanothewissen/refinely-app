@@ -6,7 +6,7 @@ import type {
 } from '../types';
 import type { JsonSchema } from '../core/json-schema';
 
-export type V2DiscoveryMode = 'none' | 'light' | 'standard' | 'deep' | 'very_deep';
+export type V2DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 export type V2CrudRisk = 'low' | 'medium' | 'high';
 export type V2Confidence = 'low' | 'medium' | 'high';
 export type V2AnswerMateriality =
@@ -17,6 +17,7 @@ export type V2AnswerMateriality =
   | 'trivial';
 
 export type V2StageName =
+  | 'triage'
   | 'scope_hypothesis'
   | 'discover'
   | 'capability_reasoning'
@@ -32,8 +33,10 @@ export interface V2PromptBudget {
 export interface V2TriageResult {
   discoveryMode: V2DiscoveryMode;
   questionBudget: number;
-  ambiguityScore: number;
-  workflowScore: number;
+  capabilityBreadth: number;
+  askClarity: number;
+  actorClarity: number;
+  discoveryLoad: number;
   crudRisk: V2CrudRisk;
   likelyCapabilityCount: number;
   likelyCapabilityShape: 'single_capability' | 'small_workflow' | 'broad_workflow';
@@ -161,14 +164,14 @@ export interface V2PipelinePreviewResult {
   status: 'preview_ready';
   triage: V2TriageResult;
   scopeHypothesis: V2ScopeHypothesis;
-  recommendedNextStep: 'confirm_scope' | 'proceed_to_generation' | 'run_discovery';
+  recommendedNextStep: 'confirm_scope' | 'run_discovery';
 }
 
 export interface V2PipelineNeedsScopeResult {
   status: 'needs_scope_confirmation';
   triage: V2TriageResult;
   scopeHypothesis: V2ScopeHypothesis;
-  recommendedNextStep: 'confirm_scope' | 'proceed_to_generation' | 'run_discovery';
+  recommendedNextStep: 'confirm_scope' | 'run_discovery';
 }
 
 export interface V2PipelineNeedsDiscoveryResult {

@@ -630,16 +630,24 @@ resolver.define('v2Preview', async ({ payload, context }) => {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
 
-  const result = await runV2Pipeline({
-    requirement: requestContext.requirement,
-    attachmentText: requestContext.attachmentText,
-    config: requestContext.config,
-    domainContext: requestContext.domainContext,
-    domainRoles: requestContext.domainRoles,
-    similarStoriesText: requestContext.similarStoriesText,
-    wiContextText: requestContext.wiContextText,
-    previewOnly: true,
-  });
+  let result;
+  try {
+    result = await runV2Pipeline({
+      requirement: requestContext.requirement,
+      attachmentText: requestContext.attachmentText,
+      config: requestContext.config,
+      domainContext: requestContext.domainContext,
+      domainRoles: requestContext.domainRoles,
+      similarStoriesText: requestContext.similarStoriesText,
+      wiContextText: requestContext.wiContextText,
+      previewOnly: true,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error ?? 'V2 preview failed.'),
+    };
+  }
 
   await conversationStore.savePreview(requestContext.sessionId, requestContext.accountId, {
     sessionId: requestContext.sessionId,
@@ -675,17 +683,25 @@ resolver.define('v2Generate', async ({ payload, context }) => {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
 
-  const result = await runV2Pipeline({
-    requirement: requestContext.requirement,
-    attachmentText: requestContext.attachmentText,
-    config: requestContext.config,
-    domainContext: requestContext.domainContext,
-    domainRoles: requestContext.domainRoles,
-    similarStoriesText: requestContext.similarStoriesText,
-    wiContextText: requestContext.wiContextText,
-    confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
-    discoveryAnswers: payload?.discoveryAnswers,
-  });
+  let result;
+  try {
+    result = await runV2Pipeline({
+      requirement: requestContext.requirement,
+      attachmentText: requestContext.attachmentText,
+      config: requestContext.config,
+      domainContext: requestContext.domainContext,
+      domainRoles: requestContext.domainRoles,
+      similarStoriesText: requestContext.similarStoriesText,
+      wiContextText: requestContext.wiContextText,
+      confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
+      discoveryAnswers: payload?.discoveryAnswers,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error ?? 'V2 generation failed.'),
+    };
+  }
 
   await conversationStore.saveGeneration(requestContext.sessionId, requestContext.accountId, {
     sessionId: requestContext.sessionId,

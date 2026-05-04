@@ -1,8 +1,8 @@
 import { callLlmJsonWithUsage } from '../core/llm';
 import type { AcceptanceRequirement, ClarifyCategoryKey, Feature, TenantConfig } from '../types';
-import { buildArWriterSystemPrompt, buildArWriterUserMessage, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildCompactEvidenceSummary, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFeatureFormatterUserMessage, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, V2_AR_WRITER_SCHEMA, V2_DISCOVERY_SCHEMA, V2_FEATURE_FORMATTER_SCHEMA, V2_REASONING_SCHEMA, V2_SCOPE_HYPOTHESIS_SCHEMA, validateDiscoveryQuestions, validateReasoningArtifact, validateScopeHypothesis } from './prompts';
-import { assessV2Triage } from './triage';
-import type { V2CapabilityReasoningArtifact, V2ClassifiedAnswer, V2DiscoveryAnswer, V2DiscoveryQuestion, V2PipelineInput, V2PipelineResult, V2ScopeHypothesis, V2StageExecutor, V2StageRequest } from './types';
+import { buildArWriterSystemPrompt, buildArWriterUserMessage, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildCompactEvidenceSummary, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFeatureFormatterUserMessage, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildTriageSystemPrompt, buildTriageUserMessage, V2_AR_WRITER_SCHEMA, V2_DISCOVERY_SCHEMA, V2_FEATURE_FORMATTER_SCHEMA, V2_REASONING_SCHEMA, V2_SCOPE_HYPOTHESIS_SCHEMA, V2_TRIAGE_SCHEMA, validateDiscoveryQuestions, validateReasoningArtifact, validateScopeHypothesis, validateTriageScores } from './prompts';
+import { assessV2TriageFromScores, type V2RawTriageScores } from './triage';
+import type { V2CapabilityReasoningArtifact, V2ClassifiedAnswer, V2DiscoveryAnswer, V2DiscoveryQuestion, V2PipelineInput, V2PipelineResult, V2ScopeHypothesis, V2StageExecutor, V2StageRequest, V2TriageResult } from './types';
 import { evaluateV2Quality } from './validators';
 
 interface RawFormattedFeature {
@@ -43,11 +43,13 @@ export function createDefaultV2StageExecutor(config: TenantConfig): V2StageExecu
   const provider = providerOpts(config);
   return async function executeStage<T>(request: V2StageRequest<T>) {
     const model =
-      request.stage === 'ar_writer'
-        ? config.generatorConfig.arModel
-        : request.stage === 'scope_hypothesis' || request.stage === 'discover'
-          ? config.generatorConfig.clarifyModel
-          : config.generatorConfig.decompositionModel;
+      request.stage === 'triage'
+        ? config.generatorConfig.triageModel
+        : request.stage === 'ar_writer'
+          ? config.generatorConfig.arModel
+          : request.stage === 'scope_hypothesis' || request.stage === 'discover'
+            ? config.generatorConfig.clarifyModel
+            : config.generatorConfig.decompositionModel;
 
     const response = await callLlmJsonWithUsage<T>({
       model,
@@ -121,7 +123,6 @@ export async function runV2Pipeline(
   input: V2PipelineInput,
   executeStage: V2StageExecutor = createDefaultV2StageExecutor(input.config),
 ): Promise<V2PipelineResult> {
-  const triage = assessV2Triage(input.requirement, input.attachmentText ?? '');
   const evidenceSummary = buildCompactEvidenceSummary(input);
   const promptUsage: {
     input: number;
@@ -132,6 +133,33 @@ export async function runV2Pipeline(
     output: 0,
     byStage: {},
   };
+  let triage: V2TriageResult;
+  try {
+    const triageResponse = await executeStage<V2RawTriageScores>({
+      stage: 'triage',
+      model: input.config.generatorConfig.triageModel,
+      systemPrompt: buildTriageSystemPrompt(),
+      userMessage: buildTriageUserMessage({
+        requirement: input.requirement,
+        attachmentText: input.attachmentText,
+      }),
+      jsonSchema: V2_TRIAGE_SCHEMA,
+      maxTokens: 220,
+      reasoningEffort: 'low',
+      validate: validateTriageScores,
+    });
+    triage = assessV2TriageFromScores(
+      triageResponse.data,
+      input.requirement,
+      input.attachmentText ?? '',
+    );
+    promptUsage.input += triageResponse.usage.input;
+    promptUsage.output += triageResponse.usage.output;
+    promptUsage.byStage.triage = triageResponse.usage;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'Unknown triage error');
+    throw new Error(`V2 triage failed: ${reason}`);
+  }
 
   let scopeHypothesis = input.confirmedScopeHypothesis;
   if (!scopeHypothesis) {
@@ -161,7 +189,7 @@ export async function runV2Pipeline(
       status: 'preview_ready',
       triage,
       scopeHypothesis,
-      recommendedNextStep: triage.discoveryMode === 'none' ? 'proceed_to_generation' : 'run_discovery',
+      recommendedNextStep: 'run_discovery',
     };
   }
 
@@ -170,14 +198,14 @@ export async function runV2Pipeline(
       status: 'needs_scope_confirmation',
       triage,
       scopeHypothesis,
-      recommendedNextStep: triage.discoveryMode === 'none' ? 'proceed_to_generation' : 'run_discovery',
+      recommendedNextStep: 'run_discovery',
     };
   }
 
   const classifiedAnswers = classifyDiscoveryAnswers(input.discoveryAnswers ?? []);
   const hasMaterialAnswers = classifiedAnswers.some((answer) => answer.materiality !== 'trivial');
 
-  if (triage.discoveryMode !== 'none' && !hasMaterialAnswers) {
+  if (!hasMaterialAnswers) {
     const discovery = await executeStage<{ questions: V2DiscoveryQuestion[] }>({
       stage: 'discover',
       model: input.config.generatorConfig.clarifyModel,
@@ -200,7 +228,7 @@ export async function runV2Pipeline(
       status: 'needs_discovery',
       triage,
       scopeHypothesis,
-      discoveryQuestions: discovery.data.questions.map((question, index) => ({
+      discoveryQuestions: discovery.data.questions.slice(0, triage.questionBudget).map((question, index) => ({
         ...question,
         id: question.id || `dq_${index + 1}`,
         categoryKey: question.categoryKey || inferCategory(question.question),

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_CONFIG, type TenantConfig } from '../../types';
 import { runV2Pipeline, classifyDiscoveryAnswers } from '../pipeline';
-import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildDiscoverySystemPrompt, buildFeatureFormatterSystemPrompt, buildScopeHypothesisSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS } from '../prompts';
-import { assessV2Triage } from '../triage';
+import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildDiscoverySystemPrompt, buildFeatureFormatterSystemPrompt, buildScopeHypothesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
+import { assessV2TriageFromScores } from '../triage';
 import type { V2StageExecutor } from '../types';
 
 const baseConfig: TenantConfig = {
@@ -30,12 +30,22 @@ const baseConfig: TenantConfig = {
   arMappings: [],
 };
 
-test('triage scales discovery depth up for workflow-heavy asks', () => {
-  const heavy = assessV2Triage('Coordinate approval routing, fallback handling, dispatch sequencing, and manual override rules for a multi-step urgent service workflow.');
-  const light = assessV2Triage('Allow a manager to rename a saved template.');
+test('triage load mapping scales discovery depth and budget by score bands', () => {
+  const heavy = assessV2TriageFromScores(
+    { capability_breadth: 5, ask_clarity: 1, actor_clarity: 1 },
+    'Coordinate approval routing, fallback handling, dispatch sequencing, and manual override rules for a multi-step urgent service workflow.',
+  );
+  const light = assessV2TriageFromScores(
+    { capability_breadth: 1, ask_clarity: 5, actor_clarity: 5 },
+    'Allow a manager to rename a saved template.',
+  );
 
-  assert.ok(['deep', 'very_deep'].includes(heavy.discoveryMode));
-  assert.ok(heavy.questionBudget >= 8);
+  assert.equal(heavy.discoveryLoad, 15);
+  assert.equal(heavy.discoveryMode, 'very_deep');
+  assert.equal(heavy.questionBudget, 15);
+  assert.equal(light.discoveryLoad, 3);
+  assert.equal(light.discoveryMode, 'light');
+  assert.equal(light.questionBudget, 2);
   assert.ok(heavy.questionBudget > light.questionBudget);
 });
 
@@ -51,6 +61,7 @@ test('classifyDiscoveryAnswers keeps only material answers for generation', () =
 
 test('v2 prompt budgets stay materially smaller than the current dense prompt style', () => {
   const prompts = [
+    ['triage', buildTriageSystemPrompt()],
     ['scope_hypothesis', buildScopeHypothesisSystemPrompt()],
     ['discover', buildDiscoverySystemPrompt()],
     ['capability_reasoning', buildCapabilityReasoningSystemPrompt()],
@@ -65,7 +76,15 @@ test('v2 prompt budgets stay materially smaller than the current dense prompt st
 });
 
 test('runV2Pipeline returns scope confirmation before generation when no scope hypothesis is confirmed', async () => {
+  const calls: string[] = [];
   const executeStage: V2StageExecutor = async (request) => {
+    calls.push(request.stage);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 3, ask_clarity: 3, actor_clarity: 3 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
     assert.equal(request.stage, 'scope_hypothesis');
     return {
       data: {
@@ -92,12 +111,60 @@ test('runV2Pipeline returns scope confirmation before generation when no scope h
 
   assert.equal(result.status, 'needs_scope_confirmation');
   assert.equal(result.scopeHypothesis.capabilities.length, 2);
+  assert.equal(result.recommendedNextStep, 'run_discovery');
+  assert.deepEqual(calls, ['triage', 'scope_hypothesis']);
+});
+
+test('runV2Pipeline uses questionBudget directly when requesting discovery', async () => {
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 3 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discover') {
+      assert.match(request.userMessage, /Generate up to 9 high-value discovery questions/i);
+      return {
+        data: {
+          questions: [
+            { id: 'q1', categoryKey: 'functional_flow', question: 'What sequence controls routing?', rationale: 'Flow boundary.', suggestions: ['A', 'B'] },
+          ],
+        } as any,
+        usage: { input: 50, output: 50 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Route incoming service requests with approval gates and fallback handling.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Route requests', rationale: 'Core capability.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner' },
+        openQuestions: ['What happens on exception?'],
+        confidence: 'medium',
+      },
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_discovery');
+  assert.equal(result.triage.questionBudget, 9);
 });
 
 test('runV2Pipeline performs full generation with per-feature AR writing once scope is confirmed', async () => {
   const calls: string[] = [];
   const executeStage: V2StageExecutor = async (request) => {
     calls.push(request.stage);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 4, actor_clarity: 4 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
     if (request.stage === 'capability_reasoning') {
       return {
         data: {
@@ -181,8 +248,33 @@ test('runV2Pipeline performs full generation with per-feature AR writing once sc
   );
 
   assert.equal(result.status, 'complete');
-  assert.deepEqual(calls, ['capability_reasoning', 'feature_formatter', 'ar_writer']);
+  assert.deepEqual(calls, ['triage', 'capability_reasoning', 'feature_formatter', 'ar_writer']);
   assert.equal(result.features.length, 1);
   assert.equal(result.features[0]?.acceptanceRequirements.length, 2);
   assert.equal(result.quality.crudLike, false);
+});
+
+test('validateTriageScores rejects invalid triage outputs', () => {
+  assert.equal(validateTriageScores({ capability_breadth: 2, ask_clarity: 3, actor_clarity: 4 }), null);
+  assert.match(
+    validateTriageScores({ capability_breadth: 9, ask_clarity: 3, actor_clarity: 4 }) ?? '',
+    /triage output must provide 1-5 integer scores/i,
+  );
+});
+
+test('runV2Pipeline fails fast when triage stage fails', async () => {
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') throw new Error('timeout');
+    throw new Error('unexpected downstream call');
+  };
+  await assert.rejects(
+    async () => runV2Pipeline(
+      {
+        requirement: 'Route work items with complex fallback logic.',
+        config: baseConfig,
+      },
+      executeStage,
+    ),
+    /V2 triage failed: timeout/i,
+  );
 });

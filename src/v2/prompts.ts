@@ -9,11 +9,23 @@ import type {
 } from './types';
 
 export const V2_PROMPT_BUDGETS: Record<V2PromptBudget['stage'], V2PromptBudget> = {
+  triage: { stage: 'triage', maxSystemChars: 1200, maxUserChars: 1600 },
   scope_hypothesis: { stage: 'scope_hypothesis', maxSystemChars: 1400, maxUserChars: 1800 },
   discover: { stage: 'discover', maxSystemChars: 1800, maxUserChars: 2200 },
   capability_reasoning: { stage: 'capability_reasoning', maxSystemChars: 2000, maxUserChars: 2600 },
   feature_formatter: { stage: 'feature_formatter', maxSystemChars: 1200, maxUserChars: 1800 },
   ar_writer: { stage: 'ar_writer', maxSystemChars: 1700, maxUserChars: 2200 },
+};
+
+export const V2_TRIAGE_SCHEMA: JsonSchema = {
+  type: 'object',
+  required: ['capability_breadth', 'ask_clarity', 'actor_clarity'],
+  additionalProperties: false,
+  properties: {
+    capability_breadth: { type: 'integer', minimum: 1, maximum: 5 },
+    ask_clarity: { type: 'integer', minimum: 1, maximum: 5 },
+    actor_clarity: { type: 'integer', minimum: 1, maximum: 5 },
+  },
 };
 
 function trimText(value: string, maxChars: number): string {
@@ -72,7 +84,7 @@ export const V2_DISCOVERY_SCHEMA: JsonSchema = {
     questions: {
       type: 'array',
       minItems: 1,
-      maxItems: 5,
+      maxItems: 15,
       items: {
         type: 'object',
         required: ['id', 'categoryKey', 'question', 'rationale', 'suggestions'],
@@ -207,6 +219,32 @@ export function buildScopeHypothesisSystemPrompt(): string {
   );
 }
 
+export function buildTriageSystemPrompt(): string {
+  return trimText(
+    [
+      'You only size how much clarification is needed before backlog-quality decomposition.',
+      'Score only the requirement and excerpt provided by the user.',
+      'Do not write discovery questions, solution details, features, or acceptance requirements.',
+      'Return JSON only with: capability_breadth, ask_clarity, actor_clarity.',
+      'Rubric: capability_breadth (1=single capability, 3=several related outcomes, 5=many distinct outcomes).',
+      'Rubric: ask_clarity (1=goals/scope unclear, 3=partially specified, 5=scope and constraints are clear).',
+      'Rubric: actor_clarity (1=no usable accountability, 3=partial role hints, 5=clear initiator/performer/approver-observer).',
+    ].join(' '),
+    V2_PROMPT_BUDGETS.triage.maxSystemChars,
+  );
+}
+
+export function buildTriageUserMessage(input: { requirement: string; attachmentText?: string }): string {
+  const parts = [
+    `Requirement:\n${trimText(input.requirement, 1100)}`,
+    input.attachmentText?.trim()
+      ? `Evidence excerpt (use only what is here):\n${trimText(input.attachmentText, 420)}`
+      : '',
+    'Return JSON matching the schema.',
+  ].filter(Boolean);
+  return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.triage.maxUserChars);
+}
+
 export function buildScopeHypothesisUserMessage(input: {
   requirement: string;
   attachmentText?: string;
@@ -246,7 +284,7 @@ export function buildDiscoveryUserMessage(input: {
     `Proposed capabilities:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)}`,
     `Open uncertainties:\n${compactList(input.scopeHypothesis.openQuestions, 6) || '- none'}`,
     input.domainContext?.trim() ? `Optional domain context:\n${trimText(input.domainContext, 260)}` : '',
-    `Generate up to ${Math.min(5, input.triage.questionBudget)} high-value discovery questions for this round only.`,
+    `Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only.`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discover.maxUserChars);
 }
@@ -364,6 +402,17 @@ export function buildCompactEvidenceSummary(input: {
 export function validateDiscoveryQuestions(data: unknown): string | null {
   const payload = data as { questions?: V2DiscoveryQuestion[] } | null;
   return payload?.questions?.length ? null : 'Discovery output must contain at least one usable question.';
+}
+
+export function validateTriageScores(data: unknown): string | null {
+  const payload = data as { capability_breadth?: unknown; ask_clarity?: unknown; actor_clarity?: unknown } | null;
+  const entries = [
+    payload?.capability_breadth,
+    payload?.ask_clarity,
+    payload?.actor_clarity,
+  ];
+  const valid = entries.every((entry) => Number.isInteger(entry) && Number(entry) >= 1 && Number(entry) <= 5);
+  return valid ? null : 'Triage output must provide 1-5 integer scores for breadth, ask clarity, and actor clarity.';
 }
 
 export function validateScopeHypothesis(data: unknown): string | null {
