@@ -278,6 +278,18 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
     };
   }, []);
 
+  useEffect(() => {
+    document.documentElement.classList.add('rf-v2-scroll');
+    document.body.classList.add('rf-v2-scroll');
+    const root = document.getElementById('root');
+    root?.classList.add('rf-v2-scroll-root');
+    return () => {
+      document.documentElement.classList.remove('rf-v2-scroll');
+      document.body.classList.remove('rf-v2-scroll');
+      root?.classList.remove('rf-v2-scroll-root');
+    };
+  }, []);
+
   const activeQuestionCount = useMemo(() => activeDiscoveryQuestions.length, [activeDiscoveryQuestions]);
 
   const activeModelSummary = useMemo(() => ([

@@ -118,6 +118,12 @@
       /* Base: clean off-white with the lightest green tint */
       linear-gradient(165deg, #f6f9f7 0%, #f2f5f3 55%, #f5f3ef 100%);
   }
+
+  html.rf-v2-scroll,
+  body.rf-v2-scroll,
+  #root.rf-v2-scroll-root {
+    overflow-y: auto;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
