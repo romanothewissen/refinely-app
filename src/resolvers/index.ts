@@ -339,10 +339,17 @@ function formatV2DomainRoles(rows: Array<{ role?: string; activities?: string }>
     .filter(Boolean);
 }
 
-async function buildV2RequestContext(payload: any, context: any) {
+async function buildV2RequestContext(
+  payload: any,
+  context: any,
+  options?: { retrieveEvidence?: boolean },
+) {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
-  const userPreferences = await getUserPreferences(accountId);
-  const config = applyPreferredPipelineProfile(await getConfig(), userPreferences.pipelineProfile);
+  const baseConfig = applyPreferredPipelineProfile(await getConfig(), 'balanced');
+  const config = {
+    ...baseConfig,
+    generatorConfig: resolveEffectiveGeneratorConfig(baseConfig.generatorConfig),
+  };
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;
   const selectedWiDocIds = [...new Set((payload?.selectedWiDocIds ?? [])
@@ -354,26 +361,32 @@ async function buildV2RequestContext(payload: any, context: any) {
   const requirement = String(payload?.requirement ?? '').trim();
   const attachmentText = String(payload?.attachmentText ?? '').trim();
 
-  const [wiContext, similarStories] = await Promise.all([
-    config.wiConfig.enabled && selectedProjectKeys.length && payload?.includeWiContext !== false
-      ? retrieveScopedWiContext(
-        requirement,
-        Math.min(config.wiConfig.topKChunks || 3, 3),
-        Math.min(config.wiConfig.maxChars || 4000, 4000),
-        selectedProjectKeys,
-        selectedWiDocIds,
-      )
-      : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
-    payload?.includeSimilarStories === false || !selectedProjectKeys.length
-      ? Promise.resolve([])
-      : retrieveScopedSimilarStories({
-        requirement,
-        attachmentText,
-        config,
-        projectKeys: selectedProjectKeys,
-        maxResults: 3,
-      }),
-  ]);
+  const shouldRetrieveEvidence = options?.retrieveEvidence !== false;
+  const [wiContext, similarStories] = shouldRetrieveEvidence
+    ? await Promise.all([
+      config.wiConfig.enabled && selectedProjectKeys.length && payload?.includeWiContext !== false
+        ? retrieveScopedWiContext(
+          requirement,
+          Math.min(config.wiConfig.topKChunks || 3, 3),
+          Math.min(config.wiConfig.maxChars || 4000, 4000),
+          selectedProjectKeys,
+          selectedWiDocIds,
+        )
+        : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
+      payload?.includeSimilarStories === false || !selectedProjectKeys.length
+        ? Promise.resolve([])
+        : retrieveScopedSimilarStories({
+          requirement,
+          attachmentText,
+          config,
+          projectKeys: selectedProjectKeys,
+          maxResults: 3,
+        }),
+    ])
+    : await Promise.all([
+      Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
+      Promise.resolve([]),
+    ]);
 
   return {
     accountId,
@@ -615,7 +628,7 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
 // ─── V2 Core Flow ─────────────────────────────────────────────────────────────
 
 resolver.define('v2Preview', async ({ payload, context }) => {
-  const requestContext = await buildV2RequestContext(payload, context);
+  const requestContext = await buildV2RequestContext(payload, context, { retrieveEvidence: false });
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
   }
@@ -675,7 +688,10 @@ resolver.define('v2Preview', async ({ payload, context }) => {
 });
 
 resolver.define('v2Generate', async ({ payload, context }) => {
-  const requestContext = await buildV2RequestContext(payload, context);
+  const hasDiscoveryAnswers = Array.isArray(payload?.discoveryAnswers) && payload.discoveryAnswers.length > 0;
+  const requestContext = await buildV2RequestContext(payload, context, {
+    retrieveEvidence: hasDiscoveryAnswers,
+  });
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
   }
@@ -700,6 +716,7 @@ resolver.define('v2Generate', async ({ payload, context }) => {
       domainRoles: requestContext.domainRoles,
       similarStoriesText: requestContext.similarStoriesText,
       wiContextText: requestContext.wiContextText,
+      triageOverride: payload?.triageOverride,
       confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
       discoveryAnswers: payload?.discoveryAnswers,
     });

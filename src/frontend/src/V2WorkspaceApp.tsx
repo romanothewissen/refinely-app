@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar';
 import { SettingsView } from './SettingsView';
 import { V2HistoryModal, type V2HistoryEntry } from './V2HistoryModal';
 import { api } from './hooks/useForge';
-import type { LlmProvider, PipelineProfile } from './types';
+import type { LlmProvider } from './types';
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
@@ -296,7 +296,6 @@ export default function V2WorkspaceApp({
   const [hasProjectSettingsAccess, setHasProjectSettingsAccess] = useState(false);
   const [tier, setTier] = useState('standard');
   const [brandingLogoUrl, setBrandingLogoUrl] = useState<string | null>(null);
-  const [pipelineProfile, setPipelineProfile] = useState<PipelineProfile>('balanced');
   const [sidebarOpen, setSidebarOpen] = useState(initialViewMode !== 'settings');
   const [sidebarExiting, setSidebarExiting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(420);
@@ -409,9 +408,6 @@ export default function V2WorkspaceApp({
         setBrandingLogoUrl(configRes?.branding?.logoUrl || null);
         if (configRes?.tier) setTier(configRes.tier);
         if (configRes?.isAdmin !== undefined) setIsAdmin(Boolean(configRes.isAdmin));
-        if (configRes?.pipelineProfile === 'fast' || configRes?.pipelineProfile === 'balanced' || configRes?.pipelineProfile === 'quality') {
-          setPipelineProfile(configRes.pipelineProfile);
-        }
         if (usageRes?.usage) setUsage(usageRes.usage);
         if (usageRes?.limits) setLimits(usageRes.limits);
 
@@ -571,11 +567,6 @@ export default function V2WorkspaceApp({
     openSettings('project');
   }, [openSettings]);
 
-  const handlePipelineProfileChange = useCallback((nextProfile: PipelineProfile) => {
-    setPipelineProfile(nextProfile);
-    void api.saveUserPreferences({ pipelineProfile: nextProfile }).catch(() => {});
-  }, []);
-
   const handleAddRunAttachments = async (files: File[]) => {
     if (!files.length) return;
     setRunAttachmentError(null);
@@ -623,6 +614,24 @@ export default function V2WorkspaceApp({
     () => runAttachments.map((attachment) => `--- ${attachment.filename} ---\n${attachment.text}`).join('\n\n'),
     [runAttachments],
   );
+  const runWiSelectionPayload = useMemo(() => {
+    if (wiSelectionMode === 'auto') {
+      return {
+        includeWiContext: true,
+        selectedWiDocIds: undefined as string[] | undefined,
+      };
+    }
+    if (!selectedWiDocIds.length) {
+      return {
+        includeWiContext: false,
+        selectedWiDocIds: [] as string[],
+      };
+    }
+    return {
+      includeWiContext: true,
+      selectedWiDocIds,
+    };
+  }, [wiSelectionMode, selectedWiDocIds]);
 
   const restoreConversation = async (nextSessionId: string) => {
     setLoading(true);
@@ -672,6 +681,9 @@ export default function V2WorkspaceApp({
         requirement,
         attachmentText,
         projectKeys: effectiveProjectKeys,
+        selectedWiDocIds: runWiSelectionPayload.selectedWiDocIds,
+        includeWiContext: runWiSelectionPayload.includeWiContext,
+        includeSimilarStories: false,
       }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result };
       if (!response?.success || !response.result) {
         throw new Error(response?.error || 'Preview failed.');
@@ -703,6 +715,10 @@ export default function V2WorkspaceApp({
         requirement,
         attachmentText,
         projectKeys: effectiveProjectKeys,
+        selectedWiDocIds: runWiSelectionPayload.selectedWiDocIds,
+        includeWiContext: runWiSelectionPayload.includeWiContext,
+        includeSimilarStories: true,
+        triageOverride: result?.triage,
         confirmedScopeHypothesis: buildScopePayload(scopeDraft),
         discoveryAnswers: Object.values(answerOverride ?? discoveryAnswers),
       }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result };
@@ -770,8 +786,6 @@ export default function V2WorkspaceApp({
                 limits={limits}
                 brandingLogoUrl={brandingLogoUrl}
                 reviewBeforeARs={false}
-                pipelineProfile={pipelineProfile}
-                onPipelineProfileChange={handlePipelineProfileChange}
                 width={sidebarWidth}
                 originIssueKey={originIssueKey}
                 projectKeys={effectiveProjectKeys}

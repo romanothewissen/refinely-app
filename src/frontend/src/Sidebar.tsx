@@ -1,7 +1,6 @@
 import React from 'react';
-import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown, Gauge, Layers, Check, ChevronRight, History } from 'lucide-react';
+import { Paperclip, Plus, Clock, Settings, PanelLeftClose, Zap, X, Database, FileText, Orbit, ChevronDown, Check, ChevronRight, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { PipelineProfile } from './types';
 
 type UsageSnapshot = {
   currentMonth: number;
@@ -32,8 +31,6 @@ interface SidebarProps {
   limits: { generationsPerMonth: number } | null;
   brandingLogoUrl?: string | null;
   reviewBeforeARs?: boolean;
-  pipelineProfile: PipelineProfile;
-  onPipelineProfileChange: (value: PipelineProfile) => void;
   width?: number;
   originIssueKey?: string | null;
   projectKeys: string[];
@@ -75,47 +72,15 @@ const stepSlideVariants = {
   exit: (direction: number) => ({ x: direction * -28, opacity: 0 }),
 };
 
-function profileAccentColor(profile: PipelineProfile): string {
-  if (profile === 'fast') return 'rgb(234, 138, 46)';
-  if (profile === 'quality') return 'rgb(82, 58, 118)';
-  return 'rgb(43, 89, 74)';
-}
-
-function profileRgba(profile: PipelineProfile, alpha: number): string {
-  if (profile === 'fast') return `rgba(234, 138, 46, ${alpha})`;
-  if (profile === 'quality') return `rgba(82, 58, 118, ${alpha})`;
-  return `rgba(43, 89, 74, ${alpha})`;
-}
-
-/** CSS custom properties driven by the active output profile — applied to the sidebar root. */
-function profileCssVars(profile: PipelineProfile): React.CSSProperties {
-  const themes: Record<PipelineProfile, Record<string, string>> = {
-    fast: {
-      '--sidebar-accent': 'rgb(234, 138, 46)',
-      '--sidebar-accent-subtle': 'rgba(234, 138, 46, 0.08)',
-      '--sidebar-accent-alpha': 'rgba(234, 138, 46, 0.05)',
-      '--sidebar-accent-border': 'rgba(234, 138, 46, 0.15)',
-      '--sidebar-cta': '#d48226',
-      '--sidebar-cta-shadow': 'rgba(234, 138, 46, 0.18)',
-    },
-    balanced: {
-      '--sidebar-accent': 'rgb(43, 89, 74)',
-      '--sidebar-accent-subtle': 'rgba(43, 89, 74, 0.08)',
-      '--sidebar-accent-alpha': 'rgba(43, 89, 74, 0.04)',
-      '--sidebar-accent-border': 'rgba(43, 89, 74, 0.15)',
-      '--sidebar-cta': '#2b594a',
-      '--sidebar-cta-shadow': 'rgba(43, 89, 74, 0.18)',
-    },
-    quality: {
-      '--sidebar-accent': 'rgb(82, 58, 118)',
-      '--sidebar-accent-subtle': 'rgba(82, 58, 118, 0.10)',
-      '--sidebar-accent-alpha': 'rgba(82, 58, 118, 0.05)',
-      '--sidebar-accent-border': 'rgba(82, 58, 118, 0.16)',
-      '--sidebar-cta': '#523a76',
-      '--sidebar-cta-shadow': 'rgba(82, 58, 118, 0.18)',
-    },
-  };
-  return themes[profile] as React.CSSProperties;
+function sidebarCssVars(): React.CSSProperties {
+  return {
+    '--sidebar-accent': 'rgb(43, 89, 74)',
+    '--sidebar-accent-subtle': 'rgba(43, 89, 74, 0.08)',
+    '--sidebar-accent-alpha': 'rgba(43, 89, 74, 0.04)',
+    '--sidebar-accent-border': 'rgba(43, 89, 74, 0.15)',
+    '--sidebar-cta': '#2b594a',
+    '--sidebar-cta-shadow': 'rgba(43, 89, 74, 0.18)',
+  } as React.CSSProperties;
 }
 
 export function Sidebar({
@@ -137,8 +102,6 @@ export function Sidebar({
   limits,
   brandingLogoUrl,
   reviewBeforeARs,
-  pipelineProfile,
-  onPipelineProfileChange,
   width,
   originIssueKey,
   projectKeys,
@@ -275,27 +238,20 @@ export function Sidebar({
     setSelectedWiDocIds(next);
   };
 
-  const profileOptions = [
-    { id: 'fast' as PipelineProfile, label: 'Fast', desc: 'Quick iteration · lighter analysis', Icon: Zap },
-    { id: 'balanced' as PipelineProfile, label: 'Balanced', desc: 'Standard depth and quality', Icon: Gauge },
-    { id: 'quality' as PipelineProfile, label: 'Quality', desc: 'Thorough analysis · richer output', Icon: Layers },
-  ];
-
   // ── Stepper state ──────────────────────────────────────────────────
   const [currentStep, setCurrentStep] = React.useState(0);
   const [maxStep, setMaxStep] = React.useState(0);
   const [slideDirection, setSlideDirection] = React.useState<1 | -1>(1);
 
   const steps = React.useMemo(() => {
-    const base: Array<{ id: 'scope' | 'profile' | 'instructions' | 'requirement'; label: string; number: string }> = [
+    const base: Array<{ id: 'scope' | 'instructions' | 'requirement'; label: string; number: string }> = [
       { id: 'scope', label: 'Scope', number: '01' },
-      { id: 'profile', label: 'Profile', number: '02' },
     ];
     if (activeWiDocs.length > 0) {
-      base.push({ id: 'instructions', label: 'Instructions', number: '03' });
-      base.push({ id: 'requirement', label: 'Requirement', number: '04' });
-    } else {
+      base.push({ id: 'instructions', label: 'Instructions', number: '02' });
       base.push({ id: 'requirement', label: 'Requirement', number: '03' });
+    } else {
+      base.push({ id: 'requirement', label: 'Requirement', number: '02' });
     }
     return base;
   }, [activeWiDocs.length]);
@@ -341,7 +297,7 @@ export function Sidebar({
   return (
     <aside
       className="rf-sidebar-shell h-full flex flex-col shrink-0 overflow-hidden"
-      style={{ width: width ?? 400, ...profileCssVars(pipelineProfile) }}
+      style={{ width: width ?? 400, ...sidebarCssVars() }}
     >
       {/* ── Header ── */}
       <motion.header
@@ -680,84 +636,6 @@ export function Sidebar({
                   </AnimatePresence>
                 </div>
               </motion.div>
-            )}
-
-            {/* ── STEP: Profile ── */}
-            {currentStepDef.id === 'profile' && (
-              <div className="flex flex-col gap-2">
-                <p className="px-0.5 text-[12px] text-[var(--rf-text-tertiary)] leading-relaxed">
-                  Choose how much time and depth to apply to this run.
-                </p>
-                {profileOptions.map((option, optIdx) => {
-                  const selected = pipelineProfile === option.id;
-                  const depthLevel = option.id === 'fast' ? 1 : option.id === 'balanced' ? 2 : 3;
-                  return (
-                    <motion.button
-                      key={option.id}
-                      type="button"
-                      onClick={() => onPipelineProfileChange(option.id)}
-                      disabled={isWorking}
-                      className={`w-full flex items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition-all disabled:opacity-50 ${
-                        selected
-                          ? 'shadow-sm bg-white'
-                          : 'bg-white border-[var(--rf-border)] hover:bg-white'
-                      }`}
-                      style={selected ? {
-                        borderColor: profileRgba(option.id, 0.22),
-                        borderWidth: '2px',
-                      } : {
-                        borderWidth: '1px',
-                      }}
-                      whileTap={{ scale: 0.98 }}
-                      variants={fadeUp}
-                      initial="hidden"
-                      animate="visible"
-                      custom={optIdx * 0.12}
-                    >
-                      <div
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all"
-                        style={selected ? {
-                          backgroundColor: profileAccentColor(option.id),
-                          border: 'none',
-                          color: 'white',
-                        } : {
-                          backgroundColor: profileRgba(option.id, 0.07),
-                          border: `1px solid ${profileRgba(option.id, 0.20)}`,
-                          color: profileAccentColor(option.id),
-                        }}
-                      >
-                        <option.Icon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className={`text-[14px] font-bold leading-tight ${selected ? 'text-[var(--rf-text)]' : 'text-[var(--rf-text-secondary)]'}`}>
-                          {option.label}
-                        </div>
-                        <div className="text-[12px] text-[var(--rf-text-tertiary)] leading-snug mt-0.5">
-                          {option.desc}
-                        </div>
-                        <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--rf-text-tertiary)]">
-                          {depthLevel === 1 ? 'Quick' : depthLevel === 2 ? 'Standard' : 'Deep'}
-                        </div>
-                      </div>
-                      <AnimatePresence>
-                        {selected && (
-                          <motion.div
-                            key={`check-${option.id}`}
-                            initial={{ scale: 0.5, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.5, opacity: 0 }}
-                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white"
-                            style={{ backgroundColor: profileAccentColor(option.id) }}
-                          >
-                            <Check className="h-3 w-3" />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </motion.button>
-                  );
-                })}
-              </div>
             )}
 
             {/* ── STEP: Work Instructions ── */}

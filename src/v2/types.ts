@@ -155,6 +155,7 @@ export interface V2PipelineInput extends V2EvidenceBundle {
   requirement: string;
   attachmentText?: string;
   config: TenantConfig;
+  triageOverride?: V2TriageResult;
   confirmedScopeHypothesis?: V2ScopeHypothesis;
   discoveryAnswers?: V2DiscoveryAnswer[];
   previewOnly?: boolean;

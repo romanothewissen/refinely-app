@@ -134,31 +134,35 @@ export async function runV2Pipeline(
     byStage: {},
   };
   let triage: V2TriageResult;
-  try {
-    const triageResponse = await executeStage<V2RawTriageScores>({
-      stage: 'triage',
-      model: input.config.generatorConfig.triageModel,
-      systemPrompt: buildTriageSystemPrompt(),
-      userMessage: buildTriageUserMessage({
-        requirement: input.requirement,
-        attachmentText: input.attachmentText,
-      }),
-      jsonSchema: V2_TRIAGE_SCHEMA,
-      maxTokens: 220,
-      reasoningEffort: 'low',
-      validate: validateTriageScores,
-    });
-    triage = assessV2TriageFromScores(
-      triageResponse.data,
-      input.requirement,
-      input.attachmentText ?? '',
-    );
-    promptUsage.input += triageResponse.usage.input;
-    promptUsage.output += triageResponse.usage.output;
-    promptUsage.byStage.triage = triageResponse.usage;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'Unknown triage error');
-    throw new Error(`V2 triage failed: ${reason}`);
+  if (input.triageOverride) {
+    triage = input.triageOverride;
+  } else {
+    try {
+      const triageResponse = await executeStage<V2RawTriageScores>({
+        stage: 'triage',
+        model: input.config.generatorConfig.triageModel,
+        systemPrompt: buildTriageSystemPrompt(),
+        userMessage: buildTriageUserMessage({
+          requirement: input.requirement,
+          attachmentText: input.attachmentText,
+        }),
+        jsonSchema: V2_TRIAGE_SCHEMA,
+        maxTokens: 220,
+        reasoningEffort: 'low',
+        validate: validateTriageScores,
+      });
+      triage = assessV2TriageFromScores(
+        triageResponse.data,
+        input.requirement,
+        input.attachmentText ?? '',
+      );
+      promptUsage.input += triageResponse.usage.input;
+      promptUsage.output += triageResponse.usage.output;
+      promptUsage.byStage.triage = triageResponse.usage;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error ?? 'Unknown triage error');
+      throw new Error(`V2 triage failed: ${reason}`);
+    }
   }
 
   let scopeHypothesis = input.confirmedScopeHypothesis;

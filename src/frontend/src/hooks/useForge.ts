@@ -41,6 +41,7 @@ export const api = {
     selectedWiDocIds?: string[];
     includeWiContext?: boolean;
     includeSimilarStories?: boolean;
+    triageOverride?: unknown;
     confirmedScopeHypothesis?: unknown;
     discoveryAnswers?: unknown[];
   }) => invoke('v2Generate', payload),
