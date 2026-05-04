@@ -1,4 +1,9 @@
 import { recordGeneration, releaseGenerationReservation } from '../services/billing';
+import {
+  getProjectMemoryHeaderForProjects,
+  getProjectMemorySelectionForStage,
+  queueProjectMemoryRefreshForProjects,
+} from '../services/project-memory';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 
@@ -40,6 +45,15 @@ export async function handler(event: { body: V2GenerationEventBody }) {
   const conversationStore = createSqlConversationStore();
 
   try {
+    await setProgress(payload.sessionId, 'Loading compiled project memory…');
+    const [{ header, status }, memorySelection] = await Promise.all([
+      getProjectMemoryHeaderForProjects(payload.projectKeys ?? []),
+      getProjectMemorySelectionForStage(payload.projectKeys ?? [], 'discovery_synthesis'),
+    ]);
+    if (status !== 'fresh') {
+      await queueProjectMemoryRefreshForProjects(payload.projectKeys ?? [], 'weekly');
+    }
+
     await setProgress(payload.sessionId, 'Reasoning about capability boundaries…');
 
     const result = await runV2Pipeline({
@@ -48,8 +62,9 @@ export async function handler(event: { body: V2GenerationEventBody }) {
       config: payload.config,
       domainContext: payload.domainContext,
       domainRoles: payload.domainRoles,
-      wiContextText: payload.wiContextText,
-      similarStoriesText: payload.similarStoriesText,
+      memoryHeader: header,
+      memorySelection,
+      memoryStatus: status,
       triageOverride: payload.triageOverride as any,
       confirmedScopeHypothesis: payload.confirmedScopeHypothesis as any,
       discoveryAnswers: payload.discoveryAnswers as any,

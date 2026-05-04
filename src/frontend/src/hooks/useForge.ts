@@ -217,6 +217,8 @@ export const api = {
   diagnoseBacklogCache: (projectKey: string) => invoke('diagnoseBacklogCache', { projectKey }),
   refreshBacklogCache: (projectKey: string) => invoke('refreshBacklogCache', { projectKey }),
   getBacklogRefreshStatus: (projectKey: string) => invoke('getBacklogRefreshStatus', { projectKey }),
+  refreshProjectMemory: (projectKey: string) => invoke('refreshProjectMemory', { projectKey }),
+  getProjectMemoryRefreshStatus: (projectKey: string) => invoke('getProjectMemoryRefreshStatus', { projectKey }),
   getGoldStoryPool: (projectKey: string) => invoke('getGoldStoryPool', { projectKey }),
   searchBacklogForGoldCandidates: (payload: { projectKey: string; query?: string }) =>
     invoke('searchBacklogForGoldCandidates', payload),

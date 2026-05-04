@@ -1,4 +1,10 @@
 import { migrationRunner, sql, type UpdateQueryResponse } from '@forge/sql';
+import type {
+  ProjectMemoryArtifactHeader,
+  ProjectMemoryRefreshTrigger,
+  ProjectMemorySelection,
+  ProjectMemorySliceType,
+} from '../v2/types';
 
 type ConversationStatus =
   | 'preview_ready'
@@ -26,6 +32,70 @@ interface TurnRow {
   turn_type: string;
   payload_json: string;
   created_at: string;
+}
+
+interface ProjectMemoryArtifactRow {
+  project_key: string;
+  artifact_version: string;
+  compiler_version: string;
+  status: string;
+  built_at: string;
+  source_snapshot_json: string | null;
+  quality_signals_json: string | null;
+  header_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ProjectMemorySliceRow {
+  project_key: string;
+  artifact_version: string;
+  slice_type: string;
+  slice_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ProjectMemoryRefreshStateRow {
+  project_key: string;
+  active_artifact_version: string | null;
+  last_built_at: string | null;
+  next_due_at: string | null;
+  last_source_hash: string | null;
+  last_trigger: string | null;
+  status: string;
+  last_error: string | null;
+  updated_at: string;
+}
+
+export interface StoredProjectMemoryArtifact {
+  projectKey: string;
+  artifactVersion: string;
+  compilerVersion: string;
+  status: string;
+  builtAt: string;
+  sourceSnapshot: Record<string, unknown> | null;
+  qualitySignals: Record<string, unknown> | null;
+  header: ProjectMemoryArtifactHeader | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredProjectMemorySelection {
+  artifactVersion: string;
+  selection: ProjectMemorySelection;
+}
+
+export interface StoredProjectMemoryRefreshState {
+  projectKey: string;
+  activeArtifactVersion: string | null;
+  lastBuiltAt: string | null;
+  nextDueAt: string | null;
+  lastSourceHash: string | null;
+  lastTrigger: ProjectMemoryRefreshTrigger | null;
+  status: 'missing' | 'queued' | 'running' | 'ready' | 'error';
+  lastError: string | null;
+  updatedAt: string;
 }
 
 export interface V2ConversationHistoryEntry {
@@ -126,6 +196,54 @@ const MIGRATIONS = [
         scores_json LONGTEXT NULL,
         payload_json LONGTEXT NULL,
         created_at VARCHAR(40) NOT NULL
+      )
+    `,
+  },
+  {
+    name: '007_project_memory_artifacts',
+    statement: `
+      CREATE TABLE IF NOT EXISTS project_memory_artifacts (
+        project_key VARCHAR(64) NOT NULL,
+        artifact_version VARCHAR(128) NOT NULL,
+        compiler_version VARCHAR(64) NOT NULL,
+        status VARCHAR(32) NOT NULL,
+        built_at VARCHAR(40) NOT NULL,
+        source_snapshot_json LONGTEXT NULL,
+        quality_signals_json LONGTEXT NULL,
+        header_json LONGTEXT NULL,
+        created_at VARCHAR(40) NOT NULL,
+        updated_at VARCHAR(40) NOT NULL,
+        PRIMARY KEY (project_key, artifact_version)
+      )
+    `,
+  },
+  {
+    name: '008_project_memory_slices',
+    statement: `
+      CREATE TABLE IF NOT EXISTS project_memory_slices (
+        project_key VARCHAR(64) NOT NULL,
+        artifact_version VARCHAR(128) NOT NULL,
+        slice_type VARCHAR(64) NOT NULL,
+        slice_json LONGTEXT NOT NULL,
+        created_at VARCHAR(40) NOT NULL,
+        updated_at VARCHAR(40) NOT NULL,
+        PRIMARY KEY (project_key, artifact_version, slice_type)
+      )
+    `,
+  },
+  {
+    name: '009_project_memory_refresh_state',
+    statement: `
+      CREATE TABLE IF NOT EXISTS project_memory_refresh_state (
+        project_key VARCHAR(64) PRIMARY KEY,
+        active_artifact_version VARCHAR(128) NULL,
+        last_built_at VARCHAR(40) NULL,
+        next_due_at VARCHAR(40) NULL,
+        last_source_hash VARCHAR(255) NULL,
+        last_trigger VARCHAR(32) NULL,
+        status VARCHAR(32) NOT NULL,
+        last_error TEXT NULL,
+        updated_at VARCHAR(40) NOT NULL
       )
     `,
   },
@@ -232,6 +350,12 @@ function compactLatestResultForSql(latestResult: Record<string, unknown>): Recor
 
 function sanitizeProjectKeys(projectKeys: string[] = []) {
   return [...new Set(projectKeys.map((key) => String(key ?? '').trim()).filter((key) => key && key !== '*'))].slice(0, 2);
+}
+
+function compactJsonForSql<T>(value: T): T {
+  const serialized = JSON.stringify(value);
+  if (utf8ByteLength(serialized) <= SQL_PARAM_SOFT_LIMIT_BYTES) return value;
+  throw new Error('Payload exceeds Forge SQL parameter soft limit.');
 }
 
 function deriveConversationTitle(input: { title?: string; requirement: string; latestResult: Record<string, unknown> }) {
@@ -433,4 +557,291 @@ export async function deleteV2Conversation(accountId: string, sessionId: string)
   await ensureV2SqlSchema();
   await executeMutation('DELETE FROM v2_conversation_turns WHERE session_id = ? AND account_id = ?', sessionId, accountId);
   await executeMutation('DELETE FROM v2_conversations WHERE session_id = ? AND account_id = ?', sessionId, accountId);
+}
+
+function mapProjectMemoryArtifactRow(row: ProjectMemoryArtifactRow): StoredProjectMemoryArtifact {
+  return {
+    projectKey: row.project_key,
+    artifactVersion: row.artifact_version,
+    compilerVersion: row.compiler_version,
+    status: row.status,
+    builtAt: row.built_at,
+    sourceSnapshot: parseJson<Record<string, unknown> | null>(row.source_snapshot_json, null),
+    qualitySignals: parseJson<Record<string, unknown> | null>(row.quality_signals_json, null),
+    header: parseJson<ProjectMemoryArtifactHeader | null>(row.header_json, null),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapProjectMemoryRefreshStateRow(row: ProjectMemoryRefreshStateRow): StoredProjectMemoryRefreshState {
+  const normalizedStatus = row.status === 'queued' || row.status === 'running' || row.status === 'ready' || row.status === 'error'
+    ? row.status
+    : 'missing';
+  const normalizedTrigger = row.last_trigger === 'weekly' || row.last_trigger === 'manual' || row.last_trigger === 'threshold'
+    ? row.last_trigger
+    : null;
+  return {
+    projectKey: row.project_key,
+    activeArtifactVersion: row.active_artifact_version,
+    lastBuiltAt: row.last_built_at,
+    nextDueAt: row.next_due_at,
+    lastSourceHash: row.last_source_hash,
+    lastTrigger: normalizedTrigger,
+    status: normalizedStatus,
+    lastError: row.last_error,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function saveProjectMemoryArtifact(input: {
+  projectKey: string;
+  artifactVersion: string;
+  compilerVersion: string;
+  builtAt: string;
+  sourceSnapshot: Record<string, unknown>;
+  qualitySignals: Record<string, unknown>;
+  header: ProjectMemoryArtifactHeader;
+  selection: ProjectMemorySelection;
+  sourceHash: string;
+  trigger: ProjectMemoryRefreshTrigger;
+  nextDueAt: string;
+}): Promise<void> {
+  await ensureV2SqlSchema();
+  const now = new Date().toISOString();
+  const existingArtifact = await queryRows<Pick<ProjectMemoryArtifactRow, 'project_key'>>(
+    'SELECT project_key FROM project_memory_artifacts WHERE project_key = ? AND artifact_version = ? LIMIT 1',
+    input.projectKey,
+    input.artifactVersion,
+  );
+
+  const sourceSnapshotJson = JSON.stringify(compactJsonForSql(input.sourceSnapshot));
+  const qualitySignalsJson = JSON.stringify(compactJsonForSql(input.qualitySignals));
+  const headerJson = JSON.stringify(compactJsonForSql(input.header));
+
+  if (existingArtifact.length) {
+    await executeMutation(
+      `
+        UPDATE project_memory_artifacts
+        SET compiler_version = ?, status = ?, built_at = ?, source_snapshot_json = ?, quality_signals_json = ?, header_json = ?, updated_at = ?
+        WHERE project_key = ? AND artifact_version = ?
+      `,
+      input.compilerVersion,
+      'ready',
+      input.builtAt,
+      sourceSnapshotJson,
+      qualitySignalsJson,
+      headerJson,
+      now,
+      input.projectKey,
+      input.artifactVersion,
+    );
+    await executeMutation(
+      'DELETE FROM project_memory_slices WHERE project_key = ? AND artifact_version = ?',
+      input.projectKey,
+      input.artifactVersion,
+    );
+  } else {
+    await executeMutation(
+      `
+        INSERT INTO project_memory_artifacts (
+          project_key,
+          artifact_version,
+          compiler_version,
+          status,
+          built_at,
+          source_snapshot_json,
+          quality_signals_json,
+          header_json,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      input.projectKey,
+      input.artifactVersion,
+      input.compilerVersion,
+      'ready',
+      input.builtAt,
+      sourceSnapshotJson,
+      qualitySignalsJson,
+      headerJson,
+      now,
+      now,
+    );
+  }
+
+  const sliceEntries = Object.entries(input.selection)
+    .filter(([key, value]) => key !== 'artifactVersion' && value !== undefined)
+    .map(([key, value]) => ({ sliceType: key as ProjectMemorySliceType, sliceJson: JSON.stringify(compactJsonForSql(value)) }));
+
+  for (const entry of sliceEntries) {
+    await executeMutation(
+      `
+        INSERT INTO project_memory_slices (
+          project_key,
+          artifact_version,
+          slice_type,
+          slice_json,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      input.projectKey,
+      input.artifactVersion,
+      entry.sliceType,
+      entry.sliceJson,
+      now,
+      now,
+    );
+  }
+
+  await upsertProjectMemoryRefreshState({
+    projectKey: input.projectKey,
+    activeArtifactVersion: input.artifactVersion,
+    lastBuiltAt: input.builtAt,
+    nextDueAt: input.nextDueAt,
+    lastSourceHash: input.sourceHash,
+    lastTrigger: input.trigger,
+    status: 'ready',
+    lastError: null,
+  });
+}
+
+export async function upsertProjectMemoryRefreshState(input: {
+  projectKey: string;
+  activeArtifactVersion?: string | null;
+  lastBuiltAt?: string | null;
+  nextDueAt?: string | null;
+  lastSourceHash?: string | null;
+  lastTrigger?: ProjectMemoryRefreshTrigger | null;
+  status: 'missing' | 'queued' | 'running' | 'ready' | 'error';
+  lastError?: string | null;
+}): Promise<void> {
+  await ensureV2SqlSchema();
+  const now = new Date().toISOString();
+  const existing = await queryRows<ProjectMemoryRefreshStateRow>(
+    'SELECT project_key, active_artifact_version, last_built_at, next_due_at, last_source_hash, last_trigger, status, last_error, updated_at FROM project_memory_refresh_state WHERE project_key = ? LIMIT 1',
+    input.projectKey,
+  );
+
+  if (existing.length) {
+    const row = existing[0]!;
+    await executeMutation(
+      `
+        UPDATE project_memory_refresh_state
+        SET active_artifact_version = ?, last_built_at = ?, next_due_at = ?, last_source_hash = ?, last_trigger = ?, status = ?, last_error = ?, updated_at = ?
+        WHERE project_key = ?
+      `,
+      input.activeArtifactVersion ?? row.active_artifact_version,
+      input.lastBuiltAt ?? row.last_built_at,
+      input.nextDueAt ?? row.next_due_at,
+      input.lastSourceHash ?? row.last_source_hash,
+      input.lastTrigger ?? row.last_trigger,
+      input.status,
+      input.lastError ?? null,
+      now,
+      input.projectKey,
+    );
+    return;
+  }
+
+  await executeMutation(
+    `
+      INSERT INTO project_memory_refresh_state (
+        project_key,
+        active_artifact_version,
+        last_built_at,
+        next_due_at,
+        last_source_hash,
+        last_trigger,
+        status,
+        last_error,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    input.projectKey,
+    input.activeArtifactVersion ?? null,
+    input.lastBuiltAt ?? null,
+    input.nextDueAt ?? null,
+    input.lastSourceHash ?? null,
+    input.lastTrigger ?? null,
+    input.status,
+    input.lastError ?? null,
+    now,
+  );
+}
+
+export async function getProjectMemoryRefreshState(projectKey: string): Promise<StoredProjectMemoryRefreshState | null> {
+  await ensureV2SqlSchema();
+  const rows = await queryRows<ProjectMemoryRefreshStateRow>(
+    'SELECT project_key, active_artifact_version, last_built_at, next_due_at, last_source_hash, last_trigger, status, last_error, updated_at FROM project_memory_refresh_state WHERE project_key = ? LIMIT 1',
+    projectKey,
+  );
+  const row = rows[0];
+  return row ? mapProjectMemoryRefreshStateRow(row) : null;
+}
+
+export async function listProjectMemoryRefreshStates(limit = 250): Promise<StoredProjectMemoryRefreshState[]> {
+  await ensureV2SqlSchema();
+  const rows = await queryRows<ProjectMemoryRefreshStateRow>(
+    `
+      SELECT project_key, active_artifact_version, last_built_at, next_due_at, last_source_hash, last_trigger, status, last_error, updated_at
+      FROM project_memory_refresh_state
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `,
+    limit,
+  );
+  return rows.map(mapProjectMemoryRefreshStateRow);
+}
+
+export async function getActiveProjectMemoryArtifact(projectKey: string): Promise<StoredProjectMemoryArtifact | null> {
+  await ensureV2SqlSchema();
+  const refreshState = await getProjectMemoryRefreshState(projectKey);
+  if (!refreshState?.activeArtifactVersion) return null;
+  const rows = await queryRows<ProjectMemoryArtifactRow>(
+    `
+      SELECT project_key, artifact_version, compiler_version, status, built_at, source_snapshot_json, quality_signals_json, header_json, created_at, updated_at
+      FROM project_memory_artifacts
+      WHERE project_key = ? AND artifact_version = ?
+      LIMIT 1
+    `,
+    projectKey,
+    refreshState.activeArtifactVersion,
+  );
+  const row = rows[0];
+  return row ? mapProjectMemoryArtifactRow(row) : null;
+}
+
+export async function getActiveProjectMemorySelection(
+  projectKey: string,
+  sliceTypes: ProjectMemorySliceType[],
+): Promise<StoredProjectMemorySelection | null> {
+  await ensureV2SqlSchema();
+  const refreshState = await getProjectMemoryRefreshState(projectKey);
+  if (!refreshState?.activeArtifactVersion) return null;
+
+  const selection: ProjectMemorySelection = {
+    artifactVersion: refreshState.activeArtifactVersion,
+  };
+  for (const sliceType of sliceTypes) {
+    const rows = await queryRows<ProjectMemorySliceRow>(
+      `
+        SELECT project_key, artifact_version, slice_type, slice_json, created_at, updated_at
+        FROM project_memory_slices
+        WHERE project_key = ? AND artifact_version = ? AND slice_type = ?
+        LIMIT 1
+      `,
+      projectKey,
+      refreshState.activeArtifactVersion,
+      sliceType,
+    );
+    const row = rows[0];
+    if (!row) continue;
+    (selection as Record<string, unknown>)[sliceType] = parseJson<unknown>(row.slice_json, null);
+  }
+  return {
+    artifactVersion: refreshState.activeArtifactVersion,
+    selection,
+  };
 }

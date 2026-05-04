@@ -3,6 +3,7 @@ import { refreshBacklogCachesForProjects, getGoldStoryPool, DomainPatterns } fro
 import { entitySet, objectWrite, KEYS } from '../services/cache';
 import { callLlmJson } from '../core/llm';
 import { getTierModel } from '../services/billing';
+import { queueProjectMemoryRefresh } from '../services/project-memory';
 
 interface BacklogCacheRefreshEvent {
   projectKey?: string;
@@ -111,6 +112,9 @@ export async function handler(event?: { body?: BacklogCacheRefreshEvent }) {
       themeCount: result?.themeCount ?? 0,
       builtAt: result?.builtAt,
       themeBuiltAt: result?.themeBuiltAt,
+    });
+    await queueProjectMemoryRefresh(manualProjectKey, 'threshold', {
+      requestedBy: event?.body?.requestedBy ?? 'system',
     });
     console.log('[backlog-cache-refresh] refreshed manual cache:', `${manualProjectKey}:${result?.issueCount ?? 0}`);
   } catch (err) {

@@ -44,6 +44,12 @@ modules:
     - key: backlog-cache-refresh
       handler: queues/backlog-cache-refresh.handler
       timeoutSeconds: 900
+    - key: project-memory-refresh
+      handler: queues/project-memory-refresh.handler
+      timeoutSeconds: 900
+    - key: project-memory-schedule
+      handler: queues/project-memory-schedule.handler
+      timeoutSeconds: 900
   consumer:
     - key: quick-refine-consumer-listener
       queue: quick-refine-queue
@@ -63,6 +69,13 @@ modules:
     - key: backlog-cache-refresh-listener
       queue: backlog-cache-refresh-queue
       function: backlog-cache-refresh
+    - key: project-memory-refresh-listener
+      queue: project-memory-refresh-queue
+      function: project-memory-refresh
+  scheduledTrigger:
+    - key: project-memory-weekly
+      function: project-memory-schedule
+      interval: week
 resources:
   - key: main
     path: src/frontend/build

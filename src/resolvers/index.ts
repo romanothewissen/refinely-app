@@ -36,6 +36,14 @@ import {
   retrieveScopedSimilarStories,
   retrieveScopedWiContext,
 } from '../services/project-selection';
+import {
+  getProjectMemoryHeaderForProjects,
+  getProjectMemoryRefreshState,
+  getProjectMemorySelectionForStage,
+  listProjectKeysForProjectMemoryCompiler,
+  queueProjectMemoryRefresh,
+  queueProjectMemoryRefreshForProjects,
+} from '../services/project-memory';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 import { deleteV2Conversation, getV2Conversation, listV2Conversations } from '../services/v2-sql';
@@ -346,7 +354,7 @@ function formatV2DomainRoles(rows: Array<{ role?: string; activities?: string }>
 async function buildV2RequestContext(
   payload: any,
   context: any,
-  options?: { retrieveEvidence?: boolean },
+  options?: { memoryStage?: 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair' },
 ) {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const baseConfig = applyPreferredPipelineProfile(await getConfig(), 'balanced');
@@ -365,60 +373,16 @@ async function buildV2RequestContext(
   const requirement = String(payload?.requirement ?? '').trim();
   const attachmentText = String(payload?.attachmentText ?? '').trim();
   const sessionId = String(payload?.sessionId ?? '').trim() || `v2_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-
-  const shouldRetrieveEvidence = options?.retrieveEvidence !== false;
-  const evidenceSignature = buildSharedPipelineEvidenceSignature({
-    requirement,
-    attachmentText,
-    projectKey: authorizedProjects.projectKey,
-    projectKeys: selectedProjectKeys,
-    includeSimilarStories: payload?.includeSimilarStories !== false,
-    selectedWiDocIds,
-  });
-  const evidenceKey = KEYS.sharedPipelineEvidence(sessionId);
-  const cachedEvidence = shouldRetrieveEvidence
-    ? await entityGet<{
-      signature?: string;
-      context?: { wiContextText?: string; similarStoriesText?: string };
-    }>(evidenceKey)
-    : null;
-
-  let wiContextText = '';
-  let similarStoriesText = '';
-  if (shouldRetrieveEvidence && cachedEvidence?.signature === evidenceSignature && cachedEvidence.context) {
-    wiContextText = String(cachedEvidence.context.wiContextText ?? '');
-    similarStoriesText = String(cachedEvidence.context.similarStoriesText ?? '');
-  } else if (shouldRetrieveEvidence) {
-    const [wiContext, similarStories] = await Promise.all([
-      config.wiConfig.enabled && selectedProjectKeys.length && payload?.includeWiContext !== false
-        ? retrieveScopedWiContext(
-          requirement,
-          Math.min(config.wiConfig.topKChunks || 3, 3),
-          Math.min(config.wiConfig.maxChars || 4000, 4000),
-          selectedProjectKeys,
-          selectedWiDocIds,
-        )
-        : Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
-      payload?.includeSimilarStories === false || !selectedProjectKeys.length
-        ? Promise.resolve([])
-        : retrieveScopedSimilarStories({
-          requirement,
-          attachmentText,
-          config,
-          projectKeys: selectedProjectKeys,
-          maxResults: 3,
-        }),
-    ]);
-    wiContextText = wiContext.text;
-    similarStoriesText = formatV2SimilarStories(similarStories);
-    await entitySetWithTtl(evidenceKey, {
-      signature: evidenceSignature,
-      savedAt: Date.now(),
-      context: {
-        wiContextText,
-        similarStoriesText,
-      },
-    }, 60 * 60 * 1000);
+  const [{ header: memoryHeader, status: memoryStatus, artifactVersion: memoryArtifactVersion }, memorySelection] = await Promise.all([
+    getProjectMemoryHeaderForProjects(selectedProjectKeys),
+    options?.memoryStage
+      ? getProjectMemorySelectionForStage(selectedProjectKeys, options.memoryStage)
+      : Promise.resolve(null),
+  ]);
+  if (memoryStatus !== 'fresh') {
+    await queueProjectMemoryRefreshForProjects(selectedProjectKeys, 'weekly', {
+      requestedBy: accountId,
+    });
   }
 
   return {
@@ -431,8 +395,10 @@ async function buildV2RequestContext(
     attachmentText,
     domainContext,
     domainRoles,
-    wiContextText,
-    similarStoriesText,
+    memoryHeader,
+    memoryStatus,
+    memoryArtifactVersion,
+    memorySelection,
   };
 }
 
@@ -661,7 +627,7 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
 // ─── V2 Core Flow ─────────────────────────────────────────────────────────────
 
 resolver.define('v2Preview', async ({ payload, context }) => {
-  const requestContext = await buildV2RequestContext(payload, context, { retrieveEvidence: true });
+  const requestContext = await buildV2RequestContext(payload, context);
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
   }
@@ -684,8 +650,8 @@ resolver.define('v2Preview', async ({ payload, context }) => {
       config: requestContext.config,
       domainContext: requestContext.domainContext,
       domainRoles: requestContext.domainRoles,
-      similarStoriesText: requestContext.similarStoriesText,
-      wiContextText: requestContext.wiContextText,
+      memoryHeader: requestContext.memoryHeader,
+      memoryStatus: requestContext.memoryStatus,
       previewOnly: true,
     });
   } catch (error) {
@@ -716,6 +682,8 @@ resolver.define('v2Preview', async ({ payload, context }) => {
     success: true,
     sessionId: requestContext.sessionId,
     result,
+    memoryStatus: requestContext.memoryStatus,
+    memoryArtifactVersion: requestContext.memoryArtifactVersion,
     warning: [check.reason, persistenceWarning].filter(Boolean).join(' ').trim() || undefined,
   };
 });
@@ -723,7 +691,7 @@ resolver.define('v2Preview', async ({ payload, context }) => {
 resolver.define('v2Generate', async ({ payload, context }) => {
   const hasDiscoveryAnswers = Array.isArray(payload?.discoveryAnswers) && payload.discoveryAnswers.length > 0;
   const requestContext = await buildV2RequestContext(payload, context, {
-    retrieveEvidence: true,
+    memoryStage: hasDiscoveryAnswers ? undefined : 'discover',
   });
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
@@ -760,8 +728,6 @@ resolver.define('v2Generate', async ({ payload, context }) => {
         projectKeys: requestContext.projectKeys,
         domainContext: requestContext.domainContext,
         domainRoles: requestContext.domainRoles,
-        wiContextText: requestContext.wiContextText,
-        similarStoriesText: requestContext.similarStoriesText,
         triageOverride: payload?.triageOverride,
         confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
         discoveryAnswers: payload?.discoveryAnswers,
@@ -784,8 +750,9 @@ resolver.define('v2Generate', async ({ payload, context }) => {
       config: requestContext.config,
       domainContext: requestContext.domainContext,
       domainRoles: requestContext.domainRoles,
-      similarStoriesText: requestContext.similarStoriesText,
-      wiContextText: requestContext.wiContextText,
+      memoryHeader: requestContext.memoryHeader,
+      memorySelection: requestContext.memorySelection,
+      memoryStatus: requestContext.memoryStatus,
       triageOverride: payload?.triageOverride,
       confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
       discoveryAnswers: payload?.discoveryAnswers,
@@ -818,6 +785,8 @@ resolver.define('v2Generate', async ({ payload, context }) => {
     success: true,
     sessionId: requestContext.sessionId,
     result,
+    memoryStatus: requestContext.memoryStatus,
+    memoryArtifactVersion: requestContext.memoryArtifactVersion,
     warning: [check.reason, persistenceWarning].filter(Boolean).join(' ').trim() || undefined,
   };
 
@@ -2334,6 +2303,13 @@ resolver.define('uploadWi', async ({ payload, context }) => {
     targetProjects: projectKey && projectKey !== '*' ? [projectKey] : ['*'],
   });
 
+  const affectedProjects = projectKey && projectKey !== '*'
+    ? [projectKey]
+    : await listProjectKeysForProjectMemoryCompiler(config);
+  await queueProjectMemoryRefreshForProjects(affectedProjects, 'threshold', {
+    requestedBy: (context as { accountId?: string })?.accountId ?? 'unknown',
+  });
+
   return { success: true, ...result };
 });
 
@@ -2420,6 +2396,9 @@ resolver.define('saveProjectConfig', async ({ payload, context }) => {
   }
   
   await saveConfig(nextConfig);
+  await queueProjectMemoryRefresh(projectKey, 'threshold', {
+    requestedBy: (context as { accountId?: string })?.accountId ?? 'unknown',
+  });
   await appendComplianceAuditEvent({
     actorAccountId: (context as { accountId?: string })?.accountId ?? 'unknown',
     category: 'config',
@@ -2481,6 +2460,13 @@ resolver.define('removeWiDoc', async ({ payload, context }) => {
     await ensureAdmin(context);
   }
   await removeDoc(payload.docId);
+  const config = await getConfig();
+  const affectedProjects = projectKey && projectKey !== '*'
+    ? [projectKey]
+    : await listProjectKeysForProjectMemoryCompiler(config);
+  await queueProjectMemoryRefreshForProjects(affectedProjects, 'threshold', {
+    requestedBy: (context as { accountId?: string })?.accountId ?? 'unknown',
+  });
   return { success: true };
 });
 
@@ -2579,6 +2565,31 @@ resolver.define('refreshBacklogCache', async ({ payload, context }) => {
     },
   });
   return { success: true, queued: true, projectKey };
+});
+
+resolver.define('refreshProjectMemory', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = String(payload?.projectKey ?? '').trim() || '*';
+  if (projectKey === '*') {
+    return { success: false, error: 'A concrete project key is required.' };
+  }
+  await ensureProjectBrowse(context, projectKey);
+  const queued = await queueProjectMemoryRefresh(projectKey, 'manual', {
+    requestedBy: (context as { accountId?: string })?.accountId ?? 'unknown',
+    force: true,
+  });
+  return { success: true, queued, projectKey };
+});
+
+resolver.define('getProjectMemoryRefreshStatus', async ({ payload, context }) => {
+  await ensureAdmin(context, payload?.projectKey);
+  const projectKey = String(payload?.projectKey ?? '').trim() || '*';
+  if (projectKey === '*') {
+    return { success: false, error: 'A concrete project key is required.' };
+  }
+  await ensureProjectBrowse(context, projectKey);
+  const status = await getProjectMemoryRefreshState(projectKey);
+  return { success: true, status };
 });
 
 resolver.define('getBacklogRefreshStatus', async ({ payload, context }) => {

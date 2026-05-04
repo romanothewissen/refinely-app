@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_CONFIG, type TenantConfig } from '../../types';
+import { buildV2EvidenceBundleFromProjectMemory } from '../../services/project-memory';
 import { runV2Pipeline, classifyDiscoveryAnswers } from '../pipeline';
 import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFinalGenerationSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildSynthesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
 import { assessV2TriageFromScores } from '../triage';
@@ -151,6 +152,43 @@ test('grounded evidence prompt blocks carry concrete cues and stay inside user b
   assert.ok(measurePromptSizes('', reasoningMessage).userChars <= V2_PROMPT_BUDGETS.capability_reasoning.maxUserChars);
 });
 
+test('compiled project memory converts structured slices into compact runtime evidence', () => {
+  const bundle = buildV2EvidenceBundleFromProjectMemory({
+    domainContext: 'Service teams coordinate field work.',
+    memoryHeader: {
+      roles: ['Service Planner', 'Dispatch Manager'],
+      businessObjects: ['service plan', 'dispatch schedule'],
+      workflowCues: ['approval routing', 'exception handling'],
+      arStyleHint: 'Use concrete business objects in THEN clauses.',
+      freshness: 'fresh',
+      builtAt: '2026-05-04T00:00:00.000Z',
+    },
+    memorySelection: {
+      roles: ['Service Planner'],
+      objects: ['service plan'],
+      workflow_patterns: ['Prepare service plan', 'Submit for approval'],
+      business_rules: ['Manual override must be explicit.'],
+      exception_patterns: ['Urgent work uses the approved exception route.'],
+      retrieval_hints: ['service plan', 'exception route'],
+      compact_exemplars: [
+        { key: 'ABC-1', summary: 'Coordinate service planning', pattern: 'GIVEN a rejected service plan...' },
+      ],
+      wi_memory: {
+        resolvedFacts: ['Service plans return to draft after rejection.'],
+        workflowSteps: ['Prepare plan', 'Submit plan'],
+        businessRules: ['Rejected plans cannot proceed automatically.'],
+        exceptions: ['Urgent work uses the approved exception route.'],
+        mustCoverBehaviors: ['Rejected plans return to draft'],
+      },
+    },
+  });
+
+  assert.match(bundle.domainContext ?? '', /approval routing/i);
+  assert.deepEqual(bundle.domainRoles, ['Service Planner', 'Dispatch Manager']);
+  assert.match(bundle.similarStoriesText ?? '', /Coordinate service planning/i);
+  assert.match(bundle.wiContextText ?? '', /Rejected plans cannot proceed automatically/i);
+});
+
 test('runV2Pipeline returns scope confirmation before generation when no scope hypothesis is confirmed', async () => {
   const calls: string[] = [];
   const executeStage: V2StageExecutor = async (request) => {
@@ -264,6 +302,63 @@ test('runV2Pipeline uses questionBudget directly when requesting discovery', asy
 
   assert.equal(result.status, 'needs_discovery');
   assert.equal(result.triage.questionBudget, 9);
+});
+
+test('runV2Pipeline uses compiled project memory for discovery prompts without raw retrieval text', async () => {
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discover') {
+      assert.match(request.userMessage, /Service Planner/i);
+      assert.match(request.userMessage, /service plan/i);
+      assert.match(request.userMessage, /approved exception route/i);
+      return {
+        data: {
+          questions: [
+            { id: 'q1', categoryKey: 'business_rules', question: 'What approvals govern the service plan exception route?', rationale: 'Rule boundary.', suggestions: ['Planner approval', 'Manager approval'] },
+          ],
+        } as any,
+        usage: { input: 50, output: 50 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service planning with exception handling.',
+      config: baseConfig,
+      memoryHeader: {
+        roles: ['Service Planner'],
+        businessObjects: ['service plan'],
+        workflowCues: ['approval routing'],
+        arStyleHint: 'Use business-facing GIVEN/WHEN/THEN clauses.',
+        freshness: 'fresh',
+        builtAt: '2026-05-04T00:00:00.000Z',
+      },
+      memorySelection: {
+        roles: ['Service Planner'],
+        objects: ['service plan'],
+        workflow_patterns: ['Prepare service plan', 'Submit for approval'],
+        business_rules: ['Manual override must be explicit.'],
+        exception_patterns: ['Urgent work uses the approved exception route.'],
+        retrieval_hints: ['service plan', 'approved exception route'],
+      },
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core capability.', confidence: 'high' }],
+        actorSlots: {},
+        openQuestions: ['Who approves the exception route?'],
+        confidence: 'medium',
+      },
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_discovery');
 });
 
 test('runV2Pipeline performs full generation with synthesis and batch final generation once scope is confirmed', async () => {
@@ -484,6 +579,94 @@ test('runV2Pipeline repairs final generation when must-cover behavior is missing
   assert.ok(calls.includes('coverage_repair'));
   assert.equal(result.coverage.repaired, true);
   assert.equal(result.coverage.sufficient, true);
+});
+
+test('runV2Pipeline makes stage reasoning profile-aware', async () => {
+  const qualityConfig: TenantConfig = {
+    ...baseConfig,
+    generatorConfig: {
+      ...baseConfig.generatorConfig,
+      pipelineProfile: 'quality',
+    },
+  };
+  const efforts = new Map<string, string>();
+  const executeStage: V2StageExecutor = async (request) => {
+    efforts.set(request.stage, request.reasoningEffort);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 4, actor_clarity: 4 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discovery_synthesis') {
+      return {
+        data: {
+          resolvedFacts: ['Service planning requires approval and exception handling.'],
+          actorMap: { initiator: 'planner', approver: 'manager' },
+          businessRules: ['Rejected plans return to draft.'],
+          workflowSteps: ['Prepare service plan', 'Submit for approval'],
+          lifecycleStates: ['draft', 'approved'],
+          exceptions: ['Urgent work uses the approved exception route.'],
+          successMeasures: [],
+          mustCoverBehaviors: ['Rejected plans return to draft'],
+          openDecisions: [],
+          arDepth: 'deep',
+          featureTarget: 1,
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    if (request.stage === 'final_generation') {
+      return {
+        data: {
+          features: [
+            {
+              summary: 'Coordinate service planning',
+              description: 'As a planner, I need to coordinate a service plan through approval handling so that the work can proceed correctly.',
+              suggested_story_points: 8,
+              acceptanceRequirements: [
+                { given: 'a service plan is drafted', when: 'the planner submits it', then: 'the plan enters approval review' },
+                { given: 'a plan is rejected', when: 'the manager records the rejection', then: 'the plan returns to draft' },
+                { given: 'a rejected plan is back in draft', when: 'the planner reopens the plan', then: 'the rejection reason remains visible before resubmission' },
+              ],
+            },
+          ],
+          coverageMap: [
+            { mustCoverBehavior: 'Rejected plans return to draft', featureSummary: 'Coordinate service planning' },
+          ],
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service planning with approval handling.',
+      config: qualityConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner', approver: 'manager' },
+        openQuestions: [],
+        confidence: 'high',
+      },
+      discoveryAnswers: [
+        {
+          questionId: 'q1',
+          categoryKey: 'business_rules',
+          question: 'What happens when the plan is rejected?',
+          answer: 'Rejected plans return to draft.',
+        },
+      ],
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'complete');
+  assert.equal(efforts.get('triage'), 'low');
+  assert.equal(efforts.get('discovery_synthesis'), 'medium');
+  assert.equal(efforts.get('final_generation'), 'high');
 });
 
 test('validateTriageScores rejects invalid triage outputs', () => {

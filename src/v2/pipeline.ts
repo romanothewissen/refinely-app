@@ -1,5 +1,5 @@
 import { callLlmJsonWithUsage } from '../core/llm';
-import type { ClarifyCategoryKey, Feature, TenantConfig } from '../types';
+import type { ClarifyCategoryKey, Feature, PipelineProfile, TenantConfig } from '../types';
 import {
   buildCoverageRepairSystemPrompt,
   buildCoverageRepairUserMessage,
@@ -51,6 +51,7 @@ import {
   validateDiscoveryQuestionsAgainstEvidence,
   validateScopeHypothesisAgainstEvidence,
 } from './evidence-pack';
+import { buildV2EvidenceBundleFromProjectMemory } from '../services/project-memory';
 
 const GENERIC_ACTOR_PATTERN = /\bas\s+an?\s+(?:user|authorized user|team member|authorized team member)\b/i;
 const CRUD_ONLY_PATTERN = /\b(create|edit|update|delete|remove|view|read|list)\b/i;
@@ -155,6 +156,37 @@ function addUsage(
   promptUsage.byStage[stage] = {
     input: (promptUsage.byStage[stage]?.input ?? 0) + usage.input,
     output: (promptUsage.byStage[stage]?.output ?? 0) + usage.output,
+  };
+}
+
+function currentPipelineProfile(config: TenantConfig): PipelineProfile {
+  return config.generatorConfig.pipelineProfile === 'fast' || config.generatorConfig.pipelineProfile === 'quality'
+    ? config.generatorConfig.pipelineProfile
+    : 'balanced';
+}
+
+function stageReasoningEffort(
+  profile: PipelineProfile,
+  stage: 'triage' | 'scope_hypothesis' | 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair',
+): 'low' | 'medium' | 'high' {
+  if (stage === 'triage' || stage === 'scope_hypothesis' || stage === 'discover') return 'low';
+  if (profile === 'fast') return 'low';
+  if (stage === 'coverage_repair') return profile === 'quality' ? 'medium' : 'low';
+  if (stage === 'final_generation') return profile === 'quality' ? 'high' : 'medium';
+  return 'medium';
+}
+
+function buildPipelineEvidenceBundle(input: V2PipelineInput) {
+  const memoryBundle = buildV2EvidenceBundleFromProjectMemory({
+    domainContext: input.domainContext,
+    memoryHeader: input.memoryHeader,
+    memorySelection: input.memorySelection,
+  });
+  return {
+    domainContext: memoryBundle.domainContext || input.domainContext,
+    domainRoles: memoryBundle.domainRoles?.length ? memoryBundle.domainRoles : input.domainRoles,
+    similarStoriesText: memoryBundle.similarStoriesText || input.similarStoriesText,
+    wiContextText: memoryBundle.wiContextText || input.wiContextText,
   };
 }
 
@@ -341,6 +373,7 @@ async function buildTriage(
     byStage: Partial<Record<V2StageRequest<unknown>['stage'], { input: number; output: number }>>;
   },
 ): Promise<V2TriageResult> {
+  const profile = currentPipelineProfile(input.config);
   if (input.triageOverride) {
     return normalizeTriageOverride(input.triageOverride, input.requirement, input.attachmentText);
   }
@@ -356,7 +389,7 @@ async function buildTriage(
       }),
       jsonSchema: V2_TRIAGE_SCHEMA,
       maxTokens: 900,
-      reasoningEffort: 'low',
+      reasoningEffort: stageReasoningEffort(profile, 'triage'),
       validate: validateTriageScores,
     });
     addUsage(promptUsage, 'triage', triageResponse.usage);
@@ -375,13 +408,15 @@ export async function runV2Pipeline(
   input: V2PipelineInput,
   executeStage: V2StageExecutor = createDefaultV2StageExecutor(input.config),
 ): Promise<V2PipelineResult> {
+  const pipelineEvidenceBundle = buildPipelineEvidenceBundle(input);
+  const profile = currentPipelineProfile(input.config);
   const baseEvidencePack = input.evidencePack ?? buildV2GroundedEvidencePack({
     requirement: input.requirement,
     attachmentText: input.attachmentText,
-    domainContext: input.domainContext,
-    domainRoles: input.domainRoles,
-    similarStoriesText: input.similarStoriesText,
-    wiContextText: input.wiContextText,
+    domainContext: pipelineEvidenceBundle.domainContext,
+    domainRoles: pipelineEvidenceBundle.domainRoles,
+    similarStoriesText: pipelineEvidenceBundle.similarStoriesText,
+    wiContextText: pipelineEvidenceBundle.wiContextText,
   });
   const promptUsage: {
     input: number;
@@ -411,7 +446,7 @@ export async function runV2Pipeline(
       }),
       jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
       maxTokens: 1400,
-      reasoningEffort: 'low',
+      reasoningEffort: stageReasoningEffort(profile, 'scope_hypothesis'),
       validate: (data) => (
         validateScopeHypothesis(data)
         ?? validateScopeHypothesisAgainstEvidence(data as V2ScopeHypothesis, baseEvidencePack)
@@ -455,7 +490,7 @@ export async function runV2Pipeline(
       }),
       jsonSchema: V2_DISCOVERY_SCHEMA,
       maxTokens: 1600,
-      reasoningEffort: 'low',
+      reasoningEffort: stageReasoningEffort(profile, 'discover'),
       validate: (data) => {
         const basic = validateDiscoveryQuestions(data);
         if (basic) return basic;
@@ -483,10 +518,10 @@ export async function runV2Pipeline(
   const synthesisEvidencePack = input.evidencePack ?? buildV2GroundedEvidencePack({
     requirement: input.requirement,
     attachmentText: input.attachmentText,
-    domainContext: input.domainContext,
-    domainRoles: input.domainRoles,
-    similarStoriesText: input.similarStoriesText,
-    wiContextText: input.wiContextText,
+    domainContext: pipelineEvidenceBundle.domainContext,
+    domainRoles: pipelineEvidenceBundle.domainRoles,
+    similarStoriesText: pipelineEvidenceBundle.similarStoriesText,
+    wiContextText: pipelineEvidenceBundle.wiContextText,
     discoveryAnswers: classifiedAnswers,
   });
   const synthesisEvidenceText = renderGroundedEvidencePack(synthesisEvidencePack, 'discovery_synthesis');
@@ -504,7 +539,7 @@ export async function runV2Pipeline(
     }),
     jsonSchema: V2_SYNTHESIS_SCHEMA,
     maxTokens: 2200,
-    reasoningEffort: 'medium',
+    reasoningEffort: stageReasoningEffort(profile, 'discovery_synthesis'),
     validate: validateSynthesis,
   });
   addUsage(promptUsage, 'discovery_synthesis', synthesisResponse.usage);
@@ -524,7 +559,7 @@ export async function runV2Pipeline(
     }),
     jsonSchema: V2_FINAL_GENERATION_SCHEMA,
     maxTokens: 4200,
-    reasoningEffort: 'medium',
+    reasoningEffort: stageReasoningEffort(profile, 'final_generation'),
     validate: validateFinalGeneration,
   });
   addUsage(promptUsage, 'final_generation', finalResponse.usage);
@@ -545,7 +580,7 @@ export async function runV2Pipeline(
       }),
       jsonSchema: V2_FINAL_GENERATION_SCHEMA,
       maxTokens: 4200,
-      reasoningEffort: 'medium',
+      reasoningEffort: stageReasoningEffort(profile, 'coverage_repair'),
       validate: validateFinalGeneration,
     });
     addUsage(promptUsage, 'coverage_repair', repairResponse.usage);

@@ -10,12 +10,24 @@ export type V2DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 export type V2CrudRisk = 'low' | 'medium' | 'high';
 export type V2Confidence = 'low' | 'medium' | 'high';
 export type V2ActorGroundingStatus = 'weak' | 'supported' | 'strong';
+export type V2MemoryStatus = 'fresh' | 'stale' | 'missing';
 export type V2AnswerMateriality =
   | 'structural'
   | 'actor_bearing'
   | 'rule_bearing'
   | 'measurement_bearing'
   | 'trivial';
+export type ProjectMemorySliceType =
+  | 'roles'
+  | 'objects'
+  | 'workflow_patterns'
+  | 'lifecycle_states'
+  | 'business_rules'
+  | 'exception_patterns'
+  | 'retrieval_hints'
+  | 'compact_exemplars'
+  | 'wi_memory';
+export type ProjectMemoryRefreshTrigger = 'weekly' | 'manual' | 'threshold';
 
 export type V2StageName =
   | 'triage'
@@ -226,11 +238,50 @@ export interface V2GroundedEvidencePack {
   wiCues: V2GroundedCue[];
 }
 
+export interface ProjectMemoryArtifactHeader {
+  roles: string[];
+  businessObjects: string[];
+  workflowCues: string[];
+  arStyleHint: string;
+  freshness: V2MemoryStatus;
+  builtAt: string | null;
+}
+
+export interface ProjectMemoryCompactExemplar {
+  key: string;
+  summary: string;
+  pattern: string;
+}
+
+export interface ProjectMemoryWiMemory {
+  resolvedFacts: string[];
+  workflowSteps: string[];
+  businessRules: string[];
+  exceptions: string[];
+  mustCoverBehaviors: string[];
+}
+
+export interface ProjectMemorySelection {
+  artifactVersion?: string;
+  roles?: string[];
+  objects?: string[];
+  workflow_patterns?: string[];
+  lifecycle_states?: string[];
+  business_rules?: string[];
+  exception_patterns?: string[];
+  retrieval_hints?: string[];
+  compact_exemplars?: ProjectMemoryCompactExemplar[];
+  wi_memory?: ProjectMemoryWiMemory | null;
+}
+
 export interface V2PipelineInput extends V2EvidenceBundle {
   requirement: string;
   attachmentText?: string;
   config: TenantConfig;
   evidencePack?: V2GroundedEvidencePack;
+  memoryHeader?: ProjectMemoryArtifactHeader;
+  memorySelection?: ProjectMemorySelection | null;
+  memoryStatus?: V2MemoryStatus;
   triageOverride?: V2TriageResult;
   confirmedScopeHypothesis?: V2ScopeHypothesis;
   discoveryAnswers?: V2DiscoveryAnswer[];
