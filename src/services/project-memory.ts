@@ -729,6 +729,39 @@ export async function getProjectMemorySelectionForStage(
   return mergeSelections(selections);
 }
 
+export async function getProjectMemoryRuntimeHealth(
+  projectKey: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const state = await getProjectMemoryRefreshState(projectKey);
+  if (!state?.activeArtifactVersion) {
+    return {
+      ok: false,
+      reason: 'No active compiled project memory artifact is recorded for this project.',
+    };
+  }
+
+  const [artifact, fullSelection] = await Promise.all([
+    getActiveProjectMemoryArtifact(projectKey),
+    getActiveProjectMemorySelection(projectKey, PROJECT_MEMORY_SLICE_TYPES),
+  ]);
+
+  if (!artifact) {
+    return {
+      ok: false,
+      reason: 'The active compiled project memory artifact could not be loaded from storage.',
+    };
+  }
+
+  if (!fullSelection?.selection) {
+    return {
+      ok: false,
+      reason: 'The active compiled project memory slices could not be loaded from storage.',
+    };
+  }
+
+  return { ok: true };
+}
+
 export function buildV2EvidenceBundleFromProjectMemory(input: {
   domainContext?: string;
   memoryHeader?: ProjectMemoryArtifactHeader;

@@ -37,13 +37,13 @@ import {
   retrieveScopedWiContext,
 } from '../services/project-selection';
 import {
-  getProjectMemoryHeaderForProjects,
   getProjectMemoryRefreshState,
-  getProjectMemorySelectionForStage,
+  getProjectMemoryRuntimeHealth,
   listProjectKeysForProjectMemoryCompiler,
   queueProjectMemoryRefresh,
   queueProjectMemoryRefreshForProjects,
 } from '../services/project-memory';
+import { loadProjectMemoryRuntimeContext } from '../services/project-memory-runtime';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 import { deleteV2Conversation, getV2Conversation, listV2Conversations } from '../services/v2-sql';
@@ -373,17 +373,16 @@ async function buildV2RequestContext(
   const requirement = String(payload?.requirement ?? '').trim();
   const attachmentText = String(payload?.attachmentText ?? '').trim();
   const sessionId = String(payload?.sessionId ?? '').trim() || `v2_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  const [{ header: memoryHeader, status: memoryStatus, artifactVersion: memoryArtifactVersion }, memorySelection] = await Promise.all([
-    getProjectMemoryHeaderForProjects(selectedProjectKeys),
-    options?.memoryStage
-      ? getProjectMemorySelectionForStage(selectedProjectKeys, options.memoryStage)
-      : Promise.resolve(null),
-  ]);
-  if (memoryStatus !== 'fresh') {
-    await queueProjectMemoryRefreshForProjects(selectedProjectKeys, 'weekly', {
-      requestedBy: accountId,
-    });
-  }
+  const {
+    memoryHeader,
+    memoryStatus,
+    memoryArtifactVersion,
+    memorySelection,
+  } = await loadProjectMemoryRuntimeContext({
+    projectKeys: selectedProjectKeys,
+    memoryStage: options?.memoryStage,
+    requestedBy: accountId,
+  });
 
   return {
     accountId,
@@ -2589,6 +2588,32 @@ resolver.define('getProjectMemoryRefreshStatus', async ({ payload, context }) =>
   }
   await ensureProjectBrowse(context, projectKey);
   const status = await getProjectMemoryRefreshState(projectKey);
+  if (!status) {
+    return { success: true, status: null };
+  }
+  try {
+    const health = await getProjectMemoryRuntimeHealth(projectKey);
+    if (!health.ok) {
+      return {
+        success: true,
+        status: {
+          ...status,
+          status: 'error',
+          lastError: health.reason ?? 'Compiled project memory is not readable for runtime use.',
+        },
+      };
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown project memory error');
+    return {
+      success: true,
+      status: {
+        ...status,
+        status: 'error',
+        lastError: `Compiled project memory health check failed: ${detail}`,
+      },
+    };
+  }
   return { success: true, status };
 });
 

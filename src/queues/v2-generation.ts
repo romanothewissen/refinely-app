@@ -1,9 +1,5 @@
 import { recordGeneration, releaseGenerationReservation } from '../services/billing';
-import {
-  getProjectMemoryHeaderForProjects,
-  getProjectMemorySelectionForStage,
-  queueProjectMemoryRefreshForProjects,
-} from '../services/project-memory';
+import { loadProjectMemoryRuntimeContext } from '../services/project-memory-runtime';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 
@@ -46,13 +42,15 @@ export async function handler(event: { body: V2GenerationEventBody }) {
 
   try {
     await setProgress(payload.sessionId, 'Loading compiled project memory…');
-    const [{ header, status }, memorySelection] = await Promise.all([
-      getProjectMemoryHeaderForProjects(payload.projectKeys ?? []),
-      getProjectMemorySelectionForStage(payload.projectKeys ?? [], 'discovery_synthesis'),
-    ]);
-    if (status !== 'fresh') {
-      await queueProjectMemoryRefreshForProjects(payload.projectKeys ?? [], 'weekly');
-    }
+    const {
+      memoryHeader: header,
+      memoryStatus: status,
+      memorySelection,
+    } = await loadProjectMemoryRuntimeContext({
+      projectKeys: payload.projectKeys ?? [],
+      memoryStage: 'discovery_synthesis',
+      requestedBy: payload.accountId,
+    });
 
     await setProgress(payload.sessionId, 'Reasoning about capability boundaries…');
 
