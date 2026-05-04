@@ -755,24 +755,46 @@ resolver.define('v2Generate', async ({ payload, context }) => {
 resolver.define('v2GetHistory', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const limit = Number(payload?.limit ?? 30);
-  const conversations = await listV2Conversations(accountId, Number.isFinite(limit) ? Math.max(1, Math.min(limit, 100)) : 30);
-  return { success: true, conversations };
+  try {
+    const conversations = await listV2Conversations(accountId, Number.isFinite(limit) ? Math.max(1, Math.min(limit, 100)) : 30);
+    return { success: true, conversations };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');
+    console.warn('[v2GetHistory] SQL read failed:', detail);
+    return {
+      success: true,
+      conversations: [],
+      warning: `History is temporarily unavailable (${detail}).`,
+    };
+  }
 });
 
 resolver.define('v2GetConversation', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const sessionId = String(payload?.sessionId ?? '').trim();
   if (!sessionId) return { success: false, error: 'sessionId is required.' };
-  const conversation = await getV2Conversation(accountId, sessionId);
-  return { success: true, conversation };
+  try {
+    const conversation = await getV2Conversation(accountId, sessionId);
+    return { success: true, conversation };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');
+    console.warn('[v2GetConversation] SQL read failed:', detail);
+    return { success: false, error: `Conversation history is temporarily unavailable (${detail}).` };
+  }
 });
 
 resolver.define('v2DeleteConversation', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const sessionId = String(payload?.sessionId ?? '').trim();
   if (!sessionId) return { success: false, error: 'sessionId is required.' };
-  await deleteV2Conversation(accountId, sessionId);
-  return { success: true };
+  try {
+    await deleteV2Conversation(accountId, sessionId);
+    return { success: true };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');
+    console.warn('[v2DeleteConversation] SQL delete failed:', detail);
+    return { success: false, error: `Could not delete conversation history (${detail}).` };
+  }
 });
 
 // ─── Generation (queue dispatch) ─────────────────────────────────────────────

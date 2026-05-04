@@ -228,9 +228,14 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
   const activeDiscoveryQuestions = result?.status === 'needs_discovery' ? result.discoveryQuestions : [];
 
   const loadHistory = async () => {
-    const response = await api.v2GetHistory(40) as { success?: boolean; conversations?: ConversationHistoryEntry[] };
-    if (response?.success) {
-      setHistory(response.conversations ?? []);
+    try {
+      const response = await api.v2GetHistory(40) as { success?: boolean; conversations?: ConversationHistoryEntry[]; warning?: string };
+      if (response?.success) {
+        setHistory(response.conversations ?? []);
+        if (response.warning) setWarning(response.warning);
+      }
+    } catch {
+      // Keep the main flow usable even if SQL history is unavailable.
     }
   };
 
@@ -299,7 +304,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
       setSelectedConversationId(response.sessionId ?? sessionId);
       setResult(response.result);
       setWarning(response.warning ?? null);
-      await loadHistory();
+      void loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Preview failed.');
     } finally {
@@ -353,7 +358,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
       setSelectedConversationId(response.sessionId ?? sessionId);
       setResult(response.result);
       setWarning(response.warning ?? null);
-      await loadHistory();
+      void loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Generation failed.');
     } finally {
@@ -390,7 +395,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
       setResult(null);
       setDiscoveryAnswers({});
     }
-    await loadHistory();
+    void loadHistory();
   }
 
   function startFresh() {
@@ -475,7 +480,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
           </div>
         </aside>
 
-        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <section className="rf-card p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
