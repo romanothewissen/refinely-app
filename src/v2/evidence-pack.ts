@@ -83,9 +83,12 @@ const LIFECYCLE_PATTERN = /\b(status|state|lifecycle|draft|approved|rejected|ret
 const GENERIC_CAPABILITY_PATTERN = /\b(manage|handle|support|process)\s+(workflow|process|requests?|items?|tasks?|operations?)\b/i;
 
 const STAGE_RENDER_BUDGETS = {
-  scope_hypothesis: 720,
-  discover: 920,
-  capability_reasoning: 1320,
+  scope_hypothesis: 1400,
+  discover: 2200,
+  discovery_synthesis: 3000,
+  final_generation: 3600,
+  coverage_repair: 2600,
+  capability_reasoning: 3000,
 } as const;
 
 type SourceName =
@@ -396,15 +399,15 @@ export function buildV2GroundedEvidencePack(input: {
     { prefix: 'lifecycle', text: texts.backlog },
     { prefix: 'lifecycle', text: texts.domainContext },
   ];
-  const backlogCues = collectSentenceCues([{ prefix: 'backlog', text: texts.backlog }], WORKFLOW_PATTERN, 3, 120);
-  const wiCues = collectSentenceCues([{ prefix: 'wi', text: texts.wi }], RULE_PATTERN, 3, 120);
+  const backlogCues = collectSentenceCues([{ prefix: 'backlog', text: texts.backlog }], WORKFLOW_PATTERN, 5, 180);
+  const wiCues = collectSentenceCues([{ prefix: 'wi', text: texts.wi }], RULE_PATTERN, 5, 180);
 
   return {
     roleCandidates: buildRoleCandidates(input),
-    businessObjects: collectObjectCues(objectSources, 3),
-    workflowSignals: collectSentenceCues(contextualSources, WORKFLOW_PATTERN, 3, 120),
-    businessRules: collectSentenceCues(contextualSources, RULE_PATTERN, 3, 120),
-    lifecycleSignals: collectSentenceCues(lifecycleSources, LIFECYCLE_PATTERN, 3, 120),
+    businessObjects: collectObjectCues(objectSources, 6),
+    workflowSignals: collectSentenceCues(contextualSources, WORKFLOW_PATTERN, 6, 180),
+    businessRules: collectSentenceCues(contextualSources, RULE_PATTERN, 6, 180),
+    lifecycleSignals: collectSentenceCues(lifecycleSources, LIFECYCLE_PATTERN, 6, 180),
     backlogCues,
     wiCues,
   };
@@ -421,10 +424,10 @@ export function renderGroundedEvidencePack(
     renderCueList('Workflow signals', evidencePack.workflowSignals.map(cueDisplayText)),
     renderCueList('Business rules', evidencePack.businessRules.map(cueDisplayText)),
     renderCueList('Lifecycle signals', evidencePack.lifecycleSignals.map(cueDisplayText)),
-    stage === 'capability_reasoning'
+    stage === 'capability_reasoning' || stage === 'discovery_synthesis' || stage === 'final_generation' || stage === 'coverage_repair'
       ? renderCueList('Backlog cues', evidencePack.backlogCues.map(cueDisplayText))
       : '',
-    stage === 'capability_reasoning'
+    stage === 'capability_reasoning' || stage === 'discovery_synthesis' || stage === 'final_generation' || stage === 'coverage_repair'
       ? renderCueList('Work instruction cues', evidencePack.wiCues.map(cueDisplayText))
       : '',
   ].filter(Boolean);

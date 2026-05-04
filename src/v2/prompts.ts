@@ -3,6 +3,8 @@ import type {
   V2CapabilityReasoningArtifact,
   V2ClassifiedAnswer,
   V2DiscoveryQuestion,
+  V2DiscoverySynthesis,
+  V2FinalGenerationResponse,
   V2PromptBudget,
   V2ScopeHypothesis,
   V2TriageResult,
@@ -10,21 +12,39 @@ import type {
 
 export const V2_PROMPT_BUDGETS: Record<V2PromptBudget['stage'], V2PromptBudget> = {
   triage: { stage: 'triage', maxSystemChars: 1200, maxUserChars: 1600 },
-  scope_hypothesis: { stage: 'scope_hypothesis', maxSystemChars: 1400, maxUserChars: 1800 },
-  discover: { stage: 'discover', maxSystemChars: 1800, maxUserChars: 2200 },
-  capability_reasoning: { stage: 'capability_reasoning', maxSystemChars: 2000, maxUserChars: 2600 },
-  feature_formatter: { stage: 'feature_formatter', maxSystemChars: 1200, maxUserChars: 1800 },
-  ar_writer: { stage: 'ar_writer', maxSystemChars: 1700, maxUserChars: 2200 },
+  scope_hypothesis: { stage: 'scope_hypothesis', maxSystemChars: 1400, maxUserChars: 2800 },
+  discover: { stage: 'discover', maxSystemChars: 1700, maxUserChars: 3600 },
+  discovery_synthesis: { stage: 'discovery_synthesis', maxSystemChars: 1700, maxUserChars: 5200 },
+  final_generation: { stage: 'final_generation', maxSystemChars: 1800, maxUserChars: 6200 },
+  coverage_repair: { stage: 'coverage_repair', maxSystemChars: 1400, maxUserChars: 5200 },
+  // Legacy prompt budgets retained for saved audit compatibility and older tests.
+  capability_reasoning: { stage: 'capability_reasoning', maxSystemChars: 2000, maxUserChars: 3600 },
+  feature_formatter: { stage: 'feature_formatter', maxSystemChars: 1200, maxUserChars: 2200 },
+  ar_writer: { stage: 'ar_writer', maxSystemChars: 1700, maxUserChars: 2600 },
 };
 
 export const V2_TRIAGE_SCHEMA: JsonSchema = {
   type: 'object',
-  required: ['capability_breadth', 'ask_clarity', 'actor_clarity'],
+  required: [
+    'complexity',
+    'ambiguity',
+    'workflow_depth',
+    'actor_clarity',
+    'must_cover_behaviors',
+    'unresolved_decision_themes',
+    'recommended_discovery_count',
+    'ar_depth',
+  ],
   additionalProperties: false,
   properties: {
-    capability_breadth: { type: 'integer', minimum: 1, maximum: 5 },
-    ask_clarity: { type: 'integer', minimum: 1, maximum: 5 },
+    complexity: { type: 'integer', minimum: 1, maximum: 5 },
+    ambiguity: { type: 'integer', minimum: 1, maximum: 5 },
+    workflow_depth: { type: 'integer', minimum: 1, maximum: 5 },
     actor_clarity: { type: 'integer', minimum: 1, maximum: 5 },
+    must_cover_behaviors: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 5, maxLength: 160 } },
+    unresolved_decision_themes: { type: 'array', maxItems: 8, items: { type: 'string', minLength: 5, maxLength: 160 } },
+    recommended_discovery_count: { type: 'integer', minimum: 0, maximum: 15 },
+    ar_depth: { type: 'string', enum: ['light', 'standard', 'deep'] },
   },
 };
 
@@ -34,8 +54,15 @@ function trimText(value: string, maxChars: number): string {
   return `${normalized.slice(0, maxChars - 24).trimEnd()} ...[trimmed]`;
 }
 
-function compactList(items: string[], max = 5): string {
-  return items.slice(0, max).map((item) => `- ${trimText(item, 160)}`).join('\n');
+function compactList(items: string[], max = 5, maxItemChars = 160): string {
+  return items.slice(0, max).map((item) => `- ${trimText(item, maxItemChars)}`).join('\n');
+}
+
+function compactDiscoveryAnswers(items: V2ClassifiedAnswer[], max = 12): string {
+  return items
+    .slice(0, max)
+    .map((answer) => `- [${answer.categoryKey}/${answer.materiality}] ${trimText(answer.question, 160)} => ${trimText(answer.answer, 600)}`)
+    .join('\n');
 }
 
 const ACTOR_SLOT_SCHEMA: JsonSchema = {
@@ -46,6 +73,28 @@ const ACTOR_SLOT_SCHEMA: JsonSchema = {
     performer: { type: 'string' },
     approver: { type: 'string' },
     observer: { type: 'string' },
+  },
+};
+
+const OPEN_DECISION_SCHEMA: JsonSchema = {
+  type: 'object',
+  required: ['title', 'detail', 'blocking'],
+  additionalProperties: false,
+  properties: {
+    title: { type: 'string', minLength: 4, maxLength: 100 },
+    detail: { type: 'string', minLength: 6, maxLength: 200 },
+    blocking: { type: 'boolean' },
+  },
+};
+
+const ACCEPTANCE_REQUIREMENT_SCHEMA: JsonSchema = {
+  type: 'object',
+  required: ['given', 'when', 'then'],
+  additionalProperties: false,
+  properties: {
+    given: { type: 'string', minLength: 6, maxLength: 260 },
+    when: { type: 'string', minLength: 6, maxLength: 260 },
+    then: { type: 'string', minLength: 6, maxLength: 260 },
   },
 };
 
@@ -109,6 +158,82 @@ export const V2_DISCOVERY_SCHEMA: JsonSchema = {
   },
 };
 
+export const V2_SYNTHESIS_SCHEMA: JsonSchema = {
+  type: 'object',
+  required: [
+    'resolvedFacts',
+    'actorMap',
+    'businessRules',
+    'workflowSteps',
+    'lifecycleStates',
+    'exceptions',
+    'successMeasures',
+    'mustCoverBehaviors',
+    'openDecisions',
+    'arDepth',
+    'featureTarget',
+  ],
+  additionalProperties: false,
+  properties: {
+    resolvedFacts: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'string', minLength: 5, maxLength: 180 } },
+    actorMap: ACTOR_SLOT_SCHEMA,
+    businessRules: { type: 'array', maxItems: 10, items: { type: 'string', minLength: 5, maxLength: 180 } },
+    workflowSteps: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 5, maxLength: 180 } },
+    lifecycleStates: { type: 'array', maxItems: 8, items: { type: 'string', minLength: 3, maxLength: 120 } },
+    exceptions: { type: 'array', maxItems: 10, items: { type: 'string', minLength: 5, maxLength: 180 } },
+    successMeasures: { type: 'array', maxItems: 6, items: { type: 'string', minLength: 5, maxLength: 160 } },
+    mustCoverBehaviors: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'string', minLength: 5, maxLength: 180 } },
+    openDecisions: { type: 'array', maxItems: 8, items: OPEN_DECISION_SCHEMA },
+    arDepth: { type: 'string', enum: ['light', 'standard', 'deep'] },
+    featureTarget: { type: 'integer', minimum: 1, maximum: 6 },
+  },
+};
+
+export const V2_FINAL_GENERATION_SCHEMA: JsonSchema = {
+  type: 'object',
+  required: ['features', 'coverageMap'],
+  additionalProperties: false,
+  properties: {
+    features: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 6,
+      items: {
+        type: 'object',
+        required: ['summary', 'description', 'suggested_story_points', 'acceptanceRequirements'],
+        additionalProperties: false,
+        properties: {
+          summary: { type: 'string', minLength: 6, maxLength: 120 },
+          description: { type: 'string', minLength: 20, maxLength: 260 },
+          suggested_story_points: { type: 'integer', minimum: 1, maximum: 13 },
+          process_code: { type: 'string' },
+          acceptanceRequirements: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 12,
+            items: ACCEPTANCE_REQUIREMENT_SCHEMA,
+          },
+        },
+      },
+    },
+    coverageMap: {
+      type: 'array',
+      maxItems: 16,
+      items: {
+        type: 'object',
+        required: ['mustCoverBehavior'],
+        additionalProperties: false,
+        properties: {
+          mustCoverBehavior: { type: 'string', minLength: 5, maxLength: 180 },
+          featureSummary: { type: 'string', maxLength: 120 },
+          openDecisionTitle: { type: 'string', maxLength: 100 },
+        },
+      },
+    },
+  },
+};
+
+// Legacy schemas are retained for imports in tests and older code paths.
 export const V2_REASONING_SCHEMA: JsonSchema = {
   type: 'object',
   required: ['capabilities', 'actorSlots', 'mustCarryRules', 'edgeCases', 'openDecisions'],
@@ -135,20 +260,7 @@ export const V2_REASONING_SCHEMA: JsonSchema = {
     actorSlots: ACTOR_SLOT_SCHEMA,
     mustCarryRules: { type: 'array', minItems: 1, maxItems: 10, items: { type: 'string', minLength: 5, maxLength: 180 } },
     edgeCases: { type: 'array', minItems: 1, maxItems: 10, items: { type: 'string', minLength: 5, maxLength: 180 } },
-    openDecisions: {
-      type: 'array',
-      maxItems: 6,
-      items: {
-        type: 'object',
-        required: ['title', 'detail', 'blocking'],
-        additionalProperties: false,
-        properties: {
-          title: { type: 'string', minLength: 4, maxLength: 100 },
-          detail: { type: 'string', minLength: 6, maxLength: 200 },
-          blocking: { type: 'boolean' },
-        },
-      },
-    },
+    openDecisions: { type: 'array', maxItems: 6, items: OPEN_DECISION_SCHEMA },
   },
 };
 
@@ -185,16 +297,7 @@ export const V2_AR_WRITER_SCHEMA: JsonSchema = {
       type: 'array',
       minItems: 2,
       maxItems: 12,
-      items: {
-        type: 'object',
-        required: ['given', 'when', 'then'],
-        additionalProperties: false,
-        properties: {
-          given: { type: 'string', minLength: 6, maxLength: 220 },
-          when: { type: 'string', minLength: 6, maxLength: 220 },
-          then: { type: 'string', minLength: 6, maxLength: 220 },
-        },
-      },
+      items: ACCEPTANCE_REQUIREMENT_SCHEMA,
     },
   },
 };
@@ -206,30 +309,18 @@ export function measurePromptSizes(systemPrompt: string, userMessage: string) {
   };
 }
 
-export function buildScopeHypothesisSystemPrompt(): string {
-  return trimText(
-    [
-      'You identify the smallest set of meaningful business capabilities implied by a requirement.',
-      'Focus on business outcomes, not CRUD fragments or implementation steps.',
-      'Return 1-6 core capabilities, tentative actor slots, and the unresolved questions that could change scope.',
-      'Ground capability labels in concrete business objects, workflow steps, or rules from the evidence.',
-      'If actor evidence is weak, keep actor slots sparse rather than inventing generic roles.',
-      'Do not write acceptance requirements or implementation detail.',
-    ].join(' '),
-    V2_PROMPT_BUDGETS.scope_hypothesis.maxSystemChars,
-  );
-}
-
 export function buildTriageSystemPrompt(): string {
   return trimText(
     [
-      'You only size how much clarification is needed before backlog-quality decomposition.',
-      'Score only the requirement and excerpt provided by the user.',
+      'You profile a business requirement before backlog generation.',
+      'Size complexity, ambiguity, workflow depth, actor clarity, discovery count, AR depth, must-cover behaviors, and unresolved decision themes.',
+      'Score only from the supplied requirement and excerpt.',
       'Do not write discovery questions, solution details, features, or acceptance requirements.',
-      'Return JSON only with: capability_breadth, ask_clarity, actor_clarity.',
-      'Rubric: capability_breadth (1=single capability, 3=several related outcomes, 5=many distinct outcomes).',
-      'Rubric: ask_clarity (1=goals/scope unclear, 3=partially specified, 5=scope and constraints are clear).',
-      'Rubric: actor_clarity (1=no usable accountability, 3=partial role hints, 5=clear initiator/performer/approver-observer).',
+      'Return JSON only.',
+      'Rubric: complexity 1=single small change, 3=several related behaviors, 5=many workflow-defining behaviors.',
+      'Rubric: ambiguity 1=mostly clear, 3=some important gaps, 5=many unresolved decisions.',
+      'Rubric: workflow_depth 1=simple CRUD, 3=multi-step, 5=stateful/routing/exception-heavy.',
+      'Rubric: actor_clarity 1=no usable accountability, 3=partial role hints, 5=clear initiator/performer/approver-observer.',
     ].join(' '),
     V2_PROMPT_BUDGETS.triage.maxSystemChars,
   );
@@ -239,11 +330,25 @@ export function buildTriageUserMessage(input: { requirement: string; attachmentT
   const parts = [
     `Requirement:\n${trimText(input.requirement, 1100)}`,
     input.attachmentText?.trim()
-      ? `Evidence excerpt (use only what is here):\n${trimText(input.attachmentText, 420)}`
+      ? `Evidence excerpt:\n${trimText(input.attachmentText, 420)}`
       : '',
     'Return JSON matching the schema.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.triage.maxUserChars);
+}
+
+export function buildScopeHypothesisSystemPrompt(): string {
+  return trimText(
+    [
+      'You identify the smallest set of meaningful business capabilities implied by a requirement.',
+      'Focus on business outcomes, not CRUD fragments or implementation steps.',
+      'Return 1-6 core capabilities, tentative actor slots, and unresolved questions that could change scope.',
+      'Ground capability labels in concrete business objects, workflow steps, rules, or evidence terms.',
+      'If actor evidence is weak, keep actor slots sparse rather than inventing generic roles.',
+      'Do not write acceptance requirements or implementation detail.',
+    ].join(' '),
+    V2_PROMPT_BUDGETS.scope_hypothesis.maxSystemChars,
+  );
 }
 
 export function buildScopeHypothesisUserMessage(input: {
@@ -256,7 +361,7 @@ export function buildScopeHypothesisUserMessage(input: {
     `Requirement:\n${trimText(input.requirement, 900)}`,
     input.attachmentText?.trim() ? `Attachment context:\n${trimText(input.attachmentText, 360)}` : '',
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
-    `Triage hints:\n- discovery mode: ${input.triage.discoveryMode}\n- likely capability count: ${input.triage.likelyCapabilityCount}\n- crud risk: ${input.triage.crudRisk}`,
+    `Requirement profile:\n- discovery mode: ${input.triage.discoveryMode}\n- likely capability count: ${input.triage.likelyCapabilityCount}\n- workflow depth: ${input.triage.workflowDepth}/5\n- must-cover behaviors:\n${compactList(input.triage.mustCoverBehaviors, 6)}`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);
 }
@@ -264,11 +369,11 @@ export function buildScopeHypothesisUserMessage(input: {
 export function buildDiscoverySystemPrompt(): string {
   return trimText(
     [
-      'You write only material discovery questions.',
+      'You write only material discovery questions from unresolved decision themes.',
       'Questions must be neutral, non-leading, and specific to the requirement.',
       'Do not assume role names that are not already confirmed.',
       'Each question must mention a concrete actor, object, rule, workflow step, or lifecycle signal already present in the grounded evidence.',
-      'Ask only questions that can materially change capability boundaries, actor accountability, business rules, or lifecycle handling.',
+      'Ask only questions that can materially change capability boundaries, actor accountability, business rules, lifecycle handling, exceptions, or success measures.',
       'Prefer concise questions and short suggestion chips.',
     ].join(' '),
     V2_PROMPT_BUDGETS.discover.maxSystemChars,
@@ -283,12 +388,115 @@ export function buildDiscoveryUserMessage(input: {
 }): string {
   const parts = [
     `Requirement:\n${trimText(input.requirement, 900)}`,
+    `Requirement profile:\n- complexity: ${input.triage.complexity}/5\n- ambiguity: ${input.triage.ambiguity}/5\n- workflow depth: ${input.triage.workflowDepth}/5\n- AR depth: ${input.triage.arDepth}`,
+    `Must-cover behaviors:\n${compactList(input.triage.mustCoverBehaviors, 8)}`,
+    input.triage.unresolvedDecisionThemes.length
+      ? `Unresolved decision themes:\n${compactList(input.triage.unresolvedDecisionThemes, 8)}`
+      : '',
     `Proposed capabilities:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)}`,
     `Open uncertainties:\n${compactList(input.scopeHypothesis.openQuestions, 6) || '- none'}`,
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     `Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only.`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discover.maxUserChars);
+}
+
+export function buildSynthesisSystemPrompt(): string {
+  return trimText(
+    [
+      'You synthesize discovery into the authoritative contract for backlog generation.',
+      'Separate resolved facts from open decisions.',
+      'Carry forward every material user answer and every must-cover behavior that affects feature boundaries or AR coverage.',
+      'Do not invent implementation detail or silently resolve unknowns.',
+      'Set featureTarget to the smallest feature count that preserves independently valuable capability boundaries.',
+    ].join(' '),
+    V2_PROMPT_BUDGETS.discovery_synthesis.maxSystemChars,
+  );
+}
+
+export function buildSynthesisUserMessage(input: {
+  requirement: string;
+  triage: V2TriageResult;
+  scopeHypothesis: V2ScopeHypothesis;
+  classifiedAnswers: V2ClassifiedAnswer[];
+  groundedEvidenceText?: string;
+}): string {
+  const materialAnswers = input.classifiedAnswers.filter((answer) => answer.materiality !== 'trivial');
+  const parts = [
+    `Requirement:\n${trimText(input.requirement, 1000)}`,
+    `Requirement profile:\n- complexity: ${input.triage.complexity}/5\n- ambiguity: ${input.triage.ambiguity}/5\n- workflow depth: ${input.triage.workflowDepth}/5\n- actor clarity: ${input.triage.actorClarity}/5\n- requested AR depth: ${input.triage.arDepth}`,
+    `Must-cover behaviors from triage:\n${compactList(input.triage.mustCoverBehaviors, 10)}`,
+    input.triage.unresolvedDecisionThemes.length ? `Unresolved themes from triage:\n${compactList(input.triage.unresolvedDecisionThemes, 10)}` : '',
+    `Confirmed capability hypothesis:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)}`,
+    materialAnswers.length ? `Material discovery answers:\n${compactDiscoveryAnswers(materialAnswers, 12)}` : '',
+    input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
+    'Return the synthesis JSON. Keep open decisions explicit instead of filling gaps with assumptions.',
+  ].filter(Boolean);
+  return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discovery_synthesis.maxUserChars);
+}
+
+export function buildFinalGenerationSystemPrompt(): string {
+  return trimText(
+    [
+      'You generate Jira-ready business features and acceptance requirements from a discovery synthesis.',
+      'Features are independently valuable business capabilities, not CRUD fragments.',
+      'Descriptions must use "As a [role], I need ... so that ...".',
+      'Acceptance requirements must be GIVEN/WHEN/THEN, business-facing, concrete, and scenario-rich.',
+      'Cover primary behavior, material rules, realistic exceptions, lifecycle states, and unresolved open decisions without inventing answers.',
+      'Return the complete feature set and map every must-cover behavior to a feature or open decision.',
+    ].join(' '),
+    V2_PROMPT_BUDGETS.final_generation.maxSystemChars,
+  );
+}
+
+export function buildFinalGenerationUserMessage(input: {
+  requirement: string;
+  synthesis: V2DiscoverySynthesis;
+  groundedEvidenceText?: string;
+  processTaxonomyEnabled?: boolean;
+  processCodes?: Array<{ code: string; name: string; definition: string }>;
+}): string {
+  const taxonomy = input.processTaxonomyEnabled && input.processCodes?.length
+    ? `Optional process taxonomy:\n${compactList(input.processCodes.map((entry) => `${entry.code}: ${entry.name} - ${entry.definition}`), 5)}`
+    : '';
+  const parts = [
+    `Requirement:\n${trimText(input.requirement, 900)}`,
+    `Discovery synthesis:\n${trimText(JSON.stringify(input.synthesis, null, 2), 3200)}`,
+    input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
+    taxonomy,
+    'Generate the final JSON. Use compact but complete features; do not omit coverage from mustCoverBehaviors.',
+  ].filter(Boolean);
+  return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.final_generation.maxUserChars);
+}
+
+export function buildCoverageRepairSystemPrompt(): string {
+  return trimText(
+    [
+      'You repair a generated backlog draft using a small list of coverage failures.',
+      'Preserve the current feature structure unless a failure cannot be fixed without adding one feature.',
+      'Do not rewrite unrelated coverage.',
+      'Return the complete repaired JSON feature set and coverage map.',
+    ].join(' '),
+    V2_PROMPT_BUDGETS.coverage_repair.maxSystemChars,
+  );
+}
+
+export function buildCoverageRepairUserMessage(input: {
+  requirement: string;
+  synthesis: V2DiscoverySynthesis;
+  generated: V2FinalGenerationResponse;
+  failures: string[];
+  groundedEvidenceText?: string;
+}): string {
+  const parts = [
+    `Requirement:\n${trimText(input.requirement, 800)}`,
+    `Discovery synthesis:\n${trimText(JSON.stringify(input.synthesis, null, 2), 2600)}`,
+    `Coverage failures to fix:\n${compactList(input.failures, 10)}`,
+    `Current generated draft:\n${trimText(JSON.stringify(input.generated, null, 2), 2600)}`,
+    input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
+    'Return the repaired final-generation JSON.',
+  ].filter(Boolean);
+  return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.coverage_repair.maxUserChars);
 }
 
 export function buildCapabilityReasoningSystemPrompt(): string {
@@ -318,7 +526,7 @@ export function buildCapabilityReasoningUserMessage(input: {
   const parts = [
     `Requirement:\n${trimText(input.requirement, 800)}`,
     `Confirmed capability hypothesis:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => capability.label), 6)}`,
-    materialAnswers.length ? `Material discovery answers:\n${compactList(materialAnswers, 8)}` : '',
+    materialAnswers.length ? `Material discovery answers:\n${compactList(materialAnswers, 8, 260)}` : '',
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     'Output capability boundaries, actor slots, must-carry rules, edge cases, and open decisions.',
   ].filter(Boolean);
@@ -409,14 +617,21 @@ export function validateDiscoveryQuestions(data: unknown): string | null {
 }
 
 export function validateTriageScores(data: unknown): string | null {
-  const payload = data as { capability_breadth?: unknown; ask_clarity?: unknown; actor_clarity?: unknown } | null;
-  const entries = [
-    payload?.capability_breadth,
-    payload?.ask_clarity,
-    payload?.actor_clarity,
-  ];
-  const valid = entries.every((entry) => Number.isInteger(entry) && Number(entry) >= 1 && Number(entry) <= 5);
-  return valid ? null : 'Triage output must provide 1-5 integer scores for breadth, ask clarity, and actor clarity.';
+  const payload = data as Record<string, unknown> | null;
+  const legacyEntries = [payload?.capability_breadth, payload?.ask_clarity, payload?.actor_clarity];
+  const legacyValid = legacyEntries.every((entry) => Number.isInteger(entry) && Number(entry) >= 1 && Number(entry) <= 5);
+  if (legacyValid) return null;
+
+  const entries = [payload?.complexity, payload?.ambiguity, payload?.workflow_depth, payload?.actor_clarity];
+  const scoresValid = entries.every((entry) => Number.isInteger(entry) && Number(entry) >= 1 && Number(entry) <= 5);
+  const countValid = Number.isInteger(payload?.recommended_discovery_count)
+    && Number(payload?.recommended_discovery_count) >= 0
+    && Number(payload?.recommended_discovery_count) <= 15;
+  const depthValid = payload?.ar_depth === 'light' || payload?.ar_depth === 'standard' || payload?.ar_depth === 'deep';
+  const behaviorsValid = Array.isArray(payload?.must_cover_behaviors) && payload.must_cover_behaviors.length > 0;
+  return scoresValid && countValid && depthValid && behaviorsValid
+    ? null
+    : 'Triage output must provide 1-5 integer scores for the requirement profile, must-cover behaviors, discovery count, and AR depth.';
 }
 
 export function validateScopeHypothesis(data: unknown): string | null {
@@ -427,4 +642,19 @@ export function validateScopeHypothesis(data: unknown): string | null {
 export function validateReasoningArtifact(data: unknown): string | null {
   const payload = data as V2CapabilityReasoningArtifact | null;
   return payload?.capabilities?.length ? null : 'Capability reasoning must contain at least one capability.';
+}
+
+export function validateSynthesis(data: unknown): string | null {
+  const payload = data as V2DiscoverySynthesis | null;
+  return payload?.mustCoverBehaviors?.length && payload?.featureTarget
+    ? null
+    : 'Discovery synthesis must contain must-cover behaviors and a feature target.';
+}
+
+export function validateFinalGeneration(data: unknown): string | null {
+  const payload = data as V2FinalGenerationResponse | null;
+  if (!payload?.features?.length) return 'Final generation must contain at least one feature.';
+  const missingArs = payload.features.find((feature) => !feature.acceptanceRequirements?.length);
+  if (missingArs) return `Feature "${missingArs.summary}" must contain acceptance requirements.`;
+  return null;
 }

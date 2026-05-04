@@ -11,7 +11,7 @@ import { Queue } from '@forge/events';
 import { asUser, route } from '@forge/api';
 import { getConfig, saveConfig, patchConfig } from '../services/tenant-config';
 import { checkGenerationAllowed, checkFeatureAllowed, getLimits, getUsage, getUsageLimits, getEffectiveTier, recordGeneration } from '../services/billing';
-import { entityDelete, entityGet, entitySet, entitySetSmall, KEYS } from '../services/cache';
+import { entityDelete, entityGet, entitySet, entitySetSmall, entitySetWithTtl, KEYS } from '../services/cache';
 import { REDACTED } from '../types';
 import { getUserPreferences, saveUserPreferences } from '../services/user-preferences';
 import {
@@ -314,14 +314,18 @@ function countConfiguredProjects(config: { arMappings?: any[]; domainContexts?: 
   return keys.size;
 }
 
-function formatV2SimilarStories(stories: Array<{ summary?: string; description?: string }> = []) {
+function formatV2SimilarStories(stories: Array<{ summary?: string; description?: string; acceptanceCriteria?: string }> = []) {
   return stories
     .slice(0, 3)
     .map((story) => {
       const summary = String(story?.summary ?? '').trim();
       const description = String(story?.description ?? '').replace(/\s+/g, ' ').trim();
+      const acceptanceCriteria = String(story?.acceptanceCriteria ?? '').replace(/\s+/g, ' ').trim();
       if (!summary) return '';
-      return description ? `${summary}: ${description.slice(0, 140)}` : summary;
+      return [
+        description ? `${summary}: ${description.slice(0, 220)}` : summary,
+        acceptanceCriteria ? `AR style: ${acceptanceCriteria.slice(0, 420)}` : '',
+      ].filter(Boolean).join('\n');
     })
     .filter(Boolean)
     .join('\n');
@@ -360,10 +364,32 @@ async function buildV2RequestContext(
   const domainRoles = formatV2DomainRoles(getCombinedPersonaRoles(config, selectedProjectKeys));
   const requirement = String(payload?.requirement ?? '').trim();
   const attachmentText = String(payload?.attachmentText ?? '').trim();
+  const sessionId = String(payload?.sessionId ?? '').trim() || `v2_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
   const shouldRetrieveEvidence = options?.retrieveEvidence !== false;
-  const [wiContext, similarStories] = shouldRetrieveEvidence
-    ? await Promise.all([
+  const evidenceSignature = buildSharedPipelineEvidenceSignature({
+    requirement,
+    attachmentText,
+    projectKey: authorizedProjects.projectKey,
+    projectKeys: selectedProjectKeys,
+    includeSimilarStories: payload?.includeSimilarStories !== false,
+    selectedWiDocIds,
+  });
+  const evidenceKey = KEYS.sharedPipelineEvidence(sessionId);
+  const cachedEvidence = shouldRetrieveEvidence
+    ? await entityGet<{
+      signature?: string;
+      context?: { wiContextText?: string; similarStoriesText?: string };
+    }>(evidenceKey)
+    : null;
+
+  let wiContextText = '';
+  let similarStoriesText = '';
+  if (shouldRetrieveEvidence && cachedEvidence?.signature === evidenceSignature && cachedEvidence.context) {
+    wiContextText = String(cachedEvidence.context.wiContextText ?? '');
+    similarStoriesText = String(cachedEvidence.context.similarStoriesText ?? '');
+  } else if (shouldRetrieveEvidence) {
+    const [wiContext, similarStories] = await Promise.all([
       config.wiConfig.enabled && selectedProjectKeys.length && payload?.includeWiContext !== false
         ? retrieveScopedWiContext(
           requirement,
@@ -382,24 +408,31 @@ async function buildV2RequestContext(
           projectKeys: selectedProjectKeys,
           maxResults: 3,
         }),
-    ])
-    : await Promise.all([
-      Promise.resolve({ text: '', docs: [], chunks: [], linkedDocs: [] }),
-      Promise.resolve([]),
     ]);
+    wiContextText = wiContext.text;
+    similarStoriesText = formatV2SimilarStories(similarStories);
+    await entitySetWithTtl(evidenceKey, {
+      signature: evidenceSignature,
+      savedAt: Date.now(),
+      context: {
+        wiContextText,
+        similarStoriesText,
+      },
+    }, 60 * 60 * 1000);
+  }
 
   return {
     accountId,
     config,
-    sessionId: String(payload?.sessionId ?? '').trim() || `v2_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    sessionId,
     projectKey: authorizedProjects.projectKey,
     projectKeys: selectedProjectKeys,
     requirement,
     attachmentText,
     domainContext,
     domainRoles,
-    wiContextText: wiContext.text,
-    similarStoriesText: formatV2SimilarStories(similarStories),
+    wiContextText,
+    similarStoriesText,
   };
 }
 
@@ -628,7 +661,7 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
 // ─── V2 Core Flow ─────────────────────────────────────────────────────────────
 
 resolver.define('v2Preview', async ({ payload, context }) => {
-  const requestContext = await buildV2RequestContext(payload, context, { retrieveEvidence: false });
+  const requestContext = await buildV2RequestContext(payload, context, { retrieveEvidence: true });
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
   }
@@ -690,7 +723,7 @@ resolver.define('v2Preview', async ({ payload, context }) => {
 resolver.define('v2Generate', async ({ payload, context }) => {
   const hasDiscoveryAnswers = Array.isArray(payload?.discoveryAnswers) && payload.discoveryAnswers.length > 0;
   const requestContext = await buildV2RequestContext(payload, context, {
-    retrieveEvidence: hasDiscoveryAnswers,
+    retrieveEvidence: true,
   });
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };

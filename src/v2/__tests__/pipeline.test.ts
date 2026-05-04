@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_CONFIG, type TenantConfig } from '../../types';
 import { runV2Pipeline, classifyDiscoveryAnswers } from '../pipeline';
-import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
+import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFinalGenerationSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildSynthesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
 import { assessV2TriageFromScores } from '../triage';
 import type { V2StageExecutor } from '../types';
 import { buildV2GroundedEvidencePack, renderGroundedEvidencePack } from '../evidence-pack';
@@ -65,6 +65,8 @@ test('v2 prompt budgets stay materially smaller than the current dense prompt st
     ['triage', buildTriageSystemPrompt()],
     ['scope_hypothesis', buildScopeHypothesisSystemPrompt()],
     ['discover', buildDiscoverySystemPrompt()],
+    ['discovery_synthesis', buildSynthesisSystemPrompt()],
+    ['final_generation', buildFinalGenerationSystemPrompt()],
     ['capability_reasoning', buildCapabilityReasoningSystemPrompt()],
     ['feature_formatter', buildFeatureFormatterSystemPrompt()],
     ['ar_writer', buildArWriterSystemPrompt()],
@@ -264,7 +266,7 @@ test('runV2Pipeline uses questionBudget directly when requesting discovery', asy
   assert.equal(result.triage.questionBudget, 9);
 });
 
-test('runV2Pipeline performs full generation with per-feature AR writing once scope is confirmed', async () => {
+test('runV2Pipeline performs full generation with synthesis and batch final generation once scope is confirmed', async () => {
   const calls: string[] = [];
   const executeStage: V2StageExecutor = async (request) => {
     calls.push(request.stage);
@@ -274,28 +276,29 @@ test('runV2Pipeline performs full generation with per-feature AR writing once sc
         usage: { input: 20, output: 10 },
       };
     }
-    if (request.stage === 'capability_reasoning') {
+    if (request.stage === 'discovery_synthesis') {
       return {
         data: {
-          capabilities: [
-            {
-              capabilityId: 'cap_1',
-              label: 'Coordinate service planning',
-              boundary: 'Manage the end-to-end plan lifecycle including approval, override, and urgent exception routing.',
-              ownerRole: 'planner',
-              mustCarryRules: ['Rejected plans return to draft.', 'Manual override must be explicit.'],
-              edgeCases: ['Urgent work may bypass the normal sequence.', 'Approval rejection must not silently proceed.'],
-            },
+          resolvedFacts: ['Service planning requires approval and exception handling.'],
+          actorMap: { initiator: 'planner', approver: 'manager' },
+          businessRules: ['Rejected plans return to draft.', 'Manual override must be explicit.'],
+          workflowSteps: ['Prepare service plan', 'Submit for approval', 'Handle rejection or urgent exception'],
+          lifecycleStates: ['draft', 'approved', 'rejected'],
+          exceptions: ['Urgent work may bypass the normal sequence through an approved exception path.'],
+          successMeasures: ['Plans do not proceed automatically after rejection.'],
+          mustCoverBehaviors: [
+            'Rejected plans return to draft',
+            'Manual override restarts approval path',
+            'Urgent exceptions use an approved route',
           ],
-          actorSlots: { initiator: 'planner', approver: 'manager' },
-          mustCarryRules: ['Rejected plans return to draft.', 'Manual override must be explicit.'],
-          edgeCases: ['Urgent work may bypass the normal sequence.', 'Approval rejection must not silently proceed.'],
           openDecisions: [],
+          arDepth: 'deep',
+          featureTarget: 1,
         } as any,
         usage: { input: 120, output: 90 },
       };
     }
-    if (request.stage === 'feature_formatter') {
+    if (request.stage === 'final_generation') {
       return {
         data: {
           features: [
@@ -303,29 +306,32 @@ test('runV2Pipeline performs full generation with per-feature AR writing once sc
               summary: 'Coordinate service planning',
               description: 'As a planner, I need to coordinate a service plan through approval and exception handling so that the work can proceed correctly.',
               suggested_story_points: 8,
+              acceptanceRequirements: [
+                {
+                  given: 'a service plan requires approval',
+                  when: 'the manager rejects the plan',
+                  then: 'the plan returns to draft and cannot proceed automatically',
+                },
+                {
+                  given: 'a rejected service plan is in draft',
+                  when: 'the planner applies a manual override',
+                  then: 'the service plan restarts the approval path explicitly',
+                },
+                {
+                  given: 'an urgent service need exists',
+                  when: 'the normal sequence cannot be followed',
+                  then: 'the planner routes the work through the approved exception path',
+                },
+              ],
             },
+          ],
+          coverageMap: [
+            { mustCoverBehavior: 'Rejected plans return to draft', featureSummary: 'Coordinate service planning' },
+            { mustCoverBehavior: 'Manual override restarts approval path', featureSummary: 'Coordinate service planning' },
+            { mustCoverBehavior: 'Urgent exceptions use an approved route', featureSummary: 'Coordinate service planning' },
           ],
         } as any,
         usage: { input: 80, output: 70 },
-      };
-    }
-    if (request.stage === 'ar_writer') {
-      return {
-        data: {
-          acceptanceRequirements: [
-            {
-              given: 'a service plan requires approval',
-              when: 'the approver rejects the plan',
-              then: 'the plan returns to draft and cannot proceed automatically',
-            },
-            {
-              given: 'an urgent service need exists',
-              when: 'the normal sequence cannot be followed',
-              then: 'the planner can route the work through the approved exception path',
-            },
-          ],
-        } as any,
-        usage: { input: 90, output: 110 },
       };
     }
     throw new Error(`Unexpected stage ${request.stage}`);
@@ -357,10 +363,127 @@ test('runV2Pipeline performs full generation with per-feature AR writing once sc
   );
 
   assert.equal(result.status, 'complete');
-  assert.deepEqual(calls, ['triage', 'capability_reasoning', 'feature_formatter', 'ar_writer']);
+  assert.deepEqual(calls, ['triage', 'discovery_synthesis', 'final_generation']);
   assert.equal(result.features.length, 1);
-  assert.equal(result.features[0]?.acceptanceRequirements.length, 2);
+  assert.equal(result.features[0]?.acceptanceRequirements.length, 3);
+  assert.equal(result.synthesis.featureTarget, 1);
+  assert.equal(result.coverage.sufficient, true);
   assert.equal(result.quality.crudLike, false);
+});
+
+test('runV2Pipeline repairs final generation when must-cover behavior is missing', async () => {
+  const calls: string[] = [];
+  const executeStage: V2StageExecutor = async (request) => {
+    calls.push(request.stage);
+    if (request.stage === 'triage') {
+      return {
+        data: {
+          complexity: 4,
+          ambiguity: 3,
+          workflow_depth: 4,
+          actor_clarity: 4,
+          must_cover_behaviors: ['Rejected plans return to draft', 'Urgent exceptions use an approved route'],
+          unresolved_decision_themes: [],
+          recommended_discovery_count: 0,
+          ar_depth: 'deep',
+        } as any,
+        usage: { input: 10, output: 10 },
+      };
+    }
+    if (request.stage === 'discovery_synthesis') {
+      return {
+        data: {
+          resolvedFacts: ['Service plans move through approval.'],
+          actorMap: { initiator: 'planner', approver: 'manager' },
+          businessRules: ['Rejected plans return to draft.'],
+          workflowSteps: ['Submit plan', 'Review plan', 'Route urgent exception'],
+          lifecycleStates: ['draft', 'rejected'],
+          exceptions: ['Urgent exceptions use an approved route.'],
+          successMeasures: [],
+          mustCoverBehaviors: ['Rejected plans return to draft', 'Urgent exceptions use an approved route'],
+          openDecisions: [],
+          arDepth: 'deep',
+          featureTarget: 1,
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    const generated = {
+      features: [
+        {
+          summary: 'Coordinate service planning',
+          description: 'As a planner, I need to coordinate a service plan through approval handling so that rejected plans are controlled.',
+          suggested_story_points: 8,
+          acceptanceRequirements: [
+            { given: 'a service plan is under review', when: 'the manager rejects the plan', then: 'the service plan returns to draft' },
+            { given: 'a rejected service plan is in draft', when: 'the planner revises it', then: 'the approval path can restart' },
+            { given: 'a service plan has review history', when: 'the planner opens it', then: 'the rejection reason remains visible' },
+          ],
+        },
+      ],
+    };
+    if (request.stage === 'final_generation') {
+      return {
+        data: {
+          ...generated,
+          coverageMap: [
+            { mustCoverBehavior: 'Rejected plans return to draft', featureSummary: 'Coordinate service planning' },
+          ],
+        } as any,
+        usage: { input: 30, output: 30 },
+      };
+    }
+    if (request.stage === 'coverage_repair') {
+      return {
+        data: {
+          ...generated,
+          features: [
+            {
+              ...generated.features[0],
+              description: 'As a planner, I need to coordinate a service plan through approval and urgent exception handling so that rejected and urgent work follows the right route.',
+              acceptanceRequirements: [
+                ...generated.features[0].acceptanceRequirements,
+                { given: 'an urgent service need exists', when: 'the normal approval sequence cannot be followed', then: 'the planner uses the approved exception route' },
+              ],
+            },
+          ],
+          coverageMap: [
+            { mustCoverBehavior: 'Rejected plans return to draft', featureSummary: 'Coordinate service planning' },
+            { mustCoverBehavior: 'Urgent exceptions use an approved route', featureSummary: 'Coordinate service planning' },
+          ],
+        } as any,
+        usage: { input: 40, output: 40 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service plan approval and urgent exception routing.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner', approver: 'manager' },
+        openQuestions: [],
+        confidence: 'high',
+      },
+      discoveryAnswers: [
+        {
+          questionId: 'q1',
+          categoryKey: 'functional_flow',
+          question: 'How are urgent exceptions routed?',
+          answer: 'Urgent exceptions must use an approved exception route.',
+        },
+      ],
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'complete');
+  assert.ok(calls.includes('coverage_repair'));
+  assert.equal(result.coverage.repaired, true);
+  assert.equal(result.coverage.sufficient, true);
 });
 
 test('validateTriageScores rejects invalid triage outputs', () => {

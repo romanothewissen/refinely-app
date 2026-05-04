@@ -1,31 +1,47 @@
 import { callLlmJsonWithUsage } from '../core/llm';
-import type { AcceptanceRequirement, ClarifyCategoryKey, Feature, TenantConfig } from '../types';
+import type { ClarifyCategoryKey, Feature, TenantConfig } from '../types';
 import {
-  buildArWriterSystemPrompt,
-  buildArWriterUserMessage,
-  buildCapabilityReasoningSystemPrompt,
-  buildCapabilityReasoningUserMessage,
+  buildCoverageRepairSystemPrompt,
+  buildCoverageRepairUserMessage,
   buildDiscoverySystemPrompt,
   buildDiscoveryUserMessage,
-  buildFeatureFormatterSystemPrompt,
-  buildFeatureFormatterUserMessage,
+  buildFinalGenerationSystemPrompt,
+  buildFinalGenerationUserMessage,
   buildScopeHypothesisSystemPrompt,
   buildScopeHypothesisUserMessage,
+  buildSynthesisSystemPrompt,
+  buildSynthesisUserMessage,
   buildTriageSystemPrompt,
   buildTriageUserMessage,
-  V2_AR_WRITER_SCHEMA,
   V2_DISCOVERY_SCHEMA,
-  V2_FEATURE_FORMATTER_SCHEMA,
-  V2_REASONING_SCHEMA,
+  V2_FINAL_GENERATION_SCHEMA,
   V2_SCOPE_HYPOTHESIS_SCHEMA,
+  V2_SYNTHESIS_SCHEMA,
   V2_TRIAGE_SCHEMA,
   validateDiscoveryQuestions,
-  validateReasoningArtifact,
+  validateFinalGeneration,
   validateScopeHypothesis,
+  validateSynthesis,
   validateTriageScores,
 } from './prompts';
 import { assessV2TriageFromScores, type V2RawTriageScores } from './triage';
-import type { V2CapabilityReasoningArtifact, V2ClassifiedAnswer, V2DiscoveryAnswer, V2DiscoveryQuestion, V2PipelineInput, V2PipelineResult, V2ScopeHypothesis, V2StageExecutor, V2StageRequest, V2TriageResult } from './types';
+import type {
+  V2CapabilityReasoningArtifact,
+  V2ClassifiedAnswer,
+  V2CoverageGateResult,
+  V2DiscoveryAnswer,
+  V2DiscoveryQuestion,
+  V2DiscoverySynthesis,
+  V2FinalGenerationResponse,
+  V2GeneratedFeature,
+  V2GroundedEvidencePack,
+  V2PipelineInput,
+  V2PipelineResult,
+  V2ScopeHypothesis,
+  V2StageExecutor,
+  V2StageRequest,
+  V2TriageResult,
+} from './types';
 import { evaluateV2Quality } from './validators';
 import {
   buildV2GroundedEvidencePack,
@@ -33,20 +49,12 @@ import {
   enrichScopeHypothesis,
   renderGroundedEvidencePack,
   validateDiscoveryQuestionsAgainstEvidence,
-  validateReasoningAgainstEvidence,
   validateScopeHypothesisAgainstEvidence,
 } from './evidence-pack';
 
-interface RawFormattedFeature {
-  summary: string;
-  description: string;
-  suggested_story_points: number;
-  process_code?: string;
-}
-
-interface RawArWriterResponse {
-  acceptanceRequirements: AcceptanceRequirement[];
-}
+const GENERIC_ACTOR_PATTERN = /\bas\s+an?\s+(?:user|authorized user|team member|authorized team member)\b/i;
+const CRUD_ONLY_PATTERN = /\b(create|edit|update|delete|remove|view|read|list)\b/i;
+const WORKFLOW_PATTERN = /\b(workflow|approval|route|routing|handoff|fallback|override|exception|lifecycle|state|dispatch|sequence|coordinate|entitlement|billable)\b/i;
 
 function providerOpts(config: TenantConfig) {
   return {
@@ -77,10 +85,10 @@ export function createDefaultV2StageExecutor(config: TenantConfig): V2StageExecu
     const model =
       request.stage === 'triage'
         ? config.generatorConfig.triageModel
-        : request.stage === 'ar_writer'
-          ? config.generatorConfig.arModel
-          : request.stage === 'scope_hypothesis' || request.stage === 'discover'
-            ? config.generatorConfig.clarifyModel
+        : request.stage === 'scope_hypothesis' || request.stage === 'discover'
+          ? config.generatorConfig.clarifyModel
+          : request.stage === 'ar_writer'
+            ? config.generatorConfig.arModel
             : config.generatorConfig.decompositionModel;
 
     const response = await callLlmJsonWithUsage<T>({
@@ -117,10 +125,10 @@ export function classifyDiscoveryAnswers(answers: V2DiscoveryAnswer[]): V2Classi
     if (!normalized || normalized.length < 8 || /^(yes|no|n\/a|none|unknown|tbd)$/i.test(lowered)) {
       return { ...answer, materiality: 'trivial', reason: 'The answer is too short or generic to change capability reasoning.' };
     }
-    if (answer.categoryKey === 'user_personas' || /\b(role|approv|owner|manager|specialist|engineer)\b/.test(lowered)) {
+    if (answer.categoryKey === 'user_personas' || /\b(role|approv|owner|manager|specialist|engineer|planner|analyst)\b/.test(lowered)) {
       return { ...answer, materiality: 'actor_bearing', reason: 'The answer materially affects actor accountability.' };
     }
-    if (answer.categoryKey === 'business_rules' || /\bmust|must not|cannot|override|manual|rule|threshold|entitle|billable\b/.test(lowered)) {
+    if (answer.categoryKey === 'business_rules' || /\bmust|must not|cannot|override|manual|rule|threshold|entitle|billable|fallback\b/.test(lowered)) {
       return { ...answer, materiality: 'rule_bearing', reason: 'The answer contains governing business logic.' };
     }
     if (answer.categoryKey === 'success_measurement' || /\bmetric|measure|success|sla|kpi|target\b/.test(lowered)) {
@@ -133,12 +141,29 @@ export function classifyDiscoveryAnswers(answers: V2DiscoveryAnswer[]): V2Classi
   });
 }
 
-function mapFormattedFeatures(rawFeatures: RawFormattedFeature[]): Feature[] {
+function addUsage(
+  promptUsage: {
+    input: number;
+    output: number;
+    byStage: Partial<Record<V2StageRequest<unknown>['stage'], { input: number; output: number }>>;
+  },
+  stage: V2StageRequest<unknown>['stage'],
+  usage: { input: number; output: number },
+) {
+  promptUsage.input += usage.input;
+  promptUsage.output += usage.output;
+  promptUsage.byStage[stage] = {
+    input: (promptUsage.byStage[stage]?.input ?? 0) + usage.input,
+    output: (promptUsage.byStage[stage]?.output ?? 0) + usage.output,
+  };
+}
+
+function mapGeneratedFeatures(rawFeatures: V2GeneratedFeature[]): Feature[] {
   return rawFeatures.map((feature, index) => ({
     id: `v2_feature_${index + 1}`,
     summary: feature.summary.trim(),
     description: feature.description.trim(),
-    acceptanceRequirements: [],
+    acceptanceRequirements: feature.acceptanceRequirements ?? [],
     storyPoints: feature.suggested_story_points,
     ...(feature.process_code ? { processCode: feature.process_code } : {}),
   }));
@@ -149,6 +174,201 @@ function buildDiscoveryChanges(answers: V2ClassifiedAnswer[]): string[] {
     .filter((answer) => answer.materiality !== 'trivial')
     .slice(0, 8)
     .map((answer) => `${answer.materiality.replace(/_/g, ' ')}: ${answer.question}`);
+}
+
+function normalizeForMatch(value: string): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokens(value: string): string[] {
+  return normalizeForMatch(value)
+    .split(' ')
+    .filter((token) => token.length >= 4 && !['with', 'from', 'that', 'this', 'when', 'then', 'must', 'need', 'user'].includes(token));
+}
+
+function textHasMeaningfulOverlap(needle: string, haystack: string): boolean {
+  const needleTokens = tokens(needle);
+  if (!needleTokens.length) return false;
+  const normalizedHaystack = normalizeForMatch(haystack);
+  const matches = needleTokens.filter((token) => normalizedHaystack.includes(token)).length;
+  return matches >= Math.min(2, needleTokens.length);
+}
+
+function featureText(feature: Feature): string {
+  return [
+    feature.summary,
+    feature.description,
+    ...feature.acceptanceRequirements.flatMap((ar) => [ar.given, ar.when, ar.then]),
+  ].join(' ');
+}
+
+function assessCoverage(
+  generated: V2FinalGenerationResponse,
+  synthesis: V2DiscoverySynthesis,
+  evidencePack: V2GroundedEvidencePack,
+): V2CoverageGateResult {
+  const features = mapGeneratedFeatures(generated.features);
+  const allFeatureText = features.map(featureText).join('\n');
+  const openDecisionTitles = new Set(synthesis.openDecisions.map((decision) => normalizeForMatch(decision.title)));
+  const featureSummaries = new Set(features.map((feature) => normalizeForMatch(feature.summary)));
+  const failures: string[] = [];
+
+  for (const behavior of synthesis.mustCoverBehaviors) {
+    const mapping = generated.coverageMap.find((entry) => normalizeForMatch(entry.mustCoverBehavior) === normalizeForMatch(behavior));
+    const mappedFeature = mapping?.featureSummary ? featureSummaries.has(normalizeForMatch(mapping.featureSummary)) : false;
+    const mappedOpen = mapping?.openDecisionTitle ? openDecisionTitles.has(normalizeForMatch(mapping.openDecisionTitle)) : false;
+    const textCovered = textHasMeaningfulOverlap(behavior, allFeatureText);
+    if (!mappedFeature && !mappedOpen && !textCovered) {
+      failures.push(`Must-cover behavior is not represented: ${behavior}`);
+    }
+  }
+
+  const groundedSpecificRole = evidencePack.roleCandidates.some((candidate) => candidate.confidence === 'strong' || candidate.confidence === 'supported');
+  if (groundedSpecificRole) {
+    const weakActor = features.find((feature) => GENERIC_ACTOR_PATTERN.test(feature.description));
+    if (weakActor) {
+      failures.push(`Feature "${weakActor.summary}" uses a generic actor despite grounded role evidence.`);
+    }
+  }
+
+  for (const feature of features) {
+    if (feature.acceptanceRequirements.length < 2) {
+      failures.push(`Feature "${feature.summary}" has fewer than two acceptance requirements.`);
+    }
+    if (synthesis.arDepth === 'deep' && feature.acceptanceRequirements.length < 3) {
+      failures.push(`Feature "${feature.summary}" is too light for deep AR coverage.`);
+    }
+  }
+
+  const workflowNeeded = synthesis.workflowSteps.length || synthesis.exceptions.length || synthesis.lifecycleStates.length || synthesis.businessRules.length;
+  const crudOnly = features.some((feature) => {
+    const text = `${feature.summary} ${feature.description}`;
+    return CRUD_ONLY_PATTERN.test(text) && workflowNeeded && !WORKFLOW_PATTERN.test(text);
+  });
+  if (crudOnly) {
+    failures.push('At least one feature still looks like a CRUD fragment even though workflow/rule coverage is required.');
+  }
+
+  return {
+    sufficient: failures.length === 0,
+    failures,
+    repaired: false,
+  };
+}
+
+function buildReasoningArtifactFromSynthesis(
+  synthesis: V2DiscoverySynthesis,
+  features: Feature[],
+): V2CapabilityReasoningArtifact {
+  const globalRules = [...synthesis.businessRules, ...synthesis.workflowSteps].filter(Boolean).slice(0, 10);
+  const globalEdges = [...synthesis.exceptions, ...synthesis.lifecycleStates].filter(Boolean).slice(0, 10);
+  return {
+    capabilities: features.map((feature, index) => ({
+      capabilityId: `cap_${index + 1}`,
+      label: feature.summary,
+      boundary: feature.description,
+      ownerRole: synthesis.actorMap.performer
+        ?? synthesis.actorMap.initiator
+        ?? feature.description.match(/^As an? ([^,]+),/i)?.[1]
+        ?? 'authorized user',
+      mustCarryRules: globalRules.length ? globalRules.slice(0, 6) : synthesis.mustCoverBehaviors.slice(0, 6),
+      edgeCases: globalEdges.length ? globalEdges.slice(0, 4) : ['No material exception was resolved during discovery.'],
+    })),
+    actorSlots: synthesis.actorMap,
+    mustCarryRules: globalRules.length ? globalRules : synthesis.mustCoverBehaviors.slice(0, 10),
+    edgeCases: globalEdges.length ? globalEdges : [],
+    openDecisions: synthesis.openDecisions,
+  };
+}
+
+function normalizeSynthesis(
+  synthesis: V2DiscoverySynthesis,
+  triage: V2TriageResult,
+  scopeHypothesis: V2ScopeHypothesis,
+): V2DiscoverySynthesis {
+  const mustCover = synthesis.mustCoverBehaviors?.length
+    ? synthesis.mustCoverBehaviors
+    : triage.mustCoverBehaviors;
+  return {
+    ...synthesis,
+    actorMap: Object.keys(synthesis.actorMap ?? {}).length ? synthesis.actorMap : scopeHypothesis.actorSlots,
+    mustCoverBehaviors: mustCover.slice(0, 12),
+    arDepth: synthesis.arDepth ?? triage.arDepth,
+    featureTarget: Math.max(1, Math.min(6, synthesis.featureTarget || scopeHypothesis.capabilities.length || triage.likelyCapabilityCount)),
+  };
+}
+
+function normalizeTriageOverride(
+  triage: V2TriageResult,
+  requirement: string,
+  attachmentText = '',
+): V2TriageResult {
+  const numeric = (value: unknown, fallback: number) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const fallback = assessV2TriageFromScores({
+    capability_breadth: numeric(triage.capabilityBreadth, 3),
+    ask_clarity: numeric(triage.askClarity, 3),
+    actor_clarity: numeric(triage.actorClarity, 3),
+  }, requirement, attachmentText);
+  return {
+    ...fallback,
+    ...triage,
+    complexity: triage.complexity ?? fallback.complexity,
+    ambiguity: triage.ambiguity ?? fallback.ambiguity,
+    workflowDepth: triage.workflowDepth ?? fallback.workflowDepth,
+    mustCoverBehaviors: triage.mustCoverBehaviors?.length ? triage.mustCoverBehaviors : fallback.mustCoverBehaviors,
+    unresolvedDecisionThemes: triage.unresolvedDecisionThemes?.length ? triage.unresolvedDecisionThemes : fallback.unresolvedDecisionThemes,
+    arDepth: triage.arDepth ?? fallback.arDepth,
+  };
+}
+
+function shouldAskDiscovery(triage: V2TriageResult, scopeHypothesis: V2ScopeHypothesis, classifiedAnswers: V2ClassifiedAnswer[]): boolean {
+  if (classifiedAnswers.some((answer) => answer.materiality !== 'trivial')) return false;
+  if (triage.questionBudget <= 0) return false;
+  if (triage.discoveryMode === 'light' && scopeHypothesis.confidence === 'high' && !scopeHypothesis.openQuestions.length) return false;
+  return true;
+}
+
+async function buildTriage(
+  input: V2PipelineInput,
+  executeStage: V2StageExecutor,
+  promptUsage: {
+    input: number;
+    output: number;
+    byStage: Partial<Record<V2StageRequest<unknown>['stage'], { input: number; output: number }>>;
+  },
+): Promise<V2TriageResult> {
+  if (input.triageOverride) {
+    return normalizeTriageOverride(input.triageOverride, input.requirement, input.attachmentText);
+  }
+
+  try {
+    const triageResponse = await executeStage<V2RawTriageScores>({
+      stage: 'triage',
+      model: input.config.generatorConfig.triageModel,
+      systemPrompt: buildTriageSystemPrompt(),
+      userMessage: buildTriageUserMessage({
+        requirement: input.requirement,
+        attachmentText: input.attachmentText,
+      }),
+      jsonSchema: V2_TRIAGE_SCHEMA,
+      maxTokens: 900,
+      reasoningEffort: 'low',
+      validate: validateTriageScores,
+    });
+    addUsage(promptUsage, 'triage', triageResponse.usage);
+    return assessV2TriageFromScores(
+      triageResponse.data,
+      input.requirement,
+      input.attachmentText ?? '',
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'Unknown triage error');
+    throw new Error(`V2 triage failed: ${reason}`);
+  }
 }
 
 export async function runV2Pipeline(
@@ -163,8 +383,6 @@ export async function runV2Pipeline(
     similarStoriesText: input.similarStoriesText,
     wiContextText: input.wiContextText,
   });
-  const scopeGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'scope_hypothesis');
-  const discoveryGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'discover');
   const promptUsage: {
     input: number;
     output: number;
@@ -174,62 +392,33 @@ export async function runV2Pipeline(
     output: 0,
     byStage: {},
   };
-  let triage: V2TriageResult;
-  if (input.triageOverride) {
-    triage = input.triageOverride;
-  } else {
-    try {
-      const triageResponse = await executeStage<V2RawTriageScores>({
-        stage: 'triage',
-        model: input.config.generatorConfig.triageModel,
-        systemPrompt: buildTriageSystemPrompt(),
-        userMessage: buildTriageUserMessage({
-          requirement: input.requirement,
-          attachmentText: input.attachmentText,
-        }),
-        jsonSchema: V2_TRIAGE_SCHEMA,
-        maxTokens: 220,
-        reasoningEffort: 'low',
-        validate: validateTriageScores,
-      });
-      triage = assessV2TriageFromScores(
-        triageResponse.data,
-        input.requirement,
-        input.attachmentText ?? '',
-      );
-      promptUsage.input += triageResponse.usage.input;
-      promptUsage.output += triageResponse.usage.output;
-      promptUsage.byStage.triage = triageResponse.usage;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error ?? 'Unknown triage error');
-      throw new Error(`V2 triage failed: ${reason}`);
-    }
-  }
+
+  const triage = await buildTriage(input, executeStage, promptUsage);
+  const scopeGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'scope_hypothesis');
+  const discoveryGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'discover');
 
   let scopeHypothesis = input.confirmedScopeHypothesis;
   if (!scopeHypothesis) {
     const scopeResponse = await executeStage<V2ScopeHypothesis>({
       stage: 'scope_hypothesis',
       model: input.config.generatorConfig.clarifyModel,
-        systemPrompt: buildScopeHypothesisSystemPrompt(),
-        userMessage: buildScopeHypothesisUserMessage({
-          requirement: input.requirement,
-          attachmentText: input.attachmentText,
-          triage,
-          groundedEvidenceText: scopeGroundedEvidenceText,
-        }),
-        jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
-        maxTokens: 1400,
-        reasoningEffort: 'low',
-        validate: (data) => (
-          validateScopeHypothesis(data)
-          ?? validateScopeHypothesisAgainstEvidence(data as V2ScopeHypothesis, baseEvidencePack)
-        ),
-      });
+      systemPrompt: buildScopeHypothesisSystemPrompt(),
+      userMessage: buildScopeHypothesisUserMessage({
+        requirement: input.requirement,
+        attachmentText: input.attachmentText,
+        triage,
+        groundedEvidenceText: scopeGroundedEvidenceText,
+      }),
+      jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
+      maxTokens: 1400,
+      reasoningEffort: 'low',
+      validate: (data) => (
+        validateScopeHypothesis(data)
+        ?? validateScopeHypothesisAgainstEvidence(data as V2ScopeHypothesis, baseEvidencePack)
+      ),
+    });
     scopeHypothesis = enrichScopeHypothesis(scopeResponse.data, baseEvidencePack);
-    promptUsage.input += scopeResponse.usage.input;
-    promptUsage.output += scopeResponse.usage.output;
-    promptUsage.byStage.scope_hypothesis = scopeResponse.usage;
+    addUsage(promptUsage, 'scope_hypothesis', scopeResponse.usage);
   } else {
     scopeHypothesis = enrichScopeHypothesis(scopeHypothesis, baseEvidencePack, { preserveActorSlots: true });
   }
@@ -253,9 +442,7 @@ export async function runV2Pipeline(
   }
 
   const classifiedAnswers = classifyDiscoveryAnswers(input.discoveryAnswers ?? []);
-  const hasMaterialAnswers = classifiedAnswers.some((answer) => answer.materiality !== 'trivial');
-
-  if (!hasMaterialAnswers) {
+  if (shouldAskDiscovery(triage, scopeHypothesis, classifiedAnswers)) {
     const discovery = await executeStage<{ questions: V2DiscoveryQuestion[] }>({
       stage: 'discover',
       model: input.config.generatorConfig.clarifyModel,
@@ -276,9 +463,7 @@ export async function runV2Pipeline(
         return validateDiscoveryQuestionsAgainstEvidence(payload?.questions ?? [], baseEvidencePack);
       },
     });
-    promptUsage.input += discovery.usage.input;
-    promptUsage.output += discovery.usage.output;
-    promptUsage.byStage.discover = discovery.usage;
+    addUsage(promptUsage, 'discover', discovery.usage);
     return {
       status: 'needs_discovery',
       triage,
@@ -289,13 +474,13 @@ export async function runV2Pipeline(
         categoryKey: question.categoryKey || inferCategory(question.question),
       })),
       materialityHints: [
-        'Answer only the questions that change capability boundaries, actor accountability, rules, or lifecycle handling.',
+        'Answer only the questions that change capability boundaries, actor accountability, rules, lifecycle handling, exceptions, or success measures.',
         'Short or trivial answers will be filtered out of generation.',
       ],
     };
   }
 
-  const reasoningEvidencePack = input.evidencePack ?? buildV2GroundedEvidencePack({
+  const synthesisEvidencePack = input.evidencePack ?? buildV2GroundedEvidencePack({
     requirement: input.requirement,
     attachmentText: input.attachmentText,
     domainContext: input.domainContext,
@@ -304,79 +489,86 @@ export async function runV2Pipeline(
     wiContextText: input.wiContextText,
     discoveryAnswers: classifiedAnswers,
   });
-  const reasoningGroundedEvidenceText = renderGroundedEvidencePack(reasoningEvidencePack, 'capability_reasoning');
+  const synthesisEvidenceText = renderGroundedEvidencePack(synthesisEvidencePack, 'discovery_synthesis');
 
-  const reasoning = await executeStage<V2CapabilityReasoningArtifact>({
-    stage: 'capability_reasoning',
+  const synthesisResponse = await executeStage<V2DiscoverySynthesis>({
+    stage: 'discovery_synthesis',
     model: input.config.generatorConfig.decompositionModel,
-    systemPrompt: buildCapabilityReasoningSystemPrompt(),
-    userMessage: buildCapabilityReasoningUserMessage({
+    systemPrompt: buildSynthesisSystemPrompt(),
+    userMessage: buildSynthesisUserMessage({
       requirement: input.requirement,
+      triage,
       scopeHypothesis,
       classifiedAnswers,
-      groundedEvidenceText: reasoningGroundedEvidenceText,
+      groundedEvidenceText: synthesisEvidenceText,
     }),
-    jsonSchema: V2_REASONING_SCHEMA,
+    jsonSchema: V2_SYNTHESIS_SCHEMA,
     maxTokens: 2200,
     reasoningEffort: 'medium',
-    validate: (data) => (
-      validateReasoningArtifact(data)
-      ?? validateReasoningAgainstEvidence(data as V2CapabilityReasoningArtifact, reasoningEvidencePack)
-    ),
+    validate: validateSynthesis,
   });
-  promptUsage.input += reasoning.usage.input;
-  promptUsage.output += reasoning.usage.output;
-  promptUsage.byStage.capability_reasoning = reasoning.usage;
-  const groundedReasoning = enrichCapabilityReasoning(reasoning.data, reasoningEvidencePack);
+  addUsage(promptUsage, 'discovery_synthesis', synthesisResponse.usage);
+  const synthesis = normalizeSynthesis(synthesisResponse.data, triage, scopeHypothesis);
 
-  const formatted = await executeStage<{ features: RawFormattedFeature[] }>({
-    stage: 'feature_formatter',
+  const finalEvidenceText = renderGroundedEvidencePack(synthesisEvidencePack, 'final_generation');
+  const finalResponse = await executeStage<V2FinalGenerationResponse>({
+    stage: 'final_generation',
     model: input.config.generatorConfig.decompositionModel,
-    systemPrompt: buildFeatureFormatterSystemPrompt(),
-    userMessage: buildFeatureFormatterUserMessage({
-      reasoning: groundedReasoning,
+    systemPrompt: buildFinalGenerationSystemPrompt(),
+    userMessage: buildFinalGenerationUserMessage({
+      requirement: input.requirement,
+      synthesis,
+      groundedEvidenceText: finalEvidenceText,
       processTaxonomyEnabled: input.config.processTaxonomyEnabled,
       processCodes: input.config.processTaxonomy,
     }),
-    jsonSchema: V2_FEATURE_FORMATTER_SCHEMA,
-    maxTokens: 1800,
-    reasoningEffort: 'low',
+    jsonSchema: V2_FINAL_GENERATION_SCHEMA,
+    maxTokens: 4200,
+    reasoningEffort: 'medium',
+    validate: validateFinalGeneration,
   });
-  promptUsage.input += formatted.usage.input;
-  promptUsage.output += formatted.usage.output;
-  promptUsage.byStage.feature_formatter = formatted.usage;
+  addUsage(promptUsage, 'final_generation', finalResponse.usage);
 
-  const features = mapFormattedFeatures(formatted.data.features);
-  for (const feature of features) {
-    const arResponse = await executeStage<RawArWriterResponse>({
-      stage: 'ar_writer',
-      model: input.config.generatorConfig.arModel,
-      systemPrompt: buildArWriterSystemPrompt(),
-      userMessage: buildArWriterUserMessage({
-        feature: { summary: feature.summary, description: feature.description },
-        capabilityReasoning: groundedReasoning,
+  let generated = finalResponse.data;
+  let coverage = assessCoverage(generated, synthesis, synthesisEvidencePack);
+  if (!coverage.sufficient) {
+    const repairResponse = await executeStage<V2FinalGenerationResponse>({
+      stage: 'coverage_repair',
+      model: input.config.generatorConfig.decompositionModel,
+      systemPrompt: buildCoverageRepairSystemPrompt(),
+      userMessage: buildCoverageRepairUserMessage({
+        requirement: input.requirement,
+        synthesis,
+        generated,
+        failures: coverage.failures,
+        groundedEvidenceText: renderGroundedEvidencePack(synthesisEvidencePack, 'coverage_repair'),
       }),
-      jsonSchema: V2_AR_WRITER_SCHEMA,
-      maxTokens: 2200,
+      jsonSchema: V2_FINAL_GENERATION_SCHEMA,
+      maxTokens: 4200,
       reasoningEffort: 'medium',
+      validate: validateFinalGeneration,
     });
-    feature.acceptanceRequirements = arResponse.data.acceptanceRequirements;
-    promptUsage.input += arResponse.usage.input;
-    promptUsage.output += arResponse.usage.output;
-    promptUsage.byStage.ar_writer = {
-      input: (promptUsage.byStage.ar_writer?.input ?? 0) + arResponse.usage.input,
-      output: (promptUsage.byStage.ar_writer?.output ?? 0) + arResponse.usage.output,
+    addUsage(promptUsage, 'coverage_repair', repairResponse.usage);
+    generated = repairResponse.data;
+    coverage = {
+      ...assessCoverage(generated, synthesis, synthesisEvidencePack),
+      repaired: true,
     };
   }
 
+  const features = mapGeneratedFeatures(generated.features);
+  const reasoning = enrichCapabilityReasoning(
+    buildReasoningArtifactFromSynthesis(synthesis, features),
+    synthesisEvidencePack,
+  );
   const finalScopeHypothesis = enrichScopeHypothesis(
     {
       ...scopeHypothesis,
-      actorSlots: Object.keys(groundedReasoning.actorSlots ?? {}).length
-        ? groundedReasoning.actorSlots
+      actorSlots: Object.keys(synthesis.actorMap ?? {}).length
+        ? synthesis.actorMap
         : scopeHypothesis.actorSlots,
     },
-    reasoningEvidencePack,
+    synthesisEvidencePack,
     { classifiedAnswers, preserveActorSlots: true },
   );
 
@@ -384,11 +576,13 @@ export async function runV2Pipeline(
     status: 'complete',
     triage,
     scopeHypothesis: finalScopeHypothesis,
-    reasoning: groundedReasoning,
+    synthesis,
+    reasoning,
     features,
     classifiedAnswers,
     discoveryChanges: buildDiscoveryChanges(classifiedAnswers),
     quality: evaluateV2Quality(features),
+    coverage,
     promptUsage,
   };
 }

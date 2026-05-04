@@ -4,9 +4,16 @@ const CRUD_TERMS = /\b(create|edit|update|delete|remove|view|read|list)\b/gi;
 const WORKFLOW_TERMS = /\b(workflow|approval|routing|handoff|exception|fallback|override|lifecycle|scheduling|coordination|entitlement|determine|dispatch|sequence|dependency|reopen|resume|cancel|billable)\b/gi;
 
 export interface V2RawTriageScores {
-  capability_breadth: number;
-  ask_clarity: number;
+  capability_breadth?: number;
+  ask_clarity?: number;
+  complexity?: number;
+  ambiguity?: number;
+  workflow_depth?: number;
   actor_clarity: number;
+  must_cover_behaviors?: string[];
+  unresolved_decision_themes?: string[];
+  recommended_discovery_count?: number;
+  ar_depth?: 'light' | 'standard' | 'deep';
 }
 
 interface BudgetBand {
@@ -56,28 +63,60 @@ function mapCapabilityCount(capabilityBreadth: number): number {
   return clamp(capabilityBreadth, 1, 6);
 }
 
+function normalizeList(value: unknown, fallback: string[]): string[] {
+  const items = Array.isArray(value)
+    ? value.map((item) => String(item ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean)
+    : [];
+  return (items.length ? items : fallback).slice(0, 12);
+}
+
+function fallbackBehaviors(requirement: string): string[] {
+  const trimmed = requirement.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return ['Represent the requested business capability'];
+  return [trimmed.length > 150 ? `${trimmed.slice(0, 147).trimEnd()}...` : trimmed];
+}
+
+function fallbackThemes(requirement: string, actorClarity: number, ambiguity: number): string[] {
+  const themes: string[] = [];
+  if (actorClarity <= 3) themes.push('Actor accountability and approval ownership');
+  if (ambiguity >= 3) themes.push('Business rules, exception handling, and completion criteria');
+  if (/\b(status|state|lifecycle|approval|routing|handoff|fallback|override)\b/i.test(requirement)) {
+    themes.push('Workflow sequence and lifecycle transitions');
+  }
+  return themes.slice(0, 8);
+}
+
 export function assessV2TriageFromScores(
   scores: V2RawTriageScores,
   requirement: string,
   attachmentText = '',
 ): V2TriageResult {
-  const capabilityBreadth = clamp(Math.round(scores.capability_breadth), 1, 5);
-  const askClarity = clamp(Math.round(scores.ask_clarity), 1, 5);
+  const complexity = clamp(Math.round(scores.complexity ?? scores.capability_breadth ?? 3), 1, 5);
+  const ambiguity = clamp(Math.round(scores.ambiguity ?? (scores.ask_clarity ? 6 - scores.ask_clarity : 3)), 1, 5);
+  const workflowDepth = clamp(Math.round(scores.workflow_depth ?? complexity), 1, 5);
+  const capabilityBreadth = clamp(Math.round(scores.capability_breadth ?? Math.max(complexity, workflowDepth)), 1, 5);
+  const askClarity = clamp(Math.round(scores.ask_clarity ?? (6 - ambiguity)), 1, 5);
   const actorClarity = clamp(Math.round(scores.actor_clarity), 1, 5);
   const discoveryLoad = clamp(
-    capabilityBreadth + (6 - askClarity) + (6 - actorClarity),
+    Math.max(capabilityBreadth, workflowDepth) + ambiguity + (6 - actorClarity),
     3,
     15,
   );
 
   const band = DISCOVERY_BANDS.find((candidate) => discoveryLoad >= candidate.minLoad && discoveryLoad <= candidate.maxLoad) ?? DISCOVERY_BANDS[DISCOVERY_BANDS.length - 1];
-  const questionBudget = interpolateBudget(discoveryLoad, band);
+  const recommendedCount = Number.isInteger(scores.recommended_discovery_count)
+    ? clamp(Number(scores.recommended_discovery_count), 0, 15)
+    : interpolateBudget(discoveryLoad, band);
+  const questionBudget = recommendedCount || (band.mode === 'light' ? 2 : interpolateBudget(discoveryLoad, band));
   const merged = `${requirement} ${attachmentText}`.trim();
   const crudRisk = estimateCrudRisk(merged);
   const likelyCapabilityShape = mapShape(capabilityBreadth);
   const likelyCapabilityCount = mapCapabilityCount(capabilityBreadth);
+  const arDepth = scores.ar_depth ?? (workflowDepth >= 4 || ambiguity >= 4 ? 'deep' : workflowDepth >= 3 ? 'standard' : 'light');
+  const mustCoverBehaviors = normalizeList(scores.must_cover_behaviors, fallbackBehaviors(requirement));
+  const unresolvedDecisionThemes = normalizeList(scores.unresolved_decision_themes, fallbackThemes(requirement, actorClarity, ambiguity));
   const reasons = [
-    `Breadth ${capabilityBreadth}/5, ask clarity ${askClarity}/5, actor clarity ${actorClarity}/5.`,
+    `Complexity ${complexity}/5, ambiguity ${ambiguity}/5, workflow depth ${workflowDepth}/5, actor clarity ${actorClarity}/5.`,
     `Discovery load ${discoveryLoad} maps to ${band.mode} discovery with budget ${questionBudget}.`,
   ];
   if (crudRisk !== 'low') {
@@ -87,6 +126,9 @@ export function assessV2TriageFromScores(
   return {
     discoveryMode: band.mode,
     questionBudget,
+    complexity,
+    ambiguity,
+    workflowDepth,
     capabilityBreadth,
     askClarity,
     actorClarity,
@@ -94,6 +136,9 @@ export function assessV2TriageFromScores(
     crudRisk,
     likelyCapabilityCount,
     likelyCapabilityShape,
+    mustCoverBehaviors,
+    unresolvedDecisionThemes,
+    arDepth,
     shouldPauseForScopeConfirmation: true,
     reasons,
   };

@@ -21,6 +21,11 @@ export type V2StageName =
   | 'triage'
   | 'scope_hypothesis'
   | 'discover'
+  | 'discovery_synthesis'
+  | 'final_generation'
+  | 'coverage_repair'
+  // Legacy stage names are kept in the union so older saved audit records and
+  // tests that inspect stage usage remain readable.
   | 'capability_reasoning'
   | 'feature_formatter'
   | 'ar_writer';
@@ -34,6 +39,9 @@ export interface V2PromptBudget {
 export interface V2TriageResult {
   discoveryMode: V2DiscoveryMode;
   questionBudget: number;
+  complexity: number;
+  ambiguity: number;
+  workflowDepth: number;
   capabilityBreadth: number;
   askClarity: number;
   actorClarity: number;
@@ -41,6 +49,9 @@ export interface V2TriageResult {
   crudRisk: V2CrudRisk;
   likelyCapabilityCount: number;
   likelyCapabilityShape: 'single_capability' | 'small_workflow' | 'broad_workflow';
+  mustCoverBehaviors: string[];
+  unresolvedDecisionThemes: string[];
+  arDepth: 'light' | 'standard' | 'deep';
   shouldPauseForScopeConfirmation: boolean;
   reasons: string[];
 }
@@ -111,6 +122,45 @@ export interface V2CapabilityReasoningArtifact {
   mustCarryRules: string[];
   edgeCases: string[];
   openDecisions: V2OpenDecision[];
+}
+
+export interface V2DiscoverySynthesis {
+  resolvedFacts: string[];
+  actorMap: V2ActorSlots;
+  businessRules: string[];
+  workflowSteps: string[];
+  lifecycleStates: string[];
+  exceptions: string[];
+  successMeasures: string[];
+  mustCoverBehaviors: string[];
+  openDecisions: V2OpenDecision[];
+  arDepth: 'light' | 'standard' | 'deep';
+  featureTarget: number;
+}
+
+export interface V2GeneratedFeature {
+  summary: string;
+  description: string;
+  suggested_story_points: number;
+  process_code?: string;
+  acceptanceRequirements: AcceptanceRequirement[];
+}
+
+export interface V2CoverageMapping {
+  mustCoverBehavior: string;
+  featureSummary?: string;
+  openDecisionTitle?: string;
+}
+
+export interface V2FinalGenerationResponse {
+  features: V2GeneratedFeature[];
+  coverageMap: V2CoverageMapping[];
+}
+
+export interface V2CoverageGateResult {
+  sufficient: boolean;
+  failures: string[];
+  repaired: boolean;
 }
 
 export interface V2BenchmarkExample {
@@ -213,11 +263,13 @@ export interface V2PipelineCompleteResult {
   status: 'complete';
   triage: V2TriageResult;
   scopeHypothesis: V2ScopeHypothesis;
+  synthesis: V2DiscoverySynthesis;
   reasoning: V2CapabilityReasoningArtifact;
   features: Feature[];
   classifiedAnswers: V2ClassifiedAnswer[];
   discoveryChanges: string[];
   quality: V2QualityEvaluation;
+  coverage: V2CoverageGateResult;
   promptUsage: {
     input: number;
     output: number;
