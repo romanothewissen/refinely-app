@@ -21,7 +21,7 @@ export default function App() {
   const [openWorkspaceApp, setOpenWorkspaceApp] = useState(false);
   const [launchMode, setLaunchMode] = useState<'generate' | 'settings'>('generate');
   const [settingsSurface, setSettingsSurface] = useState<'workspace' | 'project'>('workspace');
-  const [settingsTab, setSettingsTab] = useState<'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance'>('models');
+  const [settingsTab, setSettingsTab] = useState<'models' | 'jira' | 'domain' | 'compliance'>('models');
   const [prefillRequirement, setPrefillRequirement] = useState('');
   const [quickRefineViewState, setQuickRefineViewState] = useState<QuickRefineViewState | null>(null);
   const [returnToQuickRefine, setReturnToQuickRefine] = useState(false);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  Database, BrainCircuit, Globe, X, RefreshCw, Save, CreditCard, ChevronLeft, BarChart3,
+  Database, BrainCircuit, Globe, X, RefreshCw, Save, ChevronLeft,
   FileText, ChevronRight, ChevronDown, Check, Trash, Layers, Zap, AlertCircle, Image,
   ShieldCheck, Filter
 } from 'lucide-react';
@@ -91,6 +91,18 @@ interface BacklogRefreshStatusRow {
   builtAt?: string;
   themeBuiltAt?: string;
   error?: string;
+}
+
+interface ProjectMemoryRefreshStatusRow {
+  projectKey: string;
+  activeArtifactVersion?: string | null;
+  lastBuiltAt?: string | null;
+  nextDueAt?: string | null;
+  lastSourceHash?: string | null;
+  lastTrigger?: 'weekly' | 'manual' | 'threshold' | null;
+  status: 'missing' | 'queued' | 'running' | 'ready' | 'error';
+  lastError?: string | null;
+  updatedAt?: string;
 }
 
 interface WiDocRow {
@@ -412,7 +424,7 @@ function areStringArraysEqual(left: string[] = [], right: string[] = []) {
 }
 
 type SettingsSurface = 'workspace' | 'project';
-type WorkspaceSettingsTab = 'models' | 'domain' | 'stats' | 'billing' | 'compliance';
+type WorkspaceSettingsTab = 'models' | 'domain' | 'compliance';
 
 export function SettingsView({
   onClose,
@@ -422,12 +434,12 @@ export function SettingsView({
 }: {
   onClose: () => void;
   initialSurface?: SettingsSurface;
-  initialTab?: 'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance';
+  initialTab?: 'models' | 'jira' | 'domain' | 'compliance';
   initialProjectKey?: string;
 }) {
   const [activeSurface, setActiveSurface] = useState<SettingsSurface>(initialSurface);
   const [activeTab, setActiveTab] = useState<WorkspaceSettingsTab>(
-    initialTab === 'billing' || initialTab === 'stats' || initialTab === 'compliance' || initialTab === 'domain'
+    initialTab === 'compliance' || initialTab === 'domain'
       ? initialTab
       : 'models',
   );
@@ -498,6 +510,8 @@ export function SettingsView({
   const [backlogDiagnostics, setBacklogDiagnostics] = useState<BacklogDiagnostics | null>(null);
   const [backlogRefreshStatus, setBacklogRefreshStatus] = useState<BacklogRefreshStatusRow | null>(null);
   const [isRefreshingBacklogCache, setIsRefreshingBacklogCache] = useState(false);
+  const [projectMemoryRefreshStatus, setProjectMemoryRefreshStatus] = useState<ProjectMemoryRefreshStatusRow | null>(null);
+  const [isRefreshingProjectMemory, setIsRefreshingProjectMemory] = useState(false);
   const [backlogThemeBudgetOverride, setBacklogThemeBudgetOverride] = useState('');
   const [goldExampleConfigs, setGoldExampleConfigs] = useState<ProjectGoldExampleConfig[]>([]);
   const [goldStoryPool, setGoldStoryPool] = useState<{ key: string; summary: string; score: number }[]>([]);
@@ -527,11 +541,8 @@ export function SettingsView({
   const [piiPreviewResult, setPiiPreviewResult] = useState<PiiPreviewResult>({ text: '', totalRedactions: 0, byType: {} });
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('');
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [usage, setUsage] = useState<UsageSnapshot>(null);
-  const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
   const [domainContexts, setDomainContexts] = useState<ProjectDomainContextRow[]>([]);
   const [activeProjAdmin, setActiveProjAdmin] = useState<boolean>(false);
-  const isHostedSampler = usage?.credentialMode === 'hosted_sampler';
   const canManageProjectSettings = Boolean(isAdmin || activeProjAdmin);
   const projectCapabilities = {
     canManageProjectSettings,
@@ -546,9 +557,6 @@ export function SettingsView({
   const [wiUploadState, setWiUploadState] = useState<{ filename: string; stage: 'reading' | 'uploading' | 'indexing' } | null>(null);
   const [wiUploadError, setWiUploadError] = useState<string | null>(null);
   const wiFileInputRef = useRef<HTMLInputElement>(null);
-  const workspaceTokenUsage = useMemo(() => {
-    return transparencyReports.reduce((sum, report) => sum + (report.tokenUsage?.total ?? 0), 0);
-  }, [transparencyReports]);
   const configuredProjectCount = useMemo(() => {
     const keys = new Set<string>();
     arMappings.forEach((mapping) => {
@@ -571,18 +579,6 @@ export function SettingsView({
       domain: domainContexts.some(d => d.context?.trim()) ? 'complete' : 'pending',
     } as const;
   }, [provider, existingAnthropicApiKey, existingGeminiApiKey, existingOpenaiApiKey, existingFireworksApiKey, existingAzureOpenAIApiKey, existingOllamaApiKey, existingGroqApiKey, arMappings, domainContexts, isAdmin]);
-
-  const projectUsageBreakdown = useMemo(() => {
-    return projectActivityRows
-      .map((row) => ({
-        projectKey: row.projectKey,
-        tokenUsage: row.tokenUsage,
-        reportCount: row.count,
-        latestAt: row.latestAt,
-        actionCounts: row.actionCounts,
-      }))
-      .sort((a, b) => b.reportCount - a.reportCount || b.tokenUsage - a.tokenUsage);
-  }, [projectActivityRows]);
 
   const projectOptions = useMemo<SearchableSelectOption[]>(
     () => projects.map((project) => ({
@@ -650,6 +646,19 @@ export function SettingsView({
     return null;
   }, []);
 
+  const loadProjectMemoryRefreshStatus = useCallback(async (projectKey: string) => {
+    try {
+      const res = await api.getProjectMemoryRefreshStatus(projectKey) as any;
+      if (res?.success) {
+        setProjectMemoryRefreshStatus(res.status ?? null);
+        return res.status ?? null;
+      }
+    } catch (e) {
+      console.error('Could not load project memory refresh status', e);
+    }
+    return null;
+  }, []);
+
   useEffect(() => {
     loadInitialConfig();
     // Bootstraps settings state once on mount.
@@ -658,7 +667,7 @@ export function SettingsView({
 
   useEffect(() => {
     setActiveSurface(initialSurface);
-    if (initialTab === 'billing' || initialTab === 'stats' || initialTab === 'compliance' || initialTab === 'domain') {
+    if (initialTab === 'compliance' || initialTab === 'domain') {
       setActiveTab(initialTab);
     } else {
       setActiveTab('models');
@@ -769,10 +778,6 @@ export function SettingsView({
         if (existingConfig.branding?.logoUrl !== undefined) setBrandingLogoUrl(existingConfig.branding.logoUrl || '');
         if (existingConfig.isAdmin !== undefined) setIsAdmin(existingConfig.isAdmin);
       }
-      const usageRes = await api.getUsage() as any;
-      if (usageRes?.usage) setUsage(usageRes.usage);
-      if (usageRes?.limits) setLimits(usageRes.limits);
-      if (usageRes?.tier) setTier(usageRes.tier);
       const jiraRes = await api.discoverJira() as any;
       if (jiraRes?.success !== false) {
         setProjects(jiraRes.projects ?? []);
@@ -826,12 +831,14 @@ export function SettingsView({
       void loadBacklogCacheInfo(activeArProj);
       void loadBacklogDiagnostics(activeArProj);
       void loadBacklogRefreshStatus(activeArProj);
+      void loadProjectMemoryRefreshStatus(activeArProj);
     } else {
       setBacklogCacheInfo(null);
       setBacklogDiagnostics(null);
       setBacklogRefreshStatus(null);
+      setProjectMemoryRefreshStatus(null);
     }
-  }, [activeSurface, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics, loadBacklogRefreshStatus]);
+  }, [activeSurface, activeArProj, loadBacklogCacheInfo, loadBacklogDiagnostics, loadBacklogRefreshStatus, loadProjectMemoryRefreshStatus]);
 
   useEffect(() => {
     if (activeSurface === 'project' && activeArProj && activeArProj !== '*') {
@@ -889,6 +896,54 @@ export function SettingsView({
       alert(e?.message || 'Backlog cache refresh failed.');
     } finally {
       setIsRefreshingBacklogCache(false);
+    }
+    return null;
+  }
+
+  async function handleRefreshProjectMemory(projectKey = activeArProj) {
+    if (!projectKey || projectKey === '*') return null;
+    setIsRefreshingProjectMemory(true);
+    try {
+      const res = await api.refreshProjectMemory(projectKey) as any;
+      if (res?.success) {
+        const now = new Date().toISOString();
+        setProjectMemoryRefreshStatus((current) => ({
+          projectKey,
+          activeArtifactVersion: current?.activeArtifactVersion ?? null,
+          lastBuiltAt: current?.lastBuiltAt ?? null,
+          nextDueAt: current?.nextDueAt ?? null,
+          lastSourceHash: current?.lastSourceHash ?? null,
+          lastTrigger: 'manual',
+          status: 'queued',
+          lastError: null,
+          updatedAt: now,
+        }));
+
+        const startedAt = Date.now();
+        let pollDelayMs = 2000;
+        while (Date.now() - startedAt < 10 * 60 * 1000) {
+          const hiddenMultiplier = (typeof document !== 'undefined' && document.visibilityState === 'hidden') ? 2 : 1;
+          await new Promise(resolve => setTimeout(resolve, pollDelayMs * hiddenMultiplier));
+          const status = await loadProjectMemoryRefreshStatus(projectKey);
+          if (!status) continue;
+          if (status.status === 'queued' || status.status === 'running') {
+            pollDelayMs = Math.min(pollDelayMs + 1000, 10000);
+            continue;
+          }
+          if (status.status === 'error') {
+            alert(status.lastError || 'Project memory refresh failed.');
+            return null;
+          }
+          return status;
+        }
+        alert('Project memory refresh is still running in the background. Please check back in a moment.');
+      } else {
+        alert(res?.error || 'Project memory refresh failed.');
+      }
+    } catch (e: any) {
+      alert(e?.message || 'Project memory refresh failed.');
+    } finally {
+      setIsRefreshingProjectMemory(false);
     }
     return null;
   }
@@ -1341,8 +1396,6 @@ export function SettingsView({
   const workspaceNav = [
     { id: 'models', label: 'AI Setup', icon: BrainCircuit, sub: 'Provider and models' },
     { id: 'domain', label: 'Personal', icon: Globe, sub: 'Defaults and preferences' },
-    { id: 'stats', label: 'Stats', icon: BarChart3, sub: 'Usage and audit visibility' },
-    { id: 'billing', label: 'Billing', icon: CreditCard, sub: 'Plan and controls' },
     ...(showComplianceTab ? [{ id: 'compliance', label: 'Compliance', icon: ShieldCheck, sub: 'Coming Soon' }] : []),
   ] as const;
 
@@ -1445,7 +1498,7 @@ export function SettingsView({
             <div className="px-2.5 pb-1 pt-3">
               <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)] opacity-60">Admin</span>
             </div>
-            {workspaceNav.filter(t => ['stats', 'billing', 'compliance'].includes(t.id)).map((tab) => (
+            {workspaceNav.filter(t => ['compliance'].includes(t.id)).map((tab) => (
               <button
                 key={tab.id}
                 disabled={tab.id === 'compliance'}
@@ -1463,17 +1516,6 @@ export function SettingsView({
                 </div>
               </button>
             ))}
-
-            <div className="mt-auto pt-3 border-t border-[rgba(43,89,74,0.08)]">
-              <div className="px-2.5 py-2 space-y-0.5">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                  {isHostedSampler ? 'hosted trial' : tier}
-                </div>
-                <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                  {usage?.currentMonth ?? 0}<span className="text-[var(--rf-border-strong)]">/</span>{limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} {isHostedSampler ? 'preview credits' : 'included'}
-                </div>
-              </div>
-            </div>
           </div>
           )}
 
@@ -1835,6 +1877,9 @@ export function SettingsView({
                 backlogRefreshStatus={backlogRefreshStatus}
                 isRefreshingBacklogCache={isRefreshingBacklogCache}
                 onRefreshBacklogCache={handleRefreshBacklogCache}
+                projectMemoryRefreshStatus={projectMemoryRefreshStatus}
+                isRefreshingProjectMemory={isRefreshingProjectMemory}
+                onRefreshProjectMemory={handleRefreshProjectMemory}
                 backlogThemeBudgetOverride={backlogThemeBudgetOverride}
                 onBacklogThemeBudgetOverrideChange={setBacklogThemeBudgetOverride}
                 goldExampleConfigs={goldExampleConfigs}
@@ -1887,285 +1932,6 @@ export function SettingsView({
                   </div>
                 </div>
 
-              </motion.div>
-            )}
-
-            {activeSurface === 'workspace' && activeTab === 'stats' && (
-              <motion.div
-                className="max-w-3xl space-y-4"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Generations', value: usage?.currentMonth ?? 0, helper: isHostedSampler ? 'hosted trial this month' : 'this month' },
-                    { label: 'Tokens', value: workspaceTokenUsage.toLocaleString(), helper: 'tracked' },
-                    { label: 'Projects', value: projectUsageBreakdown.length, helper: 'with activity' },
-                    { label: 'Records', value: complianceEvents.length + transparencyReports.length, helper: 'audit + reports' },
-                  ].map((card) => (
-                    <div key={card.label} className="rf-card px-3 py-2.5">
-                      <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{card.label}</div>
-                      <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{card.value}</div>
-                      <div className="mt-0.5 text-[12px] text-[var(--rf-text-tertiary)]">{card.helper}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="rf-card p-4 space-y-3">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Project activity</div>
-                  {projectUsageBreakdown.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-4 py-4 text-sm font-medium text-[var(--rf-text-tertiary)] text-center">
-                      No tracked project activity yet.
-                    </div>
-                  ) : (
-                    <div className="overflow-hidden rounded-lg border border-[var(--rf-border)]">
-                      <table className="w-full text-left">
-                        <thead className="bg-[var(--rf-surface-soft)]">
-                          <tr className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                            <th className="px-3 py-2">Project</th>
-                            <th className="px-3 py-2">Reports</th>
-                            <th className="px-3 py-2">Tokens</th>
-                            <th className="px-3 py-2 hidden sm:table-cell">Latest</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {projectUsageBreakdown.map((project) => (
-                            <tr key={project.projectKey} className="border-t border-[var(--rf-border)]">
-                              <td className="px-3 py-2 text-sm font-bold text-[var(--rf-text)]">{project.projectKey}</td>
-                              <td className="px-3 py-2 text-sm font-medium text-[var(--rf-text-secondary)]">{project.reportCount}</td>
-                              <td className="px-3 py-2 text-sm font-medium text-[var(--rf-text-secondary)]">{project.tokenUsage.toLocaleString()}</td>
-                              <td className="px-3 py-2 text-[13px] font-medium text-[var(--rf-text-tertiary)] hidden sm:table-cell">{project.latestAt ? new Date(project.latestAt).toLocaleString() : 'n/a'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                {showComplianceTab && (
-                  <button
-                    onClick={() => setActiveTab('compliance')}
-                    className="w-full rf-card p-4 flex items-center justify-between gap-3 text-left hover:border-[var(--rf-brand)] transition group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)]" />
-                      <div>
-                        <div className="text-sm font-bold text-[var(--rf-text)]">Compliance reports & audit trail</div>
-                        <div className="text-[12px] text-[var(--rf-text-tertiary)]">{transparencyReports.length} transparency reports · {complianceEvents.length} audit events</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-[var(--rf-text-tertiary)] group-hover:text-[var(--rf-brand)] transition" />
-                  </button>
-                )}
-              </motion.div>
-            )}
-
-            {activeSurface === 'workspace' && activeTab === 'billing' && (
-              <motion.div
-                className="max-w-3xl space-y-4"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                <div className="rf-card p-4 flex items-center justify-between gap-6">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Launch plan</div>
-                    <div className="text-xl font-black text-[var(--rf-brand)] capitalize mt-0.5">{isHostedSampler ? 'free preview' : tier}</div>
-                    <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-1">
-                      {isHostedSampler
-                        ? 'This workspace is using free preview access: 3 fast, 2 balanced, and 1 quality generation per user per calendar month. Add your own provider key to continue after the preview credits are used.'
-                        : 'Refinely is launching with a single paid Standard tier and a 30-day Marketplace trial.'}
-                    </div>
-                  </div>
-                  <div className="flex-1 max-w-xs space-y-1.5">
-                    <div className="flex justify-between text-[13px] font-semibold text-[var(--rf-text-secondary)]">
-                      <span>{isHostedSampler ? 'Preview generations this month' : 'Included generations this month'}</span>
-                      <span>{usage?.currentMonth ?? 0}<span className="text-[var(--rf-text-tertiary)] font-medium"> / {limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0}</span></span>
-                    </div>
-                    {limits?.generationsPerMonth !== -1 && (
-                      <div className="w-full h-1.5 bg-[var(--rf-surface-soft)] rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[var(--rf-brand)] transition-all duration-500 rounded-full"
-                          style={{ width: usage ? `${Math.min(100, (usage.currentMonth / (limits?.generationsPerMonth || 1)) * 100)}%` : '0%' }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rf-card p-4 flex items-start justify-between gap-4">
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">
-                      {isHostedSampler ? 'Hosted trial exhausted?' : 'Need more headroom?'}
-                    </div>
-                    <div className="text-sm font-semibold text-[var(--rf-text)]">
-                      {isHostedSampler
-                        ? 'Connect your own Gemini, OpenAI, Anthropic, Azure OpenAI, or Ollama key in AI setup to keep generating after the 3/2/1 monthly preview credits are used.'
-                        : 'Larger teams can contact support for a higher soft threshold and early access to advanced packaging.'}
-                    </div>
-                    <div className="text-[12px] text-[var(--rf-text-tertiary)]">
-                      {isHostedSampler
-                        ? 'Free preview credits are user-scoped and reset each calendar month. BYOK usage is not capped by these platform-funded preview credits.'
-                        : 'We are keeping the launch offer simple, then expanding into larger-organization controls based on customer demand.'}
-                    </div>
-                  </div>
-                  {isHostedSampler ? (
-                    <div className="shrink-0 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2 text-[12px] font-bold text-[var(--rf-text)]">
-                      Add provider key in AI setup
-                    </div>
-                  ) : (
-                    <a
-                      href="mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry"
-                      className="shrink-0 inline-flex items-center justify-center rounded-lg border border-[var(--rf-text)] bg-[var(--rf-text)] px-3 py-2 text-[12px] font-bold text-white transition hover:bg-black"
-                    >
-                      Contact support
-                    </a>
-                  )}
-                </div>
-
-                <div className="rf-card p-4 space-y-4">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Usage</div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      { label: 'Generations', value: usage?.currentMonth ?? 0, sub: isHostedSampler ? 'preview 3 fast / 2 balanced / 1 quality per month' : `included ${limits?.generationsPerMonth === -1 ? '∞' : limits?.generationsPerMonth ?? 0} before warning` },
-                      { label: 'Tokens', value: workspaceTokenUsage.toLocaleString(), sub: 'approx.' },
-                      { label: 'Projects', value: configuredProjectCount, sub: 'configured' },
-                      { label: 'Records', value: transparencyReports.length + complianceEvents.length, sub: 'audit + transparency' },
-                    ].map(card => (
-                      <div key={card.label} className="rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2.5">
-                        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">{card.label}</div>
-                        <div className="mt-1 text-xl font-black text-[var(--rf-text)]">{card.value}</div>
-                        <div className="mt-0.5 text-[12px] text-[var(--rf-text-tertiary)]">{card.sub}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-xl border border-[var(--rf-border)] overflow-hidden">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] px-3 py-2 bg-[var(--rf-surface-soft)] border-b border-[var(--rf-border)]">Per-project usage</div>
-                    {projectUsageBreakdown.length ? (
-                      <div className="divide-y divide-[var(--rf-border)] bg-white">
-                        <div className="grid grid-cols-[1fr_60px_80px_minmax(0,1fr)] gap-3 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)]">
-                          <div>Project</div><div className="text-right">Reports</div><div className="text-right">Tokens</div><div>Latest</div>
-                        </div>
-                        {projectUsageBreakdown.map(project => (
-                          <div key={project.projectKey} className="grid grid-cols-[1fr_60px_80px_minmax(0,1fr)] gap-3 px-3 py-2 items-center">
-                            <div className="text-sm font-bold text-[var(--rf-text)] truncate">{project.projectKey}</div>
-                            <div className="text-sm text-[var(--rf-text-secondary)] text-right">{project.reportCount}</div>
-                            <div className="text-sm text-[var(--rf-text-secondary)] text-right">{project.tokenUsage.toLocaleString()}</div>
-                            <div className="text-[12px] text-[var(--rf-text-tertiary)] truncate">{project.latestAt ? new Date(project.latestAt).toLocaleString() : 'n/a'}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="bg-white px-4 py-4 text-sm font-medium text-[var(--rf-text-tertiary)]">
-                        No transparency reports have been loaded yet, so project-level usage cannot be approximated.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { key: 'standard', name: 'Standard', price: 'Marketplace launch tier', highlights: ['Full core workflow', 'Shared workspace setup', 'Soft monthly usage guidance'], cta: 'Included in trial', href: 'https://marketplace.atlassian.com' },
-                    { key: 'advanced', name: 'Advanced', price: 'Later / contact us', highlights: ['Higher limits', 'Larger-team controls', 'Priority roadmap input'], cta: 'Talk to support', href: 'mailto:support@smartif.ai?subject=Refinely%20Advanced%20Tier%20Inquiry' },
-                  ].map(plan => {
-                    const isCurrent = plan.key === 'standard' && tier === 'standard';
-                    return (
-                      <div key={plan.key} className={`rounded-xl border bg-white p-4 flex flex-col shadow-sm transition-all ${isCurrent ? 'border-[var(--rf-brand)] shadow-sm shadow-[var(--rf-brand)]/10' : 'border-[var(--rf-border)] hover:border-[var(--rf-border-strong)]'}`}>
-                        <div className="mb-3">
-                          <div className="flex items-center justify-between gap-1">
-                            <div className={`text-sm font-black ${isCurrent ? 'text-[var(--rf-brand)]' : 'text-[var(--rf-text)]'}`}>{plan.name}</div>
-                            {isCurrent && <span className="bg-[var(--rf-brand-muted)] text-[var(--rf-brand)] text-[11px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-[rgba(43,89,74,0.12)]">Active</span>}
-                          </div>
-                          <div className="text-[12px] text-[var(--rf-text-tertiary)] mt-0.5">{plan.price}</div>
-                        </div>
-                        <ul className="space-y-1.5 mb-4 flex-1">
-                          {plan.highlights.map(item => (
-                            <li key={item} className="text-[12px] font-medium text-[var(--rf-text-secondary)] flex items-start gap-1.5">
-                              <Check className="w-3 h-3 text-[var(--rf-success)] shrink-0 mt-0.5" />
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                        <a
-                          href={plan.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`mt-auto inline-flex w-full items-center justify-center rounded-lg border px-2 py-1.5 text-[12px] font-bold transition ${
-                            isCurrent
-                              ? 'border-[var(--rf-border)] bg-[var(--rf-surface-soft)] text-[var(--rf-text-secondary)]'
-                              : 'border-[var(--rf-text)] bg-[var(--rf-text)] text-white hover:bg-black'
-                          }`}
-                        >
-                          {isCurrent ? 'Manage' : plan.cta}
-                        </a>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="rf-card p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Company branding</div>
-                    <span className="text-[12px] font-bold px-2 py-0.5 rounded border bg-[var(--rf-surface-soft)] text-[var(--rf-text-tertiary)] border-[var(--rf-border)]">
-                      Advanced later
-                    </span>
-                  </div>
-                  <div className="flex gap-3 items-start">
-                    <div className="flex-1 space-y-1.5">
-                      <label className="text-[11px] font-bold text-[var(--rf-text-tertiary)] uppercase tracking-widest">Logo URL</label>
-                      <input
-                        value={brandingLogoUrl}
-                        onChange={e => setBrandingLogoUrl(e.target.value)}
-                        placeholder="https://example.com/logo.svg"
-                        disabled
-                        className="w-full bg-[var(--rf-surface-soft)] border border-[var(--rf-border)] rounded-lg px-3 py-2 text-sm font-medium focus:bg-white focus:ring-2 focus:ring-[var(--rf-brand)]/20 focus:border-[var(--rf-brand)] transition-all outline-none disabled:opacity-60"
-                      />
-                    </div>
-                    <div className="w-20 h-14 rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] flex items-center justify-center shrink-0">
-                      {brandingLogoUrl.trim() ? (
-                        <img src={brandingLogoUrl.trim()} alt="Logo preview" className="max-h-12 max-w-full object-contain" />
-                      ) : (
-                        <Image className="w-5 h-5 text-[var(--rf-text-tertiary)]" />
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rf-card p-4 space-y-3 relative overflow-hidden group">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Compliance</div>
-                   
-                  {/* Gating Overlay */}
-                  <div className="absolute inset-0 z-20 bg-[var(--rf-surface-soft)]/60 backdrop-blur-[1px] flex flex-col items-center justify-center p-6 text-center transition-all group-hover:bg-[var(--rf-surface-soft)]/80 cursor-not-allowed">
-                    <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-lg mb-3 border border-[var(--rf-border)]">
-                      <ShieldCheck className="w-5 h-5 text-[var(--rf-brand)]" />
-                    </div>
-                    <div className="text-sm font-bold text-[var(--rf-text)]">Compliance controls</div>
-                    <div className="text-[11px] font-bold text-[var(--rf-brand)] uppercase tracking-wider mt-1 bg-[var(--rf-brand-muted)] px-2 py-0.5 rounded border border-[rgba(43,89,74,0.1)]">Available in Advanced Edition</div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 opacity-20 pointer-events-none filter blur-[1px]">
-                    {[
-                      { key: 'enabled', label: 'Compliance mode', value: complianceEnabled, set: setComplianceEnabled },
-                      { key: 'transparency', label: 'Transparency reports', value: transparencyEnabled, set: setTransparencyEnabled },
-                      { key: 'pii', label: 'PII masking', value: piiMaskingEnabled, set: setPiiMaskingEnabled },
-                      { key: 'audit', label: 'Immutable audit trail', value: auditTrailEnabled, set: setAuditTrailEnabled },
-                    ].map(item => (
-                      <label key={item.key} className="flex items-center justify-between rounded-lg border border-[var(--rf-border)] bg-[var(--rf-surface-soft)] px-3 py-2.5">
-                        <span className="text-sm font-medium text-[var(--rf-text-secondary)]">{item.label}</span>
-                        <input
-                          type="checkbox"
-                          checked={item.value}
-                          readOnly
-                          className="h-4 w-4 rounded border-[var(--rf-border-strong)] text-[var(--rf-brand)] focus:ring-[var(--rf-brand)]"
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
               </motion.div>
             )}
 
@@ -2360,7 +2126,7 @@ export function SettingsView({
                     </div>
                   </div>
                   {complianceEvents.length === 0 ? (
-                    <div className="text-sm text-[var(--rf-text-tertiary)]">No audit events yet. Enable the immutable audit trail in the Billing tab.</div>
+                    <div className="text-sm text-[var(--rf-text-tertiary)]">No audit events yet. Enable the immutable audit trail in the compliance settings when that surface is available.</div>
                   ) : (
                     <div className="rounded-xl border border-[var(--rf-border)] overflow-hidden">
                       <div className="grid grid-cols-[minmax(0,1.2fr)_70px_minmax(0,1fr)_40px] gap-2 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)] bg-[var(--rf-surface-soft)] border-b border-[var(--rf-border)]">
@@ -2587,6 +2353,9 @@ function ProjectSetupSurface({
   backlogRefreshStatus,
   isRefreshingBacklogCache,
   onRefreshBacklogCache,
+  projectMemoryRefreshStatus,
+  isRefreshingProjectMemory,
+  onRefreshProjectMemory,
   backlogThemeBudgetOverride,
   onBacklogThemeBudgetOverrideChange,
   goldExampleConfigs,
@@ -2626,6 +2395,9 @@ function ProjectSetupSurface({
   backlogRefreshStatus: BacklogRefreshStatusRow | null;
   isRefreshingBacklogCache: boolean;
   onRefreshBacklogCache: (projectKey?: string) => Promise<any>;
+  projectMemoryRefreshStatus: ProjectMemoryRefreshStatusRow | null;
+  isRefreshingProjectMemory: boolean;
+  onRefreshProjectMemory: (projectKey?: string) => Promise<any>;
   backlogThemeBudgetOverride: string;
   onBacklogThemeBudgetOverrideChange: (value: string) => void;
   goldExampleConfigs: ProjectGoldExampleConfig[];
@@ -2899,6 +2671,9 @@ function ProjectSetupSurface({
             backlogRefreshStatus={backlogRefreshStatus}
             isRefreshingBacklogCache={isRefreshingBacklogCache}
             onRefreshBacklogCache={onRefreshBacklogCache}
+            projectMemoryRefreshStatus={projectMemoryRefreshStatus}
+            isRefreshingProjectMemory={isRefreshingProjectMemory}
+            onRefreshProjectMemory={onRefreshProjectMemory}
             backlogThemeBudgetOverride={backlogThemeBudgetOverride}
             onBacklogThemeBudgetOverrideChange={onBacklogThemeBudgetOverrideChange}
             goldExampleConfigs={goldExampleConfigs}
@@ -2932,6 +2707,7 @@ function ProjectConfigurationManager({
   backlogStatusScopes, setBacklogStatusScopes, backlogStatusOptions, detectDefaultStatuses,
   activeArProj, isAdmin, isProjectAdmin,
   backlogCacheInfo, backlogDiagnostics, backlogRefreshStatus, isRefreshingBacklogCache, onRefreshBacklogCache,
+  projectMemoryRefreshStatus, isRefreshingProjectMemory, onRefreshProjectMemory,
   backlogThemeBudgetOverride, onBacklogThemeBudgetOverrideChange,
   goldExampleConfigs, setGoldExampleConfigs,
   goldStoryPool = [],
@@ -3030,6 +2806,39 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
     if (backlogDiagnostics?.totalProjectIssues !== undefined) return backlogDiagnostics.totalProjectIssues;
     return 0;
   }, [backlogCacheInfo, backlogDiagnostics]);
+  const projectMemoryStatusLabel = useMemo(() => {
+    if (isRefreshingProjectMemory || projectMemoryRefreshStatus?.status === 'queued' || projectMemoryRefreshStatus?.status === 'running') {
+      return {
+        title: 'Refreshing',
+        detail: projectMemoryRefreshStatus?.status === 'queued'
+          ? 'Queued in the background compiler.'
+          : 'Compiling project memory from cached sources.',
+        tone: 'info' as const,
+      };
+    }
+    if (projectMemoryRefreshStatus?.status === 'error') {
+      return {
+        title: 'Needs attention',
+        detail: projectMemoryRefreshStatus.lastError || 'The last project-memory build failed.',
+        tone: 'error' as const,
+      };
+    }
+    if (projectMemoryRefreshStatus?.status === 'ready') {
+      const isStale = projectMemoryRefreshStatus.nextDueAt
+        ? Date.parse(projectMemoryRefreshStatus.nextDueAt) <= Date.now()
+        : true;
+      return {
+        title: isStale ? 'Stale' : 'Ready',
+        detail: isStale ? 'Serving the last compiled memory until the next rebuild finishes.' : 'Preview and generation can use compiled memory immediately.',
+        tone: isStale ? 'warning' as const : 'success' as const,
+      };
+    }
+    return {
+      title: 'Missing',
+      detail: 'No compiled project memory has been built for this project yet.',
+      tone: 'warning' as const,
+    };
+  }, [isRefreshingProjectMemory, projectMemoryRefreshStatus]);
   const updateContext = (patch: Partial<ProjectDomainContextRow>) => {
     const idx = domainContexts.findIndex((c: any) => c.projectKey === activeArProj);
     const nextRoles = coerceRoleGuidanceRows(
@@ -3394,6 +3203,78 @@ const [issueTypes, setIssueTypes] = useState<any[]>([]);
                  {backlogCacheInfo?.legacyFallback && (
                    <div className="mt-2 text-[13px] font-bold uppercase tracking-widest text-[var(--rf-warning)]">Legacy cache fallback</div>
                  )}
+               </div>
+               <div className="rf-card px-4 py-3 ">
+                 <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Project Memory</div>
+                 <div className="mt-1 text-sm font-bold text-[var(--rf-text-secondary)] flex items-center gap-1.5">
+                   {projectMemoryStatusLabel.tone === 'info' && <RefreshCw className="w-4 h-4 animate-spin text-[var(--rf-brand)]" />}
+                   {projectMemoryStatusLabel.tone === 'success' && <Check className="w-4 h-4 text-[var(--rf-success)]" />}
+                   {projectMemoryStatusLabel.tone === 'warning' && <AlertCircle className="w-4 h-4 text-[var(--rf-warning)]" />}
+                   {projectMemoryStatusLabel.tone === 'error' && <AlertCircle className="w-4 h-4 text-[var(--rf-danger)]" />}
+                   {projectMemoryStatusLabel.title}
+                 </div>
+                 <div className={`mt-2 text-[13px] font-medium ${
+                   projectMemoryStatusLabel.tone === 'error'
+                     ? 'text-[var(--rf-danger)]'
+                     : 'text-[var(--rf-text-tertiary)]'
+                 }`}>
+                   {projectMemoryStatusLabel.detail}
+                 </div>
+               </div>
+             </div>
+
+             <div className="rf-card px-4 py-4 ">
+               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                 <div className="space-y-3">
+                   <div>
+                     <div className="text-[13px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Compiled Project Memory</div>
+                     <div className="text-sm font-bold text-[var(--rf-text)]">Weekly grounding cache for V2 preview and generation</div>
+                     <div className="mt-1 text-[13px] font-medium text-[var(--rf-text-tertiary)] max-w-2xl">
+                       This cache is built from backlog patterns, gold examples, work instructions, and project guidance so Flash models can stay focused without re-ingesting raw context on every run.
+                     </div>
+                   </div>
+                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                     <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-3">
+                       <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Status</div>
+                       <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">{projectMemoryRefreshStatus?.status ?? 'missing'}</div>
+                     </div>
+                     <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-3">
+                       <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Last Built</div>
+                       <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">
+                         {projectMemoryRefreshStatus?.lastBuiltAt ? new Date(projectMemoryRefreshStatus.lastBuiltAt).toLocaleString() : 'Not built yet'}
+                       </div>
+                     </div>
+                     <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-3">
+                       <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Next Due</div>
+                       <div className="mt-1 text-sm font-bold text-[var(--rf-text)]">
+                         {projectMemoryRefreshStatus?.nextDueAt ? new Date(projectMemoryRefreshStatus.nextDueAt).toLocaleString() : 'Will be set after first build'}
+                       </div>
+                     </div>
+                     <div className="rounded-xl border border-[var(--rf-border)] bg-white px-3 py-3">
+                       <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--rf-text-tertiary)]">Artifact</div>
+                       <div className="mt-1 text-sm font-bold text-[var(--rf-text)] break-all">
+                         {projectMemoryRefreshStatus?.activeArtifactVersion ?? 'None yet'}
+                       </div>
+                     </div>
+                   </div>
+                   <div className="flex flex-wrap gap-3 text-[13px] font-medium text-[var(--rf-text-tertiary)]">
+                     <span>Trigger: <span className="font-bold text-[var(--rf-text-secondary)]">{projectMemoryRefreshStatus?.lastTrigger ?? 'n/a'}</span></span>
+                     <span>Updated: <span className="font-bold text-[var(--rf-text-secondary)]">{projectMemoryRefreshStatus?.updatedAt ? new Date(projectMemoryRefreshStatus.updatedAt).toLocaleString() : 'n/a'}</span></span>
+                   </div>
+                 </div>
+                 <div className="flex flex-col gap-2 lg:w-56">
+                   <button
+                     type="button"
+                     onClick={() => void onRefreshProjectMemory(activeArProj)}
+                     disabled={!canManageProjectSettings || isRefreshingProjectMemory}
+                     className="rounded-xl bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white transition hover:bg-[var(--rf-brand-hover)] disabled:opacity-50"
+                   >
+                     {isRefreshingProjectMemory ? 'Refreshing…' : 'Refresh project memory'}
+                   </button>
+                   <div className="text-[12px] font-medium text-[var(--rf-text-tertiary)]">
+                     Admin-only action. Rebuild runs in the background and keeps the last good artifact active until the new one is ready.
+                   </div>
+                 </div>
                </div>
              </div>
 

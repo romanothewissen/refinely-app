@@ -14,7 +14,7 @@ type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ActorGroundingStatus = 'weak' | 'supported' | 'strong';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
 type SettingsSurface = 'workspace' | 'project';
-type SettingsTab = 'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance';
+type SettingsTab = 'models' | 'jira' | 'domain' | 'compliance';
 type V2UiStep = 'input' | 'scope_review' | 'discovery' | 'complete';
 
 interface ScopeCapability {
@@ -566,7 +566,7 @@ export default function V2WorkspaceApp({
     if (sidebarOpen) closeSidebar();
   }, [closeSidebar, isAdmin, sidebarOpen]);
 
-  const openProjectSettings = useCallback((tab: 'models' | 'jira' | 'domain' | 'billing', projectKeyForSettings: string) => {
+  const openProjectSettings = useCallback((tab: 'models' | 'jira' | 'domain', projectKeyForSettings: string) => {
     setSettingsStartSurface('project');
     setSettingsStartTab(tab);
     setSettingsStartProjectKey(projectKeyForSettings);

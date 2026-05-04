@@ -45,7 +45,7 @@ interface SidebarProps {
   setWiSelectionMode: (mode: 'auto' | 'selected') => void;
   selectedWiDocIds: string[];
   setSelectedWiDocIds: (docIds: string[]) => void;
-  onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain' | 'billing', projectKey: string) => void;
+  onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain', projectKey: string) => void;
   runAttachments: Array<{ id: string; filename: string; charCount: number }>;
   runAttachmentParseState: { filename: string; stage: 'reading' | 'parsing' } | null;
   runAttachmentError: string | null;
