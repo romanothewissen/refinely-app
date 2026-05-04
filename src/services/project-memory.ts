@@ -687,6 +687,8 @@ export async function markProjectMemoryRefreshError(projectKey: string, message:
   });
 }
 
+export { getProjectMemoryRefreshState } from './v2-sql';
+
 export async function getProjectMemoryHeaderForProjects(projectKeys: string[]): Promise<{
   header: ProjectMemoryArtifactHeader;
   status: V2MemoryStatus;
