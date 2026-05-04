@@ -57,6 +57,7 @@ interface SidebarProps {
   workspacePipelineAuditEnabled?: boolean;
   recordPipelineAuditForRun?: boolean;
   setRecordPipelineAuditForRun?: (value: boolean) => void;
+  primaryActionLabel?: string;
 }
 
 const fadeUp = {
@@ -161,6 +162,7 @@ export function Sidebar({
   workspacePipelineAuditEnabled = false,
   recordPipelineAuditForRun = false,
   setRecordPipelineAuditForRun,
+  primaryActionLabel,
 }: SidebarProps) {
   const isAtLimit = (limits?.generationsPerMonth !== -1 && usage && limits && usage.currentMonth >= limits.generationsPerMonth) || false;
   const hasUnlimitedUsage = limits?.generationsPerMonth === -1;
@@ -1051,7 +1053,7 @@ export function Sidebar({
                     className="flex items-center gap-2"
                   >
                     <Zap className={`w-3.5 h-3.5 ${requirement.trim() ? 'fill-white' : ''}`} />
-                    <span>{originIssueKey ? 'Create Backlog' : 'Start Generation'}</span>
+                    <span>{originIssueKey ? 'Create Backlog' : (primaryActionLabel || 'Start Generation')}</span>
                   </motion.div>
                 )}
               </AnimatePresence>
