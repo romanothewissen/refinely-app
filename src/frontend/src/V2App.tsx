@@ -324,7 +324,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
           document.documentElement.scrollHeight,
           document.body.scrollHeight,
         );
-        void view.resize('100%', `${Math.ceil(nextHeight + 24)}px`);
+        void (view as any).resize('100%', `${Math.ceil(nextHeight + 24)}px`);
       });
     };
 

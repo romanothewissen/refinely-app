@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ChevronRight, Edit2, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Download, Edit2, Plus, Settings, Trash2, UserRound } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { SettingsView } from './SettingsView';
 import { V2HistoryModal, type V2HistoryEntry } from './V2HistoryModal';
@@ -9,6 +9,16 @@ import { ClarifyQuestionsView } from './ClarifyQuestionsView';
 import { StepIndicator } from './components/StepIndicator';
 import { api } from './hooks/useForge';
 import type { ClarifyAnswer, ClarifyQuestion, LlmProvider } from './types';
+import {
+  V2_PREVIEW_LOADING_STEPS,
+  V2_REFINEMENT_LOADING_STEPS,
+  type V2LoadingMode,
+  type V2LoadingStep,
+  type V2ProgressDraftFeatureSummary,
+  type V2ProgressEvent,
+  type V2ProgressEventProgress,
+  type V2ProgressStage,
+} from './v2Progress';
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ActorGroundingStatus = 'weak' | 'supported' | 'strong';
@@ -126,6 +136,24 @@ interface RunAttachment {
   filename: string;
   text: string;
   charCount: number;
+}
+
+interface PipelineAuditEntry {
+  sessionId: string;
+  auditRunId: string;
+  updatedAt: string;
+  llmCallCount: number;
+  clarifyQuestionCount: number;
+  clarifyAnswerCount: number;
+  featureCount: number;
+  acceptanceRequirementCount: number;
+}
+
+interface V2LoadingState {
+  mode: V2LoadingMode;
+  localStepIndex: number;
+  serverProgress: V2ProgressEventProgress | null;
+  provisionalItems: V2ProgressDraftFeatureSummary[];
 }
 
 interface EditableScopeDraft {
@@ -251,8 +279,56 @@ function compactUiText(value: string) {
     .trim();
 }
 
+function createAuditRunId() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `audit_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+}
+
 function actorSlotEntries(actorSlots: Record<string, string>) {
   return Object.entries(actorSlots);
+}
+
+function toProgressSummary(text: string, fallback: string): string {
+  const compact = compactUiText(text);
+  if (!compact) return fallback;
+  if (compact.length <= 140) return compact;
+  return `${compact.slice(0, 139).trimEnd()}…`;
+}
+
+function buildProvisionalLoadingItems(scopeDraft?: EditableScopeDraft | null): V2ProgressDraftFeatureSummary[] {
+  return (scopeDraft?.capabilities ?? [])
+    .slice(0, 6)
+    .map((capability, index) => ({
+      id: capability.id || `capability_${index + 1}`,
+      summary: toProgressSummary(capability.label, `Planned capability ${index + 1}`),
+    }))
+    .filter((item) => Boolean(item.summary));
+}
+
+function getLoadingSteps(mode: V2LoadingMode): V2LoadingStep[] {
+  return mode === 'preview' ? V2_PREVIEW_LOADING_STEPS : V2_REFINEMENT_LOADING_STEPS;
+}
+
+function getLoadingStepIndex(mode: V2LoadingMode, stage: V2ProgressStage): number {
+  const steps = getLoadingSteps(mode);
+  const exact = steps.findIndex((step) => step.stage === stage);
+  if (exact >= 0) return exact;
+  if (mode === 'refinement' && stage === 'triage') return 0;
+  if (mode === 'refinement' && (stage === 'scope_hypothesis' || stage === 'discover')) return 1;
+  if (mode === 'preview' && stage === 'persisting') return steps.length - 1;
+  return 0;
+}
+
+function emptyLoadingState(mode: V2LoadingMode, provisionalItems: V2ProgressDraftFeatureSummary[] = []): V2LoadingState {
+  return {
+    mode,
+    localStepIndex: 0,
+    serverProgress: null,
+    provisionalItems,
+  };
 }
 
 export default function V2WorkspaceApp({
@@ -294,6 +370,7 @@ export default function V2WorkspaceApp({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
+  const [loadingState, setLoadingState] = useState<V2LoadingState | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
@@ -315,6 +392,12 @@ export default function V2WorkspaceApp({
   } | null>(null);
   const [limits, setLimits] = useState<{ generationsPerMonth: number } | null>(null);
   const [sidebarCacheCounts, setSidebarCacheCounts] = useState<Record<string, number>>({});
+  const [pipelineAuditEnabled, setPipelineAuditEnabled] = useState(false);
+  const [recordPipelineAuditForRun, setRecordPipelineAuditForRun] = useState(false);
+  const [currentAuditRunId, setCurrentAuditRunId] = useState<string | null>(null);
+  const [auditEntries, setAuditEntries] = useState<PipelineAuditEntry[]>([]);
+  const [isExportingAudit, setIsExportingAudit] = useState(false);
+  const [isDeletingAudit, setIsDeletingAudit] = useState(false);
   const isResizing = useRef(false);
 
   const effectiveProjectKeys = useMemo(() => {
@@ -383,7 +466,7 @@ export default function V2WorkspaceApp({
       if (frameId) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
         const nextHeight = Math.max(element.scrollHeight, document.documentElement.scrollHeight, document.body.scrollHeight);
-        void view.resize('100%', `${Math.ceil(nextHeight + 24)}px`);
+        void (view as any).resize('100%', `${Math.ceil(nextHeight + 24)}px`);
       });
     };
 
@@ -401,7 +484,7 @@ export default function V2WorkspaceApp({
   useEffect(() => {
     let active = true;
 
-    void (async () => {
+    const loadBootstrapData = async () => {
       try {
         const [configRes, usageRes, jiraRes] = await Promise.all([
           api.getConfig() as Promise<any>,
@@ -413,6 +496,7 @@ export default function V2WorkspaceApp({
         setBrandingLogoUrl(configRes?.branding?.logoUrl || null);
         if (configRes?.tier) setTier(configRes.tier);
         if (configRes?.isAdmin !== undefined) setIsAdmin(Boolean(configRes.isAdmin));
+        setPipelineAuditEnabled(Boolean(configRes?.developerTools?.pipelineAuditEnabled));
         if (usageRes?.usage) setUsage(usageRes.usage);
         if (usageRes?.limits) setLimits(usageRes.limits);
 
@@ -421,13 +505,55 @@ export default function V2WorkspaceApp({
       } catch {
         // Keep the shell usable even if bootstrap data is partial.
       }
-    })();
+    };
+
+    void loadBootstrapData();
 
     void loadHistory();
     return () => {
       active = false;
     };
   }, []);
+
+  const refreshWorkspaceFlags = useCallback(async () => {
+    try {
+      const configRes = await api.getConfig() as any;
+      setBrandingLogoUrl(configRes?.branding?.logoUrl || null);
+      if (configRes?.tier) setTier(configRes.tier);
+      if (configRes?.isAdmin !== undefined) setIsAdmin(Boolean(configRes.isAdmin));
+      setPipelineAuditEnabled(Boolean(configRes?.developerTools?.pipelineAuditEnabled));
+    } catch {
+      // Best-effort only.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pipelineAuditEnabled) {
+      setRecordPipelineAuditForRun(false);
+      setCurrentAuditRunId(null);
+      setAuditEntries([]);
+    }
+  }, [pipelineAuditEnabled]);
+
+  useEffect(() => {
+    if (!loadingState) return;
+    if (loadingState.serverProgress) return;
+
+    const steps = getLoadingSteps(loadingState.mode);
+    const maxIndex = Math.max(0, steps.length - 1);
+    const tickMs = loadingState.mode === 'preview' ? 850 : 1100;
+    const timer = window.setInterval(() => {
+      setLoadingState((previous) => {
+        if (!previous || previous.serverProgress || previous.mode !== loadingState.mode) return previous;
+        return {
+          ...previous,
+          localStepIndex: Math.min(previous.localStepIndex + 1, maxIndex),
+        };
+      });
+    }, tickMs);
+
+    return () => window.clearInterval(timer);
+  }, [loadingState]);
 
   useEffect(() => {
     let active = true;
@@ -543,6 +669,24 @@ export default function V2WorkspaceApp({
     }
   }
 
+  const loadAuditEntries = useCallback(async (targetSessionId: string) => {
+    if (!pipelineAuditEnabled || !targetSessionId) {
+      setAuditEntries([]);
+      return;
+    }
+    try {
+      const response = await api.listPipelineAudits({ sessionId: targetSessionId, limit: 10 }) as {
+        success?: boolean;
+        audits?: PipelineAuditEntry[];
+      };
+      if (response?.success) {
+        setAuditEntries(Array.isArray(response.audits) ? response.audits : []);
+      }
+    } catch {
+      // Best-effort only.
+    }
+  }, [pipelineAuditEnabled]);
+
   const resetDraftState = useCallback((nextRequirement = '') => {
     const nextSessionId = createSessionId();
     setSelectedConversationId(null);
@@ -555,9 +699,12 @@ export default function V2WorkspaceApp({
     setWarning(null);
     setError(null);
     setLoadingMessage(null);
+    setLoadingState(null);
     setRunAttachments([]);
     setRunAttachmentParseState(null);
     setRunAttachmentError(null);
+    setCurrentAuditRunId(null);
+    setAuditEntries([]);
   }, []);
 
   const openSettings = useCallback((surface: SettingsSurface = (isAdmin ? 'workspace' : 'project')) => {
@@ -657,7 +804,9 @@ export default function V2WorkspaceApp({
       setScopeDraft(buildScopeDraft(restoredResult?.scopeHypothesis ?? null));
       setDiscoveryAnswers({});
       setLoadingMessage(null);
+      setLoadingState(null);
       setViewMode('generate');
+      void loadAuditEntries(response.conversation.sessionId);
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : 'Unable to load V2 session.');
     } finally {
@@ -681,9 +830,14 @@ export default function V2WorkspaceApp({
     if (!requirement.trim() && !runAttachments.length) return;
     setLoading(true);
     setLoadingMessage('Building scope preview…');
+    setLoadingState(emptyLoadingState('preview'));
     setError(null);
     setWarning(null);
     try {
+      const auditRunId = pipelineAuditEnabled && recordPipelineAuditForRun
+        ? (currentAuditRunId ?? createAuditRunId())
+        : undefined;
+      if (auditRunId && auditRunId !== currentAuditRunId) setCurrentAuditRunId(auditRunId);
       const response = await api.v2Preview({
         sessionId,
         requirement,
@@ -692,6 +846,8 @@ export default function V2WorkspaceApp({
         selectedWiDocIds: runWiSelectionPayload.selectedWiDocIds,
         includeWiContext: runWiSelectionPayload.includeWiContext,
         includeSimilarStories: false,
+        pipelineAudit: Boolean(auditRunId),
+        auditRunId,
       }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result };
       if (!response?.success || !response.result) {
         throw new Error(response?.error || 'Preview failed.');
@@ -704,10 +860,13 @@ export default function V2WorkspaceApp({
       setDiscoveryAnswers({});
       setUiStep('scope_review');
       setLoadingMessage(null);
+      setLoadingState(null);
       setWarning(response.warning ?? null);
       void loadHistory();
+      void loadAuditEntries(nextSessionId);
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : 'Preview failed.');
+      setLoadingState(null);
     } finally {
       setLoading(false);
       setLoadingMessage(null);
@@ -723,25 +882,67 @@ export default function V2WorkspaceApp({
     setWarning(nextWarning ?? null);
   }, []);
 
+  const hydrateQueuedV2Result = useCallback(async (nextSessionId: string) => {
+    const response = await api.v2GetConversation(nextSessionId) as {
+      success?: boolean;
+      conversation?: ConversationRecord | null;
+      error?: string;
+    };
+    if (!response?.success || !response.conversation) {
+      throw new Error(response?.error || 'Queued refinement finished, but the saved result could not be loaded.');
+    }
+
+    const hydratedResult = resultFromConversation(response.conversation);
+    if (!hydratedResult) {
+      throw new Error('Queued refinement finished, but the saved result was empty.');
+    }
+
+    applyV2Result(nextSessionId, hydratedResult);
+    try {
+      await api.v2ClearProgress(nextSessionId);
+    } catch {
+      // Best-effort cleanup only.
+    }
+    setLoadingState(null);
+    void loadHistory();
+    void loadAuditEntries(nextSessionId);
+  }, [applyV2Result, loadAuditEntries]);
+
   const waitForQueuedV2Generation = useCallback(async (nextSessionId: string) => {
     const startedAt = Date.now();
     while (Date.now() - startedAt < 15 * 60 * 1000) {
       await new Promise((resolve) => window.setTimeout(resolve, 1500));
       const progressResponse = await api.v2GetProgress(nextSessionId) as {
         success?: boolean;
-        progress?: { type?: string; message?: string; result?: V2Result; warning?: string };
+        progress?: V2ProgressEvent;
       };
       const progress = progressResponse?.progress;
       if (!progress) continue;
 
       if (progress.type === 'progress') {
         setLoadingMessage(progress.message ?? 'Refining backlog…');
+        setLoadingState((previous) => previous ? {
+          ...previous,
+          localStepIndex: Math.max(previous.localStepIndex, getLoadingStepIndex(previous.mode, progress.stage)),
+          serverProgress: progress,
+        } : previous);
         continue;
       }
 
-      if (progress.type === 'complete' && progress.result) {
-        applyV2Result(nextSessionId, progress.result, progress.warning ?? null);
-        void loadHistory();
+      if (progress.type === 'complete') {
+        setLoadingMessage('Opening the saved refinement…');
+        setLoadingState((previous) => previous ? {
+          ...previous,
+          localStepIndex: Math.max(previous.localStepIndex, getLoadingStepIndex(previous.mode, 'persisting')),
+          serverProgress: {
+            type: 'progress',
+            sessionId: nextSessionId,
+            stage: 'persisting',
+            message: 'Opening the saved refinement…',
+            updatedAt: Date.now(),
+          },
+        } : previous);
+        await hydrateQueuedV2Result(nextSessionId);
         return;
       }
 
@@ -751,15 +952,20 @@ export default function V2WorkspaceApp({
     }
 
     throw new Error('V2 refinement is taking longer than expected. Please try again.');
-  }, [applyV2Result]);
+  }, [hydrateQueuedV2Result]);
 
   const handleGenerate = async (answerOverride?: Record<string, DiscoveryAnswer>) => {
     if (!scopeDraft) return;
     setLoading(true);
     setLoadingMessage('Preparing refinement…');
+    setLoadingState(emptyLoadingState('refinement', buildProvisionalLoadingItems(scopeDraft)));
     setError(null);
     setWarning(null);
     try {
+      const auditRunId = pipelineAuditEnabled && recordPipelineAuditForRun
+        ? (currentAuditRunId ?? createAuditRunId())
+        : undefined;
+      if (auditRunId && auditRunId !== currentAuditRunId) setCurrentAuditRunId(auditRunId);
       const response = await api.v2Generate({
         sessionId,
         requirement,
@@ -771,6 +977,8 @@ export default function V2WorkspaceApp({
         triageOverride: result?.triage,
         confirmedScopeHypothesis: buildScopePayload(scopeDraft),
         discoveryAnswers: Object.values(answerOverride ?? discoveryAnswers),
+        pipelineAudit: Boolean(auditRunId),
+        auditRunId,
       }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result; queued?: boolean };
       if (!response?.success) {
         throw new Error(response?.error || 'Full refinement failed.');
@@ -783,17 +991,73 @@ export default function V2WorkspaceApp({
         await waitForQueuedV2Generation(nextSessionId);
       } else if (response.result) {
         applyV2Result(nextSessionId, response.result, response.warning ?? null);
+        setLoadingState(null);
         void loadHistory();
+        void loadAuditEntries(nextSessionId);
       } else {
         throw new Error('Full refinement failed.');
       }
     } catch (generationError) {
       setError(generationError instanceof Error ? generationError.message : 'Full refinement failed.');
+      setLoadingState(null);
     } finally {
       setLoading(false);
       setLoadingMessage(null);
     }
   };
+
+  const latestAuditEntry = auditEntries[0] ?? null;
+
+  const exportAudit = useCallback(async (entry: PipelineAuditEntry | null) => {
+    if (!entry) return;
+    setIsExportingAudit(true);
+    setError(null);
+    try {
+      const response = await api.getPipelineAudit({
+        sessionId: entry.sessionId,
+        auditRunId: entry.auditRunId,
+      }) as { success?: boolean; error?: string; bundle?: unknown };
+      if (!response?.success || !response.bundle) {
+        throw new Error(response?.error || 'Could not load the pipeline audit bundle.');
+      }
+      const blob = new Blob([JSON.stringify(response.bundle, null, 2)], { type: 'application/json' });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `pipeline-audit_${entry.sessionId}_${entry.auditRunId}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (auditError) {
+      setError(auditError instanceof Error ? auditError.message : 'Could not export the pipeline audit.');
+    } finally {
+      setIsExportingAudit(false);
+    }
+  }, []);
+
+  const deleteAudit = useCallback(async (entry: PipelineAuditEntry | null) => {
+    if (!entry) return;
+    setIsDeletingAudit(true);
+    setError(null);
+    try {
+      const response = await api.deletePipelineAudit({
+        sessionId: entry.sessionId,
+        auditRunId: entry.auditRunId,
+      }) as { success?: boolean; error?: string };
+      if (!response?.success) {
+        throw new Error(response?.error || 'Could not delete the pipeline audit.');
+      }
+      if (entry.auditRunId === currentAuditRunId) {
+        setCurrentAuditRunId(null);
+      }
+      await loadAuditEntries(entry.sessionId);
+    } catch (auditError) {
+      setError(auditError instanceof Error ? auditError.message : 'Could not delete the pipeline audit.');
+    } finally {
+      setIsDeletingAudit(false);
+    }
+  }, [currentAuditRunId, loadAuditEntries]);
 
   return (
     <div ref={shellRef} className="flex h-full w-full overflow-hidden text-[var(--rf-text)] font-sans bg-transparent">
@@ -861,8 +1125,9 @@ export default function V2WorkspaceApp({
                 runAttachmentError={runAttachmentError}
                 onAddRunAttachments={handleAddRunAttachments}
                 onRemoveRunAttachment={handleRemoveRunAttachment}
-                workspacePipelineAuditEnabled={false}
-                recordPipelineAuditForRun={false}
+                workspacePipelineAuditEnabled={pipelineAuditEnabled}
+                recordPipelineAuditForRun={recordPipelineAuditForRun}
+                setRecordPipelineAuditForRun={setRecordPipelineAuditForRun}
                 primaryActionLabel="Preview Scope"
               />
               {sidebarOpen && (
@@ -886,6 +1151,7 @@ export default function V2WorkspaceApp({
               onCloseSettings();
               return;
             }
+            void refreshWorkspaceFlags();
             setViewMode('generate');
             setSidebarOpen(true);
           }}
@@ -941,6 +1207,7 @@ export default function V2WorkspaceApp({
             <V2Canvas
               loading={loading}
               loadingMessage={loadingMessage}
+              loadingState={loadingState}
               result={result}
               uiStep={uiStep}
               scopeDraft={scopeDraft}
@@ -956,6 +1223,14 @@ export default function V2WorkspaceApp({
               canContinueFromScope={canContinueFromScope}
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
+              pipelineAuditEnabled={pipelineAuditEnabled}
+              recordPipelineAuditForRun={recordPipelineAuditForRun}
+              latestAuditEntry={latestAuditEntry}
+              auditEntryCount={auditEntries.length}
+              isExportingAudit={isExportingAudit}
+              isDeletingAudit={isDeletingAudit}
+              onExportAudit={() => void exportAudit(latestAuditEntry)}
+              onDeleteAudit={() => void deleteAudit(latestAuditEntry)}
             />
           </div>
         </div>
@@ -1002,9 +1277,151 @@ function StepRail({ uiStep }: { uiStep: V2UiStep }) {
   );
 }
 
+function V2LoadingSurface({
+  mode,
+  loadingMessage,
+  activeStep,
+  activeIndex,
+  serverProgress,
+  items,
+}: {
+  mode: V2LoadingMode;
+  loadingMessage: string | null;
+  activeStep: V2LoadingStep;
+  activeIndex: number;
+  serverProgress: V2ProgressEventProgress | null;
+  items: V2ProgressDraftFeatureSummary[];
+}) {
+  const steps = getLoadingSteps(mode);
+  const statusLine = loadingMessage || serverProgress?.message || activeStep.label;
+  const listHeading = serverProgress?.draftFeatures?.length
+    ? 'Draft features arriving'
+    : mode === 'refinement'
+      ? 'Planned capabilities'
+      : 'Live progress';
+  const listNote = serverProgress?.featureCounts?.drafted && serverProgress.featureCounts.drafted > items.length
+    ? `${serverProgress.featureCounts.drafted} total drafts in progress`
+    : null;
+
+  return (
+    <motion.section
+      className="rf-card overflow-hidden"
+      initial={{ opacity: 0, y: 12, scale: 0.99 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <div className="relative overflow-hidden border-b border-[var(--rf-border-subtle)] bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(237,246,242,0.92))] px-6 py-6">
+        <div className="absolute inset-y-0 right-0 w-[36%] bg-[radial-gradient(circle_at_top_right,rgba(43,89,74,0.12),transparent_62%)]" />
+        <div className="relative flex flex-wrap items-start justify-between gap-5">
+          <div className="max-w-3xl">
+            <div className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-[var(--rf-brand)]">
+              <span className="h-2 w-2 rounded-full bg-[var(--rf-brand)] animate-pulse" />
+              {mode === 'preview' ? 'Preview Running' : 'Refinement Running'}
+            </div>
+            <h2 className="mt-3 text-[24px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>
+              {activeStep.label}
+            </h2>
+            <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-[var(--rf-text-secondary)]">
+              {activeStep.summary}
+            </p>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-[var(--rf-border)] bg-white/82 px-4 py-2 text-[13px] font-semibold text-[var(--rf-text-secondary)] shadow-sm">
+              <span className="flex gap-1 dot-bounce"><span /><span /><span /></span>
+              {compactUiText(statusLine)}
+            </div>
+          </div>
+          <div className="rounded-[22px] border border-[var(--rf-border)] bg-white/78 px-4 py-3 shadow-sm">
+            <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Progress</div>
+            <div className="mt-2 text-[28px] font-black text-[var(--rf-text)]">{activeStep.percent}%</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 px-6 py-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-[24px] border border-[var(--rf-border)] bg-white/72 p-5">
+          <div className="flex items-center gap-2">
+            {steps.map((step, index) => {
+              const isDone = index < activeIndex;
+              const isCurrent = index === activeIndex;
+              return (
+                <React.Fragment key={step.stage}>
+                  <div className="flex items-center gap-2 min-w-0 shrink">
+                    <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
+                      isDone ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)]'
+                        : isCurrent ? 'border-[var(--rf-brand)] bg-white'
+                          : 'border-[var(--rf-border)] bg-white'
+                    }`}>
+                      <span className={`h-2 w-2 rounded-full ${isDone ? 'bg-white' : isCurrent ? 'bg-[var(--rf-brand)] animate-pulse' : 'bg-[var(--rf-border-strong)]'}`} />
+                    </div>
+                    <span className={`hidden text-[12px] font-semibold sm:block ${isCurrent ? 'text-[var(--rf-brand)]' : isDone ? 'text-[var(--rf-text-secondary)]' : 'text-[var(--rf-text-tertiary)]'}`}>
+                      {step.shortLabel}
+                    </span>
+                  </div>
+                  {index < steps.length - 1 && (
+                    <div className={`h-px flex-1 min-w-[10px] ${isDone ? 'bg-[var(--rf-brand-subtle)]' : 'bg-[var(--rf-border)]'}`} />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-[rgba(35,74,61,0.08)]">
+            <motion.div
+              className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.max(activeStep.percent, 8)}%` }}
+              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            />
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3 text-[12px]">
+            <span className="text-[var(--rf-text-tertiary)]">{compactUiText(activeStep.label)}</span>
+            <span className="font-bold text-[var(--rf-brand)]">{activeStep.percent}%</span>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] border border-[var(--rf-border)] bg-white/72 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{listHeading}</div>
+              <div className="mt-1 text-[14px] font-semibold text-[var(--rf-text)]">
+                {items.length > 0 ? `${items.length} visible item${items.length === 1 ? '' : 's'}` : 'The canvas will update as soon as draft structure is ready.'}
+              </div>
+            </div>
+            {listNote && (
+              <div className="rounded-full border border-[var(--rf-border)] bg-white/82 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--rf-text-secondary)]">
+                {listNote}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {items.length > 0 ? items.map((item, index) => (
+              <motion.div
+                key={item.id}
+                className="flex items-center gap-3 rounded-[18px] border border-[var(--rf-border)] bg-white/76 px-4 py-3"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.04, duration: 0.24 }}
+              >
+                <div className={`h-2.5 w-2.5 shrink-0 rounded-full ${serverProgress?.draftFeatures?.length ? 'bg-[var(--rf-brand)] animate-pulse' : 'bg-[var(--rf-brand)]/45'}`} />
+                <div className="min-w-0 flex-1 text-[13px] font-semibold text-[var(--rf-text)]">
+                  {compactUiText(item.summary)}
+                </div>
+              </motion.div>
+            )) : (
+              <div className="rounded-[18px] border border-dashed border-[var(--rf-border)] bg-white/58 px-4 py-4 text-[13px] leading-relaxed text-[var(--rf-text-secondary)]">
+                The loading canvas will stay active and transition as scope signals, drafted feature titles, and final persistence updates arrive.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
 function V2Canvas({
   loading,
   loadingMessage,
+  loadingState,
   result,
   uiStep,
   scopeDraft,
@@ -1017,9 +1434,18 @@ function V2Canvas({
   canContinueFromScope,
   sidebarOpen,
   setSidebarOpen,
+  pipelineAuditEnabled,
+  recordPipelineAuditForRun,
+  latestAuditEntry,
+  auditEntryCount,
+  isExportingAudit,
+  isDeletingAudit,
+  onExportAudit,
+  onDeleteAudit,
 }: {
   loading: boolean;
   loadingMessage: string | null;
+  loadingState: V2LoadingState | null;
   result: V2Result | null;
   uiStep: V2UiStep;
   scopeDraft: EditableScopeDraft | null;
@@ -1032,8 +1458,26 @@ function V2Canvas({
   canContinueFromScope: boolean;
   sidebarOpen: boolean;
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  pipelineAuditEnabled: boolean;
+  recordPipelineAuditForRun: boolean;
+  latestAuditEntry: PipelineAuditEntry | null;
+  auditEntryCount: number;
+  isExportingAudit: boolean;
+  isDeletingAudit: boolean;
+  onExportAudit: () => void;
+  onDeleteAudit: () => void;
 }) {
   const triage = result?.triage ?? null;
+  const activeLoadingStep = loadingState
+    ? getLoadingSteps(loadingState.mode)[
+      loadingState.serverProgress
+        ? getLoadingStepIndex(loadingState.mode, loadingState.serverProgress.stage)
+        : Math.min(loadingState.localStepIndex, getLoadingSteps(loadingState.mode).length - 1)
+    ] ?? null
+    : null;
+  const loadingItems = loadingState
+    ? ((loadingState.serverProgress?.draftFeatures?.length ? loadingState.serverProgress.draftFeatures : loadingState.provisionalItems) ?? [])
+    : [];
 
   return (
     <div className="mx-auto w-full max-w-[1320px] flex flex-col gap-5">
@@ -1063,7 +1507,66 @@ function V2Canvas({
         )}
       </section>
 
-      {uiStep === 'input' && (
+      {pipelineAuditEnabled && (
+        <section className="rf-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Pipeline audit</div>
+              <h2 className="mt-2 text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>
+                {latestAuditEntry ? 'Audit capture is available for this session.' : recordPipelineAuditForRun ? 'Audit capture is armed for this run.' : 'Audit capture is available but currently off for this run.'}
+              </h2>
+              <p className="mt-2 max-w-3xl text-[14px] leading-relaxed text-[var(--rf-text-secondary)]">
+                Prompts, model traces, discovery depth, and generated output can be exported as JSON for QA. To protect KVS, only the newest audit runs are retained and very large prompt/response fields are truncated.
+              </p>
+            </div>
+            {latestAuditEntry && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onExportAudit}
+                  disabled={isExportingAudit}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/78 px-3 py-2 text-sm font-semibold text-[var(--rf-text-secondary)] hover:bg-white disabled:opacity-45"
+                >
+                  <Download className="w-4 h-4" />
+                  {isExportingAudit ? 'Exporting…' : 'Export latest audit'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onDeleteAudit}
+                  disabled={isDeletingAudit}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[rgba(155,53,69,0.18)] bg-[rgba(155,53,69,0.06)] px-3 py-2 text-sm font-semibold text-[var(--rf-danger)] hover:bg-[rgba(155,53,69,0.1)] disabled:opacity-45"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isDeletingAudit ? 'Deleting…' : 'Delete latest audit'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-5">
+            <CanvasStat label="Run toggle" value={recordPipelineAuditForRun ? 'On for this run' : 'Off for this run'} />
+            <CanvasStat label="Captured runs" value={`${auditEntryCount}`} />
+            <CanvasStat label="LLM calls" value={`${latestAuditEntry?.llmCallCount ?? 0}`} />
+            <CanvasStat label="Questions / answers" value={`${latestAuditEntry?.clarifyQuestionCount ?? 0} / ${latestAuditEntry?.clarifyAnswerCount ?? 0}`} />
+            <CanvasStat label="Features / ARs" value={`${latestAuditEntry?.featureCount ?? 0} / ${latestAuditEntry?.acceptanceRequirementCount ?? 0}`} />
+          </div>
+        </section>
+      )}
+
+      {loading && loadingState && activeLoadingStep && (
+        <V2LoadingSurface
+          mode={loadingState.mode}
+          loadingMessage={loadingMessage}
+          activeStep={activeLoadingStep}
+          activeIndex={loadingState.serverProgress
+            ? getLoadingStepIndex(loadingState.mode, loadingState.serverProgress.stage)
+            : loadingState.localStepIndex}
+          serverProgress={loadingState.serverProgress}
+          items={loadingItems}
+        />
+      )}
+
+      {!loading && uiStep === 'input' && (
         <section className="rf-card p-8">
           <div className="max-w-3xl">
             <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Ready to preview</div>
@@ -1075,7 +1578,7 @@ function V2Canvas({
         </section>
       )}
 
-      {uiStep === 'scope_review' && result && scopeDraft && (
+      {!loading && uiStep === 'scope_review' && result && scopeDraft && (
         <>
           <section className="rf-card p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1225,7 +1728,7 @@ function V2Canvas({
         </>
       )}
 
-      {uiStep === 'discovery' && result?.status === 'needs_discovery' && (
+      {!loading && uiStep === 'discovery' && result?.status === 'needs_discovery' && (
         <ClarifyQuestionsView
           questions={result.discoveryQuestions.map((question): ClarifyQuestion => ({
             categoryKey: question.categoryKey as ClarifyQuestion['categoryKey'],
@@ -1273,7 +1776,7 @@ function V2Canvas({
         />
       )}
 
-      {uiStep === 'complete' && result?.status === 'complete' && (
+      {!loading && uiStep === 'complete' && result?.status === 'complete' && (
         <>
           <section className="rf-card p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">

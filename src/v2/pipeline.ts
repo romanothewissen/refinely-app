@@ -39,6 +39,7 @@ import type {
   V2PipelineResult,
   V2ScopeHypothesis,
   V2StageExecutor,
+  V2ProgressReporter,
   V2StageRequest,
   V2TriageResult,
 } from './types';
@@ -52,6 +53,7 @@ import {
   validateScopeHypothesisAgainstEvidence,
 } from './evidence-pack';
 import { buildV2EvidenceBundleFromProjectMemory } from '../services/project-memory';
+import { getPipelineAuditWriter } from '../services/pipeline-audit-context';
 
 const GENERIC_ACTOR_PATTERN = /\bas\s+an?\s+(?:user|authorized user|team member|authorized team member)\b/i;
 const CRUD_ONLY_PATTERN = /\b(create|edit|update|delete|remove|view|read|list)\b/i;
@@ -83,6 +85,7 @@ function providerOpts(config: TenantConfig) {
 export function createDefaultV2StageExecutor(config: TenantConfig): V2StageExecutor {
   const provider = providerOpts(config);
   return async function executeStage<T>(request: V2StageRequest<T>) {
+    getPipelineAuditWriter()?.setPhase(`v2.${request.stage}`);
     const model =
       request.stage === 'triage'
         ? config.generatorConfig.triageModel
@@ -407,6 +410,7 @@ async function buildTriage(
 export async function runV2Pipeline(
   input: V2PipelineInput,
   executeStage: V2StageExecutor = createDefaultV2StageExecutor(input.config),
+  onProgress?: V2ProgressReporter,
 ): Promise<V2PipelineResult> {
   const pipelineEvidenceBundle = buildPipelineEvidenceBundle(input);
   const profile = currentPipelineProfile(input.config);
@@ -428,12 +432,28 @@ export async function runV2Pipeline(
     byStage: {},
   };
 
+  const reportProgress = async (
+    stage: 'triage' | 'scope_hypothesis' | 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair' | 'persisting',
+    message: string,
+    extras?: Parameters<NonNullable<V2ProgressReporter>>[0],
+  ) => {
+    if (!onProgress) return;
+    await onProgress({
+      stage,
+      message,
+      ...(extras?.draftFeatures?.length ? { draftFeatures: extras.draftFeatures } : {}),
+      ...(extras?.featureCounts ? { featureCounts: extras.featureCounts } : {}),
+    });
+  };
+
+  await reportProgress('triage', 'Scoring scope complexity and discovery load…');
   const triage = await buildTriage(input, executeStage, promptUsage);
   const scopeGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'scope_hypothesis');
   const discoveryGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'discover');
 
   let scopeHypothesis = input.confirmedScopeHypothesis;
   if (!scopeHypothesis) {
+    await reportProgress('scope_hypothesis', 'Shaping the initial scope hypothesis…');
     const scopeResponse = await executeStage<V2ScopeHypothesis>({
       stage: 'scope_hypothesis',
       model: input.config.generatorConfig.clarifyModel,
@@ -478,6 +498,7 @@ export async function runV2Pipeline(
 
   const classifiedAnswers = classifyDiscoveryAnswers(input.discoveryAnswers ?? []);
   if (shouldAskDiscovery(triage, scopeHypothesis, classifiedAnswers)) {
+    await reportProgress('discover', 'Preparing the next discovery questions…');
     const discovery = await executeStage<{ questions: V2DiscoveryQuestion[] }>({
       stage: 'discover',
       model: input.config.generatorConfig.clarifyModel,
@@ -526,6 +547,7 @@ export async function runV2Pipeline(
   });
   const synthesisEvidenceText = renderGroundedEvidencePack(synthesisEvidencePack, 'discovery_synthesis');
 
+  await reportProgress('discovery_synthesis', 'Synthesizing answers into backlog structure…');
   const synthesisResponse = await executeStage<V2DiscoverySynthesis>({
     stage: 'discovery_synthesis',
     model: input.config.generatorConfig.decompositionModel,
@@ -546,6 +568,7 @@ export async function runV2Pipeline(
   const synthesis = normalizeSynthesis(synthesisResponse.data, triage, scopeHypothesis);
 
   const finalEvidenceText = renderGroundedEvidencePack(synthesisEvidencePack, 'final_generation');
+  await reportProgress('final_generation', 'Drafting capability-first backlog features…');
   const finalResponse = await executeStage<V2FinalGenerationResponse>({
     stage: 'final_generation',
     model: input.config.generatorConfig.decompositionModel,
@@ -565,8 +588,18 @@ export async function runV2Pipeline(
   addUsage(promptUsage, 'final_generation', finalResponse.usage);
 
   let generated = finalResponse.data;
+  await reportProgress('final_generation', `Drafted ${generated.features.length} feature${generated.features.length === 1 ? '' : 's'} for review…`, {
+    stage: 'final_generation',
+    message: '',
+    draftFeatures: generated.features.map((feature, index) => ({
+      id: `draft_${index + 1}`,
+      summary: feature.summary,
+    })),
+    featureCounts: { drafted: generated.features.length },
+  });
   let coverage = assessCoverage(generated, synthesis, synthesisEvidencePack);
   if (!coverage.sufficient) {
+    await reportProgress('coverage_repair', 'Repairing coverage gaps before finalizing…');
     const repairResponse = await executeStage<V2FinalGenerationResponse>({
       stage: 'coverage_repair',
       model: input.config.generatorConfig.decompositionModel,
@@ -606,6 +639,8 @@ export async function runV2Pipeline(
     synthesisEvidencePack,
     { classifiedAnswers, preserveActorSlots: true },
   );
+
+  await reportProgress('persisting', 'Writing the final backlog draft…');
 
   return {
     status: 'complete',

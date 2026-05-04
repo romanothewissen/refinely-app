@@ -319,6 +319,12 @@ function requestExpectsJson(opts: { systemPrompt: string; userMessage: string; j
   );
 }
 
+function isGeminiSchemaTooComplexError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /Gemini API error:/i.test(message)
+    && /schema produces a constraint that has too many states for serving/i.test(message);
+}
+
 function getModelCatalogEntry(
   provider: LlmProvider | undefined,
   model: string,
@@ -569,7 +575,22 @@ export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<Ll
   const resolvedOpts = { ...effectiveOpts, model: resolvedModel, maxTokens: effectiveMaxTokens };
 
   if (opts.provider === 'gemini') {
-    result = await callGemini(resolvedOpts);
+    try {
+      result = await callGemini(resolvedOpts);
+    } catch (error) {
+      if (!('jsonSchema' in opts) || !opts.jsonSchema || !isGeminiSchemaTooComplexError(error)) {
+        throw error;
+      }
+      console.warn('[llm] Gemini rejected the response schema as too complex; retrying without provider-side schema enforcement.', {
+        model: resolvedModel,
+      });
+      const fallbackOpts = {
+        ...resolvedOpts,
+        userMessage: `${resolvedOpts.userMessage}\n\nIMPORTANT: Respond with valid JSON only. No prose before or after. Follow the required response shape exactly.`,
+        jsonSchema: undefined,
+      };
+      result = await callGemini(fallbackOpts);
+    }
   } else if (opts.provider === 'anthropic') {
     result = await callAnthropic(resolvedOpts);
   } else if (opts.provider === 'openai' || opts.provider === 'fireworks') {

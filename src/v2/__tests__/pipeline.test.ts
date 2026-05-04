@@ -693,3 +693,188 @@ test('runV2Pipeline fails fast when triage stage fails', async () => {
     /V2 triage failed: timeout/i,
   );
 });
+
+test('runV2Pipeline reports preview progress stages in order', async () => {
+  const progressStages: string[] = [];
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 2, ask_clarity: 4, actor_clarity: 4 } as any,
+        usage: { input: 10, output: 10 },
+      };
+    }
+    assert.equal(request.stage, 'scope_hypothesis');
+    return {
+      data: {
+        capabilities: [{ id: 'cap_1', label: 'Review service plan', rationale: 'Core preview capability.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner' },
+        openQuestions: [],
+        confidence: 'high',
+      } as any,
+      usage: { input: 30, output: 30 },
+    };
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Preview a service plan review flow.',
+      config: baseConfig,
+      previewOnly: true,
+    },
+    executeStage,
+    async (update) => {
+      progressStages.push(update.stage);
+    },
+  );
+
+  assert.equal(result.status, 'preview_ready');
+  assert.deepEqual(progressStages, ['triage', 'scope_hypothesis']);
+});
+
+test('runV2Pipeline reports discovery progress before returning next questions', async () => {
+  const progressStages: string[] = [];
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 3 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    assert.equal(request.stage, 'discover');
+    return {
+      data: {
+        questions: [
+          { id: 'q1', categoryKey: 'functional_flow', question: 'What exception path exists?', rationale: 'Needed for backlog shape.', suggestions: ['Urgent route'] },
+        ],
+      } as any,
+      usage: { input: 40, output: 40 },
+    };
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Route service planning through approval and exception handling.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Route service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner' },
+        openQuestions: ['What exception path exists?'],
+        confidence: 'medium',
+      },
+    },
+    executeStage,
+    async (update) => {
+      progressStages.push(update.stage);
+    },
+  );
+
+  assert.equal(result.status, 'needs_discovery');
+  assert.deepEqual(progressStages, ['triage', 'discover']);
+});
+
+test('runV2Pipeline reports full generation progress through coverage repair and persistence', async () => {
+  const progressStages: string[] = [];
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 4, actor_clarity: 4 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discovery_synthesis') {
+      return {
+        data: {
+          resolvedFacts: ['Rejected plans return to draft.'],
+          actorMap: { initiator: 'planner', approver: 'manager' },
+          businessRules: ['Rejected plans return to draft.'],
+          workflowSteps: ['Submit plan', 'Review plan', 'Route urgent exception'],
+          lifecycleStates: ['draft', 'rejected'],
+          exceptions: ['Urgent exceptions use an approved route.'],
+          successMeasures: [],
+          mustCoverBehaviors: ['Rejected plans return to draft', 'Urgent exceptions use an approved route'],
+          openDecisions: [],
+          arDepth: 'deep',
+          featureTarget: 1,
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    if (request.stage === 'final_generation') {
+      return {
+        data: {
+          features: [
+            {
+              summary: 'Coordinate service planning',
+              description: 'As a planner, I need to coordinate service planning through approval handling.',
+              suggested_story_points: 8,
+              acceptanceRequirements: [
+                { given: 'a plan is under review', when: 'it is rejected', then: 'it returns to draft' },
+                { given: 'a plan is in draft', when: 'it is revised', then: 'it can be resubmitted' },
+                { given: 'a plan has history', when: 'it is reopened', then: 'prior review notes stay visible' },
+              ],
+            },
+          ],
+          coverageMap: [
+            { mustCoverBehavior: 'Rejected plans return to draft', featureSummary: 'Coordinate service planning' },
+          ],
+        } as any,
+        usage: { input: 30, output: 30 },
+      };
+    }
+    if (request.stage === 'coverage_repair') {
+      return {
+        data: {
+          features: [
+            {
+              summary: 'Coordinate service planning',
+              description: 'As a planner, I need to coordinate service planning through approval and urgent exception handling.',
+              suggested_story_points: 8,
+              acceptanceRequirements: [
+                { given: 'a plan is under review', when: 'it is rejected', then: 'it returns to draft' },
+                { given: 'a plan is in draft', when: 'it is revised', then: 'it can be resubmitted' },
+                { given: 'an urgent request exists', when: 'normal approval cannot be followed', then: 'the approved exception route is used' },
+              ],
+            },
+          ],
+          coverageMap: [
+            { mustCoverBehavior: 'Rejected plans return to draft', featureSummary: 'Coordinate service planning' },
+            { mustCoverBehavior: 'Urgent exceptions use an approved route', featureSummary: 'Coordinate service planning' },
+          ],
+        } as any,
+        usage: { input: 30, output: 30 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service plan approval and urgent exception routing.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner', approver: 'manager' },
+        openQuestions: [],
+        confidence: 'high',
+      },
+      discoveryAnswers: [
+        {
+          questionId: 'q1',
+          categoryKey: 'functional_flow',
+          question: 'How are urgent exceptions routed?',
+          answer: 'Urgent exceptions must use an approved exception route.',
+        },
+      ],
+    },
+    executeStage,
+    async (update) => {
+      progressStages.push(update.stage);
+    },
+  );
+
+  assert.equal(result.status, 'complete');
+  assert.deepEqual(
+    [...new Set(progressStages)],
+    ['triage', 'discovery_synthesis', 'final_generation', 'coverage_repair', 'persisting'],
+  );
+});

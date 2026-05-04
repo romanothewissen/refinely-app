@@ -220,6 +220,71 @@ test('Gemini 3 requests can force high thinking for strict generation stages', a
   assert.equal(thinkingConfig?.thinkingLevel, 'high');
 });
 
+test('Gemini retries without provider-side schema enforcement when the schema is too complex', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    requestBodies.push(body);
+
+    if (requestBodies.length === 1) {
+      return new Response(JSON.stringify({
+        error: {
+          message: 'The specified schema produces a constraint that has too many states for serving.',
+        },
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"ok":true,"items":["a","b"]}' }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 6 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const response = await callLlm({
+      provider: 'gemini',
+      model: 'gemini-3-flash-preview',
+      systemPrompt: 'Return JSON only.',
+      userMessage: 'Respond with valid JSON.',
+      geminiApiKey: 'test-key',
+      jsonSchema: {
+        type: 'object',
+        required: ['ok', 'items'],
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          items: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 4,
+            items: { type: 'string', minLength: 1, maxLength: 10 },
+          },
+        },
+      },
+    });
+
+    assert.equal(response.text, '{"ok":true,"items":["a","b"]}');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBodies.length, 2);
+  const firstGenerationConfig = requestBodies[0]?.generationConfig as Record<string, unknown> | undefined;
+  const secondGenerationConfig = requestBodies[1]?.generationConfig as Record<string, unknown> | undefined;
+  assert.equal(Boolean(firstGenerationConfig?.responseJsonSchema), true);
+  assert.equal('responseJsonSchema' in (secondGenerationConfig ?? {}), false);
+  const secondContents = requestBodies[1]?.contents as Array<{ parts?: Array<{ text?: string }> }> | undefined;
+  assert.match(secondContents?.[0]?.parts?.[0]?.text ?? '', /respond with valid json only/i);
+});
+
 test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-streaming limit', () => {
   assert.equal(resolveEffectiveMaxTokens({
     provider: 'fireworks',

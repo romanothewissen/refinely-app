@@ -31,6 +31,8 @@ export const api = {
     selectedWiDocIds?: string[];
     includeWiContext?: boolean;
     includeSimilarStories?: boolean;
+    pipelineAudit?: boolean;
+    auditRunId?: string;
   }) => invoke('v2Preview', payload),
   v2Generate: (payload: {
     sessionId?: string;
@@ -44,8 +46,11 @@ export const api = {
     triageOverride?: unknown;
     confirmedScopeHypothesis?: unknown;
     discoveryAnswers?: unknown[];
+    pipelineAudit?: boolean;
+    auditRunId?: string;
   }) => invoke('v2Generate', payload),
   v2GetProgress: (sessionId: string) => invoke('v2GetProgress', { sessionId }),
+  v2ClearProgress: (sessionId: string) => invoke('v2ClearProgress', { sessionId }),
   v2GetHistory: (limit?: number) => invoke('v2GetHistory', { limit }),
   v2GetConversation: (sessionId: string) => invoke('v2GetConversation', { sessionId }),
   v2DeleteConversation: (sessionId: string) => invoke('v2DeleteConversation', { sessionId }),
@@ -112,6 +117,8 @@ export const api = {
 
   getPipelineAudit: (payload: { sessionId: string; auditRunId: string }) =>
     invoke('getPipelineAudit', payload),
+  listPipelineAudits: (payload?: { sessionId?: string; limit?: number }) =>
+    invoke('listPipelineAudits', payload || {}),
   deletePipelineAudit: (payload: { sessionId: string; auditRunId: string }) =>
     invoke('deletePipelineAudit', payload),
   mergePipelineAuditClientPolling: (payload: {

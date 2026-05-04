@@ -91,6 +91,13 @@ import {
   loadPipelineAuditBundle,
   mergePipelineAuditBundle,
 } from '../services/pipeline-audit-store';
+import {
+  getPipelineAuditWriter,
+  isPipelineAuditRequested,
+  runWithPipelineAuditContext,
+} from '../services/pipeline-audit-context';
+import { buildV2AuditBasePatch, buildV2AuditResultPatch } from '../services/v2-pipeline-audit';
+import { buildV2ProgressEvent } from '../v2/progress';
 
 function applyPreferredPipelineProfile(config: any, pipelineProfile?: string) {
   if (pipelineProfile !== 'fast' && pipelineProfile !== 'balanced' && pipelineProfile !== 'quality') {
@@ -641,9 +648,13 @@ resolver.define('v2Preview', async ({ payload, context }) => {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
 
+  const auditMeta = isPipelineAuditRequested(requestContext.config, payload?.pipelineAudit, payload?.auditRunId)
+    ? { sessionId: requestContext.sessionId, auditRunId: String(payload.auditRunId), accountId: requestContext.accountId }
+    : null;
+
   let result;
-  try {
-    result = await runV2Pipeline({
+  const runPreview = async () => {
+    const nextResult = await runV2Pipeline({
       requirement: requestContext.requirement,
       attachmentText: requestContext.attachmentText,
       config: requestContext.config,
@@ -653,6 +664,26 @@ resolver.define('v2Preview', async ({ payload, context }) => {
       memoryStatus: requestContext.memoryStatus,
       previewOnly: true,
     });
+    const auditWriter = getPipelineAuditWriter();
+    if (auditWriter) {
+      await auditWriter.flushMerge({
+        ...buildV2AuditBasePatch({
+          accountId: requestContext.accountId,
+          projectKey: requestContext.projectKey,
+          projectKeys: requestContext.projectKeys,
+          config: requestContext.config,
+          requirement: requestContext.requirement,
+          attachmentText: requestContext.attachmentText,
+        }),
+        ...buildV2AuditResultPatch({ result: nextResult }),
+      });
+    }
+    return nextResult;
+  };
+  try {
+    result = auditMeta
+      ? await runWithPipelineAuditContext(auditMeta, runPreview)
+      : await runPreview();
   } catch (error) {
     return {
       success: false,
@@ -706,14 +737,19 @@ resolver.define('v2Generate', async ({ payload, context }) => {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
 
+  const auditMeta = isPipelineAuditRequested(requestContext.config, payload?.pipelineAudit, payload?.auditRunId)
+    ? { sessionId: requestContext.sessionId, auditRunId: String(payload.auditRunId), accountId: requestContext.accountId }
+    : null;
+
   if (hasDiscoveryAnswers) {
     const stateStore = createV2EphemeralWorkflowStateStore();
-    await stateStore.setProgress(requestContext.sessionId, {
-      type: 'progress',
-      sessionId: requestContext.sessionId,
-      message: 'Queuing refinement…',
-      updatedAt: Date.now(),
-    });
+    await stateStore.setProgress(
+      requestContext.sessionId,
+      buildV2ProgressEvent(requestContext.sessionId, {
+        stage: 'context',
+        message: 'Queuing refinement…',
+      }),
+    );
 
     const queue = new Queue({ key: 'v2-generation-queue' });
     await queue.push({
@@ -730,6 +766,8 @@ resolver.define('v2Generate', async ({ payload, context }) => {
         triageOverride: payload?.triageOverride,
         confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
         discoveryAnswers: payload?.discoveryAnswers,
+        pipelineAudit: payload?.pipelineAudit,
+        auditRunId: payload?.auditRunId,
       },
     });
 
@@ -742,8 +780,8 @@ resolver.define('v2Generate', async ({ payload, context }) => {
   }
 
   let result;
-  try {
-    result = await runV2Pipeline({
+  const runGenerate = async () => {
+    const nextResult = await runV2Pipeline({
       requirement: requestContext.requirement,
       attachmentText: requestContext.attachmentText,
       config: requestContext.config,
@@ -756,6 +794,29 @@ resolver.define('v2Generate', async ({ payload, context }) => {
       confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
       discoveryAnswers: payload?.discoveryAnswers,
     });
+    const auditWriter = getPipelineAuditWriter();
+    if (auditWriter) {
+      await auditWriter.flushMerge({
+        ...buildV2AuditBasePatch({
+          accountId: requestContext.accountId,
+          projectKey: requestContext.projectKey,
+          projectKeys: requestContext.projectKeys,
+          config: requestContext.config,
+          requirement: requestContext.requirement,
+          attachmentText: requestContext.attachmentText,
+        }),
+        ...buildV2AuditResultPatch({
+          result: nextResult,
+          discoveryAnswers: Array.isArray(payload?.discoveryAnswers) ? payload.discoveryAnswers as any : undefined,
+        }),
+      });
+    }
+    return nextResult;
+  };
+  try {
+    result = auditMeta
+      ? await runWithPipelineAuditContext(auditMeta, runGenerate)
+      : await runGenerate();
   } catch (error) {
     return {
       success: false,
@@ -817,6 +878,14 @@ resolver.define('v2GetProgress', async ({ payload }) => {
   };
 });
 
+resolver.define('v2ClearProgress', async ({ payload }) => {
+  const sessionId = String(payload?.sessionId ?? '').trim();
+  if (!sessionId) return { success: false, error: 'sessionId is required.' };
+  const stateStore = createV2EphemeralWorkflowStateStore();
+  await stateStore.clearProgress(sessionId);
+  return { success: true };
+});
+
 resolver.define('v2GetHistory', async ({ payload, context }) => {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const limit = Number(payload?.limit ?? 30);
@@ -854,6 +923,7 @@ resolver.define('v2DeleteConversation', async ({ payload, context }) => {
   if (!sessionId) return { success: false, error: 'sessionId is required.' };
   try {
     await deleteV2Conversation(accountId, sessionId);
+    await createV2EphemeralWorkflowStateStore().clearProgress(sessionId);
     return { success: true };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');

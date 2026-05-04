@@ -1,6 +1,7 @@
-import { entityDelete, entityGet, entitySetSmall } from '../services/cache';
+import { entityDelete, entityGet, entitySetWithTtl } from '../services/cache';
 import { saveV2Conversation } from '../services/v2-sql';
-import type { V2ConversationStore, V2WorkflowStateStore } from './types';
+import { V2_PROGRESS_TTL_MS } from './progress';
+import type { V2ConversationStore, V2ProgressEvent, V2WorkflowStateStore } from './types';
 
 const V2_PROGRESS_PREFIX = 'v2_progress_';
 
@@ -17,10 +18,10 @@ function buildStoredLatestResult(payload: Record<string, unknown>): Record<strin
 export function createV2EphemeralWorkflowStateStore(): V2WorkflowStateStore {
   return {
     async getProgress(sessionId: string) {
-      return await entityGet<Record<string, unknown>>(`${V2_PROGRESS_PREFIX}${sessionId}`) ?? null;
+      return await entityGet<V2ProgressEvent>(`${V2_PROGRESS_PREFIX}${sessionId}`) ?? null;
     },
-    async setProgress(sessionId: string, payload: Record<string, unknown>) {
-      await entitySetSmall(`${V2_PROGRESS_PREFIX}${sessionId}`, payload);
+    async setProgress(sessionId: string, payload: V2ProgressEvent) {
+      await entitySetWithTtl(`${V2_PROGRESS_PREFIX}${sessionId}`, payload, V2_PROGRESS_TTL_MS);
     },
     async clearProgress(sessionId: string) {
       await entityDelete(`${V2_PROGRESS_PREFIX}${sessionId}`);

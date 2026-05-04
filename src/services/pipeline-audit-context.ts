@@ -56,9 +56,9 @@ class PipelineAuditWriter {
       thoughtTokens: input.thoughtTokens,
       structuredOutputMode: input.structuredOutputMode,
       reasoningControlMode: input.reasoningControlMode,
-      systemPrompt: input.systemPrompt,
-      userMessage: input.userMessage,
-      responseText: truncateForAudit(input.responseText),
+      systemPrompt: truncateForAudit(input.systemPrompt, 16000),
+      userMessage: truncateForAudit(input.userMessage, 28000),
+      responseText: truncateForAudit(input.responseText, 32000),
       parseOutcome: input.parseOutcome ?? 'n/a',
       piiMasking: input.piiMasking,
     };

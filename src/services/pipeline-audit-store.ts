@@ -11,9 +11,15 @@ import {
   buildPipelineAuditIndexEntry,
   removePipelineAuditIndexEntry,
   upsertPipelineAuditIndexEntries,
+  PIPELINE_AUDIT_INDEX_MAX_ENTRIES,
 } from './pipeline-audit-benchmark';
 
-const RESPONSE_TEXT_MAX = 48000;
+const SYSTEM_PROMPT_MAX = 16000;
+const USER_MESSAGE_MAX = 28000;
+const RESPONSE_TEXT_MAX = 32000;
+const REQUIREMENT_TEXT_MAX = 8000;
+const ATTACHMENT_TEXT_MAX = 16000;
+const PIPELINE_AUDIT_STORAGE_MAX_ENTRIES = Math.min(40, PIPELINE_AUDIT_INDEX_MAX_ENTRIES);
 
 export function truncateForAudit(text: string, max = RESPONSE_TEXT_MAX): string {
   const raw = text ?? '';
@@ -27,6 +33,24 @@ function maxSeq(calls: PipelineAuditLlmCallRecord[]): number {
 
 function renumberCalls(calls: PipelineAuditLlmCallRecord[], startSeq: number): PipelineAuditLlmCallRecord[] {
   return calls.map((c, i) => ({ ...c, seq: startSeq + i + 1 }));
+}
+
+function compactAuditCalls(calls: PipelineAuditLlmCallRecord[]): PipelineAuditLlmCallRecord[] {
+  return calls.map((call) => ({
+    ...call,
+    systemPrompt: truncateForAudit(call.systemPrompt, SYSTEM_PROMPT_MAX),
+    userMessage: truncateForAudit(call.userMessage, USER_MESSAGE_MAX),
+    responseText: truncateForAudit(call.responseText, RESPONSE_TEXT_MAX),
+  }));
+}
+
+function compactUserInputs(bundle: PipelineAuditBundle['userInputs'] | undefined): PipelineAuditBundle['userInputs'] | undefined {
+  if (!bundle) return bundle;
+  return {
+    ...bundle,
+    requirement: bundle.requirement ? truncateForAudit(bundle.requirement, REQUIREMENT_TEXT_MAX) : bundle.requirement,
+    attachmentText: bundle.attachmentText ? truncateForAudit(bundle.attachmentText, ATTACHMENT_TEXT_MAX) : bundle.attachmentText,
+  };
 }
 
 export async function loadPipelineAuditBundle(
@@ -99,7 +123,7 @@ export async function mergePipelineAuditBundle(
 
   const startSeq = maxSeq(base.llmCalls);
   const appended = patch.appendLlmCalls?.length
-    ? renumberCalls(patch.appendLlmCalls, startSeq)
+    ? compactAuditCalls(renumberCalls(patch.appendLlmCalls, startSeq))
     : [];
 
   const completedPhases = [...(base.completedPhases ?? [])];
@@ -134,10 +158,10 @@ export async function mergePipelineAuditBundle(
     header: nextHeader,
     completedPhases,
     clientPolling: nextClientPolling,
-    userInputs: {
+    userInputs: compactUserInputs({
       ...base.userInputs,
       ...patch.userInputs,
-    },
+    }),
     discoveryContext: nextDiscovery,
     llmCalls: [...base.llmCalls, ...appended],
     clarify: {
@@ -156,9 +180,19 @@ export async function mergePipelineAuditBundle(
 
   await entitySet(key, next);
   const indexEntries = await listPipelineAuditIndexEntries();
-  await writePipelineAuditIndexEntries(
-    upsertPipelineAuditIndexEntries(indexEntries, buildPipelineAuditIndexEntry(next)),
+  const sortedEntries = upsertPipelineAuditIndexEntries(
+    indexEntries,
+    buildPipelineAuditIndexEntry(next),
+    Math.max(indexEntries.length + 1, PIPELINE_AUDIT_STORAGE_MAX_ENTRIES),
   );
+  const keptEntries = sortedEntries.slice(0, PIPELINE_AUDIT_STORAGE_MAX_ENTRIES);
+  const prunedEntries = sortedEntries.slice(PIPELINE_AUDIT_STORAGE_MAX_ENTRIES);
+  await writePipelineAuditIndexEntries(keptEntries);
+  if (prunedEntries.length) {
+    await Promise.all(
+      prunedEntries.map((entry) => entityDelete(KEYS.pipelineAudit(entry.sessionId, entry.auditRunId))),
+    );
+  }
 }
 
 function mergePiiStats(

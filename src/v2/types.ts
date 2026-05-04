@@ -42,6 +42,59 @@ export type V2StageName =
   | 'feature_formatter'
   | 'ar_writer';
 
+export type V2ProgressStage =
+  | 'context'
+  | 'triage'
+  | 'scope_hypothesis'
+  | 'discover'
+  | 'discovery_synthesis'
+  | 'final_generation'
+  | 'coverage_repair'
+  | 'persisting';
+
+export type V2ProgressResultStatus = 'needs_discovery' | 'complete';
+
+export interface V2ProgressDraftFeatureSummary {
+  id: string;
+  summary: string;
+}
+
+export interface V2ProgressFeatureCounts {
+  drafted: number;
+}
+
+export interface V2PipelineProgressUpdate {
+  stage: V2ProgressStage;
+  message: string;
+  draftFeatures?: V2ProgressDraftFeatureSummary[];
+  featureCounts?: V2ProgressFeatureCounts;
+}
+
+export interface V2ProgressEventProgress extends V2PipelineProgressUpdate {
+  type: 'progress';
+  sessionId: string;
+  updatedAt: number;
+}
+
+export interface V2ProgressEventComplete {
+  type: 'complete';
+  sessionId: string;
+  resultStatus: V2ProgressResultStatus;
+  updatedAt: number;
+}
+
+export interface V2ProgressEventError {
+  type: 'error';
+  sessionId: string;
+  message: string;
+  updatedAt: number;
+}
+
+export type V2ProgressEvent =
+  | V2ProgressEventProgress
+  | V2ProgressEventComplete
+  | V2ProgressEventError;
+
 export interface V2PromptBudget {
   stage: V2StageName;
   maxSystemChars: number;
@@ -351,10 +404,11 @@ export interface V2StageResponse<T> {
 }
 
 export type V2StageExecutor = <T>(request: V2StageRequest<T>) => Promise<V2StageResponse<T>>;
+export type V2ProgressReporter = (update: V2PipelineProgressUpdate) => Promise<void> | void;
 
 export interface V2WorkflowStateStore {
-  getProgress(sessionId: string): Promise<Record<string, unknown> | null>;
-  setProgress(sessionId: string, payload: Record<string, unknown>): Promise<void>;
+  getProgress(sessionId: string): Promise<V2ProgressEvent | null>;
+  setProgress(sessionId: string, payload: V2ProgressEvent): Promise<void>;
   clearProgress(sessionId: string): Promise<void>;
 }
 
