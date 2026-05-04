@@ -301,6 +301,22 @@ test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-
   }), 4096);
 });
 
+test('resolveEffectiveMaxTokens respects explicit Gemini stage caps', () => {
+  assert.equal(resolveEffectiveMaxTokens({
+    provider: 'gemini',
+    model: 'gemini-3-flash-preview',
+    systemPrompt: 'Return JSON',
+    userMessage: 'Test',
+    maxTokens: 1600,
+  }, {
+    structuredOutputMode: 'json_schema',
+    reasoningControlMode: 'thinking_level',
+    reasoningVisibility: 'hidden',
+    tokenLimitParam: 'maxOutputTokens',
+    maxOutputTokens: 65536,
+  }), 1600);
+});
+
 test('Groq reasoning requests collapse internal effort levels to default', async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | undefined;

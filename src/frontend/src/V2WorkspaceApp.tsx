@@ -322,6 +322,52 @@ function getLoadingStepIndex(mode: V2LoadingMode, stage: V2ProgressStage): numbe
   return 0;
 }
 
+const V2_STAGE_PROGRESS_DRIFT_MS: Record<V2LoadingMode, Partial<Record<V2ProgressStage, number>>> = {
+  preview: {
+    context: 2500,
+    triage: 6000,
+    scope_hypothesis: 9000,
+    persisting: 2500,
+  },
+  refinement: {
+    context: 3000,
+    triage: 3000,
+    scope_hypothesis: 5000,
+    discover: 5000,
+    discovery_synthesis: 7000,
+    final_generation: 18000,
+    coverage_repair: 8000,
+    persisting: 6000,
+  },
+};
+
+function easeOutQuad(progress: number) {
+  return 1 - ((1 - progress) * (1 - progress));
+}
+
+function getDisplayedLoadingPercent(input: {
+  mode: V2LoadingMode;
+  activeIndex: number;
+  stage: V2ProgressStage;
+  updatedAt?: number | null;
+  now: number;
+}) {
+  const steps = getLoadingSteps(input.mode);
+  const boundedIndex = Math.min(Math.max(input.activeIndex, 0), Math.max(steps.length - 1, 0));
+  const currentStep = steps[boundedIndex];
+  if (!currentStep) return 0;
+
+  const previousPercent = boundedIndex > 0 ? (steps[boundedIndex - 1]?.percent ?? 0) : 0;
+  const targetPercent = currentStep.percent;
+  const driftMs = V2_STAGE_PROGRESS_DRIFT_MS[input.mode][input.stage] ?? 6000;
+  const startedAt = input.updatedAt ?? input.now;
+  const elapsedMs = Math.max(0, input.now - startedAt);
+  const stageProgress = Math.min(1, elapsedMs / driftMs);
+  const displayed = previousPercent + ((targetPercent - previousPercent) * easeOutQuad(stageProgress));
+  const minimumVisible = boundedIndex === 0 ? Math.min(targetPercent, 4) : previousPercent + 1;
+  return Math.max(minimumVisible, Math.min(targetPercent, Math.round(displayed)));
+}
+
 function emptyLoadingState(mode: V2LoadingMode, provisionalItems: V2ProgressDraftFeatureSummary[] = []): V2LoadingState {
   return {
     mode,
@@ -933,11 +979,12 @@ export default function V2WorkspaceApp({
         setLoadingMessage('Opening the saved refinement…');
         setLoadingState((previous) => previous ? {
           ...previous,
-          localStepIndex: Math.max(previous.localStepIndex, getLoadingStepIndex(previous.mode, 'persisting')),
           serverProgress: {
             type: 'progress',
             sessionId: nextSessionId,
-            stage: 'persisting',
+            stage: previous.serverProgress?.stage
+              ?? getLoadingSteps(previous.mode)[Math.min(previous.localStepIndex, getLoadingSteps(previous.mode).length - 1)]?.stage
+              ?? 'final_generation',
             message: 'Opening the saved refinement…',
             updatedAt: Date.now(),
           },
@@ -1302,6 +1349,20 @@ function V2LoadingSurface({
   const listNote = serverProgress?.featureCounts?.drafted && serverProgress.featureCounts.drafted > items.length
     ? `${serverProgress.featureCounts.drafted} total drafts in progress`
     : null;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 300);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const displayedPercent = getDisplayedLoadingPercent({
+    mode,
+    activeIndex,
+    stage: serverProgress?.stage ?? activeStep.stage,
+    updatedAt: serverProgress?.updatedAt ?? null,
+    now,
+  });
 
   return (
     <motion.section
@@ -1331,7 +1392,7 @@ function V2LoadingSurface({
           </div>
           <div className="rounded-[22px] border border-[var(--rf-border)] bg-white/78 px-4 py-3 shadow-sm">
             <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Progress</div>
-            <div className="mt-2 text-[28px] font-black text-[var(--rf-text)]">{activeStep.percent}%</div>
+            <div className="mt-2 text-[28px] font-black text-[var(--rf-text)]">{displayedPercent}%</div>
           </div>
         </div>
       </div>
@@ -1367,13 +1428,13 @@ function V2LoadingSurface({
             <motion.div
               className="h-full rounded-full bg-[linear-gradient(90deg,var(--rf-brand),var(--rf-brand-hover))]"
               initial={{ width: 0 }}
-              animate={{ width: `${Math.max(activeStep.percent, 8)}%` }}
+              animate={{ width: `${Math.max(displayedPercent, 8)}%` }}
               transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
             />
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 text-[12px]">
             <span className="text-[var(--rf-text-tertiary)]">{compactUiText(activeStep.label)}</span>
-            <span className="font-bold text-[var(--rf-brand)]">{activeStep.percent}%</span>
+            <span className="font-bold text-[var(--rf-brand)]">{displayedPercent}%</span>
           </div>
         </div>
 

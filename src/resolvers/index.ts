@@ -27,6 +27,7 @@ import {
 } from '../services/compliance';
 import { getProjectActivitySummary, recordProjectActivity } from '../services/project-activity';
 import {
+  applyV2EconomicModelDefaults,
   resolveEffectiveGeneratorConfig,
 } from '../services/model-strategy';
 import {
@@ -367,7 +368,7 @@ async function buildV2RequestContext(
   const baseConfig = applyPreferredPipelineProfile(await getConfig(), 'balanced');
   const config = {
     ...baseConfig,
-    generatorConfig: resolveEffectiveGeneratorConfig(baseConfig.generatorConfig),
+    generatorConfig: applyV2EconomicModelDefaults(resolveEffectiveGeneratorConfig(baseConfig.generatorConfig)),
   };
   const authorizedProjects = await resolveAuthorizedProjectSelection(context, payload);
   const selectedProjectKeys = authorizedProjects.projectKeys;

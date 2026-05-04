@@ -122,6 +122,17 @@ function inferCategory(question: string): ClarifyCategoryKey {
   return 'context_trigger';
 }
 
+function normalizeDiscoveryQuestionsForReturn(
+  questions: V2DiscoveryQuestion[],
+  questionBudget: number,
+): V2DiscoveryQuestion[] {
+  return questions.slice(0, questionBudget).map((question, index) => ({
+    ...question,
+    id: question.id || `dq_${index + 1}`,
+    categoryKey: question.categoryKey || inferCategory(question.question),
+  }));
+}
+
 export function classifyDiscoveryAnswers(answers: V2DiscoveryAnswer[]): V2ClassifiedAnswer[] {
   return answers.map((answer) => {
     const normalized = answer.answer.trim();
@@ -172,7 +183,12 @@ function stageReasoningEffort(
   profile: PipelineProfile,
   stage: 'triage' | 'scope_hypothesis' | 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair',
 ): 'low' | 'medium' | 'high' {
-  if (stage === 'triage' || stage === 'scope_hypothesis' || stage === 'discover') return 'low';
+  if (stage === 'triage') return 'low';
+  if (stage === 'scope_hypothesis' || stage === 'discover') {
+    if (profile === 'fast') return 'low';
+    if (profile === 'quality') return 'high';
+    return 'medium';
+  }
   if (profile === 'fast') return 'low';
   if (stage === 'coverage_repair') return profile === 'quality' ? 'medium' : 'low';
   if (stage === 'final_generation') return profile === 'quality' ? 'high' : 'medium';
@@ -498,8 +514,7 @@ export async function runV2Pipeline(
 
   const classifiedAnswers = classifyDiscoveryAnswers(input.discoveryAnswers ?? []);
   if (shouldAskDiscovery(triage, scopeHypothesis, classifiedAnswers)) {
-    await reportProgress('discover', 'Preparing the next discovery questions…');
-    const discovery = await executeStage<{ questions: V2DiscoveryQuestion[] }>({
+    const executeDiscoveryRound = async (repairNote?: string) => executeStage<{ questions: V2DiscoveryQuestion[] }>({
       stage: 'discover',
       model: input.config.generatorConfig.clarifyModel,
       systemPrompt: buildDiscoverySystemPrompt(),
@@ -508,27 +523,33 @@ export async function runV2Pipeline(
         triage,
         scopeHypothesis,
         groundedEvidenceText: discoveryGroundedEvidenceText,
+        repairNote,
       }),
       jsonSchema: V2_DISCOVERY_SCHEMA,
       maxTokens: 1600,
       reasoningEffort: stageReasoningEffort(profile, 'discover'),
-      validate: (data) => {
-        const basic = validateDiscoveryQuestions(data);
-        if (basic) return basic;
-        const payload = data as { questions?: V2DiscoveryQuestion[] } | null;
-        return validateDiscoveryQuestionsAgainstEvidence(payload?.questions ?? [], baseEvidencePack);
-      },
+      validate: validateDiscoveryQuestions,
     });
+
+    await reportProgress('discover', 'Preparing the next discovery questions…');
+    let discovery = await executeDiscoveryRound();
     addUsage(promptUsage, 'discover', discovery.usage);
+    let groundedDiscoveryError = validateDiscoveryQuestionsAgainstEvidence(discovery.data.questions, baseEvidencePack);
+    if (groundedDiscoveryError) {
+      await reportProgress('discover', 'Tightening discovery questions against grounded evidence…');
+      discovery = await executeDiscoveryRound(groundedDiscoveryError);
+      addUsage(promptUsage, 'discover', discovery.usage);
+      groundedDiscoveryError = validateDiscoveryQuestionsAgainstEvidence(discovery.data.questions, baseEvidencePack);
+      if (groundedDiscoveryError) {
+        throw new Error(`V2 discovery failed quality gate: ${groundedDiscoveryError}`);
+      }
+    }
+
     return {
       status: 'needs_discovery',
       triage,
       scopeHypothesis,
-      discoveryQuestions: discovery.data.questions.slice(0, triage.questionBudget).map((question, index) => ({
-        ...question,
-        id: question.id || `dq_${index + 1}`,
-        categoryKey: question.categoryKey || inferCategory(question.question),
-      })),
+      discoveryQuestions: normalizeDiscoveryQuestionsForReturn(discovery.data.questions, triage.questionBudget),
       materialityHints: [
         'Answer only the questions that change capability boundaries, actor accountability, rules, lifecycle handling, exceptions, or success measures.',
         'Short or trivial answers will be filtered out of generation.',

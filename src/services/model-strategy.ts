@@ -28,6 +28,8 @@ export const DEFAULT_BUCKET_CLASSES: GeneratorBucketClasses = {
   generation: 'pro',
   refinement: 'flash',
 };
+const V2_GEMINI_FLASH_MODEL = strategyCatalog.providers.gemini.presets.latest.flash[0] || 'gemini-3-flash-preview';
+const V2_GEMINI_LITE_MODEL = strategyCatalog.providers.gemini.presets.latest.lite[0] || 'gemini-3.1-flash-lite-preview';
 
 const STORY_ASSISTANT_PROFILE_CONFIGS: Record<PipelineProfile, PipelineProfileConfig> = {
   fast: {
@@ -320,6 +322,21 @@ export function resolveEffectiveGeneratorConfig(generatorConfig: Partial<Generat
     evaluateModel: state.resolvedModels.evaluateModel || savedModels.evaluateModel,
     triageModel: state.resolvedModels.triageModel || savedModels.triageModel,
     themeModel: state.resolvedModels.themeModel || savedModels.themeModel,
+  };
+}
+
+export function applyV2EconomicModelDefaults(generatorConfig: GeneratorConfig): GeneratorConfig {
+  if (normalizeProvider(generatorConfig.provider) !== 'gemini') return generatorConfig;
+
+  return {
+    ...generatorConfig,
+    triageModel: V2_GEMINI_LITE_MODEL,
+    clarifyModel: V2_GEMINI_FLASH_MODEL,
+    decompositionModel: V2_GEMINI_FLASH_MODEL,
+    arModel: V2_GEMINI_FLASH_MODEL,
+    refineModel: V2_GEMINI_LITE_MODEL,
+    evaluateModel: V2_GEMINI_LITE_MODEL,
+    themeModel: V2_GEMINI_LITE_MODEL,
   };
 }
 

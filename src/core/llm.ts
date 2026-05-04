@@ -426,9 +426,15 @@ function resolveModelCapability(
 }
 
 export function resolveEffectiveMaxTokens(opts: LlmCallOptions, capability: ModelCapability): number {
-  const configured = typeof capability.maxOutputTokens === 'number' && capability.maxOutputTokens > 0
+  const capabilityMax = typeof capability.maxOutputTokens === 'number' && capability.maxOutputTokens > 0
     ? capability.maxOutputTokens
-    : (opts.maxTokens ?? 8192);
+    : undefined;
+  const requestedMax = typeof opts.maxTokens === 'number' && opts.maxTokens > 0
+    ? opts.maxTokens
+    : undefined;
+  const configured = requestedMax !== undefined
+    ? Math.min(requestedMax, capabilityMax ?? requestedMax)
+    : (capabilityMax ?? 8192);
   if (opts.provider === 'fireworks' && capability.tokenLimitParam === 'max_tokens') {
     return Math.min(configured, FIREWORKS_NON_STREAMING_MAX_TOKENS);
   }

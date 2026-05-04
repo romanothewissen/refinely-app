@@ -58,11 +58,46 @@ function compactList(items: string[], max = 5, maxItemChars = 160): string {
   return items.slice(0, max).map((item) => `- ${trimText(item, maxItemChars)}`).join('\n');
 }
 
+function renderSection(title: string, body?: string): string {
+  const text = String(body ?? '').trim();
+  if (!text) return '';
+  return `${title}:\n${text}`;
+}
+
 function compactDiscoveryAnswers(items: V2ClassifiedAnswer[], max = 12): string {
   return items
     .slice(0, max)
     .map((answer) => `- [${answer.categoryKey}/${answer.materiality}] ${trimText(answer.question, 160)} => ${trimText(answer.answer, 600)}`)
     .join('\n');
+}
+
+function compactActorSlots(actorSlots: V2ScopeHypothesis['actorSlots'] | V2DiscoverySynthesis['actorMap']): string {
+  return Object.entries(actorSlots ?? {})
+    .filter(([, value]) => Boolean(String(value ?? '').trim()))
+    .map(([slot, value]) => `- ${slot}: ${trimText(String(value), 80)}`)
+    .join('\n');
+}
+
+function compactOpenDecisions(openDecisions: V2DiscoverySynthesis['openDecisions']): string {
+  return openDecisions
+    .slice(0, 8)
+    .map((decision) => `- ${trimText(decision.title, 100)} (${decision.blocking ? 'blocking' : 'non-blocking'}): ${trimText(decision.detail, 180)}`)
+    .join('\n');
+}
+
+function renderSynthesisContract(input: V2DiscoverySynthesis): string {
+  return [
+    renderSection('Resolved facts', compactList(input.resolvedFacts, 10, 180)),
+    renderSection('Actor map', compactActorSlots(input.actorMap)),
+    renderSection('Workflow steps', compactList(input.workflowSteps, 10, 180)),
+    renderSection('Business rules', compactList(input.businessRules, 10, 180)),
+    renderSection('Lifecycle states', compactList(input.lifecycleStates, 8, 120)),
+    renderSection('Exceptions', compactList(input.exceptions, 10, 180)),
+    renderSection('Success measures', compactList(input.successMeasures, 6, 160)),
+    renderSection('Must-cover behaviors', compactList(input.mustCoverBehaviors, 12, 180)),
+    renderSection('Open decisions', compactOpenDecisions(input.openDecisions)),
+    renderSection('Generation targets', `- feature target: ${input.featureTarget}\n- AR depth: ${input.arDepth}`),
+  ].filter(Boolean).join('\n\n');
 }
 
 const ACTOR_SLOT_SCHEMA: JsonSchema = {
@@ -328,11 +363,11 @@ export function buildTriageSystemPrompt(): string {
 
 export function buildTriageUserMessage(input: { requirement: string; attachmentText?: string }): string {
   const parts = [
-    `Requirement:\n${trimText(input.requirement, 1100)}`,
+    renderSection('Requirement', trimText(input.requirement, 1100)),
     input.attachmentText?.trim()
-      ? `Evidence excerpt:\n${trimText(input.attachmentText, 420)}`
+      ? renderSection('Evidence excerpt', trimText(input.attachmentText, 420))
       : '',
-    'Return JSON matching the schema.',
+    'Task: Return only the triage JSON for this requirement. Use the evidence above and do not propose solutions.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.triage.maxUserChars);
 }
@@ -358,10 +393,11 @@ export function buildScopeHypothesisUserMessage(input: {
   groundedEvidenceText?: string;
 }): string {
   const parts = [
-    `Requirement:\n${trimText(input.requirement, 900)}`,
-    input.attachmentText?.trim() ? `Attachment context:\n${trimText(input.attachmentText, 360)}` : '',
+    renderSection('Requirement', trimText(input.requirement, 900)),
+    input.attachmentText?.trim() ? renderSection('Attachment context', trimText(input.attachmentText, 360)) : '',
+    renderSection('Requirement profile', `- discovery mode: ${input.triage.discoveryMode}\n- likely capability count: ${input.triage.likelyCapabilityCount}\n- workflow depth: ${input.triage.workflowDepth}/5\n- must-cover behaviors:\n${compactList(input.triage.mustCoverBehaviors, 6)}`),
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
-    `Requirement profile:\n- discovery mode: ${input.triage.discoveryMode}\n- likely capability count: ${input.triage.likelyCapabilityCount}\n- workflow depth: ${input.triage.workflowDepth}/5\n- must-cover behaviors:\n${compactList(input.triage.mustCoverBehaviors, 6)}`,
+    'Task: Return the smallest grounded capability hypothesis JSON. Keep actor slots sparse when the evidence is weak.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);
 }
@@ -385,18 +421,21 @@ export function buildDiscoveryUserMessage(input: {
   triage: V2TriageResult;
   scopeHypothesis: V2ScopeHypothesis;
   groundedEvidenceText?: string;
+  repairNote?: string;
 }): string {
   const parts = [
-    `Requirement:\n${trimText(input.requirement, 900)}`,
-    `Requirement profile:\n- complexity: ${input.triage.complexity}/5\n- ambiguity: ${input.triage.ambiguity}/5\n- workflow depth: ${input.triage.workflowDepth}/5\n- AR depth: ${input.triage.arDepth}`,
-    `Must-cover behaviors:\n${compactList(input.triage.mustCoverBehaviors, 8)}`,
+    renderSection('Requirement', trimText(input.requirement, 900)),
+    renderSection('Requirement profile', `- complexity: ${input.triage.complexity}/5\n- ambiguity: ${input.triage.ambiguity}/5\n- workflow depth: ${input.triage.workflowDepth}/5\n- AR depth: ${input.triage.arDepth}`),
+    renderSection('Must-cover behaviors', compactList(input.triage.mustCoverBehaviors, 8)),
     input.triage.unresolvedDecisionThemes.length
-      ? `Unresolved decision themes:\n${compactList(input.triage.unresolvedDecisionThemes, 8)}`
+      ? renderSection('Unresolved decision themes', compactList(input.triage.unresolvedDecisionThemes, 8))
       : '',
-    `Proposed capabilities:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)}`,
-    `Open uncertainties:\n${compactList(input.scopeHypothesis.openQuestions, 6) || '- none'}`,
+    renderSection('Proposed capabilities', compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)),
+    renderSection('Tentative actor slots', compactActorSlots(input.scopeHypothesis.actorSlots) || '- none'),
+    renderSection('Open uncertainties', compactList(input.scopeHypothesis.openQuestions, 6) || '- none'),
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
-    `Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only.`,
+    input.repairNote?.trim() ? renderSection('Retry note', trimText(input.repairNote, 320)) : '',
+    `Task: Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only, grounded in the evidence above. Each question must cite a concrete actor, object, rule, workflow step, or lifecycle cue already present above.`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discover.maxUserChars);
 }
@@ -423,14 +462,14 @@ export function buildSynthesisUserMessage(input: {
 }): string {
   const materialAnswers = input.classifiedAnswers.filter((answer) => answer.materiality !== 'trivial');
   const parts = [
-    `Requirement:\n${trimText(input.requirement, 1000)}`,
-    `Requirement profile:\n- complexity: ${input.triage.complexity}/5\n- ambiguity: ${input.triage.ambiguity}/5\n- workflow depth: ${input.triage.workflowDepth}/5\n- actor clarity: ${input.triage.actorClarity}/5\n- requested AR depth: ${input.triage.arDepth}`,
-    `Must-cover behaviors from triage:\n${compactList(input.triage.mustCoverBehaviors, 10)}`,
-    input.triage.unresolvedDecisionThemes.length ? `Unresolved themes from triage:\n${compactList(input.triage.unresolvedDecisionThemes, 10)}` : '',
-    `Confirmed capability hypothesis:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)}`,
-    materialAnswers.length ? `Material discovery answers:\n${compactDiscoveryAnswers(materialAnswers, 12)}` : '',
+    renderSection('Requirement', trimText(input.requirement, 1000)),
+    renderSection('Requirement profile', `- complexity: ${input.triage.complexity}/5\n- ambiguity: ${input.triage.ambiguity}/5\n- workflow depth: ${input.triage.workflowDepth}/5\n- actor clarity: ${input.triage.actorClarity}/5\n- requested AR depth: ${input.triage.arDepth}`),
+    renderSection('Must-cover behaviors from triage', compactList(input.triage.mustCoverBehaviors, 10)),
+    input.triage.unresolvedDecisionThemes.length ? renderSection('Unresolved themes from triage', compactList(input.triage.unresolvedDecisionThemes, 10)) : '',
+    renderSection('Confirmed capability hypothesis', compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)),
+    materialAnswers.length ? renderSection('Material discovery answers', compactDiscoveryAnswers(materialAnswers, 12)) : '',
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
-    'Return the synthesis JSON. Keep open decisions explicit instead of filling gaps with assumptions.',
+    'Task: Return the synthesis JSON only. Keep open decisions explicit instead of filling gaps with assumptions.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discovery_synthesis.maxUserChars);
 }
@@ -457,14 +496,14 @@ export function buildFinalGenerationUserMessage(input: {
   processCodes?: Array<{ code: string; name: string; definition: string }>;
 }): string {
   const taxonomy = input.processTaxonomyEnabled && input.processCodes?.length
-    ? `Optional process taxonomy:\n${compactList(input.processCodes.map((entry) => `${entry.code}: ${entry.name} - ${entry.definition}`), 5)}`
+    ? renderSection('Optional process taxonomy', compactList(input.processCodes.map((entry) => `${entry.code}: ${entry.name} - ${entry.definition}`), 5))
     : '';
   const parts = [
-    `Requirement:\n${trimText(input.requirement, 900)}`,
-    `Discovery synthesis:\n${trimText(JSON.stringify(input.synthesis, null, 2), 3200)}`,
+    renderSection('Requirement', trimText(input.requirement, 900)),
+    renderSection('Discovery synthesis contract', renderSynthesisContract(input.synthesis)),
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     taxonomy,
-    'Generate the final JSON. Use compact but complete features; do not omit coverage from mustCoverBehaviors.',
+    'Task: Generate the final JSON only. Produce the smallest complete feature set, cover every mustCoverBehavior, and keep unresolved open decisions explicit instead of inventing answers.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.final_generation.maxUserChars);
 }
@@ -489,12 +528,12 @@ export function buildCoverageRepairUserMessage(input: {
   groundedEvidenceText?: string;
 }): string {
   const parts = [
-    `Requirement:\n${trimText(input.requirement, 800)}`,
-    `Discovery synthesis:\n${trimText(JSON.stringify(input.synthesis, null, 2), 2600)}`,
-    `Coverage failures to fix:\n${compactList(input.failures, 10)}`,
-    `Current generated draft:\n${trimText(JSON.stringify(input.generated, null, 2), 2600)}`,
+    renderSection('Requirement', trimText(input.requirement, 800)),
+    renderSection('Discovery synthesis contract', renderSynthesisContract(input.synthesis)),
+    renderSection('Coverage failures to fix', compactList(input.failures, 10)),
+    renderSection('Current generated draft', trimText(JSON.stringify(input.generated, null, 2), 2600)),
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
-    'Return the repaired final-generation JSON.',
+    'Task: Return the repaired final-generation JSON only. Fix the listed failures and preserve unrelated structure.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.coverage_repair.maxUserChars);
 }

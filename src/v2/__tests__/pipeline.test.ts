@@ -277,7 +277,7 @@ test('runV2Pipeline uses questionBudget directly when requesting discovery', asy
       return {
         data: {
           questions: [
-            { id: 'q1', categoryKey: 'functional_flow', question: 'What sequence controls routing?', rationale: 'Flow boundary.', suggestions: ['A', 'B'] },
+            { id: 'q1', categoryKey: 'functional_flow', question: 'What sequence controls service request routing after approval gates?', rationale: 'Flow boundary.', suggestions: ['A', 'B'] },
           ],
         } as any,
         usage: { input: 50, output: 50 },
@@ -667,6 +667,113 @@ test('runV2Pipeline makes stage reasoning profile-aware', async () => {
   assert.equal(efforts.get('triage'), 'low');
   assert.equal(efforts.get('discovery_synthesis'), 'medium');
   assert.equal(efforts.get('final_generation'), 'high');
+});
+
+test('runV2Pipeline raises discovery reasoning on balanced profile', async () => {
+  const efforts = new Map<string, string>();
+  const executeStage: V2StageExecutor = async (request) => {
+    efforts.set(request.stage, request.reasoningEffort);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 3 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discover') {
+      return {
+        data: {
+          questions: [
+            {
+              id: 'dq_1',
+              categoryKey: 'business_rules',
+              question: 'How are approvals handled?',
+              rationale: 'Approval logic changes capability boundaries.',
+              suggestions: ['Single approver', 'Multi-step approval'],
+            },
+          ],
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service planning with approvals and downstream work creation.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: { initiator: 'planner' },
+        openQuestions: ['How are approvals handled?'],
+        confidence: 'medium',
+      },
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_discovery');
+  assert.equal(efforts.get('triage'), 'low');
+  assert.equal(efforts.get('discover'), 'medium');
+});
+
+test('runV2Pipeline retries discovery when the first question set is too generic', async () => {
+  const calls: string[] = [];
+  let discoverAttempts = 0;
+  const executeStage: V2StageExecutor = async (request) => {
+    calls.push(request.stage);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discover') {
+      discoverAttempts += 1;
+      return {
+        data: {
+          questions: [
+            discoverAttempts === 1
+              ? {
+                  id: 'dq_1',
+                  categoryKey: 'business_rules',
+                  question: 'What other details are needed?',
+                  rationale: 'Clarifies missing information.',
+                  suggestions: ['Workflow', 'Rules'],
+                }
+              : {
+                  id: 'dq_1',
+                  categoryKey: 'business_rules',
+                  question: 'Who approves the service plan before manual override or status changes proceed?',
+                  rationale: 'Approval accountability changes workflow boundaries.',
+                  suggestions: ['Planner approves', 'Manager approves'],
+                },
+          ],
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service plan approval, manual override, and status updates.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service plan approval', rationale: 'Approval workflow.', confidence: 'high' }],
+        actorSlots: {},
+        openQuestions: ['Who approves the service plan?'],
+        confidence: 'medium',
+      },
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_discovery');
+  assert.equal(discoverAttempts, 2);
+  assert.match(result.discoveryQuestions[0]?.question ?? '', /service plan/i);
+  assert.deepEqual(calls, ['triage', 'discover', 'discover']);
 });
 
 test('validateTriageScores rejects invalid triage outputs', () => {

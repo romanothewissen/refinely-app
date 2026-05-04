@@ -5,6 +5,7 @@ import { getTierModel } from '../../services/billing';
 import {
   DEFAULT_BUCKET_CLASSES,
   MODEL_STRATEGY_VERSION,
+  applyV2EconomicModelDefaults,
   buildStoryAssistantAuditRouteSummary,
   buildStoryAssistantModelRoute,
   getStoryAssistantPipelineProfileConfig,
@@ -216,4 +217,26 @@ test('quality audit summary exposes route mismatch when a quality run resolves t
   assert.equal(summary.requestedPipelineProfile, 'quality');
   assert.equal(summary.resolvedPipelineProfile, 'quality');
   assert.equal(summary.selectedModeHonored, false);
+});
+
+test('applyV2EconomicModelDefaults upgrades Gemini V2 routes onto the Gemini 3 flash line', () => {
+  const resolved = applyV2EconomicModelDefaults(resolveEffectiveGeneratorConfig({
+    provider: 'gemini',
+    modelStrategy: 'simple',
+    bucketClasses: DEFAULT_BUCKET_CLASSES,
+    modelStrategyVersion: MODEL_STRATEGY_VERSION,
+    triageModel: 'gemini-2.5-flash',
+    clarifyModel: 'gemini-2.5-flash',
+    decompositionModel: 'gemini-2.5-flash',
+    arModel: 'gemini-2.5-pro',
+    refineModel: 'gemini-2.5-flash',
+    evaluateModel: 'gemini-2.5-flash',
+    themeModel: 'gemini-2.5-flash',
+    maxTokens: 8192,
+  }));
+
+  assert.equal(resolved.triageModel, 'gemini-3.1-flash-lite-preview');
+  assert.equal(resolved.clarifyModel, 'gemini-3-flash-preview');
+  assert.equal(resolved.decompositionModel, 'gemini-3-flash-preview');
+  assert.equal(resolved.arModel, 'gemini-3-flash-preview');
 });
