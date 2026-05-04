@@ -37,7 +37,7 @@ import {
   retrieveScopedWiContext,
 } from '../services/project-selection';
 import { runV2Pipeline } from '../v2/pipeline';
-import { createSqlConversationStore } from '../v2/storage';
+import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 import { deleteV2Conversation, getV2Conversation, listV2Conversations } from '../services/v2-sql';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -706,6 +706,43 @@ resolver.define('v2Generate', async ({ payload, context }) => {
     return { success: false, error: check.reason ?? 'Generation is not available for this workspace right now.' };
   }
 
+  if (hasDiscoveryAnswers) {
+    const stateStore = createV2EphemeralWorkflowStateStore();
+    await stateStore.setProgress(requestContext.sessionId, {
+      type: 'progress',
+      sessionId: requestContext.sessionId,
+      message: 'Queuing refinement…',
+      updatedAt: Date.now(),
+    });
+
+    const queue = new Queue({ key: 'v2-generation-queue' });
+    await queue.push({
+      body: {
+        sessionId: requestContext.sessionId,
+        accountId: requestContext.accountId,
+        requirement: requestContext.requirement,
+        attachmentText: requestContext.attachmentText,
+        config: requestContext.config,
+        projectKey: requestContext.projectKey,
+        projectKeys: requestContext.projectKeys,
+        domainContext: requestContext.domainContext,
+        domainRoles: requestContext.domainRoles,
+        wiContextText: requestContext.wiContextText,
+        similarStoriesText: requestContext.similarStoriesText,
+        triageOverride: payload?.triageOverride,
+        confirmedScopeHypothesis: payload?.confirmedScopeHypothesis,
+        discoveryAnswers: payload?.discoveryAnswers,
+      },
+    });
+
+    return {
+      success: true,
+      queued: true,
+      sessionId: requestContext.sessionId,
+      warning: [check.reason].filter(Boolean).join(' ').trim() || undefined,
+    };
+  }
+
   let result;
   try {
     result = await runV2Pipeline({
@@ -767,6 +804,16 @@ resolver.define('v2Generate', async ({ payload, context }) => {
   }
 
   return response;
+});
+
+resolver.define('v2GetProgress', async ({ payload }) => {
+  const sessionId = String(payload?.sessionId ?? '').trim();
+  if (!sessionId) return { success: false, error: 'sessionId is required.' };
+  const stateStore = createV2EphemeralWorkflowStateStore();
+  return {
+    success: true,
+    progress: await stateStore.getProgress(sessionId),
+  };
 });
 
 resolver.define('v2GetHistory', async ({ payload, context }) => {

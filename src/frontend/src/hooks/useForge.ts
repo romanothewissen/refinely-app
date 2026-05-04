@@ -45,6 +45,7 @@ export const api = {
     confirmedScopeHypothesis?: unknown;
     discoveryAnswers?: unknown[];
   }) => invoke('v2Generate', payload),
+  v2GetProgress: (sessionId: string) => invoke('v2GetProgress', { sessionId }),
   v2GetHistory: (limit?: number) => invoke('v2GetHistory', { limit }),
   v2GetConversation: (sessionId: string) => invoke('v2GetConversation', { sessionId }),
   v2DeleteConversation: (sessionId: string) => invoke('v2DeleteConversation', { sessionId }),

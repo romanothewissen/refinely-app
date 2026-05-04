@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, Check, ChevronRight, Edit2, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Edit2, Plus, Settings, Trash2, UserRound } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { SettingsView } from './SettingsView';
 import { V2HistoryModal, type V2HistoryEntry } from './V2HistoryModal';
+import { ClarifyQuestionsView } from './ClarifyQuestionsView';
+import { StepIndicator } from './components/StepIndicator';
 import { api } from './hooks/useForge';
-import type { LlmProvider } from './types';
+import type { ClarifyAnswer, ClarifyQuestion, LlmProvider } from './types';
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
@@ -289,6 +291,7 @@ export default function V2WorkspaceApp({
   const [history, setHistory] = useState<V2HistoryEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [originIssueKey, setOriginIssueKey] = useState<string | null>(null);
@@ -549,6 +552,7 @@ export default function V2WorkspaceApp({
     setDiscoveryAnswers({});
     setWarning(null);
     setError(null);
+    setLoadingMessage(null);
     setRunAttachments([]);
     setRunAttachmentParseState(null);
     setRunAttachmentError(null);
@@ -650,6 +654,7 @@ export default function V2WorkspaceApp({
       setUiStep(deriveStepFromResult(restoredResult));
       setScopeDraft(buildScopeDraft(restoredResult?.scopeHypothesis ?? null));
       setDiscoveryAnswers({});
+      setLoadingMessage(null);
       setViewMode('generate');
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : 'Unable to load V2 session.');
@@ -673,6 +678,7 @@ export default function V2WorkspaceApp({
   const handlePreview = async () => {
     if (!requirement.trim() && !runAttachments.length) return;
     setLoading(true);
+    setLoadingMessage('Building scope preview…');
     setError(null);
     setWarning(null);
     try {
@@ -695,18 +701,60 @@ export default function V2WorkspaceApp({
       setScopeDraft(buildScopeDraft(response.result.scopeHypothesis));
       setDiscoveryAnswers({});
       setUiStep('scope_review');
+      setLoadingMessage(null);
       setWarning(response.warning ?? null);
       void loadHistory();
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : 'Preview failed.');
     } finally {
       setLoading(false);
+      setLoadingMessage(null);
     }
   };
+
+  const applyV2Result = useCallback((nextSessionId: string, nextResult: V2Result, nextWarning?: string | null) => {
+    setSessionId(nextSessionId);
+    setSelectedConversationId(nextSessionId);
+    setResult(nextResult);
+    setScopeDraft(buildScopeDraft(nextResult.scopeHypothesis));
+    setUiStep(deriveStepFromResult(nextResult));
+    setWarning(nextWarning ?? null);
+  }, []);
+
+  const waitForQueuedV2Generation = useCallback(async (nextSessionId: string) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 15 * 60 * 1000) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      const progressResponse = await api.v2GetProgress(nextSessionId) as {
+        success?: boolean;
+        progress?: { type?: string; message?: string; result?: V2Result; warning?: string };
+      };
+      const progress = progressResponse?.progress;
+      if (!progress) continue;
+
+      if (progress.type === 'progress') {
+        setLoadingMessage(progress.message ?? 'Refining backlog…');
+        continue;
+      }
+
+      if (progress.type === 'complete' && progress.result) {
+        applyV2Result(nextSessionId, progress.result, progress.warning ?? null);
+        void loadHistory();
+        return;
+      }
+
+      if (progress.type === 'error') {
+        throw new Error(progress.message || 'Full refinement failed.');
+      }
+    }
+
+    throw new Error('V2 refinement is taking longer than expected. Please try again.');
+  }, [applyV2Result]);
 
   const handleGenerate = async (answerOverride?: Record<string, DiscoveryAnswer>) => {
     if (!scopeDraft) return;
     setLoading(true);
+    setLoadingMessage('Preparing refinement…');
     setError(null);
     setWarning(null);
     try {
@@ -721,22 +769,27 @@ export default function V2WorkspaceApp({
         triageOverride: result?.triage,
         confirmedScopeHypothesis: buildScopePayload(scopeDraft),
         discoveryAnswers: Object.values(answerOverride ?? discoveryAnswers),
-      }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result };
-      if (!response?.success || !response.result) {
+      }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result; queued?: boolean };
+      if (!response?.success) {
         throw new Error(response?.error || 'Full refinement failed.');
       }
       const nextSessionId = response.sessionId ?? sessionId;
-      setSessionId(nextSessionId);
-      setSelectedConversationId(nextSessionId);
-      setResult(response.result);
-      setScopeDraft(buildScopeDraft(response.result.scopeHypothesis));
-      setUiStep(deriveStepFromResult(response.result));
-      setWarning(response.warning ?? null);
-      void loadHistory();
+      if (response.queued) {
+        setSelectedConversationId(nextSessionId);
+        setWarning(response.warning ?? null);
+        setLoadingMessage('Queued refinement is running…');
+        await waitForQueuedV2Generation(nextSessionId);
+      } else if (response.result) {
+        applyV2Result(nextSessionId, response.result, response.warning ?? null);
+        void loadHistory();
+      } else {
+        throw new Error('Full refinement failed.');
+      }
     } catch (generationError) {
       setError(generationError instanceof Error ? generationError.message : 'Full refinement failed.');
     } finally {
       setLoading(false);
+      setLoadingMessage(null);
     }
   };
 
@@ -808,7 +861,7 @@ export default function V2WorkspaceApp({
                 onRemoveRunAttachment={handleRemoveRunAttachment}
                 workspacePipelineAuditEnabled={false}
                 recordPipelineAuditForRun={false}
-                primaryActionLabel="Fast Preview"
+                primaryActionLabel="Preview Scope"
               />
               {sidebarOpen && (
                 <div
@@ -885,6 +938,7 @@ export default function V2WorkspaceApp({
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5">
             <V2Canvas
               loading={loading}
+              loadingMessage={loadingMessage}
               result={result}
               uiStep={uiStep}
               scopeDraft={scopeDraft}
@@ -898,6 +952,8 @@ export default function V2WorkspaceApp({
               }}
               onReturnToScope={() => setUiStep('scope_review')}
               canContinueFromScope={canContinueFromScope}
+              sidebarOpen={sidebarOpen}
+              setSidebarOpen={setSidebarOpen}
             />
           </div>
         </div>
@@ -928,37 +984,25 @@ function StepRail({ uiStep }: { uiStep: V2UiStep }) {
     { id: 'discovery', label: 'Discovery' },
     { id: 'complete', label: 'Complete' },
   ];
-  const current = stepIndex(uiStep);
+  const completedSteps = new Set(
+    steps
+      .filter((_, index) => index < stepIndex(uiStep))
+      .map((step) => step.id),
+  );
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {steps.map((step, index) => {
-        const isDone = index < current;
-        const isActive = index === current;
-        return (
-          <div
-            key={step.id}
-            className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] border ${
-              isActive
-                ? 'bg-[var(--rf-brand)] text-white border-[var(--rf-brand)]'
-                : isDone
-                  ? 'bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)] border-[var(--rf-border-strong)]'
-                  : 'bg-white/70 text-[var(--rf-text-tertiary)] border-[var(--rf-border)]'
-            }`}
-          >
-            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-current/15">
-              {isDone ? <Check className="w-3 h-3" /> : <span className="block h-1.5 w-1.5 rounded-full bg-current" />}
-            </span>
-            {step.label}
-          </div>
-        );
-      })}
-    </div>
+    <StepIndicator
+      steps={steps}
+      activeStep={uiStep}
+      completedSteps={completedSteps}
+      onStepClick={() => {}}
+    />
   );
 }
 
 function V2Canvas({
   loading,
+  loadingMessage,
   result,
   uiStep,
   scopeDraft,
@@ -969,8 +1013,11 @@ function V2Canvas({
   onReset,
   onReturnToScope,
   canContinueFromScope,
+  sidebarOpen,
+  setSidebarOpen,
 }: {
   loading: boolean;
+  loadingMessage: string | null;
   result: V2Result | null;
   uiStep: V2UiStep;
   scopeDraft: EditableScopeDraft | null;
@@ -981,6 +1028,8 @@ function V2Canvas({
   onReset: () => void;
   onReturnToScope: () => void;
   canContinueFromScope: boolean;
+  sidebarOpen: boolean;
+  setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const triage = result?.triage ?? null;
 
@@ -1016,8 +1065,8 @@ function V2Canvas({
         <section className="rf-card p-8">
           <div className="max-w-3xl">
             <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Ready to preview</div>
-            <h2 className="mt-2 text-3xl text-[var(--rf-text)]">Use the left sidebar to shape scope, then run Fast Preview.</h2>
-            <p className="mt-3 text-sm leading-7 text-[var(--rf-text-secondary)]">
+            <h2 className="mt-2 text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>Use the left sidebar to shape scope, then run Preview Scope.</h2>
+            <p className="mt-2 text-[14px] leading-relaxed text-[var(--rf-text-secondary)]">
               The V2 flow now uses the V1 shell so the main canvas stays scrollable, and scope review happens as a dedicated step instead of appearing below the fold.
             </p>
           </div>
@@ -1029,9 +1078,9 @@ function V2Canvas({
           <section className="rf-card p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Fast preview result</div>
-                <h2 className="mt-2 text-3xl text-[var(--rf-text)]">Review and edit the proposed scope before refinement.</h2>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--rf-text-secondary)]">
+                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Scope preview result</div>
+                <h2 className="mt-2 text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>Review and edit the proposed scope before refinement.</h2>
+                <p className="mt-2 max-w-3xl text-[14px] leading-relaxed text-[var(--rf-text-secondary)]">
                   Keep the capabilities that belong in this refinement, rename anything ambiguous, adjust actor roles, and decide which open questions should stay unresolved.
                 </p>
               </div>
@@ -1039,9 +1088,9 @@ function V2Canvas({
                 type="button"
                 onClick={() => void onGenerate()}
                 disabled={loading || !canContinueFromScope}
-                className="rounded-full bg-[var(--rf-brand)] px-5 py-3 text-sm font-bold text-white disabled:opacity-45"
+                className="rounded-[18px] bg-[var(--rf-brand)] px-4 py-2.5 text-[13px] font-bold text-white disabled:opacity-45 shadow-sm"
               >
-                {loading ? 'Working…' : 'Continue into full refinement'}
+                {loading ? (loadingMessage ?? 'Working…') : 'Continue into full refinement'}
               </button>
             </div>
           </section>
@@ -1049,7 +1098,7 @@ function V2Canvas({
           <section className="rf-card p-6">
             <div className="flex items-center gap-3">
               <Edit2 className="w-4 h-4 text-[var(--rf-brand)]" />
-              <h3 className="text-2xl text-[var(--rf-text)]">Capabilities</h3>
+              <h3 className="text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>Capabilities</h3>
             </div>
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
               {scopeDraft.capabilities.map((capability, index) => (
@@ -1061,7 +1110,7 @@ function V2Canvas({
                         ...previous,
                         capabilities: previous.capabilities.map((entry, entryIndex) => entryIndex === index ? { ...entry, label: event.target.value } : entry),
                       } : previous)}
-                      className="w-full bg-transparent text-sm font-semibold text-[var(--rf-text)] outline-none"
+                      className="w-full bg-transparent text-[16px] font-bold text-[var(--rf-text)] outline-none tracking-tight"
                     />
                     <button
                       type="button"
@@ -1081,7 +1130,7 @@ function V2Canvas({
                       ...previous,
                       capabilities: previous.capabilities.map((entry, entryIndex) => entryIndex === index ? { ...entry, rationale: event.target.value } : entry),
                     } : previous)}
-                    className="mt-3 min-h-[120px] w-full resize-none rounded-[18px] border border-[var(--rf-border)] bg-white/70 p-4 text-sm leading-7 text-[var(--rf-text-secondary)] outline-none"
+                    className="mt-3 min-h-[110px] w-full resize-none rounded-[18px] border border-[var(--rf-border)] bg-white/70 p-4 text-[13px] leading-relaxed text-[var(--rf-text-secondary)] outline-none"
                   />
                 </div>
               ))}
@@ -1111,7 +1160,7 @@ function V2Canvas({
             <div className="rf-card p-6">
               <div className="flex items-center gap-3">
                 <UserRound className="w-4 h-4 text-[var(--rf-brand)]" />
-                <h3 className="text-2xl text-[var(--rf-text)]">Actor slots</h3>
+                <h3 className="text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>Actor slots</h3>
               </div>
               <div className="mt-5 space-y-3">
                 {actorSlotEntries(scopeDraft.actorSlots).map(([slot, value]) => (
@@ -1138,7 +1187,7 @@ function V2Canvas({
             <div className="rf-card p-6">
               <div className="flex items-center gap-3">
                 <AlertTriangle className="w-4 h-4 text-[var(--rf-warning)]" />
-                <h3 className="text-2xl text-[var(--rf-text)]">Open questions</h3>
+                <h3 className="text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>Open questions</h3>
               </div>
               <div className="mt-5 space-y-4">
                 {scopeDraft.openQuestions.length === 0 ? (
@@ -1175,100 +1224,51 @@ function V2Canvas({
       )}
 
       {uiStep === 'discovery' && result?.status === 'needs_discovery' && (
-        <>
-          <section className="rf-card p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Discovery step</div>
-                <h2 className="mt-2 text-3xl text-[var(--rf-text)]">Answer only the questions that still change output shape.</h2>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={onReturnToScope}
-                  className="rounded-full border border-[var(--rf-border)] bg-white/80 px-5 py-3 text-sm font-bold text-[var(--rf-text-secondary)]"
-                >
-                  Back to scope
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onGenerate()}
-                  disabled={loading}
-                  className="rounded-full bg-[var(--rf-brand)] px-5 py-3 text-sm font-bold text-white disabled:opacity-45"
-                >
-                  {loading ? 'Working…' : 'Continue refinement'}
-                </button>
-              </div>
-            </div>
-            {result.materialityHints.length > 0 && (
-              <div className="mt-5 space-y-3">
-                {result.materialityHints.map((hint) => (
-                  <div key={hint} className="rounded-[18px] border px-4 py-3 text-sm text-[var(--rf-text-secondary)]" style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)' }}>
-                    {hint}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="space-y-4">
-            {result.discoveryQuestions.map((question) => {
-              const current = discoveryAnswers[question.id] ?? {
-                questionId: question.id,
-                categoryKey: question.categoryKey,
-                question: question.question,
-                answer: '',
-              };
-
-              return (
-                <section key={question.id} className="rf-card p-6">
-                  <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
-                    {question.categoryKey.replace(/_/g, ' ')}
-                  </div>
-                  <h3 className="mt-2 text-2xl text-[var(--rf-text)]">{question.question}</h3>
-                  <p className="mt-3 text-sm leading-7 text-[var(--rf-text-secondary)]">{question.rationale}</p>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {question.suggestions.map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => setDiscoveryAnswers((previous) => ({
-                          ...previous,
-                          [question.id]: {
-                            ...current,
-                            selectedSuggestion: suggestion,
-                            answer: suggestion,
-                          },
-                        }))}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                          current.selectedSuggestion === suggestion
-                            ? 'border-[var(--rf-brand)] bg-[var(--rf-brand-subtle)] text-[var(--rf-brand)]'
-                            : 'border-[var(--rf-border)] bg-white/75 text-[var(--rf-text-secondary)]'
-                        }`}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-
-                  <textarea
-                    value={current.answer}
-                    onChange={(event) => setDiscoveryAnswers((previous) => ({
-                      ...previous,
-                      [question.id]: {
-                        ...current,
-                        answer: event.target.value,
-                      },
-                    }))}
-                    className="mt-4 min-h-[120px] w-full resize-none rounded-[20px] border border-[var(--rf-border)] bg-white/78 p-4 text-sm leading-7 text-[var(--rf-text)] outline-none"
-                    placeholder="Answer in business terms."
-                  />
-                </section>
-              );
-            })}
-          </section>
-        </>
+        <ClarifyQuestionsView
+          questions={result.discoveryQuestions.map((question): ClarifyQuestion => ({
+            categoryKey: question.categoryKey as ClarifyQuestion['categoryKey'],
+            category: question.categoryKey,
+            intent: question.categoryKey,
+            question: question.question,
+            details: question.rationale,
+            suggestions: question.suggestions,
+          }))}
+          onComplete={(answers: ClarifyAnswer[]) => {
+            const nextAnswers = Object.fromEntries(
+              result.discoveryQuestions.map((question, index) => {
+                const answer = answers[index];
+                return [question.id, {
+                  questionId: question.id,
+                  categoryKey: question.categoryKey,
+                  question: question.question,
+                  answer: String(answer?.customAnswer ?? answer?.answer ?? '').trim(),
+                  selectedSuggestion: answer?.selectedSuggestions?.[0],
+                }];
+              }),
+            );
+            setDiscoveryAnswers(nextAnswers);
+            void onGenerate(nextAnswers);
+          }}
+          onSkip={onReturnToScope}
+          round={1}
+          isSubmitting={loading}
+          submitLabel={loading ? (loadingMessage ?? 'Working…') : 'Continue refinement'}
+          skipLabel="Back to scope"
+          inlineError={null}
+          priorAnswers={result.discoveryQuestions.map((question) => {
+            const current = discoveryAnswers[question.id];
+            return {
+              question: question.question,
+              answer: current?.answer ?? '',
+              selectedSuggestions: current?.selectedSuggestion ? [current.selectedSuggestion] : [],
+              customAnswer: current?.answer ?? '',
+              categoryKey: question.categoryKey as ClarifyQuestion['categoryKey'],
+              intent: question.categoryKey,
+            };
+          })}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+        />
       )}
 
       {uiStep === 'complete' && result?.status === 'complete' && (
