@@ -11,6 +11,7 @@ import { api } from './hooks/useForge';
 import type { ClarifyAnswer, ClarifyQuestion, LlmProvider } from './types';
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
+type ActorGroundingStatus = 'weak' | 'supported' | 'strong';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
 type SettingsSurface = 'workspace' | 'project';
 type SettingsTab = 'models' | 'jira' | 'domain' | 'stats' | 'billing' | 'compliance';
@@ -28,6 +29,7 @@ interface ScopeHypothesis {
   actorSlots: Record<string, string | undefined>;
   openQuestions: string[];
   confidence: 'low' | 'medium' | 'high';
+  actorGroundingStatus?: ActorGroundingStatus;
 }
 
 interface DiscoveryQuestion {

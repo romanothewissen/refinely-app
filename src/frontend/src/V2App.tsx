@@ -6,6 +6,7 @@ import type { LlmProvider, TenantConfig } from './types';
 import { DEFAULT_CONFIG } from './types';
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
+type ActorGroundingStatus = 'weak' | 'supported' | 'strong';
 type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
 
 interface ScopeCapability {
@@ -20,6 +21,7 @@ interface ScopeHypothesis {
   actorSlots: Record<string, string | undefined>;
   openQuestions: string[];
   confidence: 'low' | 'medium' | 'high';
+  actorGroundingStatus?: ActorGroundingStatus;
 }
 
 interface DiscoveryQuestion {
@@ -194,6 +196,22 @@ function actorSlotEntries(scopeHypothesis?: ScopeHypothesis | null) {
   return Object.entries(scopeHypothesis.actorSlots ?? {}).filter(([, value]) => Boolean(value));
 }
 
+function shouldRevealActorSlots(status: ConversationStatus, scopeHypothesis?: ScopeHypothesis | null) {
+  if (!scopeHypothesis) return false;
+  if (status === 'complete') return true;
+  return scopeHypothesis.actorGroundingStatus === 'strong';
+}
+
+function actorGroundingMessage(status: ConversationStatus, scopeHypothesis?: ScopeHypothesis | null) {
+  if (!scopeHypothesis || shouldRevealActorSlots(status, scopeHypothesis)) return '';
+  if (status === 'needs_discovery') {
+    return scopeHypothesis.actorGroundingStatus === 'supported'
+      ? 'Actor labels stay provisional until discovery confirms the accountable role.'
+      : 'Actors will be grounded during discovery when role evidence is still weak.';
+  }
+  return 'Actors will be grounded later once the evidence supports a specific accountable role.';
+}
+
 function ActorSlots({ scopeHypothesis }: { scopeHypothesis?: ScopeHypothesis | null }) {
   const entries = actorSlotEntries(scopeHypothesis);
   if (!entries.length) return null;
@@ -227,6 +245,8 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
 
   const activeScopeHypothesis = result?.scopeHypothesis ?? null;
   const activeDiscoveryQuestions = result?.status === 'needs_discovery' ? result.discoveryQuestions : [];
+  const actorSlotsVisible = result ? shouldRevealActorSlots(result.status, activeScopeHypothesis) : false;
+  const actorSlotsMessage = result ? actorGroundingMessage(result.status, activeScopeHypothesis) : '';
 
   const loadHistory = async () => {
     try {
@@ -653,7 +673,13 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
               </div>
 
               <div className="mt-5">
-                <ActorSlots scopeHypothesis={activeScopeHypothesis} />
+                {actorSlotsVisible ? (
+                  <ActorSlots scopeHypothesis={activeScopeHypothesis} />
+                ) : actorSlotsMessage ? (
+                  <div className="rounded-[24px] border px-4 py-3 text-sm" style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)', color: 'var(--rf-text-secondary)' }}>
+                    {actorSlotsMessage}
+                  </div>
+                ) : null}
               </div>
 
               {activeScopeHypothesis.openQuestions.length > 0 && (

@@ -1,9 +1,41 @@
 import { callLlmJsonWithUsage } from '../core/llm';
 import type { AcceptanceRequirement, ClarifyCategoryKey, Feature, TenantConfig } from '../types';
-import { buildArWriterSystemPrompt, buildArWriterUserMessage, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildCompactEvidenceSummary, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFeatureFormatterUserMessage, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildTriageSystemPrompt, buildTriageUserMessage, V2_AR_WRITER_SCHEMA, V2_DISCOVERY_SCHEMA, V2_FEATURE_FORMATTER_SCHEMA, V2_REASONING_SCHEMA, V2_SCOPE_HYPOTHESIS_SCHEMA, V2_TRIAGE_SCHEMA, validateDiscoveryQuestions, validateReasoningArtifact, validateScopeHypothesis, validateTriageScores } from './prompts';
+import {
+  buildArWriterSystemPrompt,
+  buildArWriterUserMessage,
+  buildCapabilityReasoningSystemPrompt,
+  buildCapabilityReasoningUserMessage,
+  buildDiscoverySystemPrompt,
+  buildDiscoveryUserMessage,
+  buildFeatureFormatterSystemPrompt,
+  buildFeatureFormatterUserMessage,
+  buildScopeHypothesisSystemPrompt,
+  buildScopeHypothesisUserMessage,
+  buildTriageSystemPrompt,
+  buildTriageUserMessage,
+  V2_AR_WRITER_SCHEMA,
+  V2_DISCOVERY_SCHEMA,
+  V2_FEATURE_FORMATTER_SCHEMA,
+  V2_REASONING_SCHEMA,
+  V2_SCOPE_HYPOTHESIS_SCHEMA,
+  V2_TRIAGE_SCHEMA,
+  validateDiscoveryQuestions,
+  validateReasoningArtifact,
+  validateScopeHypothesis,
+  validateTriageScores,
+} from './prompts';
 import { assessV2TriageFromScores, type V2RawTriageScores } from './triage';
 import type { V2CapabilityReasoningArtifact, V2ClassifiedAnswer, V2DiscoveryAnswer, V2DiscoveryQuestion, V2PipelineInput, V2PipelineResult, V2ScopeHypothesis, V2StageExecutor, V2StageRequest, V2TriageResult } from './types';
 import { evaluateV2Quality } from './validators';
+import {
+  buildV2GroundedEvidencePack,
+  enrichCapabilityReasoning,
+  enrichScopeHypothesis,
+  renderGroundedEvidencePack,
+  validateDiscoveryQuestionsAgainstEvidence,
+  validateReasoningAgainstEvidence,
+  validateScopeHypothesisAgainstEvidence,
+} from './evidence-pack';
 
 interface RawFormattedFeature {
   summary: string;
@@ -123,7 +155,16 @@ export async function runV2Pipeline(
   input: V2PipelineInput,
   executeStage: V2StageExecutor = createDefaultV2StageExecutor(input.config),
 ): Promise<V2PipelineResult> {
-  const evidenceSummary = buildCompactEvidenceSummary(input);
+  const baseEvidencePack = input.evidencePack ?? buildV2GroundedEvidencePack({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    domainContext: input.domainContext,
+    domainRoles: input.domainRoles,
+    similarStoriesText: input.similarStoriesText,
+    wiContextText: input.wiContextText,
+  });
+  const scopeGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'scope_hypothesis');
+  const discoveryGroundedEvidenceText = renderGroundedEvidencePack(baseEvidencePack, 'discover');
   const promptUsage: {
     input: number;
     output: number;
@@ -170,22 +211,27 @@ export async function runV2Pipeline(
     const scopeResponse = await executeStage<V2ScopeHypothesis>({
       stage: 'scope_hypothesis',
       model: input.config.generatorConfig.clarifyModel,
-      systemPrompt: buildScopeHypothesisSystemPrompt(),
-      userMessage: buildScopeHypothesisUserMessage({
-        requirement: input.requirement,
-        attachmentText: input.attachmentText,
-        triage,
-        domainContext: input.domainContext,
-      }),
-      jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
-      maxTokens: 1400,
-      reasoningEffort: 'low',
-      validate: validateScopeHypothesis,
-    });
-    scopeHypothesis = scopeResponse.data;
+        systemPrompt: buildScopeHypothesisSystemPrompt(),
+        userMessage: buildScopeHypothesisUserMessage({
+          requirement: input.requirement,
+          attachmentText: input.attachmentText,
+          triage,
+          groundedEvidenceText: scopeGroundedEvidenceText,
+        }),
+        jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
+        maxTokens: 1400,
+        reasoningEffort: 'low',
+        validate: (data) => (
+          validateScopeHypothesis(data)
+          ?? validateScopeHypothesisAgainstEvidence(data as V2ScopeHypothesis, baseEvidencePack)
+        ),
+      });
+    scopeHypothesis = enrichScopeHypothesis(scopeResponse.data, baseEvidencePack);
     promptUsage.input += scopeResponse.usage.input;
     promptUsage.output += scopeResponse.usage.output;
     promptUsage.byStage.scope_hypothesis = scopeResponse.usage;
+  } else {
+    scopeHypothesis = enrichScopeHypothesis(scopeHypothesis, baseEvidencePack, { preserveActorSlots: true });
   }
 
   if (input.previewOnly) {
@@ -218,12 +264,17 @@ export async function runV2Pipeline(
         requirement: input.requirement,
         triage,
         scopeHypothesis,
-        domainContext: input.domainContext,
+        groundedEvidenceText: discoveryGroundedEvidenceText,
       }),
       jsonSchema: V2_DISCOVERY_SCHEMA,
       maxTokens: 1600,
       reasoningEffort: 'low',
-      validate: validateDiscoveryQuestions,
+      validate: (data) => {
+        const basic = validateDiscoveryQuestions(data);
+        if (basic) return basic;
+        const payload = data as { questions?: V2DiscoveryQuestion[] } | null;
+        return validateDiscoveryQuestionsAgainstEvidence(payload?.questions ?? [], baseEvidencePack);
+      },
     });
     promptUsage.input += discovery.usage.input;
     promptUsage.output += discovery.usage.output;
@@ -244,6 +295,17 @@ export async function runV2Pipeline(
     };
   }
 
+  const reasoningEvidencePack = input.evidencePack ?? buildV2GroundedEvidencePack({
+    requirement: input.requirement,
+    attachmentText: input.attachmentText,
+    domainContext: input.domainContext,
+    domainRoles: input.domainRoles,
+    similarStoriesText: input.similarStoriesText,
+    wiContextText: input.wiContextText,
+    discoveryAnswers: classifiedAnswers,
+  });
+  const reasoningGroundedEvidenceText = renderGroundedEvidencePack(reasoningEvidencePack, 'capability_reasoning');
+
   const reasoning = await executeStage<V2CapabilityReasoningArtifact>({
     stage: 'capability_reasoning',
     model: input.config.generatorConfig.decompositionModel,
@@ -252,23 +314,27 @@ export async function runV2Pipeline(
       requirement: input.requirement,
       scopeHypothesis,
       classifiedAnswers,
-      evidenceSummary,
+      groundedEvidenceText: reasoningGroundedEvidenceText,
     }),
     jsonSchema: V2_REASONING_SCHEMA,
     maxTokens: 2200,
     reasoningEffort: 'medium',
-    validate: validateReasoningArtifact,
+    validate: (data) => (
+      validateReasoningArtifact(data)
+      ?? validateReasoningAgainstEvidence(data as V2CapabilityReasoningArtifact, reasoningEvidencePack)
+    ),
   });
   promptUsage.input += reasoning.usage.input;
   promptUsage.output += reasoning.usage.output;
   promptUsage.byStage.capability_reasoning = reasoning.usage;
+  const groundedReasoning = enrichCapabilityReasoning(reasoning.data, reasoningEvidencePack);
 
   const formatted = await executeStage<{ features: RawFormattedFeature[] }>({
     stage: 'feature_formatter',
     model: input.config.generatorConfig.decompositionModel,
     systemPrompt: buildFeatureFormatterSystemPrompt(),
     userMessage: buildFeatureFormatterUserMessage({
-      reasoning: reasoning.data,
+      reasoning: groundedReasoning,
       processTaxonomyEnabled: input.config.processTaxonomyEnabled,
       processCodes: input.config.processTaxonomy,
     }),
@@ -288,7 +354,7 @@ export async function runV2Pipeline(
       systemPrompt: buildArWriterSystemPrompt(),
       userMessage: buildArWriterUserMessage({
         feature: { summary: feature.summary, description: feature.description },
-        capabilityReasoning: reasoning.data,
+        capabilityReasoning: groundedReasoning,
       }),
       jsonSchema: V2_AR_WRITER_SCHEMA,
       maxTokens: 2200,
@@ -303,11 +369,22 @@ export async function runV2Pipeline(
     };
   }
 
+  const finalScopeHypothesis = enrichScopeHypothesis(
+    {
+      ...scopeHypothesis,
+      actorSlots: Object.keys(groundedReasoning.actorSlots ?? {}).length
+        ? groundedReasoning.actorSlots
+        : scopeHypothesis.actorSlots,
+    },
+    reasoningEvidencePack,
+    { classifiedAnswers, preserveActorSlots: true },
+  );
+
   return {
     status: 'complete',
     triage,
-    scopeHypothesis,
-    reasoning: reasoning.data,
+    scopeHypothesis: finalScopeHypothesis,
+    reasoning: groundedReasoning,
     features,
     classifiedAnswers,
     discoveryChanges: buildDiscoveryChanges(classifiedAnswers),

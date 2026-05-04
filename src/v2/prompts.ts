@@ -211,8 +211,9 @@ export function buildScopeHypothesisSystemPrompt(): string {
     [
       'You identify the smallest set of meaningful business capabilities implied by a requirement.',
       'Focus on business outcomes, not CRUD fragments or implementation steps.',
-      'Return 1-6 core capabilities, proposed actor slots, and the unresolved questions that could change scope.',
-      'Use neutral actor labels when confidence is low.',
+      'Return 1-6 core capabilities, tentative actor slots, and the unresolved questions that could change scope.',
+      'Ground capability labels in concrete business objects, workflow steps, or rules from the evidence.',
+      'If actor evidence is weak, keep actor slots sparse rather than inventing generic roles.',
       'Do not write acceptance requirements or implementation detail.',
     ].join(' '),
     V2_PROMPT_BUDGETS.scope_hypothesis.maxSystemChars,
@@ -249,12 +250,12 @@ export function buildScopeHypothesisUserMessage(input: {
   requirement: string;
   attachmentText?: string;
   triage: V2TriageResult;
-  domainContext?: string;
+  groundedEvidenceText?: string;
 }): string {
   const parts = [
     `Requirement:\n${trimText(input.requirement, 900)}`,
     input.attachmentText?.trim() ? `Attachment context:\n${trimText(input.attachmentText, 360)}` : '',
-    input.domainContext?.trim() ? `Optional domain context:\n${trimText(input.domainContext, 320)}` : '',
+    input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     `Triage hints:\n- discovery mode: ${input.triage.discoveryMode}\n- likely capability count: ${input.triage.likelyCapabilityCount}\n- crud risk: ${input.triage.crudRisk}`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);
@@ -266,6 +267,7 @@ export function buildDiscoverySystemPrompt(): string {
       'You write only material discovery questions.',
       'Questions must be neutral, non-leading, and specific to the requirement.',
       'Do not assume role names that are not already confirmed.',
+      'Each question must mention a concrete actor, object, rule, workflow step, or lifecycle signal already present in the grounded evidence.',
       'Ask only questions that can materially change capability boundaries, actor accountability, business rules, or lifecycle handling.',
       'Prefer concise questions and short suggestion chips.',
     ].join(' '),
@@ -277,13 +279,13 @@ export function buildDiscoveryUserMessage(input: {
   requirement: string;
   triage: V2TriageResult;
   scopeHypothesis: V2ScopeHypothesis;
-  domainContext?: string;
+  groundedEvidenceText?: string;
 }): string {
   const parts = [
     `Requirement:\n${trimText(input.requirement, 900)}`,
     `Proposed capabilities:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => `${capability.label}: ${capability.rationale}`), 6)}`,
     `Open uncertainties:\n${compactList(input.scopeHypothesis.openQuestions, 6) || '- none'}`,
-    input.domainContext?.trim() ? `Optional domain context:\n${trimText(input.domainContext, 260)}` : '',
+    input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     `Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only.`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discover.maxUserChars);
@@ -296,6 +298,7 @@ export function buildCapabilityReasoningSystemPrompt(): string {
       'Refine capability boundaries, actor accountability, rules, edge cases, and open decisions.',
       'Do not format final feature descriptions yet.',
       'Preserve meaningful workflow depth and exception handling.',
+      'Keep owner roles and capability boundaries grounded in the supplied evidence wording.',
       'Avoid CRUD decomposition unless the requirement is explicitly administrative.',
     ].join(' '),
     V2_PROMPT_BUDGETS.capability_reasoning.maxSystemChars,
@@ -306,7 +309,7 @@ export function buildCapabilityReasoningUserMessage(input: {
   requirement: string;
   scopeHypothesis: V2ScopeHypothesis;
   classifiedAnswers: V2ClassifiedAnswer[];
-  evidenceSummary: string;
+  groundedEvidenceText?: string;
 }): string {
   const materialAnswers = input.classifiedAnswers
     .filter((answer) => answer.materiality !== 'trivial')
@@ -316,7 +319,7 @@ export function buildCapabilityReasoningUserMessage(input: {
     `Requirement:\n${trimText(input.requirement, 800)}`,
     `Confirmed capability hypothesis:\n${compactList(input.scopeHypothesis.capabilities.map((capability) => capability.label), 6)}`,
     materialAnswers.length ? `Material discovery answers:\n${compactList(materialAnswers, 8)}` : '',
-    input.evidenceSummary ? `Compact evidence:\n${trimText(input.evidenceSummary, 420)}` : '',
+    input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     'Output capability boundaries, actor slots, must-carry rules, edge cases, and open decisions.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.capability_reasoning.maxUserChars);
@@ -328,6 +331,7 @@ export function buildFeatureFormatterSystemPrompt(): string {
       'You convert capability reasoning into a small, high-quality feature set.',
       'Each feature must represent an independently valuable business capability.',
       'Use "As a [role], I need ... so that ..." descriptions.',
+      'Capability labels must contain concrete business objects or workflow nouns from the evidence.',
       'Avoid thin CRUD fragments and vague actor labels.',
       'Leave acceptance requirements out of this step.',
     ].join(' '),

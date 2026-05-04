@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_CONFIG, type TenantConfig } from '../../types';
 import { runV2Pipeline, classifyDiscoveryAnswers } from '../pipeline';
-import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildDiscoverySystemPrompt, buildFeatureFormatterSystemPrompt, buildScopeHypothesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
+import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
 import { assessV2TriageFromScores } from '../triage';
 import type { V2StageExecutor } from '../types';
+import { buildV2GroundedEvidencePack, renderGroundedEvidencePack } from '../evidence-pack';
 
 const baseConfig: TenantConfig = {
   ...DEFAULT_CONFIG,
@@ -75,6 +76,79 @@ test('v2 prompt budgets stay materially smaller than the current dense prompt st
   });
 });
 
+test('grounded evidence pack prefers specific roles from configured roles and discovery answers', () => {
+  const pack = buildV2GroundedEvidencePack({
+    requirement: 'Coordinate a service plan through approval and exception handling.',
+    domainRoles: ['Service Planner', 'Service Manager'],
+    similarStoriesText: 'Coordinate service plans and approval routing for customer work.',
+    discoveryAnswers: classifyDiscoveryAnswers([
+      {
+        questionId: 'q1',
+        categoryKey: 'user_personas',
+        question: 'Which role owns the plan?',
+        answer: 'The Service Planner prepares the plan and the Service Manager approves it.',
+      },
+    ]),
+  });
+
+  assert.equal(pack.roleCandidates[0]?.role, 'Service Manager');
+  assert.ok(pack.roleCandidates.some((candidate) => candidate.role === 'Service Planner'));
+  assert.ok(pack.businessObjects.some((cue) => /service plan/i.test(cue.text)));
+});
+
+test('grounded evidence prompt blocks carry concrete cues and stay inside user budgets', () => {
+  const pack = buildV2GroundedEvidencePack({
+    requirement: 'Coordinate service plan approval, manual override, and status updates.',
+    domainRoles: ['Service Planner'],
+    wiContextText: 'A manual override must be explicit and rejected plans return to draft.',
+    similarStoriesText: 'Service plan approval routing tracks draft and approved states.',
+  });
+  const scopeEvidence = renderGroundedEvidencePack(pack, 'scope_hypothesis');
+  const discoveryEvidence = renderGroundedEvidencePack(pack, 'discover');
+  const reasoningEvidence = renderGroundedEvidencePack(pack, 'capability_reasoning');
+
+  const scopeMessage = buildScopeHypothesisUserMessage({
+    requirement: 'Coordinate service plan approval, manual override, and status updates.',
+    triage: assessV2TriageFromScores(
+      { capability_breadth: 3, ask_clarity: 3, actor_clarity: 2 },
+      'Coordinate service plan approval, manual override, and status updates.',
+    ),
+    groundedEvidenceText: scopeEvidence,
+  });
+  const discoveryMessage = buildDiscoveryUserMessage({
+    requirement: 'Coordinate service plan approval, manual override, and status updates.',
+    triage: assessV2TriageFromScores(
+      { capability_breadth: 3, ask_clarity: 3, actor_clarity: 2 },
+      'Coordinate service plan approval, manual override, and status updates.',
+    ),
+    scopeHypothesis: {
+      capabilities: [{ id: 'cap_1', label: 'Coordinate service plan approval', rationale: 'Approval workflow.', confidence: 'high' }],
+      actorSlots: {},
+      openQuestions: ['Who approves the service plan?'],
+      confidence: 'medium',
+    },
+    groundedEvidenceText: discoveryEvidence,
+  });
+  const reasoningMessage = buildCapabilityReasoningUserMessage({
+    requirement: 'Coordinate service plan approval, manual override, and status updates.',
+    scopeHypothesis: {
+      capabilities: [{ id: 'cap_1', label: 'Coordinate service plan approval', rationale: 'Approval workflow.', confidence: 'high' }],
+      actorSlots: {},
+      openQuestions: ['Who approves the service plan?'],
+      confidence: 'medium',
+    },
+    classifiedAnswers: [],
+    groundedEvidenceText: reasoningEvidence,
+  });
+
+  assert.match(scopeMessage, /Grounded evidence:/i);
+  assert.match(discoveryMessage, /Business objects:/i);
+  assert.match(reasoningMessage, /Work instruction cues:/i);
+  assert.ok(measurePromptSizes('', scopeMessage).userChars <= V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);
+  assert.ok(measurePromptSizes('', discoveryMessage).userChars <= V2_PROMPT_BUDGETS.discover.maxUserChars);
+  assert.ok(measurePromptSizes('', reasoningMessage).userChars <= V2_PROMPT_BUDGETS.capability_reasoning.maxUserChars);
+});
+
 test('runV2Pipeline returns scope confirmation before generation when no scope hypothesis is confirmed', async () => {
   const calls: string[] = [];
   const executeStage: V2StageExecutor = async (request) => {
@@ -113,6 +187,41 @@ test('runV2Pipeline returns scope confirmation before generation when no scope h
   assert.equal(result.scopeHypothesis.capabilities.length, 2);
   assert.equal(result.recommendedNextStep, 'run_discovery');
   assert.deepEqual(calls, ['triage', 'scope_hypothesis']);
+});
+
+test('runV2Pipeline defers preview actor slots when actor grounding is weak', async () => {
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 2, ask_clarity: 4, actor_clarity: 1 } as any,
+        usage: { input: 10, output: 10 },
+      };
+    }
+    assert.equal(request.stage, 'scope_hypothesis');
+    return {
+      data: {
+        capabilities: [
+          { id: 'cap_1', label: 'Update saved template', rationale: 'Core update flow.', confidence: 'medium' },
+        ],
+        actorSlots: { initiator: 'user' },
+        openQuestions: ['Who approves the update?'],
+        confidence: 'medium',
+      } as any,
+      usage: { input: 40, output: 30 },
+    };
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Allow editing a saved template and track status changes.',
+      config: baseConfig,
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_scope_confirmation');
+  assert.deepEqual(result.scopeHypothesis.actorSlots, {});
+  assert.equal(result.scopeHypothesis.actorGroundingStatus, 'weak');
 });
 
 test('runV2Pipeline uses questionBudget directly when requesting discovery', async () => {

@@ -9,6 +9,7 @@ import type { JsonSchema } from '../core/json-schema';
 export type V2DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 export type V2CrudRisk = 'low' | 'medium' | 'high';
 export type V2Confidence = 'low' | 'medium' | 'high';
+export type V2ActorGroundingStatus = 'weak' | 'supported' | 'strong';
 export type V2AnswerMateriality =
   | 'structural'
   | 'actor_bearing'
@@ -56,6 +57,7 @@ export interface V2CapabilityCandidate {
   label: string;
   rationale: string;
   confidence: V2Confidence;
+  evidenceKeys?: string[];
 }
 
 export interface V2ScopeHypothesis {
@@ -63,6 +65,7 @@ export interface V2ScopeHypothesis {
   actorSlots: V2ActorSlots;
   openQuestions: string[];
   confidence: V2Confidence;
+  actorGroundingStatus?: V2ActorGroundingStatus;
 }
 
 export interface V2DiscoveryQuestion {
@@ -99,6 +102,7 @@ export interface V2CapabilityReasoningItem {
   ownerRole: string;
   mustCarryRules: string[];
   edgeCases: string[];
+  evidenceKeys?: string[];
 }
 
 export interface V2CapabilityReasoningArtifact {
@@ -151,10 +155,32 @@ export interface V2EvidenceBundle {
   wiContextText?: string;
 }
 
+export interface V2RoleCandidate {
+  role: string;
+  confidence: V2ActorGroundingStatus;
+  evidenceKeys: string[];
+}
+
+export interface V2GroundedCue {
+  key: string;
+  text: string;
+}
+
+export interface V2GroundedEvidencePack {
+  roleCandidates: V2RoleCandidate[];
+  businessObjects: V2GroundedCue[];
+  workflowSignals: V2GroundedCue[];
+  businessRules: V2GroundedCue[];
+  lifecycleSignals: V2GroundedCue[];
+  backlogCues: V2GroundedCue[];
+  wiCues: V2GroundedCue[];
+}
+
 export interface V2PipelineInput extends V2EvidenceBundle {
   requirement: string;
   attachmentText?: string;
   config: TenantConfig;
+  evidencePack?: V2GroundedEvidencePack;
   triageOverride?: V2TriageResult;
   confirmedScopeHypothesis?: V2ScopeHypothesis;
   discoveryAnswers?: V2DiscoveryAnswer[];
