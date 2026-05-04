@@ -628,7 +628,8 @@ export function validateTriageScores(data: unknown): string | null {
     && Number(payload?.recommended_discovery_count) >= 0
     && Number(payload?.recommended_discovery_count) <= 15;
   const depthValid = payload?.ar_depth === 'light' || payload?.ar_depth === 'standard' || payload?.ar_depth === 'deep';
-  const behaviorsValid = Array.isArray(payload?.must_cover_behaviors) && payload.must_cover_behaviors.length > 0;
+  const mustCoverBehaviors = Array.isArray(payload?.must_cover_behaviors) ? payload.must_cover_behaviors : [];
+  const behaviorsValid = mustCoverBehaviors.length > 0;
   return scoresValid && countValid && depthValid && behaviorsValid
     ? null
     : 'Triage output must provide 1-5 integer scores for the requirement profile, must-cover behaviors, discovery count, and AR depth.';
