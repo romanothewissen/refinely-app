@@ -408,8 +408,8 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
   }
 
   return (
-    <div className="v2-root h-full min-h-0 w-full p-4 md:p-6">
-      <div className="mx-auto flex h-full max-w-[1480px] gap-4">
+    <div className="v2-root h-full min-h-0 w-full overflow-y-auto p-4 md:p-6">
+      <div className="mx-auto flex min-h-full max-w-[1480px] gap-4">
         <aside className="rf-sidebar-card hidden w-[320px] shrink-0 overflow-hidden md:flex md:flex-col">
             <div className="border-b px-5 py-5" style={{ borderColor: 'var(--rf-border)' }}>
             <div className="text-xs uppercase tracking-[0.18em]" style={{ color: 'var(--rf-text-tertiary)' }}>Refinely Core V2</div>
@@ -480,7 +480,7 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
           </div>
         </aside>
 
-        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+        <main className="flex min-h-0 flex-1 flex-col gap-4" style={{ paddingBottom: '1rem' }}>
           <section className="rf-card p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
