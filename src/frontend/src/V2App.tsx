@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { api } from './hooks/useForge';
 import './styles/v2-compat.css';
@@ -209,6 +209,7 @@ function ActorSlots({ scopeHypothesis }: { scopeHypothesis?: ScopeHypothesis | n
 }
 
 export default function V2App({ initialRequirement = '' }: { initialRequirement?: string }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [sessionId, setSessionId] = useState(() => createSessionId());
   const [requirement, setRequirement] = useState(initialRequirement);
   const [projectKeys, setProjectKeys] = useState<string[]>([]);
@@ -289,6 +290,35 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
       root?.classList.remove('rf-v2-scroll-root');
     };
   }, []);
+
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!element) return;
+
+    let frameId = 0;
+    const syncHeight = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const nextHeight = Math.max(
+          element.scrollHeight,
+          document.documentElement.scrollHeight,
+          document.body.scrollHeight,
+        );
+        void view.resize('100%', `${Math.ceil(nextHeight + 24)}px`);
+      });
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(() => syncHeight());
+    observer.observe(element);
+    window.addEventListener('resize', syncHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncHeight);
+      if (frameId) cancelAnimationFrame(frameId);
+    };
+  }, [result, history.length, loading, warning, error, settingsOpen]);
 
   const activeQuestionCount = useMemo(() => activeDiscoveryQuestions.length, [activeDiscoveryQuestions]);
 
@@ -420,8 +450,8 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
   }
 
   return (
-    <div className="v2-root h-full min-h-0 w-full overflow-y-auto p-4 md:p-6">
-      <div className="mx-auto flex min-h-full max-w-[1480px] gap-4">
+    <div ref={rootRef} className="v2-root w-full overflow-y-auto p-4 md:p-6">
+      <div className="mx-auto flex max-w-[1480px] gap-4">
         <aside className="rf-sidebar-card hidden w-[320px] shrink-0 overflow-hidden md:flex md:flex-col">
             <div className="border-b px-5 py-5" style={{ borderColor: 'var(--rf-border)' }}>
             <div className="text-xs uppercase tracking-[0.18em]" style={{ color: 'var(--rf-text-tertiary)' }}>Refinely Core V2</div>

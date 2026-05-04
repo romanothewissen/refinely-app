@@ -124,6 +124,11 @@
   #root.rf-v2-scroll-root {
     overflow-y: auto;
   }
+
+  #root.rf-v2-scroll-root {
+    height: auto;
+    min-height: 100%;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
