@@ -511,6 +511,9 @@ export async function runV2Pipeline(
       recommendedNextStep: 'run_discovery',
     };
   }
+  if (!scopeHypothesis) {
+    throw new Error('V2 pipeline cannot continue without a confirmed scope hypothesis.');
+  }
 
   const classifiedAnswers = classifyDiscoveryAnswers(input.discoveryAnswers ?? []);
   if (shouldAskDiscovery(triage, scopeHypothesis, classifiedAnswers)) {
