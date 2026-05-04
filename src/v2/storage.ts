@@ -4,6 +4,16 @@ import type { V2ConversationStore, V2WorkflowStateStore } from './types';
 
 const V2_PROGRESS_PREFIX = 'v2_progress_';
 
+function buildStoredLatestResult(payload: Record<string, unknown>): Record<string, unknown> {
+  const result = payload.result && typeof payload.result === 'object'
+    ? payload.result as Record<string, unknown>
+    : payload;
+  const stored: Record<string, unknown> = { result };
+  const requirement = typeof payload.requirement === 'string' ? payload.requirement.trim() : '';
+  if (requirement) stored.requirement = requirement;
+  return stored;
+}
+
 export function createV2EphemeralWorkflowStateStore(): V2WorkflowStateStore {
   return {
     async getProgress(sessionId: string) {
@@ -29,7 +39,7 @@ export function createSqlConversationStore(): V2ConversationStore {
         requirement: String(payload.requirement ?? ''),
         title: typeof payload.title === 'string' ? payload.title : undefined,
         status: String(payload.status ?? 'preview_ready') as 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete',
-        latestResult: payload,
+        latestResult: buildStoredLatestResult(payload),
         turnType: String(payload.turnType ?? 'preview') as 'preview' | 'discovery' | 'generation',
       });
     },
@@ -42,7 +52,7 @@ export function createSqlConversationStore(): V2ConversationStore {
         requirement: String(payload.requirement ?? ''),
         title: typeof payload.title === 'string' ? payload.title : undefined,
         status: String(payload.status ?? 'complete') as 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete',
-        latestResult: payload,
+        latestResult: buildStoredLatestResult(payload),
         turnType: String(payload.turnType ?? 'generation') as 'preview' | 'discovery' | 'generation',
       });
     },

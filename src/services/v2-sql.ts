@@ -1,4 +1,4 @@
-import { migrationRunner, sql, type Result, type UpdateQueryResponse } from '@forge/sql';
+import { migrationRunner, sql, type UpdateQueryResponse } from '@forge/sql';
 
 type ConversationStatus =
   | 'preview_ready'
@@ -133,6 +133,9 @@ const MIGRATIONS = [
 
 let schemaPromise: Promise<void> | null = null;
 let migrationsEnqueued = false;
+const SQL_PARAM_SOFT_LIMIT_BYTES = 900 * 1024;
+const MAX_PERSISTED_FEATURES = 40;
+const MAX_PERSISTED_ARS_PER_FEATURE = 6;
 
 function enqueueMigrations() {
   if (migrationsEnqueued) return;
@@ -162,6 +165,71 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
+function utf8ByteLength(value: string): number {
+  if (typeof Buffer !== 'undefined') return Buffer.byteLength(value, 'utf8');
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(value).length;
+  return value.length;
+}
+
+function pickSqlErrorDetail(error: unknown): string {
+  const candidate = error as {
+    message?: unknown;
+    code?: unknown;
+    debug?: { code?: unknown; message?: unknown; sqlMessage?: unknown } | null;
+  };
+  const message = typeof candidate?.message === 'string' ? candidate.message : 'Unknown SQL execution error';
+  const code = typeof candidate?.code === 'string' ? candidate.code : '';
+  const debugCode = typeof candidate?.debug?.code === 'string' ? candidate.debug.code : '';
+  const debugMessage = typeof candidate?.debug?.message === 'string'
+    ? candidate.debug.message
+    : (typeof candidate?.debug?.sqlMessage === 'string' ? candidate.debug.sqlMessage : '');
+  const parts = [message, code, debugCode, debugMessage].filter(Boolean);
+  return parts.join(' | ');
+}
+
+function compactLatestResultForSql(latestResult: Record<string, unknown>): Record<string, unknown> {
+  const initial = JSON.stringify(latestResult);
+  if (utf8ByteLength(initial) <= SQL_PARAM_SOFT_LIMIT_BYTES) return latestResult;
+
+  const reduced: Record<string, unknown> = { ...latestResult };
+  const candidateResult = latestResult.result;
+  if (candidateResult && typeof candidateResult === 'object') {
+    const result = { ...(candidateResult as Record<string, unknown>) };
+    const features = Array.isArray(result.features) ? result.features : null;
+    if (features && features.length > MAX_PERSISTED_FEATURES) {
+      result.features = features.slice(0, MAX_PERSISTED_FEATURES).map((feature) => {
+        if (!feature || typeof feature !== 'object') return feature;
+        const featureRecord = { ...(feature as Record<string, unknown>) };
+        if (Array.isArray(featureRecord.acceptanceRequirements)) {
+          featureRecord.acceptanceRequirements = featureRecord.acceptanceRequirements.slice(0, MAX_PERSISTED_ARS_PER_FEATURE);
+        }
+        return featureRecord;
+      });
+    }
+    reduced.result = result;
+  }
+
+  const reducedJson = JSON.stringify(reduced);
+  if (utf8ByteLength(reducedJson) <= SQL_PARAM_SOFT_LIMIT_BYTES) {
+    return reduced;
+  }
+
+  return {
+    result: {
+      status: (latestResult.result && typeof latestResult.result === 'object')
+        ? (latestResult.result as { status?: unknown }).status
+        : undefined,
+      triage: (latestResult.result && typeof latestResult.result === 'object')
+        ? (latestResult.result as { triage?: unknown }).triage
+        : undefined,
+      scopeHypothesis: (latestResult.result && typeof latestResult.result === 'object')
+        ? (latestResult.result as { scopeHypothesis?: unknown }).scopeHypothesis
+        : undefined,
+    },
+    warning: 'Stored V2 conversation payload was compacted to satisfy Forge SQL request limits.',
+  };
+}
+
 function sanitizeProjectKeys(projectKeys: string[] = []) {
   return [...new Set(projectKeys.map((key) => String(key ?? '').trim()).filter((key) => key && key !== '*'))].slice(0, 2);
 }
@@ -185,12 +253,20 @@ function deriveConversationTitle(input: { title?: string; requirement: string; l
 }
 
 async function queryRows<T>(statement: string, ...params: unknown[]) {
-  const result = await sql.prepare<T>(statement).bindParams(...params).execute();
-  return result.rows;
+  try {
+    const result = await sql.prepare<T>(statement).bindParams(...params).execute();
+    return result.rows;
+  } catch (error) {
+    throw new Error(`V2 SQL query failed: ${pickSqlErrorDetail(error)}`);
+  }
 }
 
 async function executeMutation(statement: string, ...params: unknown[]) {
-  return await sql.prepare<UpdateQueryResponse>(statement).bindParams(...params).execute();
+  try {
+    return await sql.prepare<UpdateQueryResponse>(statement).bindParams(...params).execute();
+  } catch (error) {
+    throw new Error(`V2 SQL mutation failed: ${pickSqlErrorDetail(error)}`);
+  }
 }
 
 async function upsertConversation(input: SaveV2ConversationInput) {
@@ -203,7 +279,7 @@ async function upsertConversation(input: SaveV2ConversationInput) {
     input.accountId,
   );
 
-  const payload = JSON.stringify(input.latestResult);
+  const payload = JSON.stringify(compactLatestResultForSql(input.latestResult));
   if (existing.length) {
     await executeMutation(
       `
@@ -271,7 +347,7 @@ async function insertTurn(input: SaveV2ConversationInput) {
     input.sessionId,
     input.accountId,
     input.turnType,
-    JSON.stringify(input.latestResult),
+    JSON.stringify(compactLatestResultForSql(input.latestResult)),
     new Date().toISOString(),
   );
 }

@@ -649,21 +649,28 @@ resolver.define('v2Preview', async ({ payload, context }) => {
     };
   }
 
-  await conversationStore.savePreview(requestContext.sessionId, requestContext.accountId, {
-    sessionId: requestContext.sessionId,
-    projectKey: requestContext.projectKey,
-    projectKeys: requestContext.projectKeys,
-    requirement: requestContext.requirement,
-    status: result.status,
-    turnType: 'preview',
-    result,
-  });
+  let persistenceWarning: string | null = null;
+  try {
+    await conversationStore.savePreview(requestContext.sessionId, requestContext.accountId, {
+      sessionId: requestContext.sessionId,
+      projectKey: requestContext.projectKey,
+      projectKeys: requestContext.projectKeys,
+      requirement: requestContext.requirement,
+      status: result.status,
+      turnType: 'preview',
+      result,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');
+    console.warn('[v2Preview] Conversation persistence failed:', detail);
+    persistenceWarning = `Preview completed, but conversation history was not saved (${detail}).`;
+  }
 
   return {
     success: true,
     sessionId: requestContext.sessionId,
     result,
-    warning: check.reason,
+    warning: [check.reason, persistenceWarning].filter(Boolean).join(' ').trim() || undefined,
   };
 });
 
@@ -703,29 +710,43 @@ resolver.define('v2Generate', async ({ payload, context }) => {
     };
   }
 
-  await conversationStore.saveGeneration(requestContext.sessionId, requestContext.accountId, {
-    sessionId: requestContext.sessionId,
-    projectKey: requestContext.projectKey,
-    projectKeys: requestContext.projectKeys,
-    requirement: requestContext.requirement,
-    status: result.status,
-    turnType: result.status === 'complete' ? 'generation' : 'discovery',
-    result,
-  });
+  let persistenceWarning: string | null = null;
+  try {
+    await conversationStore.saveGeneration(requestContext.sessionId, requestContext.accountId, {
+      sessionId: requestContext.sessionId,
+      projectKey: requestContext.projectKey,
+      projectKeys: requestContext.projectKeys,
+      requirement: requestContext.requirement,
+      status: result.status,
+      turnType: result.status === 'complete' ? 'generation' : 'discovery',
+      result,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');
+    console.warn('[v2Generate] Conversation persistence failed:', detail);
+    persistenceWarning = `Output generated, but conversation history was not saved (${detail}).`;
+  }
 
   const response: Record<string, unknown> = {
     success: true,
     sessionId: requestContext.sessionId,
     result,
-    warning: check.reason,
+    warning: [check.reason, persistenceWarning].filter(Boolean).join(' ').trim() || undefined,
   };
 
   if (result.status === 'complete') {
-    response.usageTracking = await recordGeneration(
-      requestContext.config,
-      requestContext.accountId,
-      payload?.sessionId,
-    );
+    try {
+      response.usageTracking = await recordGeneration(
+        requestContext.config,
+        requestContext.accountId,
+        payload?.sessionId,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? 'Unknown usage tracking error');
+      console.warn('[v2Generate] Usage tracking failed:', detail);
+      const usageWarning = `Output generated, but usage tracking did not complete (${detail}).`;
+      response.warning = [response.warning, usageWarning].filter(Boolean).join(' ').trim();
+    }
   }
 
   return response;

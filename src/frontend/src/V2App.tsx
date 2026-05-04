@@ -524,9 +524,9 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
                     <div className="text-xs uppercase tracking-[0.16em]" style={{ color: 'var(--rf-text-tertiary)' }}>Triage</div>
                     <div className="mt-3 text-sm leading-7" style={{ color: 'var(--rf-text-secondary)' }}>
                       Discovery mode: <strong>{result.triage.discoveryMode}</strong><br />
-                      Question budget: <strong>{result.triage.questionBudget}</strong><br />
-                      Capability target: <strong>{result.triage.likelyCapabilityCount}</strong><br />
-                      CRUD risk: <strong>{result.triage.crudRisk}</strong>
+                      Question budget (advisory): <strong>{result.triage.questionBudget}</strong><br />
+                      Capability target (advisory): <strong>{result.triage.likelyCapabilityCount}</strong><br />
+                      CRUD risk (heuristic): <strong>{result.triage.crudRisk}</strong>
                     </div>
                   </div>
                 )}
