@@ -39,7 +39,7 @@ export function createSqlConversationStore(): V2ConversationStore {
         projectKeys: Array.isArray(payload.projectKeys) ? payload.projectKeys.map((key) => String(key ?? '')) : [],
         requirement: String(payload.requirement ?? ''),
         title: typeof payload.title === 'string' ? payload.title : undefined,
-        status: String(payload.status ?? 'preview_ready') as 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete',
+        status: String(payload.status ?? 'preview_ready') as 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'discovery_generation_failed' | 'complete',
         latestResult: buildStoredLatestResult(payload),
         turnType: String(payload.turnType ?? 'preview') as 'preview' | 'discovery' | 'generation',
       });
@@ -52,7 +52,7 @@ export function createSqlConversationStore(): V2ConversationStore {
         projectKeys: Array.isArray(payload.projectKeys) ? payload.projectKeys.map((key) => String(key ?? '')) : [],
         requirement: String(payload.requirement ?? ''),
         title: typeof payload.title === 'string' ? payload.title : undefined,
-        status: String(payload.status ?? 'complete') as 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete',
+        status: String(payload.status ?? 'complete') as 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'discovery_generation_failed' | 'complete',
         latestResult: buildStoredLatestResult(payload),
         turnType: String(payload.turnType ?? 'generation') as 'preview' | 'discovery' | 'generation',
       });

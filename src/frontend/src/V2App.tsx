@@ -7,7 +7,7 @@ import { DEFAULT_CONFIG } from './types';
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ActorGroundingStatus = 'weak' | 'supported' | 'strong';
-type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
+type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'discovery_generation_failed' | 'complete';
 
 interface ScopeCapability {
   id: string;
@@ -70,6 +70,13 @@ interface DiscoveryResult extends V2ResultBase {
   materialityHints: string[];
 }
 
+interface DiscoveryFailureResult extends V2ResultBase {
+  status: 'discovery_generation_failed';
+  message: string;
+  retryable: boolean;
+  failureCode: string;
+}
+
 interface CompleteResult extends V2ResultBase {
   status: 'complete';
   features: V2Feature[];
@@ -86,7 +93,7 @@ interface CompleteResult extends V2ResultBase {
   };
 }
 
-type V2Result = PreviewResult | DiscoveryResult | CompleteResult;
+type V2Result = PreviewResult | DiscoveryResult | DiscoveryFailureResult | CompleteResult;
 
 interface ConversationHistoryEntry {
   sessionId: string;
@@ -208,6 +215,9 @@ function actorGroundingMessage(status: ConversationStatus, scopeHypothesis?: Sco
     return scopeHypothesis.actorGroundingStatus === 'supported'
       ? 'Actor labels stay provisional until discovery confirms the accountable role.'
       : 'Actors will be grounded during discovery when role evidence is still weak.';
+  }
+  if (status === 'discovery_generation_failed') {
+    return 'Actor labels stay provisional until discovery questions can be generated successfully.';
   }
   return 'Actors will be grounded later once the evidence supports a specific accountable role.';
 }
@@ -426,6 +436,18 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
     } finally {
       setLoading(false);
     }
+  }
+
+  function returnToScopeReview() {
+    if (!result || result.status === 'complete' || result.status === 'preview_ready' || result.status === 'needs_scope_confirmation') return;
+    setResult({
+      status: 'needs_scope_confirmation',
+      triage: result.triage,
+      scopeHypothesis: result.scopeHypothesis,
+      recommendedNextStep: 'run_discovery',
+    });
+    setError(null);
+    setWarning(null);
   }
 
   async function loadConversation(nextSessionId: string) {
@@ -782,6 +804,47 @@ export default function V2App({ initialRequirement = '' }: { initialRequirement?
               >
                 Continue with discovery answers
               </button>
+            </section>
+          )}
+
+          {result?.status === 'discovery_generation_failed' && (
+            <section className="rf-card p-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.16em]" style={{ color: 'var(--rf-text-tertiary)' }}>Discovery retry</div>
+                  <h3 className="mt-2 text-2xl" style={{ color: 'var(--rf-text)' }}>We couldn’t generate discovery questions for this scope.</h3>
+                </div>
+                <div className="rounded-full border px-3 py-1 text-xs uppercase tracking-[0.16em]" style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-tertiary)' }}>
+                  retryable
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-[24px] border p-5" style={{ borderColor: 'rgba(160,81,30,0.2)', background: 'rgba(160,81,30,0.08)' }}>
+                <div className="text-sm leading-7" style={{ color: 'var(--rf-text-secondary)' }}>
+                  {result.message}
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  className="rounded-full px-5 py-3 text-sm font-semibold"
+                  style={{ background: 'var(--rf-brand)', color: '#fff', opacity: loading ? 0.7 : 1 }}
+                  disabled={loading}
+                  onClick={() => void handleGenerate()}
+                  type="button"
+                >
+                  Retry discovery questions
+                </button>
+                <button
+                  className="rounded-full border px-5 py-3 text-sm font-semibold"
+                  style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-secondary)', background: 'rgba(255,255,255,0.78)' }}
+                  disabled={loading}
+                  onClick={returnToScopeReview}
+                  type="button"
+                >
+                  Back to scope
+                </button>
+              </div>
             </section>
           )}
 

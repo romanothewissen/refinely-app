@@ -1,4 +1,4 @@
-import { callLlmJsonWithUsage } from '../core/llm';
+import { callLlmJsonWithUsage, LlmJsonParseError } from '../core/llm';
 import type { ClarifyCategoryKey, Feature, PipelineProfile, TenantConfig } from '../types';
 import {
   buildCoverageRepairSystemPrompt,
@@ -29,6 +29,7 @@ import type {
   V2CapabilityReasoningArtifact,
   V2ClassifiedAnswer,
   V2CoverageGateResult,
+  V2DiscoveryFailureDiagnostics,
   V2DiscoveryAnswer,
   V2DiscoveryQuestion,
   V2DiscoverySynthesis,
@@ -169,6 +170,77 @@ function normalizeDiscoveryQuestionsForReturn(
     id: question.id || `dq_${index + 1}`,
     categoryKey: question.categoryKey || inferCategory(question.question),
   }));
+}
+
+function isRecoverableDiscoveryError(error: unknown): boolean {
+  if (error instanceof LlmJsonParseError) return true;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /\$\.questions is required/i.test(message)
+    || /json validation failed/i.test(message)
+    || /llm json extraction failed/i.test(message);
+}
+
+function parseResponseShape(error: unknown): Record<string, string | number | boolean> | undefined {
+  if (!(error instanceof LlmJsonParseError) || !error.parseShape) return undefined;
+  try {
+    const parsed = JSON.parse(error.parseShape);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string | number | boolean> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeWrongStageEnvelope(responseShape?: Record<string, string | number | boolean>): boolean {
+  if (!responseShape) return false;
+  return Boolean(responseShape.containsFeaturesKey || responseShape.containsCoverageMap || responseShape.containsCapabilitiesKey || responseShape.containsDiscoveryProfile);
+}
+
+function buildDiscoveryFailureDiagnostics(
+  error: unknown,
+  failureType: V2DiscoveryFailureDiagnostics['failureType'],
+  validationErrorOverride?: string,
+): V2DiscoveryFailureDiagnostics {
+  const validationError = validationErrorOverride ?? (error instanceof Error ? error.message : String(error ?? ''));
+  const responseShape = parseResponseShape(error);
+  return {
+    stage: 'discover',
+    failureType,
+    validationError: validationError || undefined,
+    responseShape,
+    appearsTruncated: responseShape ? Boolean(responseShape.startsWithJsonToken && !responseShape.endsWithJsonToken && !responseShape.endsWithFence) : undefined,
+    appearsWrongStageEnvelope: summarizeWrongStageEnvelope(responseShape) || undefined,
+  };
+}
+
+function annotateDiscoveryFailure(diagnostics: V2DiscoveryFailureDiagnostics): void {
+  getPipelineAuditWriter()?.annotateLastJsonFailure({
+    stage: diagnostics.stage,
+    failureType: diagnostics.failureType,
+    validationError: diagnostics.validationError,
+    responseShape: diagnostics.responseShape,
+    appearsTruncated: diagnostics.appearsTruncated,
+    appearsWrongStageEnvelope: diagnostics.appearsWrongStageEnvelope,
+  });
+}
+
+function buildDiscoveryFailureResult(
+  triage: V2TriageResult,
+  scopeHypothesis: V2ScopeHypothesis,
+  input: {
+    failureCode: 'discovery_questions_invalid_shape' | 'discovery_questions_not_grounded';
+    diagnostics: V2DiscoveryFailureDiagnostics;
+  },
+) {
+  annotateDiscoveryFailure(input.diagnostics);
+  return {
+    status: 'discovery_generation_failed' as const,
+    triage,
+    scopeHypothesis,
+    message: 'We couldn’t generate discovery questions. Please retry.',
+    retryable: true,
+    failureCode: input.failureCode,
+    diagnostics: input.diagnostics,
+  };
 }
 
 export function classifyDiscoveryAnswers(answers: V2DiscoveryAnswer[]): V2ClassifiedAnswer[] {
@@ -614,16 +686,53 @@ export async function runV2Pipeline(
     });
 
     await reportProgress('discover', 'Preparing the next discovery questions…');
-    let discovery = await executeDiscoveryRound();
-    addUsage(promptUsage, 'discover', discovery.usage);
+    let discovery;
+    try {
+      discovery = await executeDiscoveryRound();
+      addUsage(promptUsage, 'discover', discovery.usage);
+    } catch (error) {
+      if (!isRecoverableDiscoveryError(error)) throw error;
+      await reportProgress('discover', 'Retrying discovery question generation with a stricter shape hint…');
+      try {
+        discovery = await executeDiscoveryRound(
+          'Return the top-level JSON object with a questions array. Every item in questions must include id, categoryKey, question, rationale, and suggestions.',
+        );
+        addUsage(promptUsage, 'discover', discovery.usage);
+      } catch (retryError) {
+        if (!isRecoverableDiscoveryError(retryError)) throw retryError;
+        const diagnostics = buildDiscoveryFailureDiagnostics(retryError, 'json_shape');
+        console.warn('[v2] Discovery generation returned an invalid question shape after retry; returning retryable discovery failure.', {
+          error: diagnostics.validationError,
+          requirementPreview: input.requirement.slice(0, 160),
+        });
+        return buildDiscoveryFailureResult(triage, confirmedScopeHypothesis, {
+          failureCode: 'discovery_questions_invalid_shape',
+          diagnostics,
+        });
+      }
+    }
+
     let groundedDiscoveryError = validateDiscoveryQuestionsAgainstEvidence(discovery.data.questions, baseEvidencePack);
     if (groundedDiscoveryError) {
       await reportProgress('discover', 'Tightening discovery questions against grounded evidence…');
-      discovery = await executeDiscoveryRound(groundedDiscoveryError);
-      addUsage(promptUsage, 'discover', discovery.usage);
-      groundedDiscoveryError = validateDiscoveryQuestionsAgainstEvidence(discovery.data.questions, baseEvidencePack);
+      try {
+        discovery = await executeDiscoveryRound(groundedDiscoveryError);
+        addUsage(promptUsage, 'discover', discovery.usage);
+        groundedDiscoveryError = validateDiscoveryQuestionsAgainstEvidence(discovery.data.questions, baseEvidencePack);
+      } catch (error) {
+        if (!isRecoverableDiscoveryError(error)) throw error;
+        groundedDiscoveryError = groundedDiscoveryError || (error instanceof Error ? error.message : String(error));
+      }
       if (groundedDiscoveryError) {
-        throw new Error(`V2 discovery failed quality gate: ${groundedDiscoveryError}`);
+        const diagnostics = buildDiscoveryFailureDiagnostics(null, 'grounding_quality', groundedDiscoveryError);
+        console.warn('[v2] Discovery grounding failed after retry; returning retryable discovery failure.', {
+          error: groundedDiscoveryError,
+          requirementPreview: input.requirement.slice(0, 160),
+        });
+        return buildDiscoveryFailureResult(triage, confirmedScopeHypothesis, {
+          failureCode: 'discovery_questions_not_grounded',
+          diagnostics,
+        });
       }
     }
 

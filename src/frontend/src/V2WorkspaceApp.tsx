@@ -22,10 +22,10 @@ import {
 
 type DiscoveryMode = 'light' | 'standard' | 'deep' | 'very_deep';
 type ActorGroundingStatus = 'weak' | 'supported' | 'strong';
-type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'complete';
+type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_discovery' | 'discovery_generation_failed' | 'complete';
 type SettingsSurface = 'workspace' | 'project';
 type SettingsTab = 'models' | 'jira' | 'domain' | 'compliance';
-type V2UiStep = 'input' | 'scope_review' | 'discovery' | 'complete';
+type V2UiStep = 'input' | 'scope_review' | 'discovery' | 'discovery_failure' | 'complete';
 
 interface ScopeCapability {
   id: string;
@@ -88,6 +88,13 @@ interface DiscoveryResult extends V2ResultBase {
   materialityHints: string[];
 }
 
+interface DiscoveryFailureResult extends V2ResultBase {
+  status: 'discovery_generation_failed';
+  message: string;
+  retryable: boolean;
+  failureCode: string;
+}
+
 interface CompleteResult extends V2ResultBase {
   status: 'complete';
   features: V2Feature[];
@@ -104,7 +111,7 @@ interface CompleteResult extends V2ResultBase {
   };
 }
 
-type V2Result = PreviewResult | DiscoveryResult | CompleteResult;
+type V2Result = PreviewResult | DiscoveryResult | DiscoveryFailureResult | CompleteResult;
 
 interface ConversationRecord extends V2HistoryEntry {
   projectKey: string | null;
@@ -282,6 +289,7 @@ function deriveStepFromResult(result: V2Result | null): V2UiStep {
   if (!result) return 'input';
   if (result.status === 'complete') return 'complete';
   if (result.status === 'needs_discovery') return 'discovery';
+  if (result.status === 'discovery_generation_failed') return 'discovery_failure';
   return 'scope_review';
 }
 
@@ -289,6 +297,7 @@ function stepIndex(step: V2UiStep): number {
   if (step === 'input') return 0;
   if (step === 'scope_review') return 2;
   if (step === 'discovery') return 3;
+  if (step === 'discovery_failure') return 3;
   return 4;
 }
 
@@ -1869,6 +1878,48 @@ function V2Canvas({
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
         />
+      )}
+
+      {!loading && uiStep === 'discovery_failure' && result?.status === 'discovery_generation_failed' && (
+        <section className="rf-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Discovery Retry</div>
+              <h2 className="mt-2 text-3xl text-[var(--rf-text)]">We couldn’t generate discovery questions for this scope.</h2>
+              <p className="mt-3 text-sm leading-7 text-[var(--rf-text-secondary)]">
+                {result.message}
+              </p>
+            </div>
+            <div className="rounded-[18px] border px-4 py-3 text-sm font-semibold text-[var(--rf-text-secondary)]" style={{ borderColor: 'var(--rf-border)', background: 'rgba(255,255,255,0.72)' }}>
+              Retryable
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-[24px] border p-5 text-sm leading-7 text-[var(--rf-text-secondary)]" style={{ borderColor: 'rgba(160,81,30,0.2)', background: 'rgba(160,81,30,0.08)' }}>
+            Retry discovery to regenerate the question set. Your scoped capabilities and open uncertainties are preserved.
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              className="rounded-full px-5 py-3 text-sm font-semibold"
+              style={{ background: 'var(--rf-brand)', color: '#fff', opacity: loading ? 0.7 : 1 }}
+              disabled={loading}
+              onClick={() => void handleGenerate()}
+              type="button"
+            >
+              {loading ? (loadingMessage ?? 'Working…') : 'Retry discovery questions'}
+            </button>
+            <button
+              className="rounded-full border px-5 py-3 text-sm font-semibold"
+              style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-secondary)', background: 'rgba(255,255,255,0.78)' }}
+              disabled={loading}
+              onClick={() => setUiStep('scope_review')}
+              type="button"
+            >
+              Back to scope
+            </button>
+          </div>
+        </section>
       )}
 
       {!loading && uiStep === 'complete' && result?.status === 'complete' && (

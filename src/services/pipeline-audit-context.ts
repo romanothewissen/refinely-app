@@ -39,6 +39,7 @@ class PipelineAuditWriter {
     piiMasking?: PiiMaskingStats;
     parseOutcome?: PipelineAuditLlmCallRecord['parseOutcome'];
     geminiFallbacks?: string[];
+    jsonFailure?: PipelineAuditLlmCallRecord['jsonFailure'];
   }): void {
     const record: PipelineAuditLlmCallRecord = {
       seq: 0,
@@ -62,6 +63,7 @@ class PipelineAuditWriter {
       responseText: truncateForAudit(input.responseText, 32000),
       parseOutcome: input.parseOutcome ?? 'n/a',
       geminiFallbacks: input.geminiFallbacks?.length ? input.geminiFallbacks : undefined,
+      jsonFailure: input.jsonFailure,
       piiMasking: input.piiMasking,
     };
     this.calls.push(record);
@@ -72,6 +74,16 @@ class PipelineAuditWriter {
     if (this.calls.length === 0) return;
     const row = this.calls[this.calls.length - 1];
     row.parseOutcome = outcome;
+  }
+
+  annotateLastJsonFailure(input: NonNullable<PipelineAuditLlmCallRecord['jsonFailure']>): void {
+    if (this.calls.length === 0) return;
+    const row = this.calls[this.calls.length - 1];
+    row.jsonFailure = {
+      ...row.jsonFailure,
+      ...input,
+      responseShape: input.responseShape ?? row.jsonFailure?.responseShape,
+    };
   }
 
   drainLlmCalls(): PipelineAuditLlmCallRecord[] {

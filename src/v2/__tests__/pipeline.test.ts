@@ -573,6 +573,101 @@ test('runV2Pipeline uses compiled project memory for discovery prompts without r
   assert.equal(result.status, 'needs_discovery');
 });
 
+test('runV2Pipeline returns a retryable discovery failure when the model omits the questions array twice', async () => {
+  let discoverAttempts = 0;
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discover') {
+      discoverAttempts += 1;
+      throw new Error('$.questions is required');
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service planning with approval fallback and urgent exception routing.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: {},
+        openQuestions: ['Who approves the exception route?'],
+        confidence: 'medium',
+      },
+      triageOverride: {
+        ...assessV2TriageFromScores(
+          { capability_breadth: 4, ask_clarity: 3, actor_clarity: 2 },
+          'Coordinate service planning with approval fallback and urgent exception routing.',
+        ),
+        unresolvedDecisionThemes: ['exception approval routing', 'manual override handling'],
+      },
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'discovery_generation_failed');
+  assert.equal(discoverAttempts, 2);
+  assert.equal(result.message, 'We couldn’t generate discovery questions. Please retry.');
+  assert.equal(result.retryable, true);
+  assert.equal(result.failureCode, 'discovery_questions_invalid_shape');
+  assert.equal(result.diagnostics?.validationError, '$.questions is required');
+});
+
+test('runV2Pipeline returns a retryable discovery failure when grounded discovery questions still fail after retry', async () => {
+  let discoverAttempts = 0;
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discover') {
+      discoverAttempts += 1;
+      return {
+        data: {
+          questions: [
+            {
+              id: `q_${discoverAttempts}`,
+              categoryKey: 'functional_flow',
+              question: 'How should orchestration work?',
+              rationale: 'Clarifies the process.',
+              suggestions: [],
+            },
+          ],
+        } as any,
+        usage: { input: 50, output: 40 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service planning with approval fallback and urgent exception routing.',
+      config: baseConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
+        actorSlots: {},
+        openQuestions: ['Who approves the exception route?'],
+        confidence: 'medium',
+      },
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'discovery_generation_failed');
+  assert.equal(discoverAttempts, 2);
+  assert.equal(result.failureCode, 'discovery_questions_not_grounded');
+  assert.equal(result.diagnostics?.failureType, 'grounding_quality');
+  assert.match(result.diagnostics?.validationError ?? '', /must reference grounded/i);
+});
+
 test('runV2Pipeline performs full generation with synthesis and batch final generation once scope is confirmed', async () => {
   const calls: string[] = [];
   const executeStage: V2StageExecutor = async (request) => {

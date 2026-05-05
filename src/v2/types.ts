@@ -52,7 +52,7 @@ export type V2ProgressStage =
   | 'coverage_repair'
   | 'persisting';
 
-export type V2ProgressResultStatus = 'needs_discovery' | 'complete';
+export type V2ProgressResultStatus = 'needs_discovery' | 'discovery_generation_failed' | 'complete';
 
 export interface V2ProgressDraftFeatureSummary {
   id: string;
@@ -364,6 +364,25 @@ export interface V2PipelineNeedsDiscoveryResult {
   materialityHints: string[];
 }
 
+export interface V2DiscoveryFailureDiagnostics {
+  stage: 'discover';
+  failureType: 'json_shape' | 'grounding_quality';
+  validationError?: string;
+  responseShape?: Record<string, string | number | boolean>;
+  appearsTruncated?: boolean;
+  appearsWrongStageEnvelope?: boolean;
+}
+
+export interface V2PipelineDiscoveryFailedResult {
+  status: 'discovery_generation_failed';
+  triage: V2TriageResult;
+  scopeHypothesis: V2ScopeHypothesis;
+  message: string;
+  retryable: boolean;
+  failureCode: 'discovery_questions_invalid_shape' | 'discovery_questions_not_grounded';
+  diagnostics?: V2DiscoveryFailureDiagnostics;
+}
+
 export interface V2PipelineCompleteResult {
   status: 'complete';
   triage: V2TriageResult;
@@ -386,6 +405,7 @@ export type V2PipelineResult =
   | V2PipelinePreviewResult
   | V2PipelineNeedsScopeResult
   | V2PipelineNeedsDiscoveryResult
+  | V2PipelineDiscoveryFailedResult
   | V2PipelineCompleteResult;
 
 export interface V2StageRequest<T> {

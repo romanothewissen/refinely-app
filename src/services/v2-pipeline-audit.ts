@@ -4,6 +4,7 @@ import type {
   V2ClassifiedAnswer,
   V2DiscoveryAnswer,
   V2PipelineCompleteResult,
+  V2PipelineDiscoveryFailedResult,
   V2PipelineNeedsDiscoveryResult,
   V2PipelineResult,
 } from '../v2/types';
@@ -82,6 +83,27 @@ export function buildV2AuditResultPatch(input: {
           details: question.rationale,
           suggestions: question.suggestions,
         })),
+        completedAt: new Date().toISOString(),
+      },
+      completePhase: 'clarify',
+    };
+  }
+
+  if (input.result.status === 'discovery_generation_failed') {
+    const failureResult = input.result as V2PipelineDiscoveryFailedResult;
+    return {
+      clarify: {
+        failure: {
+          code: failureResult.failureCode,
+          message: failureResult.message,
+          retryable: failureResult.retryable,
+          stage: failureResult.diagnostics?.stage ?? 'discover',
+          failureType: failureResult.diagnostics?.failureType ?? 'json_shape',
+          validationError: failureResult.diagnostics?.validationError,
+          responseShape: failureResult.diagnostics?.responseShape,
+          appearsTruncated: failureResult.diagnostics?.appearsTruncated,
+          appearsWrongStageEnvelope: failureResult.diagnostics?.appearsWrongStageEnvelope,
+        },
         completedAt: new Date().toISOString(),
       },
       completePhase: 'clarify',

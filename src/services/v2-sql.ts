@@ -10,6 +10,7 @@ type ConversationStatus =
   | 'preview_ready'
   | 'needs_scope_confirmation'
   | 'needs_discovery'
+  | 'discovery_generation_failed'
   | 'complete';
 
 interface ConversationRow {

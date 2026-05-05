@@ -1197,6 +1197,14 @@ export interface PipelineAuditLlmCallRecord {
   responseText: string;
   parseOutcome?: 'n/a' | 'clean_parse' | 'repaired_parse' | 'parse_failed' | 'parse_failed_after_retry';
   geminiFallbacks?: string[];
+  jsonFailure?: {
+    stage?: string;
+    failureType?: string;
+    validationError?: string;
+    responseShape?: Record<string, string | number | boolean>;
+    appearsTruncated?: boolean;
+    appearsWrongStageEnvelope?: boolean;
+  };
   piiMasking?: PiiMaskingStats;
 }
 
@@ -1284,6 +1292,17 @@ export interface PipelineAuditBundle {
   clarify?: {
     questions?: ClarifyQuestion[];
     contextMeta?: ClarifyContextMeta;
+    failure?: {
+      code: string;
+      message: string;
+      retryable: boolean;
+      stage: string;
+      failureType: string;
+      validationError?: string;
+      responseShape?: Record<string, string | number | boolean>;
+      appearsTruncated?: boolean;
+      appearsWrongStageEnvelope?: boolean;
+    };
     completedAt?: string;
   };
   sufficiency?: {

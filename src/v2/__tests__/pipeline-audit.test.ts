@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildV2AuditResultPatch } from '../../services/v2-pipeline-audit';
-import type { V2PipelineCompleteResult, V2PipelineNeedsDiscoveryResult } from '../types';
+import type { V2PipelineCompleteResult, V2PipelineDiscoveryFailedResult, V2PipelineNeedsDiscoveryResult } from '../types';
 
 test('buildV2AuditResultPatch maps V2 discovery questions into the clarify audit shape', () => {
   const result: V2PipelineNeedsDiscoveryResult = {
@@ -146,4 +146,55 @@ test('buildV2AuditResultPatch maps V2 completed generation into answers and feat
   assert.equal(patch.generation?.clarifyAnswers?.[0]?.question, 'Who should be notified after approval?');
   assert.equal(patch.generation?.features?.length, 1);
   assert.equal(patch.generation?.features?.[0]?.summary, 'Requester notification');
+});
+
+test('buildV2AuditResultPatch captures discovery generation failures for audit diagnosis', () => {
+  const result: V2PipelineDiscoveryFailedResult = {
+    status: 'discovery_generation_failed',
+    triage: {
+      complexity: 4,
+      ambiguity: 4,
+      workflowDepth: 4,
+      capabilityBreadth: 4,
+      askClarity: 3,
+      actorClarity: 2,
+      discoveryLoad: 11,
+      discoveryMode: 'deep',
+      questionBudget: 6,
+      likelyCapabilityCount: 3,
+      likelyCapabilityShape: 'broad_workflow',
+      crudRisk: 'low',
+      mustCoverBehaviors: ['Handle exception routing'],
+      unresolvedDecisionThemes: ['Approval fallback'],
+      arDepth: 'deep',
+      reasons: ['Workflow has unresolved approval handling.'],
+      shouldPauseForScopeConfirmation: true,
+    },
+    scopeHypothesis: {
+      capabilities: [{ id: 'cap_1', label: 'Route approvals', rationale: 'Primary workflow', confidence: 'medium' }],
+      actorSlots: {},
+      openQuestions: ['Who owns the fallback?'],
+      confidence: 'medium',
+    },
+    message: 'We couldn’t generate discovery questions. Please retry.',
+    retryable: true,
+    failureCode: 'discovery_questions_invalid_shape',
+    diagnostics: {
+      stage: 'discover',
+      failureType: 'json_shape',
+      validationError: '$.questions is required',
+      responseShape: {
+        startsWithJsonToken: true,
+        containsQuestionsKey: false,
+        containsCapabilitiesKey: true,
+      },
+      appearsWrongStageEnvelope: true,
+    },
+  };
+
+  const patch = buildV2AuditResultPatch({ result });
+  assert.equal(patch.completePhase, 'clarify');
+  assert.equal(patch.clarify?.failure?.code, 'discovery_questions_invalid_shape');
+  assert.equal(patch.clarify?.failure?.validationError, '$.questions is required');
+  assert.equal(patch.clarify?.failure?.appearsWrongStageEnvelope, true);
 });

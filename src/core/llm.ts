@@ -479,9 +479,13 @@ function summarizeJsonParseInput(text: string): Record<string, string | number |
     containsFence: /```/.test(trimmed),
     startsWithJsonToken: firstNonWhitespace === '{' || firstNonWhitespace === '[',
     startsWith: firstNonWhitespace || '(empty)',
+    endsWithJsonToken: trimmed.endsWith('}') || trimmed.endsWith(']'),
     endsWithFence: /```$/.test(trimmed),
     containsDiscoveryProfile: trimmed.includes('"discoveryProfile"'),
     containsQuestionsKey: trimmed.includes('"questions"'),
+    containsCapabilitiesKey: trimmed.includes('"capabilities"'),
+    containsFeaturesKey: trimmed.includes('"features"'),
+    containsCoverageMap: trimmed.includes('"coverageMap"'),
   };
 }
 
