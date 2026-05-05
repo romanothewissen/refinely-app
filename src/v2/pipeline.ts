@@ -507,8 +507,7 @@ export async function runV2Pipeline(
 
   let scopeHypothesis = input.confirmedScopeHypothesis;
   if (!scopeHypothesis) {
-    await reportProgress('scope_hypothesis', 'Shaping the initial scope hypothesis…');
-    const scopeResponse = await executeStage<V2ScopeHypothesis>({
+    const executeScopeRound = async (repairNote?: string) => executeStage<V2ScopeHypothesis>({
       stage: 'scope_hypothesis',
       model: input.config.generatorConfig.clarifyModel,
       systemPrompt: buildScopeHypothesisSystemPrompt(),
@@ -517,17 +516,41 @@ export async function runV2Pipeline(
         attachmentText: input.attachmentText,
         triage,
         groundedEvidenceText: scopeGroundedEvidenceText,
+        repairNote,
       }),
       jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
       maxTokens: 1400,
       reasoningEffort: stageReasoningEffort(profile, 'scope_hypothesis'),
-      validate: (data) => (
-        validateScopeHypothesis(data)
-        ?? validateScopeHypothesisAgainstEvidence(data as V2ScopeHypothesis, baseEvidencePack)
-      ),
+      validate: validateScopeHypothesis,
     });
-    scopeHypothesis = enrichScopeHypothesis(normalizeScopeHypothesis(scopeResponse.data), baseEvidencePack);
+
+    await reportProgress('scope_hypothesis', 'Shaping the initial scope hypothesis…');
+    let scopeResponse = await executeScopeRound();
     addUsage(promptUsage, 'scope_hypothesis', scopeResponse.usage);
+
+    let groundedScopeError = validateScopeHypothesisAgainstEvidence(scopeResponse.data as V2ScopeHypothesis, baseEvidencePack);
+    if (groundedScopeError) {
+      await reportProgress('scope_hypothesis', 'Tightening scope labels against grounded evidence…');
+      scopeResponse = await executeScopeRound(groundedScopeError);
+      addUsage(promptUsage, 'scope_hypothesis', scopeResponse.usage);
+      groundedScopeError = validateScopeHypothesisAgainstEvidence(scopeResponse.data as V2ScopeHypothesis, baseEvidencePack);
+    }
+
+    const normalizedScopeHypothesis = normalizeScopeHypothesis(scopeResponse.data);
+    scopeHypothesis = enrichScopeHypothesis(
+      groundedScopeError
+        ? { ...normalizedScopeHypothesis, confidence: 'low' }
+        : normalizedScopeHypothesis,
+      baseEvidencePack,
+    );
+
+    if (groundedScopeError) {
+      console.warn('[v2] Scope hypothesis grounding failed after retry; continuing with best-effort draft.', {
+        error: groundedScopeError,
+        requirementPreview: input.requirement.slice(0, 160),
+        capabilityLabels: normalizedScopeHypothesis.capabilities.map((capability) => capability.label),
+      });
+    }
   } else {
     scopeHypothesis = enrichScopeHypothesis(normalizeScopeHypothesis(scopeHypothesis), baseEvidencePack, { preserveActorSlots: true });
   }

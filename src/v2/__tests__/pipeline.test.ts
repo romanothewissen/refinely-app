@@ -6,7 +6,7 @@ import { runV2Pipeline, classifyDiscoveryAnswers } from '../pipeline';
 import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFinalGenerationSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildSynthesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, V2_SCOPE_HYPOTHESIS_SCHEMA, validateTriageScores } from '../prompts';
 import { assessV2TriageFromScores } from '../triage';
 import type { V2StageExecutor } from '../types';
-import { buildV2GroundedEvidencePack, renderGroundedEvidencePack } from '../evidence-pack';
+import { buildV2GroundedEvidencePack, renderGroundedEvidencePack, validateScopeHypothesisAgainstEvidence } from '../evidence-pack';
 import { validateJsonSchema } from '../../core/json-schema';
 
 const baseConfig: TenantConfig = {
@@ -153,6 +153,33 @@ test('grounded evidence prompt blocks carry concrete cues and stay inside user b
   assert.ok(measurePromptSizes('', reasoningMessage).userChars <= V2_PROMPT_BUDGETS.capability_reasoning.maxUserChars);
 });
 
+test('scope hypothesis grounding accepts specific capability labels backed by direct requirement terms', () => {
+  const pack = buildV2GroundedEvidencePack({
+    requirement: 'Coordinate the loaner lifecycle across delivery, repair, return shipment, and status updates.',
+  });
+
+  const validationError = validateScopeHypothesisAgainstEvidence(
+    {
+      capabilities: [
+        {
+          id: 'cap_1',
+          label: 'Loaner Lifecycle Coordination',
+          rationale: 'Tracks the loaner through delivery, repair, return shipment, and status handling.',
+          confidence: 'high',
+        },
+      ],
+      actorSlots: {},
+      openQuestions: [],
+      confidence: 'medium',
+    },
+    pack,
+  );
+
+  assert.equal(validationError, null);
+  assert.ok(pack.directEvidenceTerms.includes('loaner'));
+  assert.ok(pack.directEvidenceTerms.includes('lifecycle'));
+});
+
 test('compiled project memory converts structured slices into compact runtime evidence', () => {
   const bundle = buildV2EvidenceBundleFromProjectMemory({
     domainContext: 'Service teams coordinate field work.',
@@ -228,6 +255,87 @@ test('runV2Pipeline returns scope confirmation before generation when no scope h
   assert.equal(result.scopeHypothesis.capabilities.length, 2);
   assert.equal(result.recommendedNextStep, 'run_discovery');
   assert.deepEqual(calls, ['triage', 'scope_hypothesis']);
+});
+
+test('runV2Pipeline retries scope hypothesis when the first grounded draft is too generic', async () => {
+  const calls: string[] = [];
+  let scopeAttempts = 0;
+  const executeStage: V2StageExecutor = async (request) => {
+    calls.push(request.stage);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 3, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    assert.equal(request.stage, 'scope_hypothesis');
+    scopeAttempts += 1;
+    return {
+      data: {
+        capabilities: [
+          scopeAttempts === 1
+            ? { id: 'cap_1', label: 'Manage workflow', rationale: 'Handles the process.', confidence: 'medium' }
+            : { id: 'cap_1', label: 'Loaner lifecycle coordination', rationale: 'Coordinates delivery, repair, return shipment, and status updates for the loaner.', confidence: 'high' },
+        ],
+        actorSlots: {},
+        openQuestions: [],
+        confidence: 'medium',
+      } as any,
+      usage: { input: 40, output: 30 },
+    };
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate the loaner lifecycle across delivery, repair, return shipment, and status updates.',
+      config: baseConfig,
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_scope_confirmation');
+  assert.equal(scopeAttempts, 2);
+  assert.equal(result.scopeHypothesis.capabilities[0]?.label, 'Loaner lifecycle coordination');
+  assert.equal(result.scopeHypothesis.confidence, 'medium');
+  assert.deepEqual(calls, ['triage', 'scope_hypothesis', 'scope_hypothesis']);
+});
+
+test('runV2Pipeline continues with a low-confidence scope hypothesis when grounding still fails after retry', async () => {
+  let scopeAttempts = 0;
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 3, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    assert.equal(request.stage, 'scope_hypothesis');
+    scopeAttempts += 1;
+    return {
+      data: {
+        capabilities: [
+          { id: 'cap_1', label: `Manage workflow ${scopeAttempts}`, rationale: 'Handles the process.', confidence: 'medium' },
+        ],
+        actorSlots: {},
+        openQuestions: ['Who owns this process?'],
+        confidence: 'medium',
+      } as any,
+      usage: { input: 40, output: 30 },
+    };
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate the loaner lifecycle across delivery, repair, return shipment, and status updates.',
+      config: baseConfig,
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_scope_confirmation');
+  assert.equal(scopeAttempts, 2);
+  assert.equal(result.scopeHypothesis.confidence, 'low');
+  assert.equal(result.scopeHypothesis.capabilities[0]?.label, 'Manage workflow 2');
 });
 
 test('runV2Pipeline defers preview actor slots when actor grounding is weak', async () => {

@@ -289,6 +289,7 @@ export interface V2GroundedEvidencePack {
   lifecycleSignals: V2GroundedCue[];
   backlogCues: V2GroundedCue[];
   wiCues: V2GroundedCue[];
+  directEvidenceTerms: string[];
 }
 
 export interface ProjectMemoryArtifactHeader {

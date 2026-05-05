@@ -391,12 +391,14 @@ export function buildScopeHypothesisUserMessage(input: {
   attachmentText?: string;
   triage: V2TriageResult;
   groundedEvidenceText?: string;
+  repairNote?: string;
 }): string {
   const parts = [
     renderSection('Requirement', trimText(input.requirement, 900)),
     input.attachmentText?.trim() ? renderSection('Attachment context', trimText(input.attachmentText, 360)) : '',
     renderSection('Requirement profile', `- discovery mode: ${input.triage.discoveryMode}\n- likely capability count: ${input.triage.likelyCapabilityCount}\n- workflow depth: ${input.triage.workflowDepth}/5\n- must-cover behaviors:\n${compactList(input.triage.mustCoverBehaviors, 6)}`),
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
+    input.repairNote?.trim() ? renderSection('Retry note', trimText(input.repairNote, 320)) : '',
     'Task: Return the smallest grounded capability hypothesis JSON. Keep actor slots sparse when the evidence is weak.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);

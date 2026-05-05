@@ -91,6 +91,33 @@ const STAGE_RENDER_BUDGETS = {
   capability_reasoning: 3000,
 } as const;
 
+const DIRECT_TERM_STOPWORDS = new Set([
+  'about',
+  'after',
+  'before',
+  'being',
+  'between',
+  'cannot',
+  'could',
+  'every',
+  'from',
+  'into',
+  'manual',
+  'other',
+  'their',
+  'there',
+  'these',
+  'those',
+  'through',
+  'under',
+  'using',
+  'where',
+  'which',
+  'while',
+  'within',
+  'would',
+]);
+
 type SourceName =
   | 'requirement'
   | 'attachment'
@@ -262,6 +289,13 @@ function collectObjectCues(
   return uniqueByKey(cues, (cue) => cue.key, maxItems);
 }
 
+function collectDirectEvidenceTerms(texts: string[], maxItems: number): string[] {
+  const terms = texts
+    .flatMap((text) => tokenize(text))
+    .filter((term) => !DIRECT_TERM_STOPWORDS.has(term));
+  return uniqueByKey(terms, (term) => term, maxItems);
+}
+
 function roleWeight(source: SourceName): number {
   switch (source) {
     case 'user_persona_answer':
@@ -410,6 +444,18 @@ export function buildV2GroundedEvidencePack(input: {
     lifecycleSignals: collectSentenceCues(lifecycleSources, LIFECYCLE_PATTERN, 6, 180),
     backlogCues,
     wiCues,
+    directEvidenceTerms: collectDirectEvidenceTerms(
+      [
+        texts.requirement,
+        texts.attachment,
+        texts.answers,
+        texts.wi,
+        texts.backlog,
+        texts.domainContext,
+        ...(input.domainRoles ?? []),
+      ],
+      80,
+    ),
   };
 }
 
@@ -444,6 +490,7 @@ function packTerms(evidencePack: V2GroundedEvidencePack): string[] {
     ...evidencePack.lifecycleSignals.map((cue) => cue.text),
     ...evidencePack.backlogCues.map((cue) => cue.text),
     ...evidencePack.wiCues.map((cue) => cue.text),
+    ...evidencePack.directEvidenceTerms,
   ];
   const phrases = rawTerms
     .map((term) => normalize(term).toLowerCase())
