@@ -28,6 +28,7 @@ export interface LlmResponse {
   structuredOutputMode?: 'json_schema' | 'json_object' | 'prompt_only';
   reasoningControlMode?: 'reasoning_effort' | 'thinking_budget' | 'thinking_level' | 'openai_reasoning' | 'auto' | 'none';
   thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
+  geminiFallbacks?: string[];
   piiMasking?: PiiMaskingStats;
 }
 
@@ -45,6 +46,8 @@ export interface LlmCallOptions {
   geminiBaseUrl?: string;
   /** Explicit Gemini 3 thinking level override for calls that need stricter reasoning. */
   geminiThinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
+  /** Internal-use retry escape hatch to suppress Gemini thinkingConfig entirely. */
+  disableGeminiThinkingConfig?: boolean;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   fireworksApiKey?: string;
@@ -237,7 +240,9 @@ function buildGeminiThinkingConfig(
   model: string,
   effort: LlmCallOptions['reasoningEffort'],
   overrideLevel?: GeminiThinkingLevel,
+  disabled?: boolean,
 ): GeminiThinkingConfig | undefined {
+  if (disabled) return undefined;
   if (!effort) return undefined;
   // Thinking-capable Gemini models: 2.x and 3.x series, explicit "thinking" in name, or "exp"
   // Non-thinking models (e.g. gemini-1.5-flash, gemini-1.0) do not accept thinkingConfig.
@@ -323,6 +328,26 @@ function isGeminiSchemaTooComplexError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return /Gemini API error:/i.test(message)
     && /schema produces a constraint that has too many states for serving/i.test(message);
+}
+
+function isGeminiInvalidArgumentError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /Gemini API error:/i.test(message)
+    && /invalid argument/i.test(message);
+}
+
+function appendStrictJsonInstruction(userMessage: string): string {
+  if (/respond with valid json only/i.test(userMessage)) return userMessage;
+  return `${userMessage}\n\nIMPORTANT: Respond with valid JSON only. No prose before or after. Follow the required response shape exactly.`;
+}
+
+function requestUsesGeminiThinkingConfig(opts: {
+  model: string;
+  reasoningEffort?: LlmCallOptions['reasoningEffort'];
+  geminiThinkingLevel?: LlmCallOptions['geminiThinkingLevel'];
+  disableGeminiThinkingConfig?: boolean;
+}): boolean {
+  return Boolean(buildGeminiThinkingConfig(opts.model, opts.reasoningEffort, opts.geminiThinkingLevel, opts.disableGeminiThinkingConfig));
 }
 
 function getModelCatalogEntry(
@@ -578,24 +603,60 @@ export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<Ll
 
   const startedAt = Date.now();
   let result: LlmResponse;
-  const resolvedOpts = { ...effectiveOpts, model: resolvedModel, maxTokens: effectiveMaxTokens };
+  const resolvedOpts: LlmCallOptions & { jsonSchema?: JsonSchema; schemaName?: string } = {
+    ...(effectiveOpts as LlmCallOptions & { jsonSchema?: JsonSchema; schemaName?: string }),
+    model: resolvedModel,
+    maxTokens: effectiveMaxTokens,
+  };
+  const geminiFallbacks: string[] = [];
 
   if (opts.provider === 'gemini') {
-    try {
-      result = await callGemini(resolvedOpts);
-    } catch (error) {
-      if (!('jsonSchema' in opts) || !opts.jsonSchema || !isGeminiSchemaTooComplexError(error)) {
+    let geminiOpts = resolvedOpts;
+    let schemaFallbackApplied = false;
+    let thinkingFallbackApplied = false;
+    while (true) {
+      try {
+        result = await callGemini(geminiOpts);
+        break;
+      } catch (error) {
+        const canDropSchema = Boolean(('jsonSchema' in opts) && opts.jsonSchema && !schemaFallbackApplied);
+        if (canDropSchema && (isGeminiSchemaTooComplexError(error) || isGeminiInvalidArgumentError(error))) {
+          schemaFallbackApplied = true;
+          const fallbackReason = isGeminiSchemaTooComplexError(error)
+            ? 'removed_provider_schema_after_schema_complexity'
+            : 'removed_provider_schema_after_invalid_argument';
+          geminiFallbacks.push(fallbackReason);
+          console.warn('[llm] Gemini rejected the provider-side JSON schema; retrying with prompt-only JSON enforcement.', {
+            model: resolvedModel,
+            fallbackReason,
+          });
+          geminiOpts = {
+            ...geminiOpts,
+            userMessage: appendStrictJsonInstruction(geminiOpts.userMessage),
+            jsonSchema: undefined,
+          };
+          continue;
+        }
+        const canDropThinking = !thinkingFallbackApplied
+          && requestUsesGeminiThinkingConfig(geminiOpts)
+          && isGeminiInvalidArgumentError(error);
+        if (canDropThinking) {
+          thinkingFallbackApplied = true;
+          geminiFallbacks.push('removed_thinking_config_after_invalid_argument');
+          console.warn('[llm] Gemini rejected the request shape; retrying without thinking config.', {
+            model: resolvedModel,
+            fallbackReason: 'removed_thinking_config_after_invalid_argument',
+          });
+          geminiOpts = {
+            ...geminiOpts,
+            reasoningEffort: 'none',
+            geminiThinkingLevel: undefined,
+            disableGeminiThinkingConfig: true,
+          };
+          continue;
+        }
         throw error;
       }
-      console.warn('[llm] Gemini rejected the response schema as too complex; retrying without provider-side schema enforcement.', {
-        model: resolvedModel,
-      });
-      const fallbackOpts = {
-        ...resolvedOpts,
-        userMessage: `${resolvedOpts.userMessage}\n\nIMPORTANT: Respond with valid JSON only. No prose before or after. Follow the required response shape exactly.`,
-        jsonSchema: undefined,
-      };
-      result = await callGemini(fallbackOpts);
     }
   } else if (opts.provider === 'anthropic') {
     result = await callAnthropic(resolvedOpts);
@@ -636,12 +697,14 @@ export async function callLlm(opts: LlmCallOptions | LlmJsonOptions): Promise<Ll
         input: result.inputTokens ?? 0,
         output: result.outputTokens ?? 0,
       },
+      geminiFallbacks: geminiFallbacks.length ? geminiFallbacks : result.geminiFallbacks,
       piiMasking: result.piiMasking ?? piiMasking,
     });
   }
 
   return {
     ...result,
+    geminiFallbacks: geminiFallbacks.length ? geminiFallbacks : result.geminiFallbacks,
     piiMasking,
     effectiveMaxTokens,
     structuredOutputMode: result.structuredOutputMode ?? capability.structuredOutputMode,
@@ -1090,6 +1153,7 @@ async function callGemini(opts: {
   geminiApiKey?: string;
   geminiBaseUrl?: string;
   geminiThinkingLevel?: LlmCallOptions['geminiThinkingLevel'];
+  disableGeminiThinkingConfig?: boolean;
   jsonSchema?: JsonSchema;
 }): Promise<LlmResponse> {
   const apiKey = (opts.geminiApiKey ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -1102,7 +1166,7 @@ async function callGemini(opts: {
   const model = mapModelForGemini(opts.model);
   const baseUrl = opts.geminiBaseUrl ?? process.env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta';
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort, opts.geminiThinkingLevel);
+  const thinkingConfig = buildGeminiThinkingConfig(model, opts.reasoningEffort, opts.geminiThinkingLevel, opts.disableGeminiThinkingConfig);
   const expectsJson = requestExpectsJson(opts);
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: opts.maxTokens ?? 8192,

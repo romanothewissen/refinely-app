@@ -38,6 +38,7 @@ class PipelineAuditWriter {
     reasoningControlMode?: PipelineAuditLlmCallRecord['reasoningControlMode'];
     piiMasking?: PiiMaskingStats;
     parseOutcome?: PipelineAuditLlmCallRecord['parseOutcome'];
+    geminiFallbacks?: string[];
   }): void {
     const record: PipelineAuditLlmCallRecord = {
       seq: 0,
@@ -60,6 +61,7 @@ class PipelineAuditWriter {
       userMessage: truncateForAudit(input.userMessage, 28000),
       responseText: truncateForAudit(input.responseText, 32000),
       parseOutcome: input.parseOutcome ?? 'n/a',
+      geminiFallbacks: input.geminiFallbacks?.length ? input.geminiFallbacks : undefined,
       piiMasking: input.piiMasking,
     };
     this.calls.push(record);

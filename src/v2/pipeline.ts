@@ -218,9 +218,26 @@ function currentPipelineProfile(config: TenantConfig): PipelineProfile {
 }
 
 function stageReasoningEffort(
+  config: TenantConfig,
   profile: PipelineProfile,
+  model: string,
   stage: 'triage' | 'scope_hypothesis' | 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair',
 ): 'low' | 'medium' | 'high' {
+  const isGeminiThree = config.generatorConfig.provider === 'gemini' && /^gemini-3(?:[._-]|$)/i.test(model.trim());
+  if (isGeminiThree) {
+    if (stage === 'triage') {
+      if (profile === 'fast') return 'low';
+      if (profile === 'quality') return 'high';
+      return 'medium';
+    }
+    if (stage === 'scope_hypothesis' || stage === 'discover' || stage === 'discovery_synthesis') {
+      if (profile === 'fast') return 'low';
+      return 'high';
+    }
+    if (stage === 'final_generation') return profile === 'quality' ? 'high' : 'medium';
+    if (stage === 'coverage_repair') return profile === 'quality' ? 'medium' : 'low';
+    return 'medium';
+  }
   if (stage === 'triage') return 'low';
   if (stage === 'scope_hypothesis' || stage === 'discover') {
     if (profile === 'fast') return 'low';
@@ -446,7 +463,7 @@ async function buildTriage(
       }),
       jsonSchema: V2_TRIAGE_SCHEMA,
       maxTokens: 900,
-      reasoningEffort: stageReasoningEffort(profile, 'triage'),
+      reasoningEffort: stageReasoningEffort(input.config, profile, input.config.generatorConfig.triageModel, 'triage'),
       validate: validateTriageScores,
     });
     addUsage(promptUsage, 'triage', triageResponse.usage);
@@ -520,7 +537,7 @@ export async function runV2Pipeline(
       }),
       jsonSchema: V2_SCOPE_HYPOTHESIS_SCHEMA,
       maxTokens: 1400,
-      reasoningEffort: stageReasoningEffort(profile, 'scope_hypothesis'),
+      reasoningEffort: stageReasoningEffort(input.config, profile, input.config.generatorConfig.clarifyModel, 'scope_hypothesis'),
       validate: validateScopeHypothesis,
     });
 
@@ -592,7 +609,7 @@ export async function runV2Pipeline(
       }),
       jsonSchema: V2_DISCOVERY_SCHEMA,
       maxTokens: 1600,
-      reasoningEffort: stageReasoningEffort(profile, 'discover'),
+      reasoningEffort: stageReasoningEffort(input.config, profile, input.config.generatorConfig.clarifyModel, 'discover'),
       validate: validateDiscoveryQuestions,
     });
 
@@ -647,7 +664,7 @@ export async function runV2Pipeline(
     }),
     jsonSchema: V2_SYNTHESIS_SCHEMA,
     maxTokens: 2200,
-    reasoningEffort: stageReasoningEffort(profile, 'discovery_synthesis'),
+    reasoningEffort: stageReasoningEffort(input.config, profile, input.config.generatorConfig.decompositionModel, 'discovery_synthesis'),
     validate: validateSynthesis,
   });
   addUsage(promptUsage, 'discovery_synthesis', synthesisResponse.usage);
@@ -668,7 +685,7 @@ export async function runV2Pipeline(
     }),
     jsonSchema: V2_FINAL_GENERATION_SCHEMA,
     maxTokens: 4200,
-    reasoningEffort: stageReasoningEffort(profile, 'final_generation'),
+    reasoningEffort: stageReasoningEffort(input.config, profile, input.config.generatorConfig.decompositionModel, 'final_generation'),
     validate: validateFinalGeneration,
   });
   addUsage(promptUsage, 'final_generation', finalResponse.usage);
@@ -699,7 +716,7 @@ export async function runV2Pipeline(
       }),
       jsonSchema: V2_FINAL_GENERATION_SCHEMA,
       maxTokens: 4200,
-      reasoningEffort: stageReasoningEffort(profile, 'coverage_repair'),
+      reasoningEffort: stageReasoningEffort(input.config, profile, input.config.generatorConfig.decompositionModel, 'coverage_repair'),
       validate: validateFinalGeneration,
     });
     addUsage(promptUsage, 'coverage_repair', repairResponse.usage);

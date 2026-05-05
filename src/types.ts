@@ -1196,6 +1196,7 @@ export interface PipelineAuditLlmCallRecord {
   userMessage: string;
   responseText: string;
   parseOutcome?: 'n/a' | 'clean_parse' | 'repaired_parse' | 'parse_failed' | 'parse_failed_after_retry';
+  geminiFallbacks?: string[];
   piiMasking?: PiiMaskingStats;
 }
 

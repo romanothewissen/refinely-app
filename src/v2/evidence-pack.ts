@@ -56,6 +56,7 @@ const OBJECT_KEYWORDS = [
   'plan',
   'order',
   'case',
+  'service',
   'shipment',
   'schedule',
   'template',
@@ -71,6 +72,11 @@ const OBJECT_KEYWORDS = [
   'task',
   'record',
   'activity',
+  'labor',
+  'part',
+  'loaner',
+  'installation',
+  'deinstallation',
   'approval',
   'exception',
   'override',
@@ -116,6 +122,49 @@ const DIRECT_TERM_STOPWORDS = new Set([
   'while',
   'within',
   'would',
+]);
+
+const PHRASE_EDGE_STOPWORDS = new Set([
+  'a',
+  'an',
+  'all',
+  'and',
+  'are',
+  'as',
+  'be',
+  'by',
+  'for',
+  'from',
+  'in',
+  'into',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'that',
+  'the',
+  'then',
+  'through',
+  'to',
+  'via',
+  'we',
+  'with',
+]);
+
+const NON_CONCRETE_TOKENS = new Set([
+  'can',
+  'able',
+  'create',
+  'created',
+  'eventually',
+  'facilitate',
+  'follow',
+  'need',
+  'needs',
+  'plan',
+  'planning',
+  'trigger',
 ]);
 
 type SourceName =
@@ -206,12 +255,51 @@ function splitIntoSegments(text: string): string[] {
     .filter((segment) => segment.length >= 12);
 }
 
+function normalizePhraseTokens(value: string): string[] {
+  return normalize(value)
+    .toLowerCase()
+    .replace(/[()]/g, ' ')
+    .replace(/[/]+/g, ' ')
+    .split(/[^a-z0-9-]+/)
+    .filter(Boolean);
+}
+
+function cleanConcretePhrase(value: string): string {
+  const tokens = normalizePhraseTokens(value);
+  while (tokens.length && (PHRASE_EDGE_STOPWORDS.has(tokens[0]!) || NON_CONCRETE_TOKENS.has(tokens[0]!))) tokens.shift();
+  while (tokens.length && PHRASE_EDGE_STOPWORDS.has(tokens[tokens.length - 1]!)) tokens.pop();
+  if (!tokens.length) return '';
+  if (tokens.every((token) => NON_CONCRETE_TOKENS.has(token) || PHRASE_EDGE_STOPWORDS.has(token))) return '';
+  if (tokens.length === 1 && (NON_CONCRETE_TOKENS.has(tokens[0]!) || tokens[0]!.length < 4)) return '';
+  return normalize(tokens.join(' '));
+}
+
+function hasMeaningfulFocusOverlap(text: string, focusTerms: string[]): boolean {
+  const normalized = normalize(text).toLowerCase();
+  const candidateTokens = tokenize(text);
+  if (!candidateTokens.length || !focusTerms.length) return false;
+  return focusTerms.some((term) => {
+    if (term.length < 4) return false;
+    if (normalized.includes(term)) return true;
+    return candidateTokens.includes(term);
+  }) || candidateTokens.filter((token) => focusTerms.includes(token)).length >= Math.min(2, candidateTokens.length);
+}
+
+function objectKeywordPattern(): string {
+  return OBJECT_KEYWORDS
+    .map((keyword) => {
+      if (keyword.endsWith('y')) return `${keyword}|${keyword.slice(0, -1)}ies`;
+      return `${keyword}s?`;
+    })
+    .join('|');
+}
+
 function extractObjectPhrases(text: string): string[] {
   const matches: string[] = [];
   const normalized = normalize(text);
-  const pattern = new RegExp(`\\b([a-z0-9]+(?:\\s+[a-z0-9]+){0,2}\\s+(?:${OBJECT_KEYWORDS.join('|')})s?)\\b`, 'gi');
+  const pattern = new RegExp(`\\b(((?:[a-z0-9-]+(?:\\s+[a-z0-9-]+){0,3}\\s+)?(?:${objectKeywordPattern()})))\\b`, 'gi');
   for (const match of normalized.matchAll(pattern)) {
-    const phrase = normalize(match[1] ?? '');
+    const phrase = cleanConcretePhrase(match[1] ?? '');
     if (!phrase) continue;
     matches.push(phrase);
   }
@@ -257,15 +345,17 @@ function extractRolePhrases(text: string): string[] {
 }
 
 function collectSentenceCues(
-  texts: Array<{ prefix: string; text: string }>,
+  texts: Array<{ prefix: string; text: string; requiresFocus?: boolean }>,
   pattern: RegExp,
   maxItems: number,
   maxChars: number,
+  focusTerms: string[] = [],
 ): V2GroundedCue[] {
   const cues: V2GroundedCue[] = [];
   for (const entry of texts) {
     for (const segment of splitIntoSegments(entry.text)) {
       if (!pattern.test(segment)) continue;
+      if (entry.requiresFocus && !hasMeaningfulFocusOverlap(segment, focusTerms)) continue;
       const cue = toCue(entry.prefix, segment, maxChars);
       if (cue) cues.push(cue);
       if (cues.length >= maxItems * 2) break;
@@ -275,12 +365,14 @@ function collectSentenceCues(
 }
 
 function collectObjectCues(
-  texts: Array<{ prefix: string; text: string }>,
+  texts: Array<{ prefix: string; text: string; requiresFocus?: boolean }>,
   maxItems: number,
+  focusTerms: string[] = [],
 ): V2GroundedCue[] {
   const cues: V2GroundedCue[] = [];
   for (const entry of texts) {
     for (const phrase of extractObjectPhrases(entry.text)) {
+      if (entry.requiresFocus && !hasMeaningfulFocusOverlap(phrase, focusTerms)) continue;
       const cue = toCue('object', phrase, 96);
       if (cue) cues.push(cue);
       if (cues.length >= maxItems * 3) break;
@@ -415,33 +507,37 @@ export function buildV2GroundedEvidencePack(input: {
     { prefix: 'object', text: texts.requirement },
     { prefix: 'object', text: texts.attachment },
     { prefix: 'object', text: texts.answers },
-    { prefix: 'object', text: texts.wi },
-    { prefix: 'object', text: texts.backlog },
-    { prefix: 'object', text: texts.domainContext },
+    { prefix: 'object', text: texts.wi, requiresFocus: true },
+    { prefix: 'object', text: texts.backlog, requiresFocus: true },
+    { prefix: 'object', text: texts.domainContext, requiresFocus: true },
   ];
+  const focusTerms = collectDirectEvidenceTerms(
+    [texts.requirement, texts.attachment, texts.answers],
+    40,
+  );
   const contextualSources = [
     { prefix: 'workflow', text: texts.requirement },
     { prefix: 'workflow', text: texts.answers },
-    { prefix: 'workflow', text: texts.wi },
-    { prefix: 'workflow', text: texts.backlog },
-    { prefix: 'workflow', text: texts.domainContext },
+    { prefix: 'workflow', text: texts.wi, requiresFocus: true },
+    { prefix: 'workflow', text: texts.backlog, requiresFocus: true },
+    { prefix: 'workflow', text: texts.domainContext, requiresFocus: true },
   ];
   const lifecycleSources = [
     { prefix: 'lifecycle', text: texts.requirement },
     { prefix: 'lifecycle', text: texts.answers },
-    { prefix: 'lifecycle', text: texts.wi },
-    { prefix: 'lifecycle', text: texts.backlog },
-    { prefix: 'lifecycle', text: texts.domainContext },
+    { prefix: 'lifecycle', text: texts.wi, requiresFocus: true },
+    { prefix: 'lifecycle', text: texts.backlog, requiresFocus: true },
+    { prefix: 'lifecycle', text: texts.domainContext, requiresFocus: true },
   ];
-  const backlogCues = collectSentenceCues([{ prefix: 'backlog', text: texts.backlog }], WORKFLOW_PATTERN, 5, 180);
-  const wiCues = collectSentenceCues([{ prefix: 'wi', text: texts.wi }], RULE_PATTERN, 5, 180);
+  const backlogCues = collectSentenceCues([{ prefix: 'backlog', text: texts.backlog, requiresFocus: true }], WORKFLOW_PATTERN, 5, 180, focusTerms);
+  const wiCues = collectSentenceCues([{ prefix: 'wi', text: texts.wi, requiresFocus: true }], RULE_PATTERN, 5, 180, focusTerms);
 
   return {
     roleCandidates: buildRoleCandidates(input),
-    businessObjects: collectObjectCues(objectSources, 6),
-    workflowSignals: collectSentenceCues(contextualSources, WORKFLOW_PATTERN, 6, 180),
-    businessRules: collectSentenceCues(contextualSources, RULE_PATTERN, 6, 180),
-    lifecycleSignals: collectSentenceCues(lifecycleSources, LIFECYCLE_PATTERN, 6, 180),
+    businessObjects: collectObjectCues(objectSources, 6, focusTerms),
+    workflowSignals: collectSentenceCues(contextualSources, WORKFLOW_PATTERN, 6, 180, focusTerms),
+    businessRules: collectSentenceCues(contextualSources, RULE_PATTERN, 6, 180, focusTerms),
+    lifecycleSignals: collectSentenceCues(lifecycleSources, LIFECYCLE_PATTERN, 6, 180, focusTerms),
     backlogCues,
     wiCues,
     directEvidenceTerms: collectDirectEvidenceTerms(

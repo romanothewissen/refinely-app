@@ -379,6 +379,9 @@ export function buildScopeHypothesisSystemPrompt(): string {
       'Focus on business outcomes, not CRUD fragments or implementation steps.',
       'Return 1-6 core capabilities, tentative actor slots, and unresolved questions that could change scope.',
       'Ground capability labels in concrete business objects, workflow steps, rules, or evidence terms.',
+      'Prefer the requirement\'s own concrete nouns and workflow wording over abstract relabeling.',
+      'Avoid consultant-style labels such as transformation, orchestration, artifact, execution triggering, or asset tracking when the requirement already names the workflow plainly.',
+      'Capability labels should read like user-visible business capabilities, not architecture summaries.',
       'If actor evidence is weak, keep actor slots sparse rather than inventing generic roles.',
       'Do not write acceptance requirements or implementation detail.',
     ].join(' '),
@@ -411,6 +414,9 @@ export function buildDiscoverySystemPrompt(): string {
       'Questions must be neutral, non-leading, and specific to the requirement.',
       'Do not assume role names that are not already confirmed.',
       'Each question must mention a concrete actor, object, rule, workflow step, or lifecycle signal already present in the grounded evidence.',
+      'Map each question to an unresolved decision theme or open uncertainty already provided.',
+      'Prefer the requirement\'s own terms over abstract words like object, artifact, transformation, trigger, or lifecycle when plainer business wording exists.',
+      'Do not speculate about data models or permissions unless that decision would materially change scope.',
       'Ask only questions that can materially change capability boundaries, actor accountability, business rules, lifecycle handling, exceptions, or success measures.',
       'Prefer concise questions and short suggestion chips.',
     ].join(' '),
@@ -437,7 +443,7 @@ export function buildDiscoveryUserMessage(input: {
     renderSection('Open uncertainties', compactList(input.scopeHypothesis.openQuestions, 6) || '- none'),
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     input.repairNote?.trim() ? renderSection('Retry note', trimText(input.repairNote, 320)) : '',
-    `Task: Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only, grounded in the evidence above. Each question must cite a concrete actor, object, rule, workflow step, or lifecycle cue already present above.`,
+    `Task: Generate up to ${input.triage.questionBudget} high-value discovery questions for this round only, grounded in the evidence above. Each question must resolve one of the unresolved themes or open uncertainties already listed, and must cite a concrete actor, object, rule, workflow step, or lifecycle cue already present above.`,
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.discover.maxUserChars);
 }

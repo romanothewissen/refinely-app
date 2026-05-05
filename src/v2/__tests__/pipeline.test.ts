@@ -33,6 +33,18 @@ const baseConfig: TenantConfig = {
   arMappings: [],
 };
 
+const geminiBalancedConfig: TenantConfig = {
+  ...baseConfig,
+  generatorConfig: {
+    ...baseConfig.generatorConfig,
+    provider: 'gemini',
+    triageModel: 'gemini-3.1-flash-lite-preview',
+    clarifyModel: 'gemini-3-flash-preview',
+    decompositionModel: 'gemini-3-flash-preview',
+    arModel: 'gemini-3-flash-preview',
+  },
+};
+
 test('triage load mapping scales discovery depth and budget by score bands', () => {
   const heavy = assessV2TriageFromScores(
     { capability_breadth: 5, ask_clarity: 1, actor_clarity: 1 },
@@ -100,6 +112,20 @@ test('grounded evidence pack prefers specific roles from configured roles and di
   assert.ok(pack.businessObjects.some((cue) => /service plan/i.test(cue.text)));
 });
 
+test('grounded evidence pack suppresses malformed fragments and irrelevant retrieved cues', () => {
+  const pack = buildV2GroundedEvidencePack({
+    requirement: 'We need to facilitate field service activities, in-house service, loaners, and installations through a single plan that can generate quotes and downstream work orders.',
+    wiContextText: 'If Physician Contact Info is available, a Contact Line must be added during complaint documentation.',
+    similarStoriesText: 'Shipment approvals and field service activities are coordinated from a single plan.',
+  });
+
+  assert.ok(pack.businessObjects.some((cue) => /single plan/i.test(cue.text)));
+  assert.ok(pack.businessObjects.some((cue) => /field service/i.test(cue.text)));
+  assert.ok(pack.businessObjects.some((cue) => /loaners/i.test(cue.text)));
+  assert.ok(pack.businessObjects.every((cue) => !/through a single plan|able to eventually quote|from from that plan/i.test(cue.text)));
+  assert.ok(pack.businessRules.every((cue) => !/physician contact info/i.test(cue.text)));
+});
+
 test('grounded evidence prompt blocks carry concrete cues and stay inside user budgets', () => {
   const pack = buildV2GroundedEvidencePack({
     requirement: 'Coordinate service plan approval, manual override, and status updates.',
@@ -151,6 +177,12 @@ test('grounded evidence prompt blocks carry concrete cues and stay inside user b
   assert.ok(measurePromptSizes('', scopeMessage).userChars <= V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);
   assert.ok(measurePromptSizes('', discoveryMessage).userChars <= V2_PROMPT_BUDGETS.discover.maxUserChars);
   assert.ok(measurePromptSizes('', reasoningMessage).userChars <= V2_PROMPT_BUDGETS.capability_reasoning.maxUserChars);
+});
+
+test('v2 prompts discourage abstract relabeling and speculative discovery wording', () => {
+  assert.match(buildScopeHypothesisSystemPrompt(), /Avoid consultant-style labels/i);
+  assert.match(buildDiscoverySystemPrompt(), /Map each question to an unresolved decision theme/i);
+  assert.match(buildDiscoverySystemPrompt(), /Do not speculate about data models or permissions/i);
 });
 
 test('scope hypothesis grounding accepts specific capability labels backed by direct requirement terms', () => {
@@ -849,7 +881,7 @@ test('runV2Pipeline makes stage reasoning profile-aware', async () => {
   assert.equal(efforts.get('final_generation'), 'high');
 });
 
-test('runV2Pipeline raises discovery reasoning on balanced profile', async () => {
+test('runV2Pipeline raises Gemini reasoning on balanced profile for early V2 stages', async () => {
   const efforts = new Map<string, string>();
   const executeStage: V2StageExecutor = async (request) => {
     efforts.set(request.stage, request.reasoningEffort);
@@ -881,7 +913,7 @@ test('runV2Pipeline raises discovery reasoning on balanced profile', async () =>
   const result = await runV2Pipeline(
     {
       requirement: 'Coordinate service planning with approvals and downstream work creation.',
-      config: baseConfig,
+      config: geminiBalancedConfig,
       confirmedScopeHypothesis: {
         capabilities: [{ id: 'cap_1', label: 'Coordinate service planning', rationale: 'Core workflow.', confidence: 'high' }],
         actorSlots: { initiator: 'planner' },
@@ -893,8 +925,123 @@ test('runV2Pipeline raises discovery reasoning on balanced profile', async () =>
   );
 
   assert.equal(result.status, 'needs_discovery');
-  assert.equal(efforts.get('triage'), 'low');
-  assert.equal(efforts.get('discover'), 'medium');
+  assert.equal(efforts.get('triage'), 'medium');
+  assert.equal(efforts.get('discover'), 'high');
+});
+
+test('runV2Pipeline raises Gemini reasoning on balanced profile for scope and synthesis', async () => {
+  const efforts = new Map<string, string>();
+  const executeStage: V2StageExecutor = async (request) => {
+    efforts.set(request.stage, request.reasoningEffort);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 4, actor_clarity: 4 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'scope_hypothesis') {
+      return {
+        data: {
+          capabilities: [{ id: 'cap_1', label: 'Single plan coordination', rationale: 'Coordinates the single plan across service types.', confidence: 'high' }],
+          actorSlots: {},
+          openQuestions: [],
+          confidence: 'medium',
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const previewResult = await runV2Pipeline(
+    {
+      requirement: 'Coordinate field service, in-house service, and loaners through a single plan.',
+      config: geminiBalancedConfig,
+      previewOnly: true,
+    },
+    executeStage,
+  );
+
+  assert.equal(previewResult.status, 'preview_ready');
+  assert.equal(efforts.get('triage'), 'medium');
+  assert.equal(efforts.get('scope_hypothesis'), 'high');
+});
+
+test('runV2Pipeline raises Gemini synthesis reasoning on balanced profile', async () => {
+  const efforts = new Map<string, string>();
+  const executeStage: V2StageExecutor = async (request) => {
+    efforts.set(request.stage, request.reasoningEffort);
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 4, ask_clarity: 4, actor_clarity: 3 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'discovery_synthesis') {
+      return {
+        data: {
+          resolvedFacts: ['The single plan drives quote generation and work order creation.'],
+          actorMap: {},
+          businessRules: ['The single plan must support multiple service types.'],
+          workflowSteps: ['Plan work', 'Generate quote'],
+          lifecycleStates: ['draft', 'quoted'],
+          exceptions: [],
+          successMeasures: [],
+          mustCoverBehaviors: ['Generate quotes from the single plan'],
+          openDecisions: [],
+          arDepth: 'deep',
+          featureTarget: 1,
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    if (request.stage === 'final_generation') {
+      return {
+        data: {
+          features: [
+            {
+              summary: 'Generate quotes from a single service plan',
+              description: 'As a support specialist, I need to generate a quote from a single service plan so that follow-up work can proceed from one coordinated workflow.',
+              suggested_story_points: 8,
+              acceptanceRequirements: [
+                { given: 'a single plan includes multiple service types', when: 'the specialist generates a quote', then: 'the quote reflects the planned work in one commercial output' },
+                { given: 'a quote is accepted', when: 'the plan proceeds', then: 'downstream work creation starts from the same plan' },
+                { given: 'the single plan is still being assembled', when: 'the specialist reviews the plan', then: 'quote generation remains tied to the single coordinated plan state' },
+              ],
+            },
+          ],
+          coverageMap: [{ mustCoverBehavior: 'Generate quotes from the single plan', featureSummary: 'Generate quotes from a single service plan' }],
+        } as any,
+        usage: { input: 20, output: 20 },
+      };
+    }
+    throw new Error(`Unexpected stage ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate services through a single plan and generate quotes from that plan.',
+      config: geminiBalancedConfig,
+      confirmedScopeHypothesis: {
+        capabilities: [{ id: 'cap_1', label: 'Single plan coordination', rationale: 'Coordinates one plan across service types.', confidence: 'high' }],
+        actorSlots: {},
+        openQuestions: [],
+        confidence: 'medium',
+      },
+      discoveryAnswers: [
+        {
+          questionId: 'q1',
+          categoryKey: 'business_rules',
+          question: 'What must the plan support?',
+          answer: 'The single plan must support multiple service types and quote generation.',
+        },
+      ],
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'complete');
+  assert.equal(efforts.get('discovery_synthesis'), 'high');
 });
 
 test('runV2Pipeline retries discovery when the first question set is too generic', async () => {

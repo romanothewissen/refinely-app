@@ -285,6 +285,124 @@ test('Gemini retries without provider-side schema enforcement when the schema is
   assert.match(secondContents?.[0]?.parts?.[0]?.text ?? '', /respond with valid json only/i);
 });
 
+test('Gemini retries without provider-side schema enforcement after invalid argument', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    requestBodies.push(body);
+
+    if (requestBodies.length === 1) {
+      return new Response(JSON.stringify({
+        error: {
+          message: 'Request contains an invalid argument.',
+        },
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+      usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 4 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const response = await callLlm({
+      provider: 'gemini',
+      model: 'gemini-3-flash-preview',
+      systemPrompt: 'Return JSON only.',
+      userMessage: 'Respond with valid JSON.',
+      geminiApiKey: 'test-key',
+      jsonSchema: {
+        type: 'object',
+        required: ['ok'],
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+        },
+      },
+    });
+
+    assert.equal(response.text, '{"ok":true}');
+    assert.deepEqual(response.geminiFallbacks, ['removed_provider_schema_after_invalid_argument']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBodies.length, 2);
+  const secondGenerationConfig = requestBodies[1]?.generationConfig as Record<string, unknown> | undefined;
+  assert.equal('responseJsonSchema' in (secondGenerationConfig ?? {}), false);
+});
+
+test('Gemini retries without thinking config after repeated invalid argument', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    requestBodies.push(body);
+
+    if (requestBodies.length < 3) {
+      return new Response(JSON.stringify({
+        error: {
+          message: 'Request contains an invalid argument.',
+        },
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+      usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 4 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const response = await callLlm({
+      provider: 'gemini',
+      model: 'gemini-3-flash-preview',
+      systemPrompt: 'Return JSON only.',
+      userMessage: 'Respond with valid JSON.',
+      geminiApiKey: 'test-key',
+      reasoningEffort: 'medium',
+      jsonSchema: {
+        type: 'object',
+        required: ['ok'],
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+        },
+      },
+    });
+
+    assert.equal(response.text, '{"ok":true}');
+    assert.deepEqual(response.geminiFallbacks, [
+      'removed_provider_schema_after_invalid_argument',
+      'removed_thinking_config_after_invalid_argument',
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBodies.length, 3);
+  const secondGenerationConfig = requestBodies[1]?.generationConfig as Record<string, unknown> | undefined;
+  const thirdGenerationConfig = requestBodies[2]?.generationConfig as Record<string, unknown> | undefined;
+  assert.equal(Boolean(secondGenerationConfig?.thinkingConfig), true);
+  assert.equal(Boolean(thirdGenerationConfig?.thinkingConfig), false);
+});
+
 test('resolveEffectiveMaxTokens clamps Fireworks max_tokens requests to the non-streaming limit', () => {
   assert.equal(resolveEffectiveMaxTokens({
     provider: 'fireworks',
