@@ -183,7 +183,7 @@ export const V2_DISCOVERY_SCHEMA: JsonSchema = {
           rationale: { type: 'string', minLength: 8, maxLength: 160 },
           suggestions: {
             type: 'array',
-            minItems: 2,
+            minItems: 0,
             maxItems: 4,
             items: { type: 'string', minLength: 1, maxLength: 90 },
           },
