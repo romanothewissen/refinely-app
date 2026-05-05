@@ -3,10 +3,11 @@ import test from 'node:test';
 import { DEFAULT_CONFIG, type TenantConfig } from '../../types';
 import { buildV2EvidenceBundleFromProjectMemory } from '../../services/project-memory';
 import { runV2Pipeline, classifyDiscoveryAnswers } from '../pipeline';
-import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFinalGenerationSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildSynthesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, validateTriageScores } from '../prompts';
+import { buildArWriterSystemPrompt, buildCapabilityReasoningSystemPrompt, buildCapabilityReasoningUserMessage, buildDiscoverySystemPrompt, buildDiscoveryUserMessage, buildFeatureFormatterSystemPrompt, buildFinalGenerationSystemPrompt, buildScopeHypothesisSystemPrompt, buildScopeHypothesisUserMessage, buildSynthesisSystemPrompt, buildTriageSystemPrompt, measurePromptSizes, V2_PROMPT_BUDGETS, V2_SCOPE_HYPOTHESIS_SCHEMA, validateTriageScores } from '../prompts';
 import { assessV2TriageFromScores } from '../triage';
 import type { V2StageExecutor } from '../types';
 import { buildV2GroundedEvidencePack, renderGroundedEvidencePack } from '../evidence-pack';
+import { validateJsonSchema } from '../../core/json-schema';
 
 const baseConfig: TenantConfig = {
   ...DEFAULT_CONFIG,
@@ -262,6 +263,77 @@ test('runV2Pipeline defers preview actor slots when actor grounding is weak', as
   assert.equal(result.status, 'needs_scope_confirmation');
   assert.deepEqual(result.scopeHypothesis.actorSlots, {});
   assert.equal(result.scopeHypothesis.actorGroundingStatus, 'weak');
+});
+
+test('runV2Pipeline normalizes overlong scope capability ids before returning them to the UI', async () => {
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 3, ask_clarity: 3, actor_clarity: 3 } as any,
+        usage: { input: 10, output: 10 },
+      };
+    }
+    assert.equal(request.stage, 'scope_hypothesis');
+    return {
+      data: {
+        capabilities: [
+          {
+            id: 'capability_identifier_that_is_far_too_long_for_the_schema_to_accept_cleanly',
+            label: 'Coordinate service planning',
+            rationale: 'Primary workflow capability.',
+            confidence: 'high',
+          },
+          {
+            label: 'Handle approval fallback',
+            rationale: 'Fallback logic changes scope.',
+            confidence: 'medium',
+          },
+        ],
+        actorSlots: {},
+        openQuestions: [],
+        confidence: 'medium',
+      } as any,
+      usage: { input: 40, output: 20 },
+    };
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service planning with approval fallback handling.',
+      config: baseConfig,
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'needs_scope_confirmation');
+  assert.ok(result.scopeHypothesis.capabilities.every((capability) => capability.id.length <= 32));
+  assert.ok(result.scopeHypothesis.capabilities.every((capability) => capability.id.startsWith('cap_')));
+});
+
+test('v2 scope hypothesis schema allows long or omitted model ids so the pipeline can normalize them later', () => {
+  const validationError = validateJsonSchema(
+    {
+      capabilities: [
+        {
+          id: 'capability_identifier_that_is_far_too_long_for_the_schema_to_accept_cleanly',
+          label: 'Coordinate service planning',
+          rationale: 'Primary workflow capability.',
+          confidence: 'high',
+        },
+        {
+          label: 'Handle approval fallback',
+          rationale: 'Fallback logic changes scope.',
+          confidence: 'medium',
+        },
+      ],
+      actorSlots: {},
+      openQuestions: [],
+      confidence: 'medium',
+    },
+    V2_SCOPE_HYPOTHESIS_SCHEMA,
+  );
+
+  assert.equal(validationError, null);
 });
 
 test('runV2Pipeline uses questionBudget directly when requesting discovery', async () => {

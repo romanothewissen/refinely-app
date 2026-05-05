@@ -144,10 +144,10 @@ export const V2_SCOPE_HYPOTHESIS_SCHEMA: JsonSchema = {
       maxItems: 6,
       items: {
         type: 'object',
-        required: ['id', 'label', 'rationale', 'confidence'],
+        required: ['label', 'rationale', 'confidence'],
         additionalProperties: false,
         properties: {
-          id: { type: 'string', minLength: 1, maxLength: 32 },
+          id: { type: 'string', minLength: 1, maxLength: 120 },
           label: { type: 'string', minLength: 6, maxLength: 120 },
           rationale: { type: 'string', minLength: 8, maxLength: 220 },
           confidence: { type: 'string', enum: ['low', 'medium', 'high'] },

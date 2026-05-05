@@ -122,6 +122,44 @@ function inferCategory(question: string): ClarifyCategoryKey {
   return 'context_trigger';
 }
 
+function normalizeStableId(
+  value: string | undefined,
+  prefix: string,
+  index: number,
+  used: Set<string>,
+): string {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const fallback = `${prefix}_${index + 1}`;
+  const withPrefix = normalized
+    ? (normalized.startsWith(`${prefix}_`) ? normalized : `${prefix}_${normalized}`)
+    : fallback;
+  const base = withPrefix.slice(0, 32) || fallback;
+  let candidate = base;
+  let duplicateIndex = 2;
+  while (used.has(candidate)) {
+    const suffix = `_${duplicateIndex}`;
+    candidate = `${base.slice(0, Math.max(1, 32 - suffix.length))}${suffix}`;
+    duplicateIndex += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function normalizeScopeHypothesis(scopeHypothesis: V2ScopeHypothesis): V2ScopeHypothesis {
+  const usedCapabilityIds = new Set<string>();
+  return {
+    ...scopeHypothesis,
+    capabilities: scopeHypothesis.capabilities.map((capability, index) => ({
+      ...capability,
+      id: normalizeStableId(capability.id || capability.label, 'cap', index, usedCapabilityIds),
+    })),
+  };
+}
+
 function normalizeDiscoveryQuestionsForReturn(
   questions: V2DiscoveryQuestion[],
   questionBudget: number,
@@ -488,10 +526,10 @@ export async function runV2Pipeline(
         ?? validateScopeHypothesisAgainstEvidence(data as V2ScopeHypothesis, baseEvidencePack)
       ),
     });
-    scopeHypothesis = enrichScopeHypothesis(scopeResponse.data, baseEvidencePack);
+    scopeHypothesis = enrichScopeHypothesis(normalizeScopeHypothesis(scopeResponse.data), baseEvidencePack);
     addUsage(promptUsage, 'scope_hypothesis', scopeResponse.usage);
   } else {
-    scopeHypothesis = enrichScopeHypothesis(scopeHypothesis, baseEvidencePack, { preserveActorSlots: true });
+    scopeHypothesis = enrichScopeHypothesis(normalizeScopeHypothesis(scopeHypothesis), baseEvidencePack, { preserveActorSlots: true });
   }
 
   if (input.previewOnly) {

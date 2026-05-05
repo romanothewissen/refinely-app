@@ -216,9 +216,10 @@ function resultFromConversation(conversation: ConversationRecord | null): V2Resu
 
 function buildScopeDraft(scopeHypothesis?: ScopeHypothesis | null): EditableScopeDraft | null {
   if (!scopeHypothesis) return null;
+  const usedCapabilityIds = new Set<string>();
   return {
     capabilities: (scopeHypothesis.capabilities ?? []).map((capability) => ({
-      id: capability.id,
+      id: normalizeScopeCapabilityId(capability.id || capability.label, usedCapabilityIds),
       label: capability.label,
       rationale: capability.rationale,
       confidence: capability.confidence,
@@ -235,11 +236,31 @@ function buildScopeDraft(scopeHypothesis?: ScopeHypothesis | null): EditableScop
   };
 }
 
+function normalizeScopeCapabilityId(value: string, used: Set<string>) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const base = (normalized.startsWith('cap_') ? normalized : `cap_${normalized || 'draft'}`).slice(0, 32) || 'cap_draft';
+  let candidate = base;
+  let duplicateIndex = 2;
+  while (used.has(candidate)) {
+    const suffix = `_${duplicateIndex}`;
+    candidate = `${base.slice(0, Math.max(1, 32 - suffix.length))}${suffix}`;
+    duplicateIndex += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
 function buildScopePayload(draft: EditableScopeDraft): ScopeHypothesis {
+  const usedCapabilityIds = new Set<string>();
   return {
     capabilities: draft.capabilities
       .map((capability) => ({
         ...capability,
+        id: normalizeScopeCapabilityId(capability.id || capability.label, usedCapabilityIds),
         label: capability.label.trim(),
         rationale: capability.rationale.trim(),
       }))
@@ -1529,6 +1550,7 @@ function V2Canvas({
   onDeleteAudit: () => void;
 }) {
   const triage = result?.triage ?? null;
+  const showAuditPanel = pipelineAuditEnabled && (uiStep !== 'input' || Boolean(latestAuditEntry));
   const activeLoadingStep = loadingState
     ? getLoadingSteps(loadingState.mode)[
       loadingState.serverProgress
@@ -1541,11 +1563,35 @@ function V2Canvas({
     : [];
 
   return (
-    <div className="mx-auto w-full max-w-[1320px] flex flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4">
       <section className="rf-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-3">
-            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">V2 workflow</div>
+          <div className="max-w-3xl space-y-3">
+            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">
+              {uiStep === 'input' ? 'Refinement flow' : 'V2 workflow'}
+            </div>
+            {uiStep === 'input' && (
+              <div className="space-y-2">
+                <h2 className="text-[22px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>
+                  Shape the scope in the sidebar, then run Preview Scope.
+                </h2>
+                <p className="max-w-2xl text-[14px] leading-relaxed text-[var(--rf-text-secondary)]">
+                  Start with the requirement and only add the context that changes scope. Review and audit details will appear later, when they are actually useful.
+                </p>
+                {pipelineAuditEnabled && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <span className="rounded-full border border-[var(--rf-border)] bg-white/70 px-3 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                      Audit {recordPipelineAuditForRun ? 'on' : 'off'} for this run
+                    </span>
+                    {latestAuditEntry && (
+                      <span className="rounded-full border border-[var(--rf-border)] bg-white/70 px-3 py-1 text-[12px] font-semibold text-[var(--rf-text-secondary)]">
+                        {auditEntryCount} saved audit run{auditEntryCount === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <StepRail uiStep={uiStep} />
           </div>
           <button
@@ -1568,7 +1614,7 @@ function V2Canvas({
         )}
       </section>
 
-      {pipelineAuditEnabled && (
+      {showAuditPanel && (
         <section className="rf-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -1625,18 +1671,6 @@ function V2Canvas({
           serverProgress={loadingState.serverProgress}
           items={loadingItems}
         />
-      )}
-
-      {!loading && uiStep === 'input' && (
-        <section className="rf-card p-8">
-          <div className="max-w-3xl">
-            <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Ready to preview</div>
-            <h2 className="mt-2 text-[20px] font-black tracking-tight text-[var(--rf-text)]" style={{ fontFamily: 'Fraunces, serif' }}>Use the left sidebar to shape scope, then run Preview Scope.</h2>
-            <p className="mt-2 text-[14px] leading-relaxed text-[var(--rf-text-secondary)]">
-              The V2 flow now uses the V1 shell so the main canvas stays scrollable, and scope review happens as a dedicated step instead of appearing below the fold.
-            </p>
-          </div>
-        </section>
       )}
 
       {!loading && uiStep === 'scope_review' && result && scopeDraft && (
