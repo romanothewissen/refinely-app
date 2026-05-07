@@ -924,22 +924,32 @@ export default function V2WorkspaceApp({
         includeSimilarStories: false,
         pipelineAudit: Boolean(auditRunId),
         auditRunId,
-      }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result };
-      if (!response?.success || !response.result) {
+      }) as { success?: boolean; error?: string; warning?: string; sessionId?: string; result?: V2Result; queued?: boolean };
+      if (!response?.success) {
         throw new Error(response?.error || 'Preview failed.');
       }
       const nextSessionId = response.sessionId ?? sessionId;
-      setSessionId(nextSessionId);
-      setSelectedConversationId(nextSessionId);
-      setResult(response.result);
-      setScopeDraft(buildScopeDraft(response.result.scopeHypothesis));
-      setDiscoveryAnswers({});
-      setUiStep('scope_review');
-      setLoadingMessage(null);
-      setLoadingState(null);
-      setWarning(response.warning ?? null);
-      void loadHistory();
-      void loadAuditEntries(nextSessionId);
+      if (response.queued) {
+        setSessionId(nextSessionId);
+        setSelectedConversationId(nextSessionId);
+        setWarning(response.warning ?? null);
+        setLoadingMessage('Queued scope preview is running…');
+        await waitForQueuedV2Preview(nextSessionId);
+      } else if (response.result) {
+        setSessionId(nextSessionId);
+        setSelectedConversationId(nextSessionId);
+        setResult(response.result);
+        setScopeDraft(buildScopeDraft(response.result.scopeHypothesis));
+        setDiscoveryAnswers({});
+        setUiStep('scope_review');
+        setLoadingMessage(null);
+        setLoadingState(null);
+        setWarning(response.warning ?? null);
+        void loadHistory();
+        void loadAuditEntries(nextSessionId);
+      } else {
+        throw new Error('Preview failed.');
+      }
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : 'Preview failed.');
       setLoadingState(null);
@@ -1029,6 +1039,41 @@ export default function V2WorkspaceApp({
     }
 
     throw new Error('V2 refinement is taking longer than expected. Please try again.');
+  }, [hydrateQueuedV2Result]);
+
+  const waitForQueuedV2Preview = useCallback(async (nextSessionId: string) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 15 * 60 * 1000) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      const progressResponse = await api.v2GetProgress(nextSessionId) as {
+        success?: boolean;
+        progress?: V2ProgressEvent;
+      };
+      const progress = progressResponse?.progress;
+      if (!progress) continue;
+
+      if (progress.type === 'progress') {
+        setLoadingMessage(progress.message ?? 'Building scope preview…');
+        setLoadingState((previous) => previous ? {
+          ...previous,
+          localStepIndex: Math.max(previous.localStepIndex, getLoadingStepIndex(previous.mode, progress.stage)),
+          serverProgress: progress,
+        } : previous);
+        continue;
+      }
+
+      if (progress.type === 'complete') {
+        setLoadingMessage('Opening the saved preview…');
+        await hydrateQueuedV2Result(nextSessionId);
+        return;
+      }
+
+      if (progress.type === 'error') {
+        throw new Error(progress.message || 'Preview failed.');
+      }
+    }
+
+    throw new Error('V2 preview is taking longer than expected. Please try again.');
   }, [hydrateQueuedV2Result]);
 
   const handleGenerate = async (answerOverride?: Record<string, DiscoveryAnswer>) => {

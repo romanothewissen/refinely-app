@@ -52,7 +52,12 @@ export type V2ProgressStage =
   | 'coverage_repair'
   | 'persisting';
 
-export type V2ProgressResultStatus = 'needs_discovery' | 'discovery_generation_failed' | 'complete';
+export type V2ProgressResultStatus =
+  | 'preview_ready'
+  | 'needs_scope_confirmation'
+  | 'needs_discovery'
+  | 'discovery_generation_failed'
+  | 'complete';
 
 export interface V2ProgressDraftFeatureSummary {
   id: string;

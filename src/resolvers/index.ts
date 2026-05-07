@@ -638,7 +638,6 @@ resolver.define('v2Preview', async ({ payload, context }) => {
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
   }
-  const conversationStore = createSqlConversationStore();
 
   const check = await checkGenerationAllowed(requestContext.config, context, {
     sessionId: requestContext.sessionId,
@@ -653,69 +652,49 @@ resolver.define('v2Preview', async ({ payload, context }) => {
     ? { sessionId: requestContext.sessionId, auditRunId: String(payload.auditRunId), accountId: requestContext.accountId }
     : null;
 
-  let result;
-  const runPreview = async () => {
-    const nextResult = await runV2Pipeline({
-      requirement: requestContext.requirement,
-      attachmentText: requestContext.attachmentText,
-      config: requestContext.config,
-      domainContext: requestContext.domainContext,
-      domainRoles: requestContext.domainRoles,
-      memoryHeader: requestContext.memoryHeader,
-      memoryStatus: requestContext.memoryStatus,
-      previewOnly: true,
-    });
-    const auditWriter = getPipelineAuditWriter();
-    if (auditWriter) {
-      await auditWriter.flushMerge({
-        ...buildV2AuditBasePatch({
-          accountId: requestContext.accountId,
-          projectKey: requestContext.projectKey,
-          projectKeys: requestContext.projectKeys,
-          config: requestContext.config,
-          requirement: requestContext.requirement,
-          attachmentText: requestContext.attachmentText,
-        }),
-        ...buildV2AuditResultPatch({ result: nextResult }),
-      });
-    }
-    return nextResult;
-  };
   try {
-    result = auditMeta
-      ? await runWithPipelineAuditContext(auditMeta, runPreview)
-      : await runPreview();
+    const stateStore = createV2EphemeralWorkflowStateStore();
+    await stateStore.setProgress(
+      requestContext.sessionId,
+      buildV2ProgressEvent(requestContext.sessionId, {
+        stage: 'context',
+        message: 'Queuing scope preview…',
+      }),
+    );
+
+    const queue = new Queue({ key: 'v2-generation-queue' });
+    await queue.push({
+      body: {
+        mode: 'preview',
+        sessionId: requestContext.sessionId,
+        accountId: requestContext.accountId,
+        requirement: requestContext.requirement,
+        attachmentText: requestContext.attachmentText,
+        config: requestContext.config,
+        projectKey: requestContext.projectKey,
+        projectKeys: requestContext.projectKeys,
+        domainContext: requestContext.domainContext,
+        domainRoles: requestContext.domainRoles,
+        memoryHeader: requestContext.memoryHeader,
+        memoryStatus: requestContext.memoryStatus,
+        pipelineAudit: Boolean(auditMeta),
+        auditRunId: auditMeta?.auditRunId,
+      },
+    });
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error ?? 'V2 preview failed.'),
+      error: error instanceof Error ? error.message : String(error ?? 'Could not queue V2 preview.'),
     };
-  }
-
-  let persistenceWarning: string | null = null;
-  try {
-    await conversationStore.savePreview(requestContext.sessionId, requestContext.accountId, {
-      sessionId: requestContext.sessionId,
-      projectKey: requestContext.projectKey,
-      projectKeys: requestContext.projectKeys,
-      requirement: requestContext.requirement,
-      status: result.status,
-      turnType: 'preview',
-      result,
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error ?? 'Unknown SQL execution error');
-    console.warn('[v2Preview] Conversation persistence failed:', detail);
-    persistenceWarning = `Preview completed, but conversation history was not saved (${detail}).`;
   }
 
   return {
     success: true,
+    queued: true,
     sessionId: requestContext.sessionId,
-    result,
     memoryStatus: requestContext.memoryStatus,
     memoryArtifactVersion: requestContext.memoryArtifactVersion,
-    warning: [check.reason, persistenceWarning].filter(Boolean).join(' ').trim() || undefined,
+    warning: [check.reason].filter(Boolean).join(' ').trim() || undefined,
   };
 });
 

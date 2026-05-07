@@ -13,9 +13,14 @@ import {
 } from '../v2/progress';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
-import type { V2PipelineProgressUpdate } from '../v2/types';
+import type {
+  ProjectMemoryArtifactHeader,
+  V2MemoryStatus,
+  V2PipelineProgressUpdate,
+} from '../v2/types';
 
 interface V2GenerationEventBody {
+  mode?: 'preview' | 'generate';
   sessionId: string;
   accountId: string;
   requirement: string;
@@ -27,6 +32,8 @@ interface V2GenerationEventBody {
   domainRoles?: string[];
   wiContextText?: string;
   similarStoriesText?: string;
+  memoryHeader?: ProjectMemoryArtifactHeader;
+  memoryStatus?: V2MemoryStatus;
   triageOverride?: unknown;
   confirmedScopeHypothesis?: unknown;
   discoveryAnswers?: unknown[];
@@ -51,19 +58,25 @@ export async function handler(event: { body: V2GenerationEventBody }) {
     : null;
 
   const runQueuedGeneration = async () => {
-    await setProgress(payload.sessionId, {
-      stage: 'context',
-      message: 'Loading compiled project memory…',
-    });
-    const {
-      memoryHeader: header,
-      memoryStatus: status,
-      memorySelection,
-    } = await loadProjectMemoryRuntimeContext({
-      projectKeys: payload.projectKeys ?? [],
-      memoryStage: 'discovery_synthesis',
-      requestedBy: payload.accountId,
-    });
+    const isPreview = payload.mode === 'preview';
+    let header = payload.memoryHeader;
+    let status = payload.memoryStatus;
+    let memorySelection;
+
+    if (!isPreview) {
+      await setProgress(payload.sessionId, {
+        stage: 'context',
+        message: 'Loading compiled project memory…',
+      });
+      const runtimeContext = await loadProjectMemoryRuntimeContext({
+        projectKeys: payload.projectKeys ?? [],
+        memoryStage: 'discovery_synthesis',
+        requestedBy: payload.accountId,
+      });
+      header = runtimeContext.memoryHeader;
+      status = runtimeContext.memoryStatus;
+      memorySelection = runtimeContext.memorySelection;
+    }
 
     const result = await runV2Pipeline({
       requirement: payload.requirement,
@@ -77,6 +90,7 @@ export async function handler(event: { body: V2GenerationEventBody }) {
       triageOverride: payload.triageOverride as any,
       confirmedScopeHypothesis: payload.confirmedScopeHypothesis as any,
       discoveryAnswers: payload.discoveryAnswers as any,
+      previewOnly: isPreview,
     }, undefined, async (update) => {
       await setProgress(payload.sessionId, update);
     });
@@ -99,23 +113,35 @@ export async function handler(event: { body: V2GenerationEventBody }) {
       });
     }
 
-    await conversationStore.saveGeneration(payload.sessionId, payload.accountId, {
-      sessionId: payload.sessionId,
-      projectKey: payload.projectKey,
-      projectKeys: payload.projectKeys,
-      requirement: payload.requirement,
-      status: result.status,
-      turnType: result.status === 'complete' ? 'generation' : 'discovery',
-      result,
-    });
+    if (isPreview) {
+      await conversationStore.savePreview(payload.sessionId, payload.accountId, {
+        sessionId: payload.sessionId,
+        projectKey: payload.projectKey,
+        projectKeys: payload.projectKeys,
+        requirement: payload.requirement,
+        status: result.status,
+        turnType: 'preview',
+        result,
+      });
+    } else {
+      await conversationStore.saveGeneration(payload.sessionId, payload.accountId, {
+        sessionId: payload.sessionId,
+        projectKey: payload.projectKey,
+        projectKeys: payload.projectKeys,
+        requirement: payload.requirement,
+        status: result.status,
+        turnType: result.status === 'complete' ? 'generation' : 'discovery',
+        result,
+      });
 
-    if (result.status === 'complete') {
-      await recordGeneration(payload.config, payload.accountId, payload.sessionId);
+      if (result.status === 'complete') {
+        await recordGeneration(payload.config, payload.accountId, payload.sessionId);
+      }
     }
 
     await stateStore.setProgress(
       payload.sessionId,
-      buildV2CompletionEvent(payload.sessionId, result.status === 'complete' ? 'complete' : 'needs_discovery'),
+      buildV2CompletionEvent(payload.sessionId, result.status),
     );
   };
 
