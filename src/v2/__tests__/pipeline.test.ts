@@ -450,7 +450,7 @@ test('runV2Pipeline normalizes overlong scope capability ids before returning th
   assert.ok(result.scopeHypothesis.capabilities.every((capability) => capability.id.startsWith('cap_')));
 });
 
-test('v2 scope hypothesis schema allows long or omitted model ids so the pipeline can normalize them later', () => {
+test('v2 scope hypothesis schema allows sparse scope fields so the pipeline can normalize them later', () => {
   const validationError = validateJsonSchema(
     {
       capabilities: [
@@ -466,14 +466,51 @@ test('v2 scope hypothesis schema allows long or omitted model ids so the pipelin
           confidence: 'medium',
         },
       ],
-      actorSlots: {},
-      openQuestions: [],
-      confidence: 'medium',
     },
     V2_SCOPE_HYPOTHESIS_SCHEMA,
   );
 
   assert.equal(validationError, null);
+});
+
+test('runV2Pipeline normalizes omitted scope actor slots and open questions', async () => {
+  const executeStage: V2StageExecutor = async (request) => {
+    if (request.stage === 'triage') {
+      return {
+        data: { capability_breadth: 3, ask_clarity: 3, actor_clarity: 2 } as any,
+        usage: { input: 20, output: 10 },
+      };
+    }
+    if (request.stage === 'scope_hypothesis') {
+      return {
+        data: {
+          capabilities: [
+            {
+              label: 'Coordinate service plan approval',
+              rationale: 'Approval workflow shapes the scope.',
+              confidence: 'high',
+            },
+          ],
+        } as any,
+        usage: { input: 30, output: 20 },
+      };
+    }
+    throw new Error(`Unexpected stage: ${request.stage}`);
+  };
+
+  const result = await runV2Pipeline(
+    {
+      requirement: 'Coordinate service plan approval and fallback routing.',
+      config: baseConfig,
+      previewOnly: true,
+    },
+    executeStage,
+  );
+
+  assert.equal(result.status, 'preview_ready');
+  assert.deepEqual(result.scopeHypothesis.actorSlots, {});
+  assert.deepEqual(result.scopeHypothesis.openQuestions, []);
+  assert.equal(result.scopeHypothesis.confidence, 'medium');
 });
 
 test('runV2Pipeline uses questionBudget directly when requesting discovery', async () => {

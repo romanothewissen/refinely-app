@@ -135,7 +135,7 @@ const ACCEPTANCE_REQUIREMENT_SCHEMA: JsonSchema = {
 
 export const V2_SCOPE_HYPOTHESIS_SCHEMA: JsonSchema = {
   type: 'object',
-  required: ['capabilities', 'actorSlots', 'openQuestions', 'confidence'],
+  required: ['capabilities'],
   additionalProperties: false,
   properties: {
     capabilities: {
@@ -403,6 +403,7 @@ export function buildScopeHypothesisUserMessage(input: {
     input.groundedEvidenceText?.trim() ? input.groundedEvidenceText : '',
     input.repairNote?.trim() ? renderSection('Retry note', trimText(input.repairNote, 320)) : '',
     'Task: Return the smallest grounded capability hypothesis JSON. Keep actor slots sparse when the evidence is weak.',
+    'Always include actorSlots and openQuestions keys in the JSON. Use {} for actorSlots and [] for openQuestions when evidence is missing.',
   ].filter(Boolean);
   return trimText(parts.join('\n\n'), V2_PROMPT_BUDGETS.scope_hypothesis.maxUserChars);
 }

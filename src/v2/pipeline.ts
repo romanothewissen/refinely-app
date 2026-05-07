@@ -150,14 +150,22 @@ function normalizeStableId(
   return candidate;
 }
 
-function normalizeScopeHypothesis(scopeHypothesis: V2ScopeHypothesis): V2ScopeHypothesis {
+function normalizeScopeHypothesis(scopeHypothesis: Partial<V2ScopeHypothesis>): V2ScopeHypothesis {
   const usedCapabilityIds = new Set<string>();
+  const normalizedConfidence = scopeHypothesis.confidence === 'low'
+    || scopeHypothesis.confidence === 'medium'
+    || scopeHypothesis.confidence === 'high'
+    ? scopeHypothesis.confidence
+    : 'medium';
   return {
-    ...scopeHypothesis,
-    capabilities: scopeHypothesis.capabilities.map((capability, index) => ({
+    capabilities: (scopeHypothesis.capabilities ?? []).map((capability, index) => ({
       ...capability,
       id: normalizeStableId(capability.id || capability.label, 'cap', index, usedCapabilityIds),
     })),
+    actorSlots: scopeHypothesis.actorSlots ?? {},
+    openQuestions: scopeHypothesis.openQuestions ?? [],
+    confidence: normalizedConfidence,
+    ...(scopeHypothesis.actorGroundingStatus ? { actorGroundingStatus: scopeHypothesis.actorGroundingStatus } : {}),
   };
 }
 
