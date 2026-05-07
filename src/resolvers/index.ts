@@ -362,7 +362,10 @@ function formatV2DomainRoles(rows: Array<{ role?: string; activities?: string }>
 async function buildV2RequestContext(
   payload: any,
   context: any,
-  options?: { memoryStage?: 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair' },
+  options?: {
+    memoryStage?: 'discover' | 'discovery_synthesis' | 'final_generation' | 'coverage_repair';
+    skipMemoryLoad?: boolean;
+  },
 ) {
   const accountId = (context as { accountId?: string })?.accountId ?? 'unknown';
   const baseConfig = applyPreferredPipelineProfile(await getConfig(), 'balanced');
@@ -381,16 +384,18 @@ async function buildV2RequestContext(
   const requirement = String(payload?.requirement ?? '').trim();
   const attachmentText = String(payload?.attachmentText ?? '').trim();
   const sessionId = String(payload?.sessionId ?? '').trim() || `v2_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  const {
-    memoryHeader,
-    memoryStatus,
-    memoryArtifactVersion,
-    memorySelection,
-  } = await loadProjectMemoryRuntimeContext({
-    projectKeys: selectedProjectKeys,
-    memoryStage: options?.memoryStage,
-    requestedBy: accountId,
-  });
+  const memoryContext = options?.skipMemoryLoad
+    ? {
+        memoryHeader: undefined,
+        memoryStatus: undefined,
+        memoryArtifactVersion: undefined,
+        memorySelection: undefined,
+      }
+    : await loadProjectMemoryRuntimeContext({
+        projectKeys: selectedProjectKeys,
+        memoryStage: options?.memoryStage,
+        requestedBy: accountId,
+      });
 
   return {
     accountId,
@@ -402,10 +407,10 @@ async function buildV2RequestContext(
     attachmentText,
     domainContext,
     domainRoles,
-    memoryHeader,
-    memoryStatus,
-    memoryArtifactVersion,
-    memorySelection,
+    memoryHeader: memoryContext.memoryHeader,
+    memoryStatus: memoryContext.memoryStatus,
+    memoryArtifactVersion: memoryContext.memoryArtifactVersion,
+    memorySelection: memoryContext.memorySelection,
   };
 }
 
@@ -634,7 +639,7 @@ resolver.define('discoverLlmModels', async ({ payload, context }) => {
 // ─── V2 Core Flow ─────────────────────────────────────────────────────────────
 
 resolver.define('v2Preview', async ({ payload, context }) => {
-  const requestContext = await buildV2RequestContext(payload, context);
+  const requestContext = await buildV2RequestContext(payload, context, { skipMemoryLoad: true });
   if (!requestContext.requirement) {
     return { success: false, error: 'Requirement is required.' };
   }
