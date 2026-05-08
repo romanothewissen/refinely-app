@@ -94,6 +94,25 @@ test('extractJsonWithMetadata reports repaired parses for truncated JSON blocks'
   assert.equal(parsed.data.items[0]?.label, 'partial value');
 });
 
+test('extractJsonWithMetadata repairs trailing commas before closing delimiters', () => {
+  const parsed = extractJsonWithMetadata<{ capabilities: Array<{ id: string; label: string }> }>(
+    '{ "capabilities": [ { "id": "multi-type-service-planning", "label": "Multi-Type Service A", } ] }',
+  );
+
+  assert.equal(parsed.parseMode, 'repaired_parse');
+  assert.equal(parsed.data.capabilities[0]?.id, 'multi-type-service-planning');
+});
+
+test('extractJsonWithMetadata escapes literal newlines inside JSON strings', () => {
+  const parsed = extractJsonWithMetadata<{ capabilities: Array<{ rationale: string }> }>(
+    `{ "capabilities": [ { "rationale": "Line 1
+Line 2" } ] }`,
+  );
+
+  assert.equal(parsed.parseMode, 'repaired_parse');
+  assert.equal(parsed.data.capabilities[0]?.rationale, 'Line 1\nLine 2');
+});
+
 test('mapReasoningDepthToEffort translates provider-neutral reasoning levels', () => {
   assert.equal(mapReasoningDepthToEffort('light'), 'low');
   assert.equal(mapReasoningDepthToEffort('standard'), 'medium');

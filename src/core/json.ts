@@ -6,6 +6,69 @@ function tryParseJson<T>(text: string): T | null {
   }
 }
 
+function sanitizeJsonCandidate(text: string): string {
+  let result = '';
+  let inString = false;
+  let escaping = false;
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaping) {
+        result += char;
+        escaping = false;
+        continue;
+      }
+      if (char === '\\') {
+        result += char;
+        escaping = true;
+        continue;
+      }
+      if (char === '"') {
+        result += char;
+        inString = false;
+        continue;
+      }
+      if (char === '\n') {
+        result += '\\n';
+        continue;
+      }
+      if (char === '\r') {
+        result += '\\r';
+        continue;
+      }
+      if (char === '\t') {
+        result += '\\t';
+        continue;
+      }
+      result += char;
+      continue;
+    }
+
+    if (char === '"') {
+      result += char;
+      inString = true;
+      continue;
+    }
+
+    if (char === ',') {
+      let lookahead = index + 1;
+      while (lookahead < text.length && /\s/.test(text[lookahead]!)) {
+        lookahead += 1;
+      }
+      const next = text[lookahead];
+      if (next === '}' || next === ']') {
+        continue;
+      }
+    }
+
+    result += char;
+  }
+
+  return result;
+}
+
 export type JsonExtractParseMode = 'clean_parse' | 'repaired_parse';
 
 function extractBalancedJsonCandidate(text: string): string | null {
@@ -137,6 +200,10 @@ function repairTruncatedJsonCandidate(text: string): string | null {
     if (tryParseJson(candidate) !== null) {
       return candidate;
     }
+    const sanitizedCandidate = sanitizeJsonCandidate(candidate);
+    if (tryParseJson(sanitizedCandidate) !== null) {
+      return sanitizedCandidate;
+    }
   }
 
   return null;
@@ -168,6 +235,11 @@ export function extractJsonWithMetadata<T = unknown>(text: string): {
   if (strippedFenceParsed !== null) {
     return { data: strippedFenceParsed, parseMode: 'clean_parse' };
   }
+  const sanitizedStrippedFence = sanitizeJsonCandidate(strippedFence);
+  const sanitizedStrippedFenceParsed = tryParseJson<T>(sanitizedStrippedFence);
+  if (sanitizedStrippedFenceParsed !== null) {
+    return { data: sanitizedStrippedFenceParsed, parseMode: 'repaired_parse' };
+  }
   const strippedFenceRepaired = repairTruncatedJsonCandidate(strippedFence);
   if (strippedFenceRepaired) {
     const parsedStrippedFenceRepaired = tryParseJson<T>(strippedFenceRepaired);
@@ -185,6 +257,11 @@ export function extractJsonWithMetadata<T = unknown>(text: string): {
     const parsedBlock = tryParseJson<T>(block);
     if (parsedBlock !== null) {
       return { data: parsedBlock, parseMode: 'clean_parse' };
+    }
+    const sanitizedBlock = sanitizeJsonCandidate(block);
+    const parsedSanitizedBlock = tryParseJson<T>(sanitizedBlock);
+    if (parsedSanitizedBlock !== null) {
+      return { data: parsedSanitizedBlock, parseMode: 'repaired_parse' };
     }
     const balancedBlock = extractBalancedJsonCandidate(block);
     if (balancedBlock) {
@@ -208,6 +285,12 @@ export function extractJsonWithMetadata<T = unknown>(text: string): {
     if (parsedBalanced !== null) {
       return { data: parsedBalanced, parseMode: 'clean_parse' };
     }
+  }
+
+  const sanitized = sanitizeJsonCandidate(normalized);
+  const parsedSanitized = tryParseJson<T>(sanitized);
+  if (parsedSanitized !== null) {
+    return { data: parsedSanitized, parseMode: 'repaired_parse' };
   }
 
   const repaired = repairTruncatedJsonCandidate(normalized);
