@@ -45,7 +45,7 @@ import {
   queueProjectMemoryRefreshForProjects,
 } from '../services/project-memory';
 import { loadProjectMemoryRuntimeContext } from '../services/project-memory-runtime';
-import { runForgeV3Preview } from '../services/v3-preview';
+import { buildV3PreviewState, createV3PreviewId, loadV3PreviewState, saveV3PreviewState } from '../services/v3-preview-state';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 import { deleteV2Conversation, getV2Conversation, listV2Conversations } from '../services/v2-sql';
@@ -2348,19 +2348,76 @@ resolver.define('v3GeneratePreview', async ({ payload, context }) => {
       ? Math.max(4, Math.min(24, Number(payload.maxContextCards)))
       : undefined;
 
-    const preview = await runForgeV3Preview({
-      requirement,
-      config,
+    const previewId = createV3PreviewId();
+    const accountId = String((context as { accountId?: string })?.accountId ?? '');
+    const queuedAt = new Date().toISOString();
+    const queuedState = buildV3PreviewState({
+      previewId,
+      accountId,
       projectKey: selection.projectKey,
       projectKeys: selection.projectKeys,
-      accountId: (context as { accountId?: string })?.accountId,
-      selectedDocIds,
-      provider,
-      maxContextCards,
-      jsaText: typeof payload?.jsaText === 'string' ? payload.jsaText : undefined,
+      status: 'queued',
+      queuedAt,
+    }, queuedAt);
+    await saveV3PreviewState(queuedState);
+
+    const queue = new Queue({ key: 'v3-preview-queue' });
+    await queue.push({
+      body: {
+        previewId,
+        requirement,
+        config,
+        projectKey: selection.projectKey,
+        projectKeys: selection.projectKeys,
+        accountId,
+        selectedDocIds,
+        provider,
+        maxContextCards,
+        jsaText: typeof payload?.jsaText === 'string' ? payload.jsaText : undefined,
+        queuedAt,
+      },
     });
 
-    return { success: true, ...preview };
+    return {
+      success: true,
+      queued: true,
+      previewId,
+      status: queuedState,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+resolver.define('v3GetPreview', async ({ payload, context }) => {
+  try {
+    const previewId = String(payload?.previewId ?? '').trim();
+    if (!previewId) {
+      return { success: false, error: 'Preview id is required.' };
+    }
+
+    const state = await loadV3PreviewState(previewId);
+    if (!state) {
+      return { success: false, error: 'V3 Preview state was not found. It may have expired.' };
+    }
+
+    const accountId = String((context as { accountId?: string })?.accountId ?? '');
+    if (state.accountId && accountId && state.accountId !== accountId) {
+      return { success: false, error: 'V3 Preview state is not available for this user.' };
+    }
+
+    const { result, score, sources, ...status } = state;
+    return {
+      success: true,
+      previewId,
+      status,
+      result,
+      score,
+      sources,
+    };
   } catch (err) {
     return {
       success: false,

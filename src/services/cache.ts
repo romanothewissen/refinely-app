@@ -269,6 +269,7 @@ export const KEYS = {
   sharedPipelineEvidence: (sessionId: string) => `shared_pipeline_evidence_${sessionId}`,
   clarifyProgress: (sessionId: string) => `clarify_progress_${sessionId}`,
   refineProgress: (sessionId: string) => `refine_progress_${sessionId}`,
+  v3PreviewStatus: (previewId: string) => `v3_preview_status_${previewId}`,
   quickRefineSession: (sessionId: string) => `quick_refine_${sessionId}`,
   userLastSession: (accountId: string) => `u_${accountId}_last_session`,
   userIssueSession: (accountId: string, issueKey: string) => `u_${accountId}_issue_${issueKey}`,

@@ -167,6 +167,18 @@ interface V2LoadingState {
 interface V3PreviewResponse {
   success?: boolean;
   error?: string;
+  queued?: boolean;
+  previewId?: string;
+  status?: {
+    previewId?: string;
+    status?: 'queued' | 'running' | 'completed' | 'error';
+    queuedAt?: string;
+    startedAt?: string;
+    completedAt?: string;
+    updatedAt?: string;
+    durationMs?: number;
+    error?: string;
+  };
   result?: any;
   score?: any;
   sources?: {
@@ -530,6 +542,7 @@ export default function V2WorkspaceApp({
   const [v3Requirement, setV3Requirement] = useState(initialRequirement);
   const [v3Response, setV3Response] = useState<V3PreviewResponse | null>(null);
   const [v3Loading, setV3Loading] = useState(false);
+  const [v3LoadingMessage, setV3LoadingMessage] = useState<string | null>(null);
   const [v3Error, setV3Error] = useState<string | null>(null);
   const [v3UploadState, setV3UploadState] = useState<string | null>(null);
   const [v3Tab, setV3Tab] = useState<'features' | 'plan' | 'evidence' | 'score' | 'raw'>('features');
@@ -1290,6 +1303,39 @@ export default function V2WorkspaceApp({
     }
   }, [currentAuditRunId, loadAuditEntries]);
 
+  const waitForQueuedV3Preview = useCallback(async (previewId: string) => {
+    const startedAt = Date.now();
+    let pollDelayMs = 1500;
+
+    while (Date.now() - startedAt < 15 * 60 * 1000) {
+      const hiddenMultiplier = (typeof document !== 'undefined' && document.visibilityState === 'hidden') ? 2 : 1;
+      await new Promise((resolve) => window.setTimeout(resolve, pollDelayMs * hiddenMultiplier));
+      const response = await api.v3GetPreview(previewId) as V3PreviewResponse;
+      if (!response?.success) {
+        throw new Error(response?.error || 'V3 Preview failed.');
+      }
+
+      const status = response.status?.status;
+      if (status === 'completed') {
+        if (!response.result) {
+          throw new Error('V3 Preview finished, but no result was returned.');
+        }
+        setV3Response(response);
+        setV3Tab('features');
+        return;
+      }
+
+      if (status === 'error') {
+        throw new Error(response.status?.error || response.error || 'V3 Preview failed.');
+      }
+
+      setV3LoadingMessage(status === 'running' ? 'Grounding V3 preview…' : 'Queued V3 preview…');
+      pollDelayMs = Math.min(pollDelayMs + 500, 5000);
+    }
+
+    throw new Error('V3 Preview is still running. Check this panel again in a moment.');
+  }, []);
+
   const handleV3Run = useCallback(async () => {
     const prompt = v3Requirement.trim() || requirement.trim();
     if (!prompt) {
@@ -1302,6 +1348,7 @@ export default function V2WorkspaceApp({
     }
 
     setV3Loading(true);
+    setV3LoadingMessage('Queuing V3 preview…');
     setV3Error(null);
     try {
       const response = await api.v3GeneratePreview({
@@ -1314,14 +1361,27 @@ export default function V2WorkspaceApp({
       if (!response?.success) {
         throw new Error(response?.error || 'V3 Preview failed.');
       }
-      setV3Response(response);
-      setV3Tab('features');
+
+      if (response.queued) {
+        const previewId = response.previewId || response.status?.previewId;
+        if (!previewId) {
+          throw new Error('V3 Preview was queued, but no preview id was returned.');
+        }
+        setV3LoadingMessage('Queued V3 preview…');
+        await waitForQueuedV3Preview(previewId);
+      } else if (response.result) {
+        setV3Response(response);
+        setV3Tab('features');
+      } else {
+        throw new Error('V3 Preview failed.');
+      }
     } catch (runError) {
       setV3Error(runError instanceof Error ? runError.message : 'V3 Preview failed.');
     } finally {
       setV3Loading(false);
+      setV3LoadingMessage(null);
     }
-  }, [effectiveProjectKey, effectiveProjectKeys, requirement, selectedWiDocIds, v3Requirement, wiSelectionMode]);
+  }, [effectiveProjectKey, effectiveProjectKeys, requirement, selectedWiDocIds, v3Requirement, waitForQueuedV3Preview, wiSelectionMode]);
 
   const handleV3UploadDocs = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -1598,6 +1658,7 @@ export default function V2WorkspaceApp({
                 setSelectionMode={setWiSelectionMode}
                 response={v3Response}
                 loading={v3Loading}
+                loadingMessage={v3LoadingMessage}
                 error={v3Error}
                 uploadState={v3UploadState}
                 backlogCacheInfo={v3BacklogCacheInfo}
@@ -1856,6 +1917,7 @@ function V3PreviewCanvas({
   setSelectionMode,
   response,
   loading,
+  loadingMessage,
   error,
   uploadState,
   backlogCacheInfo,
@@ -1883,6 +1945,7 @@ function V3PreviewCanvas({
   setSelectionMode: React.Dispatch<React.SetStateAction<'auto' | 'selected'>>;
   response: V3PreviewResponse | null;
   loading: boolean;
+  loadingMessage: string | null;
   error: string | null;
   uploadState: string | null;
   backlogCacheInfo: V3BacklogCacheInfo | null;
@@ -2145,7 +2208,7 @@ function V3PreviewCanvas({
           ) : loading ? (
             <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 rounded-2xl border border-[var(--rf-border)] bg-white/62">
               <RefreshCw className="h-6 w-6 animate-spin text-[var(--rf-brand)]" />
-              <div className="text-sm font-bold text-[var(--rf-text-secondary)]">Grounding V3 preview</div>
+              <div className="text-sm font-bold text-[var(--rf-text-secondary)]">{loadingMessage || 'Grounding V3 preview'}</div>
             </div>
           ) : activeTab === 'features' ? (
             <V3FeaturesView features={features} />

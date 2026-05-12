@@ -27,7 +27,7 @@ type V3ContextKind =
   | 'project_convention'
   | 'status';
 
-interface ForgeV3PreviewInput {
+export interface ForgeV3PreviewInput {
   requirement: string;
   config: TenantConfig;
   projectKey?: string;
@@ -90,7 +90,7 @@ interface V3Runtime {
   }) => unknown;
 }
 
-interface ForgeV3SourcesSummary {
+export interface ForgeV3SourcesSummary {
   projectKeys: string[];
   primaryProjectKey: string;
   documentCount: number;
@@ -101,7 +101,7 @@ interface ForgeV3SourcesSummary {
   memoryArtifactVersion?: string;
 }
 
-interface ForgeV3PreviewResult {
+export interface ForgeV3PreviewResult {
   result: unknown;
   score: unknown;
   sources: ForgeV3SourcesSummary;

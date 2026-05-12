@@ -38,6 +38,9 @@ modules:
     - key: v2-generation-consumer
       handler: queues/v2-generation.handler
       timeoutSeconds: 900
+    - key: v3-preview-consumer
+      handler: queues/v3-preview.handler
+      timeoutSeconds: 900
     - key: refine-consumer
       handler: queues/refine.handler
       timeoutSeconds: 180
@@ -63,6 +66,9 @@ modules:
     - key: v2-generation-consumer-listener
       queue: v2-generation-queue
       function: v2-generation-consumer
+    - key: v3-preview-consumer-listener
+      queue: v3-preview-queue
+      function: v3-preview-consumer
     - key: refine-consumer-listener
       queue: refine-queue
       function: refine-consumer

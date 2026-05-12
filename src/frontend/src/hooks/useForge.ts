@@ -63,6 +63,7 @@ export const api = {
     provider?: 'heuristic' | 'gemini';
     jsaText?: string;
   }) => invoke('v3GeneratePreview', payload),
+  v3GetPreview: (previewId: string) => invoke('v3GetPreview', { previewId }),
 
   // Generation
   startGeneration: (payload: {
