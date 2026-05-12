@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { requestJira, view } from '@forge/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ChevronRight, Download, Edit2, Plus, Settings, Trash2, UserRound } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Database, Download, Edit2, Play, Plus, RefreshCw, Settings, Sparkles, Trash2, Upload, UserRound } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { SettingsView } from './SettingsView';
 import { V2HistoryModal, type V2HistoryEntry } from './V2HistoryModal';
@@ -26,6 +26,7 @@ type ConversationStatus = 'preview_ready' | 'needs_scope_confirmation' | 'needs_
 type SettingsSurface = 'workspace' | 'project';
 type SettingsTab = 'models' | 'jira' | 'domain' | 'compliance';
 type V2UiStep = 'input' | 'scope_review' | 'discovery' | 'discovery_failure' | 'complete';
+type WorkspaceViewMode = 'generate' | 'settings' | 'v3';
 
 interface ScopeCapability {
   id: string;
@@ -161,6 +162,58 @@ interface V2LoadingState {
   localStepIndex: number;
   serverProgress: V2ProgressEventProgress | null;
   provisionalItems: V2ProgressDraftFeatureSummary[];
+}
+
+interface V3PreviewResponse {
+  success?: boolean;
+  error?: string;
+  result?: any;
+  score?: any;
+  sources?: {
+    projectKeys?: string[];
+    primaryProjectKey?: string;
+    documentCount?: number;
+    documentChunkCount?: number;
+    similarStoryCount?: number;
+    projectContextCount?: number;
+    memoryStatus?: string;
+  };
+}
+
+interface V3BacklogCacheInfo {
+  projectKey: string;
+  builtAt?: string;
+  issueCount: number;
+  stale: boolean;
+  shardCount: number;
+  themeCount: number;
+  themeBuiltAt?: string;
+  legacyFallback: boolean;
+}
+
+interface V3BacklogDiagnostics {
+  projectKey: string;
+  configuredStatuses: string[];
+  jqlUsed: string;
+  totalProjectIssues: number;
+  doneCategoryIssues: number;
+  matchingScopeIssues: number;
+  likelyReason: string;
+}
+
+interface V3BacklogRefreshStatus {
+  projectKey: string;
+  status: 'queued' | 'running' | 'completed' | 'error';
+  updatedAt?: string;
+  queuedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  issueCount?: number;
+  shardCount?: number;
+  themeCount?: number;
+  builtAt?: string;
+  themeBuiltAt?: string;
+  error?: string;
 }
 
 interface EditableScopeDraft {
@@ -414,14 +467,14 @@ export default function V2WorkspaceApp({
   initialRequirement = '',
   onCloseSettings,
 }: {
-  initialViewMode?: 'generate' | 'settings';
+  initialViewMode?: WorkspaceViewMode;
   initialSettingsSurface?: SettingsSurface;
   initialSettingsTab?: SettingsTab;
   initialRequirement?: string;
   onCloseSettings?: () => void;
 }) {
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const [viewMode, setViewMode] = useState<'generate' | 'settings'>(initialViewMode);
+  const [viewMode, setViewMode] = useState<WorkspaceViewMode>(initialViewMode);
   const [settingsStartSurface, setSettingsStartSurface] = useState<SettingsSurface>(initialSettingsSurface);
   const [settingsStartTab, setSettingsStartTab] = useState<SettingsTab>(initialSettingsTab);
   const [settingsStartProjectKey, setSettingsStartProjectKey] = useState<string>('*');
@@ -474,6 +527,16 @@ export default function V2WorkspaceApp({
   const [auditEntries, setAuditEntries] = useState<PipelineAuditEntry[]>([]);
   const [isExportingAudit, setIsExportingAudit] = useState(false);
   const [isDeletingAudit, setIsDeletingAudit] = useState(false);
+  const [v3Requirement, setV3Requirement] = useState(initialRequirement);
+  const [v3Response, setV3Response] = useState<V3PreviewResponse | null>(null);
+  const [v3Loading, setV3Loading] = useState(false);
+  const [v3Error, setV3Error] = useState<string | null>(null);
+  const [v3UploadState, setV3UploadState] = useState<string | null>(null);
+  const [v3Tab, setV3Tab] = useState<'features' | 'plan' | 'evidence' | 'score' | 'raw'>('features');
+  const [v3BacklogCacheInfo, setV3BacklogCacheInfo] = useState<V3BacklogCacheInfo | null>(null);
+  const [v3BacklogDiagnostics, setV3BacklogDiagnostics] = useState<V3BacklogDiagnostics | null>(null);
+  const [v3BacklogRefreshStatus, setV3BacklogRefreshStatus] = useState<V3BacklogRefreshStatus | null>(null);
+  const [v3BacklogRefreshing, setV3BacklogRefreshing] = useState(false);
   const isResizing = useRef(false);
 
   const effectiveProjectKeys = useMemo(() => {
@@ -555,7 +618,7 @@ export default function V2WorkspaceApp({
       window.removeEventListener('resize', syncHeight);
       if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [viewMode, uiStep, result, historyOpen, loading, warning, error, sidebarOpen, scopeDraft]);
+  }, [viewMode, uiStep, result, historyOpen, loading, warning, error, sidebarOpen, scopeDraft, v3Response, v3Loading, v3Error, v3BacklogCacheInfo, v3BacklogRefreshStatus]);
 
   useEffect(() => {
     let active = true;
@@ -711,27 +774,73 @@ export default function V2WorkspaceApp({
     };
   }, [effectiveProjectKeys]);
 
-  useEffect(() => {
-    const loadWiDocs = async () => {
-      try {
-        const keys = effectiveProjectKeys.length ? effectiveProjectKeys : ['*'];
-        const results = await Promise.all(keys.map((key) => api.listWiDocs(key) as Promise<any>));
-        const docsById = new Map<string, any>();
-        results.forEach((response: any) => {
-          (Array.isArray(response?.docs) ? response.docs : []).forEach((doc: any) => {
-            docsById.set(doc.docId, doc);
-          });
+  const refreshWiDocs = useCallback(async (keysInput?: string[]) => {
+    try {
+      const keys = keysInput?.length ? keysInput : (effectiveProjectKeys.length ? effectiveProjectKeys : ['*']);
+      const results = await Promise.all(keys.map((key) => api.listWiDocs(key) as Promise<any>));
+      const docsById = new Map<string, any>();
+      results.forEach((response: any) => {
+        (Array.isArray(response?.docs) ? response.docs : []).forEach((doc: any) => {
+          docsById.set(doc.docId, doc);
         });
-        const nextDocs = [...docsById.values()];
-        setWiDocs(nextDocs);
-        setSelectedWiDocIds((prev) => prev.filter((id) => nextDocs.some((doc: any) => doc.docId === id)));
-      } catch {
-        // noop
-      }
-    };
-
-    void loadWiDocs();
+      });
+      const nextDocs = [...docsById.values()];
+      setWiDocs(nextDocs);
+      setSelectedWiDocIds((prev) => prev.filter((id) => nextDocs.some((doc: any) => doc.docId === id)));
+    } catch {
+      // noop
+    }
   }, [effectiveProjectKeys]);
+
+  const refreshV3BacklogState = useCallback(async (projectKey: string) => {
+    if (!projectKey || projectKey === '*') {
+      setV3BacklogCacheInfo(null);
+      setV3BacklogDiagnostics(null);
+      setV3BacklogRefreshStatus(null);
+      return null;
+    }
+
+    try {
+      const [infoRes, diagnosticsRes, statusRes] = await Promise.all([
+        api.getBacklogCacheInfo(projectKey) as Promise<any>,
+        api.diagnoseBacklogCache(projectKey) as Promise<any>,
+        api.getBacklogRefreshStatus(projectKey) as Promise<any>,
+      ]);
+
+      const info = infoRes?.success ? {
+        projectKey: infoRes.projectKey,
+        builtAt: infoRes.builtAt,
+        issueCount: infoRes.issueCount ?? 0,
+        stale: Boolean(infoRes.stale),
+        shardCount: infoRes.shardCount ?? 0,
+        themeCount: infoRes.themeCount ?? 0,
+        themeBuiltAt: infoRes.themeBuiltAt,
+        legacyFallback: Boolean(infoRes.legacyFallback),
+      } as V3BacklogCacheInfo : null;
+      const diagnostics = diagnosticsRes?.success ? (diagnosticsRes.diagnostics ?? null) as V3BacklogDiagnostics | null : null;
+      const status = statusRes?.success ? (statusRes.status ?? null) as V3BacklogRefreshStatus | null : null;
+
+      setV3BacklogCacheInfo(info);
+      setV3BacklogDiagnostics(diagnostics);
+      setV3BacklogRefreshStatus(status);
+      return { info, diagnostics, status };
+    } catch (stateError) {
+      setV3BacklogCacheInfo(null);
+      setV3BacklogDiagnostics(null);
+      setV3BacklogRefreshStatus(null);
+      setV3Error(stateError instanceof Error ? stateError.message : 'Could not load backlog cache status.');
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshWiDocs();
+  }, [refreshWiDocs]);
+
+  useEffect(() => {
+    if (viewMode !== 'v3') return;
+    void refreshV3BacklogState(effectiveProjectKey);
+  }, [effectiveProjectKey, refreshV3BacklogState, viewMode]);
 
   async function loadHistory() {
     try {
@@ -1181,6 +1290,130 @@ export default function V2WorkspaceApp({
     }
   }, [currentAuditRunId, loadAuditEntries]);
 
+  const handleV3Run = useCallback(async () => {
+    const prompt = v3Requirement.trim() || requirement.trim();
+    if (!prompt) {
+      setV3Error('Add a requirement before running V3 Preview.');
+      return;
+    }
+    if (!effectiveProjectKeys.length || effectiveProjectKey === '*') {
+      setV3Error('Select a Jira project before running V3 Preview.');
+      return;
+    }
+
+    setV3Loading(true);
+    setV3Error(null);
+    try {
+      const response = await api.v3GeneratePreview({
+        requirement: prompt,
+        projectKey: effectiveProjectKey,
+        projectKeys: effectiveProjectKeys,
+        selectedDocIds: wiSelectionMode === 'selected' ? selectedWiDocIds : undefined,
+        maxContextCards: 14,
+      }) as V3PreviewResponse;
+      if (!response?.success) {
+        throw new Error(response?.error || 'V3 Preview failed.');
+      }
+      setV3Response(response);
+      setV3Tab('features');
+    } catch (runError) {
+      setV3Error(runError instanceof Error ? runError.message : 'V3 Preview failed.');
+    } finally {
+      setV3Loading(false);
+    }
+  }, [effectiveProjectKey, effectiveProjectKeys, requirement, selectedWiDocIds, v3Requirement, wiSelectionMode]);
+
+  const handleV3UploadDocs = useCallback(async (files: File[]) => {
+    if (!files.length) return;
+    if (!effectiveProjectKey || effectiveProjectKey === '*') {
+      setV3Error('Select a Jira project before uploading project knowledge.');
+      return;
+    }
+    setV3UploadState(`Uploading ${files.length} document${files.length === 1 ? '' : 's'}...`);
+    setV3Error(null);
+    try {
+      for (const file of files) {
+        const fileBase64 = await fileToBase64(file);
+        const response = await api.uploadWi(file.name, fileBase64, undefined, effectiveProjectKey) as any;
+        if (!response?.success) {
+          throw new Error(response?.error || `Could not upload ${file.name}.`);
+        }
+      }
+      await refreshWiDocs([effectiveProjectKey]);
+    } catch (uploadError) {
+      setV3Error(uploadError instanceof Error ? uploadError.message : 'Document upload failed.');
+    } finally {
+      setV3UploadState(null);
+    }
+  }, [effectiveProjectKey, refreshWiDocs]);
+
+  const handleV3RemoveDoc = useCallback(async (docId: string) => {
+    if (!effectiveProjectKey || effectiveProjectKey === '*') return;
+    setV3Error(null);
+    try {
+      const response = await api.removeWiDoc(docId, effectiveProjectKey) as any;
+      if (!response?.success) throw new Error(response?.error || 'Could not remove the document.');
+      await refreshWiDocs([effectiveProjectKey]);
+    } catch (removeError) {
+      setV3Error(removeError instanceof Error ? removeError.message : 'Could not remove the document.');
+    }
+  }, [effectiveProjectKey, refreshWiDocs]);
+
+  const handleV3RefreshBacklogCache = useCallback(async () => {
+    if (!effectiveProjectKey || effectiveProjectKey === '*') {
+      setV3Error('Select a Jira project before building backlog examples.');
+      return;
+    }
+    if (!(isAdmin || hasProjectSettingsAccess)) {
+      setV3Error('Project admin access is required to build backlog examples.');
+      return;
+    }
+
+    setV3BacklogRefreshing(true);
+    setV3Error(null);
+    try {
+      const queued = await api.refreshBacklogCache(effectiveProjectKey) as any;
+      if (!queued?.success) {
+        throw new Error(queued?.error || 'Backlog cache refresh failed.');
+      }
+
+      const queuedStatus: V3BacklogRefreshStatus = {
+        projectKey: effectiveProjectKey,
+        status: 'queued',
+        queuedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setV3BacklogRefreshStatus(queuedStatus);
+
+      const startedAt = Date.now();
+      let pollDelayMs = 1800;
+      while (Date.now() - startedAt < 15 * 60 * 1000) {
+        const hiddenMultiplier = (typeof document !== 'undefined' && document.visibilityState === 'hidden') ? 2 : 1;
+        await new Promise((resolve) => setTimeout(resolve, pollDelayMs * hiddenMultiplier));
+        const state = await refreshV3BacklogState(effectiveProjectKey);
+        const status = state?.status;
+        if (!status || status.status === 'queued' || status.status === 'running') {
+          pollDelayMs = Math.min(pollDelayMs + 1000, 10000);
+          continue;
+        }
+        if (status.status === 'error') {
+          throw new Error(status.error || 'Backlog cache refresh failed.');
+        }
+        setSidebarCacheCounts((current) => ({
+          ...current,
+          [effectiveProjectKey]: state?.info?.issueCount ?? status.issueCount ?? 0,
+        }));
+        return;
+      }
+
+      setV3Error('Backlog cache rebuild is still running. Check this panel again in a moment.');
+    } catch (refreshError) {
+      setV3Error(refreshError instanceof Error ? refreshError.message : 'Backlog cache refresh failed.');
+    } finally {
+      setV3BacklogRefreshing(false);
+    }
+  }, [effectiveProjectKey, hasProjectSettingsAccess, isAdmin, refreshV3BacklogState]);
+
   return (
     <div ref={shellRef} className="flex h-full w-full overflow-hidden text-[var(--rf-text)] font-sans bg-transparent">
       <AnimatePresence>
@@ -1195,7 +1428,7 @@ export default function V2WorkspaceApp({
           >
             <div className="relative h-full w-full flex">
               <Sidebar
-                viewMode={viewMode}
+                viewMode={viewMode === 'v3' ? 'generate' : viewMode}
                 setViewMode={(mode: 'generate' | 'settings') => {
                   if (mode === 'settings') openSettings();
                   else setViewMode(mode);
@@ -1285,8 +1518,12 @@ export default function V2WorkspaceApp({
         <div className="rf-main-shell rf-pane-seam flex-1 flex flex-col h-full relative overflow-hidden">
           <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--rf-border-subtle)] bg-white/58 backdrop-blur-xl">
             <div>
-              <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Refinely Core V2</div>
-              <h1 className="mt-1 text-[28px] leading-tight text-[var(--rf-text)]">Scope first, then refine with intent</h1>
+              <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">
+                {viewMode === 'v3' ? 'Forge V3 Pilot' : 'Refinely Core V2'}
+              </div>
+              <h1 className="mt-1 text-[28px] leading-tight text-[var(--rf-text)]">
+                {viewMode === 'v3' ? 'Preview with Jira and project knowledge' : 'Scope first, then refine with intent'}
+              </h1>
             </div>
             <div className="flex items-center gap-2">
               {!sidebarOpen && (
@@ -1299,6 +1536,27 @@ export default function V2WorkspaceApp({
                   Sidebar
                 </button>
               )}
+              <div className="inline-flex overflow-hidden rounded-xl border border-[var(--rf-border)] bg-white/75">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('generate')}
+                  className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold transition ${viewMode === 'generate' ? 'bg-[var(--rf-brand)] text-white' : 'text-[var(--rf-text-secondary)] hover:bg-white'}`}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  V2
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setV3Requirement((current) => current || requirement);
+                    setViewMode('v3');
+                  }}
+                  className={`inline-flex items-center gap-2 border-l border-[var(--rf-border)] px-3 py-2 text-sm font-semibold transition ${viewMode === 'v3' ? 'bg-[var(--rf-brand)] text-white' : 'text-[var(--rf-text-secondary)] hover:bg-white'}`}
+                >
+                  <Database className="w-4 h-4" />
+                  V3 Preview
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => openSettings()}
@@ -1326,34 +1584,65 @@ export default function V2WorkspaceApp({
           )}
 
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-6 py-5">
-            <V2Canvas
-              loading={loading}
-              loadingMessage={loadingMessage}
-              loadingState={loadingState}
-              result={result}
-              uiStep={uiStep}
-              scopeDraft={scopeDraft}
-              setScopeDraft={setScopeDraft}
-              discoveryAnswers={discoveryAnswers}
-              setDiscoveryAnswers={setDiscoveryAnswers}
-              onGenerate={handleGenerate}
-              onReset={() => {
-                resetDraftState('');
-                setSidebarOpen(true);
-              }}
-              onReturnToScope={() => setUiStep('scope_review')}
-              canContinueFromScope={canContinueFromScope}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-              pipelineAuditEnabled={pipelineAuditEnabled}
-              recordPipelineAuditForRun={recordPipelineAuditForRun}
-              latestAuditEntry={latestAuditEntry}
-              auditEntryCount={auditEntries.length}
-              isExportingAudit={isExportingAudit}
-              isDeletingAudit={isDeletingAudit}
-              onExportAudit={() => void exportAudit(latestAuditEntry)}
-              onDeleteAudit={() => void deleteAudit(latestAuditEntry)}
-            />
+            {viewMode === 'v3' ? (
+              <V3PreviewCanvas
+                requirement={v3Requirement}
+                setRequirement={setV3Requirement}
+                projectKeys={effectiveProjectKeys}
+                setProjectKeys={setSelectedProjectKeys}
+                availableProjects={availableProjects}
+                wiDocs={wiDocs}
+                selectedDocIds={selectedWiDocIds}
+                setSelectedDocIds={setSelectedWiDocIds}
+                selectionMode={wiSelectionMode}
+                setSelectionMode={setWiSelectionMode}
+                response={v3Response}
+                loading={v3Loading}
+                error={v3Error}
+                uploadState={v3UploadState}
+                backlogCacheInfo={v3BacklogCacheInfo}
+                backlogDiagnostics={v3BacklogDiagnostics}
+                backlogRefreshStatus={v3BacklogRefreshStatus}
+                isRefreshingBacklogCache={v3BacklogRefreshing}
+                canManageProjectKnowledge={Boolean(isAdmin || hasProjectSettingsAccess)}
+                activeTab={v3Tab}
+                setActiveTab={setV3Tab}
+                onRun={handleV3Run}
+                onUploadDocs={handleV3UploadDocs}
+                onRemoveDoc={handleV3RemoveDoc}
+                onRefreshBacklogCache={handleV3RefreshBacklogCache}
+                onOpenProjectSettings={openProjectSettings}
+              />
+            ) : (
+              <V2Canvas
+                loading={loading}
+                loadingMessage={loadingMessage}
+                loadingState={loadingState}
+                result={result}
+                uiStep={uiStep}
+                scopeDraft={scopeDraft}
+                setScopeDraft={setScopeDraft}
+                discoveryAnswers={discoveryAnswers}
+                setDiscoveryAnswers={setDiscoveryAnswers}
+                onGenerate={handleGenerate}
+                onReset={() => {
+                  resetDraftState('');
+                  setSidebarOpen(true);
+                }}
+                onReturnToScope={() => setUiStep('scope_review')}
+                canContinueFromScope={canContinueFromScope}
+                sidebarOpen={sidebarOpen}
+                setSidebarOpen={setSidebarOpen}
+                pipelineAuditEnabled={pipelineAuditEnabled}
+                recordPipelineAuditForRun={recordPipelineAuditForRun}
+                latestAuditEntry={latestAuditEntry}
+                auditEntryCount={auditEntries.length}
+                isExportingAudit={isExportingAudit}
+                isDeletingAudit={isDeletingAudit}
+                onExportAudit={() => void exportAudit(latestAuditEntry)}
+                onDeleteAudit={() => void deleteAudit(latestAuditEntry)}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1551,6 +1840,474 @@ function V2LoadingSurface({
         </div>
       </div>
     </motion.section>
+  );
+}
+
+function V3PreviewCanvas({
+  requirement,
+  setRequirement,
+  projectKeys,
+  setProjectKeys,
+  availableProjects,
+  wiDocs,
+  selectedDocIds,
+  setSelectedDocIds,
+  selectionMode,
+  setSelectionMode,
+  response,
+  loading,
+  error,
+  uploadState,
+  backlogCacheInfo,
+  backlogDiagnostics,
+  backlogRefreshStatus,
+  isRefreshingBacklogCache,
+  canManageProjectKnowledge,
+  activeTab,
+  setActiveTab,
+  onRun,
+  onUploadDocs,
+  onRemoveDoc,
+  onRefreshBacklogCache,
+  onOpenProjectSettings,
+}: {
+  requirement: string;
+  setRequirement: React.Dispatch<React.SetStateAction<string>>;
+  projectKeys: string[];
+  setProjectKeys: (keys: string[], options?: { collapseWorkspace?: boolean; nextContextMode?: 'undecided' | 'project' | 'global' }) => void;
+  availableProjects: Array<{ key: string; name: string }>;
+  wiDocs: any[];
+  selectedDocIds: string[];
+  setSelectedDocIds: React.Dispatch<React.SetStateAction<string[]>>;
+  selectionMode: 'auto' | 'selected';
+  setSelectionMode: React.Dispatch<React.SetStateAction<'auto' | 'selected'>>;
+  response: V3PreviewResponse | null;
+  loading: boolean;
+  error: string | null;
+  uploadState: string | null;
+  backlogCacheInfo: V3BacklogCacheInfo | null;
+  backlogDiagnostics: V3BacklogDiagnostics | null;
+  backlogRefreshStatus: V3BacklogRefreshStatus | null;
+  isRefreshingBacklogCache: boolean;
+  canManageProjectKnowledge: boolean;
+  activeTab: 'features' | 'plan' | 'evidence' | 'score' | 'raw';
+  setActiveTab: React.Dispatch<React.SetStateAction<'features' | 'plan' | 'evidence' | 'score' | 'raw'>>;
+  onRun: () => void | Promise<void>;
+  onUploadDocs: (files: File[]) => void | Promise<void>;
+  onRemoveDoc: (docId: string) => void | Promise<void>;
+  onRefreshBacklogCache: () => void | Promise<void>;
+  onOpenProjectSettings: (tab: 'models' | 'jira' | 'domain', projectKey: string) => void;
+}) {
+  const uploadRef = useRef<HTMLInputElement | null>(null);
+  const selectedProjectKey = projectKeys[0] ?? '';
+  const features = response?.result?.draft?.features ?? [];
+  const capabilities = response?.result?.capabilityPlan?.capabilities ?? [];
+  const contextCards = response?.result?.contextPack?.cards ?? [];
+  const score = response?.score;
+  const selectedDocSet = useMemo(() => new Set(selectedDocIds), [selectedDocIds]);
+  const visibleDocIds = useMemo(() => new Set(wiDocs.map((doc) => doc.docId)), [wiDocs]);
+  const cacheStatus = backlogRefreshStatus?.status;
+  const cacheIsRunning = isRefreshingBacklogCache || cacheStatus === 'queued' || cacheStatus === 'running';
+  const cacheIssueCount = backlogCacheInfo?.issueCount ?? backlogRefreshStatus?.issueCount ?? 0;
+  const cacheBuiltAt = backlogCacheInfo?.builtAt ?? backlogRefreshStatus?.builtAt;
+  const cacheStatusLabel = cacheStatus === 'error'
+    ? 'Refresh failed'
+    : cacheIsRunning
+      ? cacheStatus === 'running' ? 'Building' : 'Queued'
+      : backlogCacheInfo?.stale
+        ? 'Stale'
+        : cacheBuiltAt
+          ? 'Ready'
+          : 'Not built';
+
+  const toggleDoc = (docId: string) => {
+    if (!visibleDocIds.has(docId)) return;
+    setSelectedDocIds((prev) => prev.includes(docId)
+      ? prev.filter((id) => id !== docId)
+      : [...prev, docId].slice(0, 6));
+    setSelectionMode('selected');
+  };
+
+  const handleUploadChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    await onUploadDocs(files);
+  };
+
+  return (
+    <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-4">
+      <section className="rf-card p-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Requirement</div>
+                <h2 className="mt-1 text-[20px] font-black text-[var(--rf-text)]">V3 grounded preview</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onRun()}
+                disabled={loading || !selectedProjectKey || !requirement.trim()}
+                className="inline-flex items-center gap-2 rounded-xl bg-[var(--rf-brand)] px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-[var(--rf-brand-hover)] disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                Run V3
+              </button>
+            </div>
+            <textarea
+              value={requirement}
+              onChange={(event) => setRequirement(event.target.value)}
+              rows={8}
+              className="min-h-[190px] w-full resize-y rounded-2xl border border-[var(--rf-border)] bg-white/82 px-4 py-3 text-[14px] leading-relaxed text-[var(--rf-text)] outline-none transition focus:border-[var(--rf-brand)] focus:ring-4 focus:ring-[rgba(43,89,74,0.1)]"
+              placeholder="Paste the requirement to preview with Jira and uploaded project knowledge."
+            />
+            {error && (
+              <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'rgba(155,53,69,0.2)', background: 'rgba(155,53,69,0.08)', color: 'var(--rf-danger)' }}>
+                {error}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+              <label className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]" htmlFor="v3-project-select">
+                Jira project
+              </label>
+              <select
+                id="v3-project-select"
+                value={selectedProjectKey}
+                onChange={(event) => setProjectKeys(event.target.value ? [event.target.value] : [], { nextContextMode: event.target.value ? 'project' : 'undecided' })}
+                className="mt-2 w-full rounded-xl border border-[var(--rf-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--rf-text)] outline-none focus:border-[var(--rf-brand)]"
+              >
+                <option value="">Select project</option>
+                {availableProjects.map((project) => (
+                  <option key={project.key} value={project.key}>{project.key} - {project.name || project.key}</option>
+                ))}
+              </select>
+              {selectedProjectKey && (
+                <button
+                  type="button"
+                  onClick={() => onOpenProjectSettings('domain', selectedProjectKey)}
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[var(--rf-border)] bg-white/75 px-3 py-2 text-xs font-bold text-[var(--rf-text-secondary)] hover:bg-white"
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  Advanced project settings
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Backlog examples</div>
+                  <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">
+                    {cacheIssueCount > 0 ? `${cacheIssueCount} indexed issue${cacheIssueCount === 1 ? '' : 's'}` : cacheStatusLabel}
+                  </div>
+                  {cacheBuiltAt && (
+                    <div className="mt-1 text-[11px] font-semibold text-[var(--rf-text-tertiary)]">
+                      Built {new Date(cacheBuiltAt).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={!selectedProjectKey || cacheIsRunning || !canManageProjectKnowledge}
+                  onClick={() => void onRefreshBacklogCache()}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--rf-border)] bg-white/80 px-3 py-2 text-xs font-black text-[var(--rf-text-secondary)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
+                  title={canManageProjectKnowledge ? 'Build backlog examples for V3 grounding' : 'Project admin access is required'}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${cacheIsRunning ? 'animate-spin' : ''}`} />
+                  {cacheIsRunning ? 'Building' : cacheIssueCount > 0 ? 'Rebuild' : 'Build'}
+                </button>
+              </div>
+              <div className="mt-3 rounded-xl border border-[var(--rf-border-subtle)] bg-white/58 px-3 py-2 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
+                {cacheStatus === 'error'
+                  ? (backlogRefreshStatus?.error || 'The backlog cache build failed. Try rebuilding after checking Jira access and backlog scope.')
+                  : backlogDiagnostics?.likelyReason
+                    ? backlogDiagnostics.likelyReason
+                    : 'Used by V3 as retrieved backlog examples; project documents and Jira metadata still work without it.'}
+              </div>
+              {backlogDiagnostics?.jqlUsed && (
+                <div className="mt-2 truncate text-[11px] font-mono text-[var(--rf-text-tertiary)]" title={backlogDiagnostics.jqlUsed}>
+                  {backlogDiagnostics.jqlUsed}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Project docs</div>
+                  <div className="mt-1 text-sm font-semibold text-[var(--rf-text)]">{wiDocs.length} document{wiDocs.length === 1 ? '' : 's'}</div>
+                </div>
+                <input
+                  ref={uploadRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.csv,.txt,.md,.markdown,.eml"
+                  className="hidden"
+                  onChange={(event) => void handleUploadChange(event)}
+                />
+                <button
+                  type="button"
+                  disabled={!selectedProjectKey || Boolean(uploadState)}
+                  onClick={() => uploadRef.current?.click()}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--rf-border)] bg-white/75 text-[var(--rf-text-secondary)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
+                  title="Upload project document"
+                >
+                  <Upload className="h-4 w-4" />
+                </button>
+              </div>
+              {uploadState && <div className="mt-3 text-xs font-semibold text-[var(--rf-brand)]">{uploadState}</div>}
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectionMode('auto')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-bold ${selectionMode === 'auto' ? 'bg-[var(--rf-brand)] text-white' : 'border border-[var(--rf-border)] bg-white/75 text-[var(--rf-text-secondary)]'}`}
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectionMode('selected')}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-bold ${selectionMode === 'selected' ? 'bg-[var(--rf-brand)] text-white' : 'border border-[var(--rf-border)] bg-white/75 text-[var(--rf-text-secondary)]'}`}
+                >
+                  Selected
+                </button>
+              </div>
+              <div className="mt-3 max-h-[260px] space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                {wiDocs.length ? wiDocs.map((doc) => {
+                  const isSelected = selectedDocSet.has(doc.docId);
+                  return (
+                    <div key={doc.docId} className="rounded-xl border border-[var(--rf-border)] bg-white/78 p-3">
+                      <div className="flex items-start gap-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleDoc(doc.docId)}
+                          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${isSelected ? 'border-[var(--rf-brand)] bg-[var(--rf-brand)] text-white' : 'border-[var(--rf-border)] bg-white text-transparent'}`}
+                          title={isSelected ? 'Selected' : 'Select document'}
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-bold text-[var(--rf-text)]">{doc.filename}</div>
+                          <div className="mt-1 text-xs text-[var(--rf-text-tertiary)]">{doc.chunkCount ?? 0} chunks</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void onRemoveDoc(doc.docId)}
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--rf-text-tertiary)] hover:bg-[rgba(155,53,69,0.08)] hover:text-[var(--rf-danger)]"
+                          title="Remove document"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <div className="rounded-xl border border-dashed border-[var(--rf-border)] bg-white/58 px-3 py-4 text-sm text-[var(--rf-text-secondary)]">
+                    No project documents yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rf-card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rf-border-subtle)] px-5 py-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {(['features', 'plan', 'evidence', 'score', 'raw'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={`rounded-xl px-3 py-2 text-sm font-bold capitalize ${activeTab === tab ? 'bg-[var(--rf-brand)] text-white' : 'text-[var(--rf-text-secondary)] hover:bg-white/75'}`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+          {response?.sources && (
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-[var(--rf-text-tertiary)]">
+              <span>{response.sources.documentChunkCount ?? 0} doc chunks</span>
+              <span>{response.sources.similarStoryCount ?? 0} backlog examples</span>
+              <span>{response.sources.projectContextCount ?? 0} project facts</span>
+            </div>
+          )}
+        </div>
+        <div className="p-5">
+          {!response && !loading ? (
+            <div className="flex min-h-[260px] items-center justify-center rounded-2xl border border-dashed border-[var(--rf-border)] bg-white/50 text-sm font-semibold text-[var(--rf-text-secondary)]">
+              Run V3 to preview the grounded backlog draft.
+            </div>
+          ) : loading ? (
+            <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 rounded-2xl border border-[var(--rf-border)] bg-white/62">
+              <RefreshCw className="h-6 w-6 animate-spin text-[var(--rf-brand)]" />
+              <div className="text-sm font-bold text-[var(--rf-text-secondary)]">Grounding V3 preview</div>
+            </div>
+          ) : activeTab === 'features' ? (
+            <V3FeaturesView features={features} />
+          ) : activeTab === 'plan' ? (
+            <V3PlanView capabilities={capabilities} />
+          ) : activeTab === 'evidence' ? (
+            <V3EvidenceView cards={contextCards} sources={response?.sources} />
+          ) : activeTab === 'score' ? (
+            <V3ScoreView score={score} validation={response?.result?.validation} />
+          ) : (
+            <pre className="max-h-[620px] overflow-auto rounded-2xl border border-[var(--rf-border)] bg-[rgba(20,27,24,0.04)] p-4 text-xs leading-relaxed text-[var(--rf-text-secondary)]">
+              {JSON.stringify(response, null, 2)}
+            </pre>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function V3FeaturesView({ features }: { features: any[] }) {
+  if (!features.length) {
+    return <EmptyV3State label="No features returned." />;
+  }
+  return (
+    <div className="space-y-4">
+      {features.map((feature, index) => (
+        <article key={feature.id ?? index} className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{feature.id ?? `Feature ${index + 1}`}</div>
+              <h3 className="mt-1 text-lg font-black text-[var(--rf-text)]">{feature.summary}</h3>
+            </div>
+            <span className="rounded-full border border-[var(--rf-border)] bg-white/78 px-3 py-1 text-xs font-bold text-[var(--rf-text-secondary)]">
+              {feature.provenance ?? 'requirement'}
+            </span>
+          </div>
+          <p className="mt-2 text-sm font-semibold leading-relaxed text-[var(--rf-text)]">{feature.description}</p>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--rf-text-secondary)]">{feature.businessOutcome}</p>
+          <div className="mt-4 space-y-3">
+            {(feature.acceptanceRequirements ?? []).map((ar: any, arIndex: number) => (
+              <div key={ar.id ?? arIndex} className="rounded-xl border border-[var(--rf-border-subtle)] bg-white/76 p-3">
+                <div className="grid gap-2 text-sm md:grid-cols-3">
+                  <div><span className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Given</span><div className="mt-1 text-[var(--rf-text)]">{ar.given}</div></div>
+                  <div><span className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">When</span><div className="mt-1 text-[var(--rf-text)]">{ar.when}</div></div>
+                  <div><span className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--rf-text-tertiary)]">Then</span><div className="mt-1 font-semibold text-[var(--rf-text)]">{ar.then}</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {feature.openQuestions?.length > 0 && (
+            <div className="mt-4 rounded-xl border border-[rgba(160,81,30,0.2)] bg-[rgba(160,81,30,0.06)] p-3 text-sm text-[var(--rf-warning)]">
+              {feature.openQuestions.join(' ')}
+            </div>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function V3PlanView({ capabilities }: { capabilities: any[] }) {
+  if (!capabilities.length) return <EmptyV3State label="No capability plan returned." />;
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {capabilities.map((capability, index) => (
+        <div key={capability.id ?? index} className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+          <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{capability.id ?? `Capability ${index + 1}`}</div>
+          <h3 className="mt-1 text-base font-black text-[var(--rf-text)]">{capability.label}</h3>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--rf-text-secondary)]">{capability.businessOutcome}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(capability.acceptanceFocus ?? []).map((focus: string) => (
+              <span key={focus} className="rounded-full border border-[var(--rf-border)] bg-white/78 px-3 py-1 text-xs font-bold text-[var(--rf-text-secondary)]">{focus}</span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function V3EvidenceView({ cards, sources }: { cards: any[]; sources?: V3PreviewResponse['sources'] }) {
+  return (
+    <div className="space-y-4">
+      {sources && (
+        <div className="grid gap-3 md:grid-cols-4">
+          {[
+            ['Docs', sources.documentChunkCount ?? 0],
+            ['Backlog', sources.similarStoryCount ?? 0],
+            ['Project', sources.projectContextCount ?? 0],
+            ['Memory', sources.memoryStatus ?? 'n/a'],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">{label}</div>
+              <div className="mt-2 text-xl font-black text-[var(--rf-text)]">{String(value)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {cards.length ? (
+        <div className="grid gap-3">
+          {cards.map((card) => (
+            <div key={card.id} className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[rgba(43,89,74,0.08)] px-3 py-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--rf-brand)]">{card.sourceKind}</span>
+                <span className="rounded-full border border-[var(--rf-border)] bg-white/78 px-3 py-1 text-xs font-bold text-[var(--rf-text-secondary)]">{card.kind}</span>
+                <span className="text-xs font-semibold text-[var(--rf-text-tertiary)]">{card.sourceId}</span>
+              </div>
+              <h3 className="mt-2 text-sm font-black text-[var(--rf-text)]">{card.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--rf-text-secondary)]">{card.text}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyV3State label="No evidence cards returned." />
+      )}
+    </div>
+  );
+}
+
+function V3ScoreView({ score, validation }: { score: any; validation: any }) {
+  if (!score) return <EmptyV3State label="No score returned." />;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--rf-text-tertiary)]">Overall</div>
+          <div className="mt-1 text-4xl font-black text-[var(--rf-text)]">{score.overall ?? 0}</div>
+        </div>
+        <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black ${validation?.passed ? 'bg-[rgba(43,89,74,0.1)] text-[var(--rf-brand)]' : 'bg-[rgba(155,53,69,0.1)] text-[var(--rf-danger)]'}`}>
+          <CheckCircle2 className="h-4 w-4" />
+          {validation?.passed ? 'Validator passed' : `${validation?.issues?.length ?? 0} validator issue(s)`}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {(score.dimensions ?? []).map((dimension: any) => (
+          <div key={dimension.id} className="rounded-2xl border border-[var(--rf-border)] bg-white/72 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-black text-[var(--rf-text)]">{dimension.label}</h3>
+              <span className="text-lg font-black text-[var(--rf-brand)]">{dimension.score}</span>
+            </div>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--rf-text-secondary)]">{dimension.note}</p>
+          </div>
+        ))}
+      </div>
+      {score.qualityWarnings?.length > 0 && (
+        <div className="rounded-2xl border border-[rgba(160,81,30,0.2)] bg-[rgba(160,81,30,0.06)] p-4">
+          <div className="text-sm font-black text-[var(--rf-warning)]">Why this may feel weak</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--rf-warning)]">
+            {score.qualityWarnings.map((warning: string) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyV3State({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[var(--rf-border)] bg-white/50 text-sm font-semibold text-[var(--rf-text-secondary)]">
+      {label}
+    </div>
   );
 }
 
@@ -1949,7 +2706,7 @@ function V2Canvas({
               className="rounded-full px-5 py-3 text-sm font-semibold"
               style={{ background: 'var(--rf-brand)', color: '#fff', opacity: loading ? 0.7 : 1 }}
               disabled={loading}
-              onClick={() => void handleGenerate()}
+              onClick={() => void onGenerate()}
               type="button"
             >
               {loading ? (loadingMessage ?? 'Working…') : 'Retry discovery questions'}
@@ -1958,7 +2715,7 @@ function V2Canvas({
               className="rounded-full border px-5 py-3 text-sm font-semibold"
               style={{ borderColor: 'var(--rf-border)', color: 'var(--rf-text-secondary)', background: 'rgba(255,255,255,0.78)' }}
               disabled={loading}
-              onClick={() => setUiStep('scope_review')}
+              onClick={onReturnToScope}
               type="button"
             >
               Back to scope

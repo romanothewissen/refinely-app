@@ -45,6 +45,7 @@ import {
   queueProjectMemoryRefreshForProjects,
 } from '../services/project-memory';
 import { loadProjectMemoryRuntimeContext } from '../services/project-memory-runtime';
+import { runForgeV3Preview } from '../services/v3-preview';
 import { runV2Pipeline } from '../v2/pipeline';
 import { createSqlConversationStore, createV2EphemeralWorkflowStateStore } from '../v2/storage';
 import { deleteV2Conversation, getV2Conversation, listV2Conversations } from '../services/v2-sql';
@@ -2322,6 +2323,52 @@ resolver.define('discoverStatuses', async ({ payload }) => {
   return { success: true, statuses };
 });
 
+resolver.define('v3GeneratePreview', async ({ payload, context }) => {
+  try {
+    const requirement = String(payload?.requirement ?? '').trim();
+    if (!requirement) {
+      return { success: false, error: 'Requirement is required.' };
+    }
+
+    const selection = await resolveAuthorizedProjectSelection(context, payload);
+    if (!selection.projectKeys.length || selection.projectKey === '*') {
+      return { success: false, error: 'Select a Jira project before running V3 Preview.' };
+    }
+    await ensureProjectBrowse(context, selection.projectKey);
+
+    const configBase = await getConfig();
+    const config = { ...configBase, tier: getEffectiveTier(configBase, context) };
+    const selectedDocIds = Array.isArray(payload?.selectedDocIds)
+      ? payload.selectedDocIds.map((value: unknown) => String(value)).filter(Boolean)
+      : undefined;
+    const provider = payload?.provider === 'gemini' || payload?.provider === 'heuristic'
+      ? payload.provider
+      : undefined;
+    const maxContextCards = Number.isFinite(Number(payload?.maxContextCards))
+      ? Math.max(4, Math.min(24, Number(payload.maxContextCards)))
+      : undefined;
+
+    const preview = await runForgeV3Preview({
+      requirement,
+      config,
+      projectKey: selection.projectKey,
+      projectKeys: selection.projectKeys,
+      accountId: (context as { accountId?: string })?.accountId,
+      selectedDocIds,
+      provider,
+      maxContextCards,
+      jsaText: typeof payload?.jsaText === 'string' ? payload.jsaText : undefined,
+    });
+
+    return { success: true, ...preview };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
 
 // ─── Work Instructions ────────────────────────────────────────────────────────
 
@@ -2525,7 +2572,6 @@ resolver.define('removeWiDoc', async ({ payload, context }) => {
 });
 
 resolver.define('getBacklogCacheInfo', async ({ payload, context }) => {
-  await ensureAdmin(context, payload?.projectKey);
   const projectKey = payload?.projectKey || '*';
   await ensureProjectBrowse(context, projectKey);
   const info = await getBacklogCacheInfo(projectKey);
@@ -2589,7 +2635,6 @@ resolver.define('setGoldExampleLabel', async ({ payload, context }) => {
 });
 
 resolver.define('diagnoseBacklogCache', async ({ payload, context }) => {
-  await ensureAdmin(context, payload?.projectKey);
   const eventConfig = await getConfig();
   const config = { ...eventConfig, tier: getEffectiveTier(eventConfig, context) };
   const projectKey = payload?.projectKey || '*';
@@ -2673,7 +2718,6 @@ resolver.define('getProjectMemoryRefreshStatus', async ({ payload, context }) =>
 });
 
 resolver.define('getBacklogRefreshStatus', async ({ payload, context }) => {
-  await ensureAdmin(context, payload?.projectKey);
   const projectKey = payload?.projectKey || '*';
   await ensureProjectBrowse(context, projectKey);
   const status = await entityGet(KEYS.backlogRefreshStatus(projectKey));

@@ -54,6 +54,15 @@ export const api = {
   v2GetHistory: (limit?: number) => invoke('v2GetHistory', { limit }),
   v2GetConversation: (sessionId: string) => invoke('v2GetConversation', { sessionId }),
   v2DeleteConversation: (sessionId: string) => invoke('v2DeleteConversation', { sessionId }),
+  v3GeneratePreview: (payload: {
+    requirement: string;
+    projectKey?: string;
+    projectKeys?: string[];
+    selectedDocIds?: string[];
+    maxContextCards?: number;
+    provider?: 'heuristic' | 'gemini';
+    jsaText?: string;
+  }) => invoke('v3GeneratePreview', payload),
 
   // Generation
   startGeneration: (payload: {

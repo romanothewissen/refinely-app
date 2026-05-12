@@ -1,5 +1,5 @@
 import { getConfig } from '../services/tenant-config';
-import { refreshBacklogCachesForProjects, getGoldStoryPool, DomainPatterns } from '../core/similar-stories';
+import { refreshBacklogCache, getGoldStoryPool, DomainPatterns } from '../core/similar-stories';
 import { entitySet, objectWrite, KEYS } from '../services/cache';
 import { callLlmJson } from '../core/llm';
 import { getTierModel } from '../services/billing';
@@ -96,8 +96,7 @@ export async function handler(event?: { body?: BacklogCacheRefreshEvent }) {
       manual: true,
       startedAt: new Date().toISOString(),
     });
-    const refreshed = await refreshBacklogCachesForProjects([manualProjectKey], config);
-    const result = refreshed.find(item => item.projectKey === manualProjectKey);
+    const result = await refreshBacklogCache(manualProjectKey, config);
 
     // Extract domain vocabulary from gold stories (best-effort, non-blocking)
     await extractDomainPatterns(manualProjectKey, config);
