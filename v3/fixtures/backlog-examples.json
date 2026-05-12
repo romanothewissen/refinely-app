@@ -1,0 +1,37 @@
+[
+  {
+    "key": "SERV-1042",
+    "summary": "Coordinate urgent service approval",
+    "description": "As a Service Planner, I need urgent service requests to route to a Service Manager so that dispatch only proceeds after eligibility and entitlement are confirmed.",
+    "acceptanceRequirements": [
+      {
+        "given": "an urgent service request has entitlement and safety details",
+        "when": "the Service Planner submits the request for approval",
+        "then": "the Service Manager can approve or reject the request with a recorded decision"
+      },
+      {
+        "given": "an urgent service request is missing entitlement evidence",
+        "when": "the Service Planner attempts to submit it for dispatch",
+        "then": "the workflow pauses and prompts the planner to collect the missing authorization"
+      }
+    ]
+  },
+  {
+    "key": "LOAN-218",
+    "summary": "Manage loaner equipment reservation",
+    "description": "As a Dispatch Manager, I need approved loaner requests to reserve available equipment so that customers receive temporary equipment without double-booking inventory.",
+    "acceptanceRequirements": [
+      {
+        "given": "a loaner request has been approved",
+        "when": "available equipment is selected for the customer",
+        "then": "the equipment is reserved and cannot be assigned to another request"
+      },
+      {
+        "given": "a returned loaner has not yet been inspected",
+        "when": "a planner searches for available equipment",
+        "then": "the returned loaner is excluded until inspection marks it available"
+      }
+    ]
+  }
+]
+

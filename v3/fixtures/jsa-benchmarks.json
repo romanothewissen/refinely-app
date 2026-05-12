@@ -1,0 +1,115 @@
+[
+  {
+    "id": "complex-service-plan-jsa",
+    "label": "Complex service plan JSA calibration",
+    "requirementIncludes": [
+      "complex services",
+      "single plan",
+      "parts",
+      "labor",
+      "quote",
+      "follow-up actions"
+    ],
+    "expectedFeatureRange": {
+      "min": 5,
+      "max": 8
+    },
+    "minimumAverageAcceptanceRequirements": 3,
+    "requiredTerms": [
+      "single plan",
+      "field service",
+      "in-house service",
+      "loaners",
+      "deinstallations",
+      "installations",
+      "activities",
+      "parts",
+      "labor",
+      "quote",
+      "parts orders",
+      "shipments",
+      "work orders"
+    ],
+    "expectedScenarioTerms": [
+      "de-installation",
+      "loaner installation",
+      "in-house repair",
+      "loaner de-installation",
+      "repaired equipment installation",
+      "off-site repair",
+      "re-installation",
+      "customer site",
+      "service facility",
+      "service performer",
+      "not available for scheduling or execution",
+      "illogical sequence",
+      "distinct line items",
+      "work orders",
+      "parts shipment",
+      "equipment shipment",
+      "Not Started",
+      "In Progress",
+      "Completed"
+    ],
+    "questionOnlyTerms": [
+      "payment authorization",
+      "return authorization",
+      "preventive maintenance",
+      "active multi-activity service plan",
+      "completed activity",
+      "cancelled"
+    ],
+    "prohibitedOverreachTerms": [
+      "customer eligibility",
+      "equipment availability",
+      "expected ship date",
+      "planned return date",
+      "manager approval",
+      "manager review",
+      "dispatch manager",
+      "reserve the equipment",
+      "rejected with a clear reason",
+      "approval timestamp",
+      "safety impact",
+      "entitlement"
+    ],
+    "expectedOpenQuestionTerms": [
+      "workflow",
+      "pricing",
+      "mapping"
+    ],
+    "jsaText": "1\nDefine a multi-activity service plan for complex service events\n7.2.1\n13\nAs a Service Support Specialist, I need to build a single service plan by adding and sequencing multiple distinct activities like de-installation, loaner delivery, and in-house repair, so that I can accurately model and manage a complex service event in one place.\nGIVEN a service case requires equipment to be serviced off-site with a loaner provided WHEN a service plan is created THEN the plan can contain distinct activities for de-installation, loaner installation, off-site repair, loaner de-installation, and repaired equipment installation.\nGIVEN a multi-activity service plan is being created WHEN different service types are added THEN each activity can be recorded with its specific service type within the same plan.\nGIVEN a service case requires equipment to be serviced at a remote facility without a loaner WHEN a service plan is created THEN the plan can contain activities for de-installation, off-site repair, and re-installation without requiring loaner-related activities.\n2\nSpecify resources and details for each activity within a consolidated plan\n7.2.1\n5\nAs a Service Support Specialist, I need to specify the unique location, parts, and service performer for each distinct activity within a consolidated service plan so that all resource requirements for the entire service event are accurately captured.\nGIVEN a multi-activity service plan includes an on-site and an off-site service WHEN resource details are specified for each activity THEN the service location for the on-site activity can be the customer site and the location for the off-site activity can be a service facility.\nGIVEN a multi-activity service plan includes a repair and a loaner installation WHEN parts are specified for each activity THEN the repair parts can be designated for the service facility and the loaner equipment can be designated for the customer location.\nGIVEN a multi-activity service plan includes work performed by different service performers WHEN a service performer is specified for each activity THEN each activity carries the performer type needed for that service location.\n3\nEnforce scheduling dependencies between sequenced activities in a service plan\n7.2.1\n5\nAs a Service Support Specialist, I need the system to enforce dependencies between service activities so that a subsequent activity, like an installation, cannot be scheduled before a prerequisite activity, like a repair, is completed.\nGIVEN a service plan contains a sequence of dependent activities WHEN the preceding activity has not been completed THEN the subsequent activity is not available for scheduling or execution.\nGIVEN a service plan contains a sequence of dependent activities WHEN the preceding activity's completion is recorded THEN the subsequent activity becomes available for scheduling and execution.\nGIVEN a service plan contains an activity that requires a part to be shipped WHEN the required part has not been shipped THEN the service activity is not available for scheduling.\n4\nValidate the logical sequence of activities in a service plan\n7.2.1\n2\nAs a Service Support Specialist, I need to be warned if I create an illogical sequence of activities in a service plan, such as a re-installation before a de-installation, so that I can prevent errors in the service workflow.\nGIVEN a multi-activity service plan is being created WHEN an installation activity is sequenced before a de-installation activity for the same service event THEN the illogical sequence is identified before execution.\nGIVEN a multi-activity service plan is being created WHEN a loaner de-installation is sequenced before the loaner installation THEN the illogical sequence is identified before execution.\n5\nGenerate a consolidated quote from a multi-activity service plan\n7.1.4\n8\nAs a Billing Specialist, I need to generate a single quote that itemizes all billable and covered activities from a complex service plan so that the customer receives a clear and complete estimate for the entire service event.\nGIVEN a multi-activity service plan contains multiple billable activities and parts WHEN a quote is generated from the plan THEN the quote includes all billable labor and parts from all activities in the plan as distinct line items.\nGIVEN a service quote is prepared from planned work WHEN the plan includes billable and non-billable service needs THEN the quote reflects the billable planned service scope without losing activity, parts, or labor context.\n6\nInitiate all follow-on transactions from a single service plan\n7.2.1\n8\nAs a Service Support Specialist, I need to initiate the creation of all required work orders, parts orders, and shipments from a finalized multi-activity service plan so that I can efficiently dispatch all components of a complex service event.\nGIVEN a finalized multi-activity service plan contains multiple service activities at different locations WHEN the plan is initiated THEN a separate work order is created for each distinct service activity.\nGIVEN a finalized multi-activity service plan requires parts at a service facility and loaner equipment at a customer site WHEN the plan is initiated THEN a parts shipment is created for the service facility and a separate equipment shipment is created for the customer site.\nGIVEN a multi-activity service plan has not been marked as ready for execution WHEN follow-on transactions are initiated THEN no work orders, parts orders, or shipments are created.\n7\nView the consolidated status of a multi-activity service plan\n7.3.6\n5\nAs a Service Manager, I need to view a consolidated status of all related activities within a single service plan so that I can track the end-to-end progress of a complex service event without reviewing multiple, separate records.\nGIVEN a multi-activity service plan has been initiated WHEN viewing the plan THEN the current status of each individual associated service activity is visible using Not Started, In Progress, and Completed states.\nGIVEN all but one activity in a multi-activity service plan are complete WHEN viewing the plan THEN the overall status of the plan indicates that it is still in progress.\nGIVEN all activities within a multi-activity service plan are completed WHEN viewing the plan THEN the overall status of the plan indicates it is complete."
+  },
+  {
+    "id": "support-triage-jsa",
+    "label": "Support triage JSA calibration",
+    "requirementIncludes": [
+      "support requests",
+      "priority",
+      "route"
+    ],
+    "expectedFeatureRange": {
+      "min": 3,
+      "max": 5
+    },
+    "minimumAverageAcceptanceRequirements": 2,
+    "requiredTerms": [
+      "support requests",
+      "priority",
+      "route",
+      "team",
+      "status"
+    ],
+    "prohibitedOverreachTerms": [
+      "api",
+      "database table",
+      "cron",
+      "slack channel"
+    ],
+    "expectedOpenQuestionTerms": [
+      "priority",
+      "routing"
+    ],
+    "jsaText": "1\nClassify incoming support requests\n4.1.1\n5\nAs a Support Coordinator, I need incoming support requests classified by priority so that urgent work is recognized quickly.\nGIVEN a support request is received WHEN its business impact is assessed THEN the request has a priority classification.\n2\nRoute support requests to the right team\n4.1.2\n5\nAs a Support Coordinator, I need support requests routed to the responsible team so that work reaches the group that can resolve it.\nGIVEN a support request has a priority and topic WHEN routing occurs THEN the responsible team is identified.\n3\nTrack triage status\n4.1.3\n3\nAs a Support Coordinator, I need triage status visibility so that pending and routed work can be monitored.\nGIVEN a support request has been triaged WHEN its routing or priority changes THEN the triage status reflects the current state."
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "name": "refinely-v3-poc",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local POC for a grounded, lean Refinely V3 pipeline.",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "demo": "npm run build && node dist/src/cli.js --requirement \"Allow service planners to submit urgent loaner requests for manager approval while enforcing eligibility and return rules.\"",
+    "demo:gemini": "npm run build && node dist/src/cli.js --provider gemini --requirement \"Allow service planners to submit urgent loaner requests for manager approval while enforcing eligibility and return rules.\"",
+    "ui": "npm run build && node dist/src/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

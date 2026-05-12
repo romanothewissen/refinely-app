@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Refinely V3 POC</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="input-panel" aria-label="Run V3 pipeline">
+        <div class="brand-row">
+          <div>
+            <p class="eyebrow">Local POC</p>
+            <h1>Refinely V3</h1>
+          </div>
+          <div class="status-pill" id="statusPill">Ready</div>
+        </div>
+
+        <label class="field-label" for="requirement">Business requirement</label>
+        <textarea id="requirement" spellcheck="true">We need to be able to facilitate complex services that include field service activities, in-house service, loaners, deinstallations and installations, all through a single plan. The plan is to plan the activities, the parts, the labor, and to be able to eventually quote from that plan and then from the plan all the follow-up actions are created like parts orders/shipments, work orders etc.</textarea>
+
+        <div class="control-row">
+          <label>
+            Provider
+            <select id="provider">
+              <option value="gemini">Gemini Flash</option>
+              <option value="heuristic">Heuristic</option>
+            </select>
+          </label>
+          <label>
+            Context cards
+            <input id="maxContextCards" type="number" min="4" max="24" value="12" />
+          </label>
+          <button id="runButton" type="button">Run V3</button>
+        </div>
+
+        <details class="jsa-box">
+          <summary>Paste JSA output for comparison</summary>
+          <textarea id="jsaText" placeholder="Paste JSA feature/AR output here to show rough comparison counts and coverage signals."></textarea>
+        </details>
+      </section>
+
+      <section class="score-band" id="scoreBand" aria-label="Score summary">
+        <div class="score-main">
+          <span class="score-number" id="overallScore">--</span>
+          <span class="score-label">overall</span>
+        </div>
+        <div class="score-grid" id="scoreGrid"></div>
+      </section>
+
+      <section class="workspace">
+        <nav class="tabs" aria-label="Result views">
+          <button class="tab active" data-tab="features">Features</button>
+          <button class="tab" data-tab="plan">Plan</button>
+          <button class="tab" data-tab="evidence">Evidence</button>
+          <button class="tab" data-tab="comparison">JSA Compare</button>
+          <button class="tab" data-tab="raw">Raw</button>
+        </nav>
+
+        <section class="tab-panel active" id="featuresPanel"></section>
+        <section class="tab-panel" id="planPanel"></section>
+        <section class="tab-panel" id="evidencePanel"></section>
+        <section class="tab-panel" id="comparisonPanel"></section>
+        <section class="tab-panel" id="rawPanel"></section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
+

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "WI-LOANER-001",
+    "title": "Loaner Request Handling",
+    "text": "Service Planners may submit loaner requests when a customer service case requires temporary equipment. The request must include customer eligibility, equipment availability, expected ship date, and planned return date before manager review. If the customer is not eligible or the equipment is unavailable, the request must be rejected with a clear reason and returned to the planner for correction. Approved urgent loaner requests must notify the Dispatch Manager and reserve the equipment before shipment. Returned loaners must be inspected and marked available before they can be assigned to another customer."
+  },
+  {
+    "id": "WI-SERVICE-APPROVAL-002",
+    "title": "Urgent Service Approval",
+    "text": "Urgent service work requires manager approval before dispatch unless an existing entitlement explicitly allows automatic approval. The Service Manager must review urgency, entitlement, and safety impact before approval. If entitlement is missing, the workflow must pause and notify the planner to collect missing authorization. Approved urgent service work must record the approval timestamp and the approving manager."
+  }
+]
+
