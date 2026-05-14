@@ -93,6 +93,19 @@ function renderFeatures(result) {
   }
 
   panels.features.innerHTML = `
+    ${result.draft.blockingQuestions?.length ? `
+      <article class="feature-card">
+        <header class="feature-head">
+          <div>
+            <h2>Open questions</h2>
+            <p>Scope details that should be resolved before Jira writeback.</p>
+          </div>
+        </header>
+        <ul class="question-list">
+          ${result.draft.blockingQuestions.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+        </ul>
+      </article>
+    ` : ''}
     <div class="feature-list">
       ${result.draft.features.map((feature, index) => `
         <article class="feature-card">
@@ -139,12 +152,33 @@ function renderFeatures(result) {
 }
 
 function renderPlan(result) {
+  const sizing = result.capabilityPlan.sizingAssessment;
   panels.plan.innerHTML = `
     <div class="plan-list">
       <div class="comparison-item">
         <strong>Complexity:</strong> ${escapeHtml(result.capabilityPlan.complexity)}
         <span class="muted"> · Planner: ${escapeHtml(result.diagnostics.planner)} · Generator: ${escapeHtml(result.diagnostics.generator)}</span>
       </div>
+      ${sizing ? `
+        <article class="plan-item">
+          <h2>Sizing assessment</h2>
+          <p>${escapeHtml(sizing.reasoningSummary)}</p>
+          <div class="badge-row">
+            <span class="badge">${escapeHtml(sizing.clarity)} clarity</span>
+            <span class="badge">${escapeHtml(sizing.ambiguityLevel)} ambiguity</span>
+            <span class="badge">${escapeHtml(sizing.decompositionStyle.replace(/_/g, ' '))}</span>
+            <span class="badge">${sizing.recommendedFeatureRange.min}-${sizing.recommendedFeatureRange.max} feature range</span>
+          </div>
+          ${sizing.candidateCapabilities?.length ? `
+            <div class="diagnostic-block">
+              <strong>Candidate splits</strong>
+              <div class="coverage-grid">
+                ${sizing.candidateCapabilities.map((candidate) => `<span class="badge">${escapeHtml(candidate.label)} · ${escapeHtml(candidate.confidence)}</span>`).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </article>
+      ` : ''}
       ${result.capabilityPlan.capabilities.map((capability, index) => `
         <article class="plan-item">
           <h2>${index + 1}. ${escapeHtml(capability.label)}</h2>

@@ -98,11 +98,35 @@ export interface V3CapabilityCandidate {
   provenance: V3Provenance;
 }
 
+export interface V3SizingCapabilityCandidate {
+  label: string;
+  splitRationale: string;
+  mergeRisk: string;
+  confidence: 'low' | 'medium' | 'high';
+  requirementEvidence: string[];
+}
+
+export interface V3CapabilitySizingAssessment {
+  clarity: 'clear' | 'mixed' | 'vague';
+  complexity: 'simple' | 'moderate' | 'complex';
+  ambiguityLevel: 'low' | 'medium' | 'high';
+  recommendedFeatureRange: {
+    min: number;
+    max: number;
+  };
+  decompositionStyle: 'single_capability' | 'grouped_capabilities' | 'workflow_slices' | 'mixed';
+  candidateCapabilities: V3SizingCapabilityCandidate[];
+  capabilitiesLikelyMissingIfOmitted: string[];
+  openQuestions: string[];
+  reasoningSummary: string;
+}
+
 export interface V3CapabilityPlan {
   capabilities: V3CapabilityCandidate[];
   openQuestions: string[];
   assumptions: string[];
   complexity: 'simple' | 'moderate' | 'complex';
+  sizingAssessment?: V3CapabilitySizingAssessment;
 }
 
 export interface V3AcceptanceRequirement {

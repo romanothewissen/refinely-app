@@ -32,7 +32,7 @@ Use a custom requirement:
 
 ```sh
 npm --prefix v3 run build
-node v3/dist/src/cli.js --requirement "Allow dispatch managers to approve urgent service work and notify planners when eligibility rules fail."
+node v3/dist/src/cli.js --requirement "Allow program coordinators to submit vendor access requests for approval while tracking missing information and approval status."
 ```
 
 Gemini run:

@@ -41,7 +41,7 @@ const ROLE_SUFFIX = '(?:owners?|managers?|specialists?|engineers?|planners?|coor
 const ROLE_SUFFIX_REGEX = new RegExp(`\\b((?:[A-Za-z][A-Za-z/&-]*\\s+){0,4}[A-Za-z][A-Za-z/&-]*\\s+${ROLE_SUFFIX})\\b`, 'gi');
 const ROLE_ACTION_REGEX = new RegExp(`\\b((?:[A-Za-z][A-Za-z/&-]*\\s+){0,4}[A-Za-z][A-Za-z/&-]*\\s+${ROLE_SUFFIX})\\s+(?:must|will|may|can|should)\\s+(?:create|review|coordinate|manage|submit|approve|reject|route|notify|reserve|host|perform|follow|proceed|maintain|track|assign|complete|resolve|own|support)\\b`, 'gi');
 const ROLE_RESPONSIBILITY_REGEX = /\bresponsibilit(?:y|ies)\s+of\s+(?:the\s+)?([A-Za-z][A-Za-z/& -]{2,80}?)(?:\s+or equivalent|[.;,\n]|$)/gi;
-const INVALID_ROLE_PHRASE = /\b(all activities|available actions|business outcome|case type|delay reason|follow up action|information on|missing scope|plan action|planned date|planned dates|related work|service event|service order type|solution quote|source requirement|work order actions?)\b/i;
+const INVALID_ROLE_PHRASE = /\b(all activities|available actions|business outcome|case type|delay reason|follow up action|information on|missing scope|plan action|planned date|planned dates|related work|order type|solution quote|source requirement|work order actions?)\b/i;
 
 function findPrimaryRole(requirement: string, contextPack: V3ContextPack): string {
   return findRoleForCapability(requirement, undefined, contextPack).role;
@@ -60,8 +60,9 @@ function findRoleForCapability(
     }))
     .sort((left, right) => right.score - left.score);
 
-  const best = ranked[0]?.candidate;
-  if (best) {
+  const bestRanked = ranked[0];
+  const best = bestRanked?.candidate;
+  if (best && (best.source === 'requirement' || bestRanked.score >= 70)) {
     return {
       role: best.role,
       evidenceRef: best.card ? evidenceRef(best.card, `Grounds persona role "${best.role}" in retrieved ${sourceLabel(best.card)} context`) : undefined,
@@ -77,6 +78,7 @@ function normalizeRole(value: string): string {
     .replace(/^.*\b(?:responsibility|responsibilities)\s+of\s+/i, '')
     .replace(/^.*\bcontext\s+for\s+/i, '')
     .replace(/^.*\b(?:by|to|from|for|within|between)\s+(?=[A-Za-z][A-Za-z/&-]*(?:\s+[A-Za-z][A-Za-z/&-]*){0,4}\s+(?:owners?|managers?|specialists?|engineers?|planners?|coordinators?|analysts?|approvers?|requesters?|leads?|agents?|admins?|administrators?|technicians?|teams?|sales|support)\b)/i, '')
+    .replace(/^as\s+a[n]?\s+/i, '')
     .replace(/^(?:the|a|an|of|for|by|to|from|and|or)\s+/i, '')
     .replace(/\bor equivalent\b/gi, '')
     .replace(/[.:;,]+$/g, '')
@@ -195,7 +197,7 @@ function isUsableRole(role: string): boolean {
   const normalized = role.toLowerCase();
   const tokens = normalized.split(/\s+/).filter(Boolean);
   if (tokens.length > 5) return false;
-  if (/^(business|customer|equipment|plan|quote|record|request|service|system|workflow|work)$/i.test(normalized)) return false;
+  if (/^(business|customer|equipment|plan|quote|record|request|system|workflow|work)$/i.test(normalized)) return false;
   return new RegExp(`\\b${ROLE_SUFFIX}\\b`, 'i').test(normalized);
 }
 
@@ -228,13 +230,13 @@ function scoreRoleCandidate(
 
   const capabilityText = `${capability?.label ?? ''} ${capability?.businessOutcome ?? ''}`;
   const candidateText = `${candidate.role} ${candidate.text} ${candidate.card?.title ?? ''}`;
-  const financialCapability = /\b(quote|financial|billable|price|pricing|cost|estimate)\b/i.test(capabilityText);
-  const financialCandidate = /\b(quote|financial|billable|price|pricing|cost|estimate)\b/i.test(candidateText);
-  if (financialCapability && financialCandidate) score += 22;
+  const financialCapability = /\b(quote|financial|billable|price|pricing|cost|estimate|approval packet|outputs?)\b/i.test(capabilityText);
+  const financialCandidate = /\b(quote|financial|finance|billable|price|pricing|cost|estimate|approval packet|packet)\b/i.test(candidateText);
+  if (financialCapability && financialCandidate) score += 38;
   if (!financialCapability && financialCandidate) score -= 22;
 
-  const operationalCapability = /\b(plan|activity|activities|sequence|sequencing|dependenc|resource|parts?|labor|status|follow-on|follow up|downstream|install|de-?install)\b/i.test(capabilityText);
-  const operationalCandidate = /\b(activity|activities|planning|coordinate|logistics|install|de-?install|field service|service support|specialist)\b/i.test(candidateText);
+  const operationalCapability = /\b(plan|activity|activities|tasks?|steps?|sequence|sequencing|dependenc|resource|parts?|labor|status|follow-on|follow up|downstream|records?|orders?|handoffs?)\b/i.test(capabilityText);
+  const operationalCandidate = /\b(activity|activities|tasks?|steps?|planning|coordinate|logistics|operations?|support|specialist)\b/i.test(candidateText);
   if (operationalCapability && operationalCandidate) score += 16;
   return score;
 }
@@ -306,12 +308,30 @@ function hasExplicitActor(requirement: string): boolean {
   return /\ballow\s+.+?\s+to\s+/i.test(requirement) || /\bas a[n]?\s+.+?,\s*i need\b/i.test(requirement);
 }
 
-function hasLoanerScope(requirement: string): boolean {
-  return /\bloaners?\b/i.test(requirement);
+function hasPlanScope(requirement: string, capability: V3CapabilityCandidate): boolean {
+  return /\b(plan|planning|program|schedule|roadmap|coordinated work|activity|activities|tasks?|steps?)\b/i.test(`${requirement} ${capability.label} ${capability.businessOutcome}`);
 }
 
-function hasServicePlanScope(requirement: string, capability: V3CapabilityCandidate): boolean {
-  return /\b(service plan|complex services?|field service|in-house service|loaners?|deinstallations?|installations?)\b/i.test(`${requirement} ${capability.label} ${capability.businessOutcome}`);
+function sourceScopeItems(requirement: string): string[] {
+  const listText = requirement.match(/\b(?:include|includes|including|with|across)\s+(.+?)(?:\.|\bso that\b|\bwhile\b|$)/i)?.[1] ?? '';
+  const items = listText
+    .replace(/\ball through\b.*$/i, '')
+    .split(/,|\band\b|\bor\b|\//i)
+    .map((item) => item
+      .replace(/\b(all|the|a|an|that|can|could|may|needed|required|various|multiple|single|one)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase())
+    .filter((item) => item.length >= 4 && item.length <= 42 && !/^(etc|through|from|plan|plans)$/.test(item));
+  return Array.from(new Set(items)).slice(0, 8);
+}
+
+function formatScopeItems(items: string[], fallback: string): string {
+  const clean = items.filter(Boolean).slice(0, 5);
+  if (!clean.length) return fallback;
+  if (clean.length === 1) return clean[0] ?? fallback;
+  if (clean.length === 2) return `${clean[0]} and ${clean[1]}`;
+  return `${clean.slice(0, -1).join(', ')}, and ${clean[clean.length - 1]}`;
 }
 
 const CONTEXT_STOP_TERMS = new Set([
@@ -336,7 +356,6 @@ const CONTEXT_STOP_TERMS = new Set([
   'plans',
   'request',
   'requests',
-  'service',
   'should',
   'that',
   'through',
@@ -357,14 +376,17 @@ function significantTerms(text: string): Set<string> {
 
 function buildCapabilityAcceptanceRequirements(requirement: string, capability: V3CapabilityCandidate, featureIndex: number): V3AcceptanceRequirement[] {
   const labelText = capability.label.toLowerCase();
-  const isMultiActivityServicePlan = /\b(multi-activity service plan|multiple service activities|activity chains?)\b/i.test(labelText);
-  const isPlanDefinition = /\b(define|consolidated service plan|single plan)\b/i.test(labelText)
-    && !isMultiActivityServicePlan
+  const capabilityText = `${capability.label} ${capability.businessOutcome}`;
+  const scopeItems = sourceScopeItems(requirement);
+  const scopeList = formatScopeItems(scopeItems, 'the named activities, resources, outputs, and handoffs');
+  const primaryScopeItem = scopeItems[0] ?? 'a named scope item';
+  const isMultiActivityPlan = /\b(multi-activity|multiple activities|activity types|scope types|scope items|named activity)\b/i.test(capabilityText);
+  const isPlanDefinition = /\b(define|coordinated plan|consolidated plan|single plan|plan)\b/i.test(labelText)
+    && !isMultiActivityPlan
     && !/\b(status|quote|follow-on|transaction|sequence|sequenc|dependenc|resource)\b/i.test(labelText);
-  const isActivityTypeCapability = /\b(multiple service activities|activity types|service activities)\b/i.test(labelText)
+  const isActivityTypeCapability = /\b(multiple activities|activity types|scope types|named activity|named scope)\b/i.test(labelText)
     && !isPlanDefinition
     && !/\b(status|quote|follow-on|transaction|sequence|sequenc|dependenc|resource)\b/i.test(labelText);
-  const isLoanerCapability = /\b(loaner need|temporary replacement)\b/i.test(labelText);
   const ars: V3AcceptanceRequirement[] = [];
   const push = (given: string, when: string, then: string) => {
     ars.push({
@@ -377,116 +399,94 @@ function buildCapabilityAcceptanceRequirements(requirement: string, capability: 
     });
   };
 
-  if (hasLoanerScope(requirement) && isLoanerCapability) {
+  if (hasPlanScope(requirement, capability) && isMultiActivityPlan) {
     push(
-      'faulty customer equipment is being serviced',
-      'temporary replacement equipment is required during the service event',
-      'the need for a loaner is captured as part of the service plan.',
+      `a coordinated plan may include ${scopeList}`,
+      'the plan scope is defined',
+      `each applicable named item is represented as distinct planned scope within the same plan.`,
     );
     push(
-      'a temporary replacement is not required for a service event',
-      'the service plan is reviewed for applicable activity needs',
-      'the plan can proceed without a loaner while preserving the other required service activities.',
-    );
-  }
-
-  if (hasServicePlanScope(requirement, capability) && isMultiActivityServicePlan) {
-    push(
-      'a service case requires equipment to be serviced away from the customer location with a loaner provided',
-      'a multi-activity service plan is created',
-      'the plan can contain distinct activities for de-installation, loaner installation, in-house repair, loaner de-installation, and repaired equipment installation.',
+      `${primaryScopeItem} is not applicable for a specific business case`,
+      'the plan is reviewed for applicable scope',
+      `the plan can omit inapplicable named items without blocking the remaining planned scope.`,
     );
     push(
-      'a multi-activity service plan is being created',
-      'field service, in-house service, loaner, deinstallation, or installation work is added',
-      'each applicable service activity is recorded as a distinct planned activity within the same service plan.',
-    );
-    push(
-      'a service case requires equipment to be serviced at a remote facility without a loaner',
-      'a multi-activity service plan is created',
-      'the plan can contain de-installation, off-site repair, and re-installation without requiring loaner-related activities.',
-    );
-    push(
-      'a complex service event has one coordinated service scope',
-      'activities are added for planning, quoting, or execution readiness',
-      'all planned activities remain associated with the same service plan for the service event.',
+      'multiple activities or scope items belong to the same business outcome',
+      'activity or scope details are planned',
+      'the related work, resources, outputs, and follow-up actions remain tied to one coordinated plan.',
     );
   }
 
   if (isPlanDefinition) {
     push(
-      'a complex service event includes multiple kinds of service work',
-      hasLoanerScope(requirement)
-        ? 'field service, in-house service, deinstallation, installation, or loaner needs apply'
-        : 'field service, in-house service, deinstallation, installation, or other service needs apply',
-      hasLoanerScope(requirement)
-        ? 'those service needs are reflected in one service plan without requiring loaner needs for service events that do not need them.'
-        : 'those service needs are reflected in one service plan.',
+      `a business outcome requires coordinated planning across ${scopeList}`,
+      'the plan is defined',
+      'the applicable scope, resources, outputs, and follow-up needs are captured in one planning context.',
     );
     push(
-      'a complex service event requires planning before execution',
-      'activities, materials, labor, financial output, or follow-up work need to be coordinated',
-      'the plan acts as the single business source for planned work, quote preparation, and follow-up actions.',
+      'planned work must support later business outputs or handoffs',
+      'activities, resources, outputs, or follow-up work need to be coordinated',
+      'the plan acts as the business source for planned work and downstream decisions.',
     );
     push(
-      'a service plan is used to coordinate quoting and execution readiness',
-      'planned activities, parts, labor, and follow-up actions are reviewed together',
-      'activities, parts, labor, quote needs, and follow-up actions remain tied to the same service plan.',
+      'a plan contains optional or conditional scope',
+      'the applicable items are reviewed',
+      'inapplicable items can remain out of scope while applicable work stays coordinated.',
     );
   }
 
   if (isActivityTypeCapability) {
     push(
-      'a complex service event includes more than one service activity type',
-      'field service, in-house service, deinstallation, installation, or temporary replacement support is needed',
-      'each applicable service activity type is represented as planned work within the same service plan.',
+      `the requirement names ${scopeList}`,
+      'activity or scope types are added to the plan',
+      'each applicable type is represented as planned work within the same coordinated scope.',
     );
     push(
-      'a service activity type is optional for a specific service event',
-      'that activity type is not needed for the customer outcome',
-      'the service plan can omit the unnecessary activity type without blocking the remaining planned work.',
+      'a named activity or scope type is optional for a specific case',
+      'that type is not needed for the business outcome',
+      'the plan can omit the unnecessary type without blocking the remaining planned work.',
     );
     push(
-      'a service plan includes different work types for the same service event',
-      'the planned service scope is reviewed',
-      'field service, in-house service, deinstallation, installation, and temporary replacement work can be distinguished within the plan.',
+      'a plan includes different work types for the same business outcome',
+      'the planned scope is reviewed',
+      'the applicable work types can be distinguished while remaining part of the same plan.',
     );
   }
 
-  if (/\b(resources?|parts?|labor|location|activity-specific details)\b/i.test(labelText)) {
+  if (/\b(resources?|parts?|labor|location|materials?|effort|capacity|staff|equipment|activity-specific details)\b/i.test(labelText)) {
     push(
-      'a multi-activity service plan includes an on-site service and an off-site service',
-      'resource details are specified for each activity',
-      'the service location for the on-site activity can be the customer site and the location for the off-site activity can be a service facility.',
+      'planned activities or scope items have different resource needs',
+      'activity or scope details are planned',
+      'each item carries the resources, effort, ownership, and location details needed for downstream use.',
     );
     push(
-      'a multi-activity service plan includes a repair activity and a loaner installation activity',
-      'parts or equipment are specified for each activity',
-      'repair parts can be designated for the service facility and loaner equipment can be designated for the customer location.',
+      'resource needs differ across named scope items',
+      'resources or effort are assigned',
+      'resource details remain tied to the activity or scope item that requires them.',
     );
     push(
-      'a multi-activity service plan includes work with different resource needs',
-      'activity details are specified',
-      'each activity carries its service performer type, parts, labor effort, location, and resource needs.',
+      'a planned activity is missing resource detail',
+      'output preparation or follow-up action readiness is reviewed',
+      'missing resources, effort, ownership, or location details are visible before dependent outputs proceed.',
     );
   }
 
-  if (/\b(sequence|sequencing|dependencies|dependency|prerequisites?|prerequisite)\b/i.test(labelText) && !/\b(validate|illogical|logical service activity sequence)\b/i.test(labelText)) {
-    if (hasServicePlanScope(requirement, capability)) {
+  if (/\b(sequence|sequencing|dependencies|dependency|prerequisites?|prerequisite)\b/i.test(labelText) && !/\b(validate|illogical|logical activity sequence)\b/i.test(labelText)) {
+    if (hasPlanScope(requirement, capability)) {
       push(
-        'a service plan contains a sequence of dependent activities, such as de-installation followed by off-site repair',
-        'the preceding activity has not been completed',
-        'the subsequent activity is not available for scheduling or execution.',
+        'a plan contains dependent activities, resources, or handoffs',
+        'a prerequisite is incomplete',
+        'the dependent activity is treated as not ready for follow-up work.',
       );
       push(
-        'a service plan contains a sequence of dependent activities, such as off-site repair followed by re-installation',
-        'the preceding activity completion is recorded',
-        'the subsequent activity becomes available for scheduling and execution.',
+        'multiple planned items must happen in a specific order',
+        'the sequence is planned',
+        'the plan shows the required order before dependent outputs or handoffs proceed.',
       );
       push(
-        'a planned service activity requires a part or loaner equipment to be shipped before work starts',
-        'the required shipment has not been completed',
-        'the service activity is not available for scheduling until the shipment prerequisite is satisfied.',
+        'a planned sequence conflicts with a business rule',
+        'readiness for downstream work is reviewed',
+        'the sequence conflict is visible before outputs or follow-up actions proceed.',
       );
     } else {
       push(
@@ -507,7 +507,7 @@ function buildCapabilityAcceptanceRequirements(requirement: string, capability: 
     }
   }
 
-  if (/\b(approval|decision|release)\b/i.test(labelText)) {
+  if (/\b(approval|decision|release)\b/i.test(labelText) && !/\bpackets?\b/i.test(labelText)) {
     push(
       'a request requires a business decision before it can proceed',
       'approval or release readiness is evaluated',
@@ -521,16 +521,16 @@ function buildCapabilityAcceptanceRequirements(requirement: string, capability: 
   }
 
   if (/\b(validate|rule|exception|illogical|logical sequence)\b/i.test(labelText)) {
-    if (hasServicePlanScope(requirement, capability)) {
+    if (hasPlanScope(requirement, capability)) {
       push(
-        'a multi-activity service plan is being created for one coordinated service event',
-        'an installation or re-installation activity is sequenced before the related de-installation activity',
-        'the illogical sequence conflict for re-installation before de-installation is identified before execution proceeds.',
+        'a coordinated plan is reviewed before downstream work begins',
+        'a required rule, prerequisite, or sequence is missing or conflicting',
+        'the conflict is visible before the affected output or follow-up action proceeds.',
       );
       push(
-        'a multi-activity service plan includes loaner installation and loaner de-installation activities',
-        'loaner de-installation is sequenced before loaner installation',
-        'the illogical sequence conflict for loaner de-installation before loaner installation is identified before follow-up work is derived.',
+        'a named scope item has applicability rules',
+        'the item is included without satisfying those rules',
+        'the invalid or inapplicable scope is identified before dependent planning continues.',
       );
     } else {
       push(
@@ -546,58 +546,53 @@ function buildCapabilityAcceptanceRequirements(requirement: string, capability: 
     }
   }
 
-  if (/\b(quote|financial|billable|cost|price)\b/i.test(labelText)) {
+  if (/\b(quote|financial|billable|cost|price|estimate|outputs?|packets?|artifacts?|reports?|documents?)\b/i.test(labelText)) {
     push(
-      'a multi-activity service plan contains multiple billable activities and parts',
-      'a quote is generated from the plan',
-      'the quote includes all billable labor and parts from all activities in the plan as distinct line items.',
+      'a coordinated plan contains items that affect a requested output',
+      'the output is prepared from the plan',
+      'the output covers the applicable planned scope and preserves the context of the items that drive it.',
     );
     push(
-      'a service quote is prepared from planned work',
-      'the plan includes billable and non-billable service needs',
-      'the quote reflects the billable planned service scope without losing activity, parts, or labor context.',
-    );
-    push(
-      'billable service scope is reviewed before customer-facing financial output is prepared',
-      'the plan includes activity, parts, or labor items that may affect the quote',
-      'the consolidated quote remains tied to the planned activities, parts, and labor that caused the line items.',
+      'a requested output is prepared from planned work',
+      'the plan includes items that should and should not affect the output',
+      'the output reflects the applicable scope while other planned work remains in the plan.',
     );
   }
 
-  if (/\b(follow-on|follow-on transactions|follow up|downstream|work order|shipment|order)\b/i.test(labelText)) {
+  if (/\b(follow[- ]?on|follow[- ]?up|downstream|work orders?|shipments?|orders?)\b/i.test(labelText)) {
     push(
-      'a finalized multi-activity service plan contains multiple service activities at different locations',
-      'follow-on transactions are initiated',
-      'a separate work order is created for each distinct service activity.',
+      'a ready plan contains items eligible for downstream action',
+      'follow-up actions are created from the plan',
+      'downstream records or handoffs are created from eligible planned items and remain tied to the source plan.',
     );
     push(
-      'a finalized multi-activity service plan requires parts at a service facility and loaner equipment at a customer site',
-      'follow-on transactions are initiated',
-      'a parts shipment is created for the service facility and a separate equipment shipment is created for the customer site.',
+      'a plan includes resource or delivery needs',
+      'follow-up actions are created from planned resources',
+      'records, orders, tasks, or handoffs are derived from the planned item and its resource needs.',
     );
     push(
-      'a multi-activity service plan has not been marked as ready for execution',
-      'follow-on transactions are initiated',
-      'no work orders, parts orders, or shipments are created for the unresolved planned work.',
+      'a planned activity or resource need is unresolved',
+      'follow-up action creation is reviewed',
+      'unresolved items do not create downstream records or handoffs until the missing plan details are resolved.',
     );
   }
 
   if (/\b(status|progress|track|visibility)\b/i.test(labelText)) {
-    if (hasServicePlanScope(requirement, capability)) {
+    if (hasPlanScope(requirement, capability)) {
       push(
-        'a multi-activity service plan has been initiated',
+        'a coordinated plan has been initiated',
         'the plan status is reviewed',
-        'the current status of each associated service activity is visible using Not Started, In Progress, Completed, and blocked states.',
+        'the current status of each associated planned item is visible using the applicable business states.',
       );
       push(
-        'all but one activity in a multi-activity service plan are complete',
-        'the overall service plan status is reviewed',
-        'the overall status of the plan indicates that the service event is still in progress.',
+        'some but not all planned items are complete',
+        'overall plan progress is reviewed',
+        'the overall status shows that the coordinated outcome is still in progress.',
       );
       push(
-        'all activities within a multi-activity service plan are completed',
-        'the overall service plan status is reviewed',
-        'the overall status of the plan indicates that the service event is complete.',
+        'all planned items required for the coordinated outcome are complete',
+        'overall plan progress is reviewed',
+        'the overall status shows that the coordinated outcome is complete.',
       );
     } else {
       push(
@@ -615,14 +610,14 @@ function buildCapabilityAcceptanceRequirements(requirement: string, capability: 
 
   if (/\b(modify|change|active|adapt|update)\b/i.test(labelText)) {
     push(
-      'a service plan is already in progress',
-      'future service work needs to change',
-      'the service plan reflects changes to future activities without changing completed service work.',
+      'a coordinated plan is already in progress',
+      'future planned work needs to change',
+      'the plan reflects changes to future items without changing completed work.',
     );
     push(
-      'part of a service plan has already been completed',
+      'part of a plan has already been completed',
       'remaining planned work changes before execution',
-      'only future or incomplete planned work is changed while completed activity history remains stable.',
+      'only future or incomplete planned work is changed while completed history remains stable.',
     );
   }
 
@@ -655,10 +650,13 @@ function targetAcceptanceRequirementCount(requirement: string, capability: V3Cap
   if (/\b(validate|rule|exception|illogical|logical sequence)\b/i.test(capabilityText)) {
     return 2;
   }
-  if (/\b(quote|financial|billable|follow-on|follow up|downstream|transaction|work order|shipment|order|sequence|sequencing|dependencies|dependency|resources?|parts?|labor|consolidated|single plan|activity types|multiple service activities)\b/i.test(capabilityText)) {
+  if (/\b(quote|financial|billable|outputs?|packets?|artifacts?|reports?|documents?)\b/i.test(capabilityText)) {
+    return 2;
+  }
+  if (/\b(follow[- ]?on|follow[- ]?up|downstream|transactions?|work orders?|shipments?|orders?|sequence|sequencing|dependencies|dependency|resources?|parts?|labor|consolidated|single plan|activity types|multiple activities)\b/i.test(capabilityText)) {
     return 3;
   }
-  if (/\b(status|progress|loaner|temporary replacement|approval|decision|validate|rule|exception|modify|change|active|update)\b/i.test(capabilityText)) {
+  if (/\b(status|progress|optional|conditional|approval|decision|validate|rule|exception|modify|change|active|update)\b/i.test(capabilityText)) {
     return 2;
   }
   return /\b(and|,|while|with|before|after)\b/i.test(requirement) ? 2 : 1;
@@ -728,31 +726,35 @@ function buildStatusThen(requirement: string): string {
 function buildContextOpenQuestions(requirement: string, contextPack: V3ContextPack): string[] {
   const requirementTerms = significantTerms(requirement);
   const questions: string[] = [];
-  const seenTitles = new Set<string>();
+  const planScope = /\b(plan|planning|program|schedule|roadmap|activities?|tasks?|steps?)\b/i.test(requirement);
+  const quoteScope = /\b(quote|estimate|invoice|price|pricing|cost|billable)\b/i.test(requirement);
+  const followUpScope = /\b(follow[- ]?up|downstream|record|records|orders?|shipments?|work orders?|created like|derive|derived)\b/i.test(requirement);
 
-  for (const card of contextPack.cards.filter((item) => ['work_instruction', 'document'].includes(item.sourceKind))) {
-    if (seenTitles.has(card.title)) continue;
+  if (planScope) {
+    questions.push('Which named scope items should become separate capabilities, and which should remain item types within one coordinated plan?');
+    questions.push('Which sequence, dependency, and readiness rules should prevent outputs or follow-up actions from proceeding?');
+  }
+
+  if (quoteScope) {
+    questions.push('Which pricing, coverage, discount, tax, and approval rules should determine quote scope from the plan?');
+  }
+  if (followUpScope) {
+    questions.push('Which downstream record mappings, creation triggers, and ownership handoffs should create orders, tasks, records, or other follow-up items?');
+  }
+
+  const adjacentContextCards = contextPack.cards.filter((card) => {
+    if (!['work_instruction', 'document'].includes(card.sourceKind)) return false;
     const cardTerms = significantTerms(`${card.title} ${card.text}`);
     const sharedTerms = Array.from(cardTerms).filter((term) => requirementTerms.has(term));
     const unsupportedTerms = Array.from(cardTerms).filter((term) => !requirementTerms.has(term));
-    if (!sharedTerms.length || unsupportedTerms.length < 3) continue;
-    questions.push(`Which details from "${card.title}" should apply to this requirement, and which should remain in the adjacent ${sourceLabel(card)} or existing workflow context?`);
-    seenTitles.add(card.title);
-    if (questions.length >= 3) break;
-  }
-
-  if (/\b(quote|estimate|invoice|price|pricing|cost|billable)\b/i.test(requirement)) {
-    questions.push('Which pricing, discount, tax, coverage, or approval rules should apply to generated financial outputs?');
-  }
-  if (/\b(follow[- ]?up|downstream|record|records|orders?|shipments?|work orders?|created like|derive|derived)\b/i.test(requirement)) {
-    questions.push('Which downstream record mappings, trigger conditions, and ownership rules should apply?');
-  }
-  if (/\b(service plan|complex services?|field service|in-house service|loaners?|deinstallations?|installations?)\b/i.test(requirement)) {
-    questions.push('Should customer payment authorization be required before billable service activities, work orders, or parts shipments can proceed?');
-    questions.push('Should return authorization be created when customer equipment is sent from the customer site to a service facility?');
-    questions.push('Should preventive maintenance due dates be captured as part of multi-activity service plans?');
-    questions.push('Should active multi-activity service plan changes be in scope after execution starts, and which completed activity details must remain locked?');
-    questions.push('Should cancellation behavior apply when future service activities or follow-on records are removed from an active plan?');
+    return sharedTerms.length > 0 && unsupportedTerms.length >= 3;
+  });
+  const documentTitles = Array.from(new Set(adjacentContextCards
+    .filter((card) => card.sourceKind === 'document')
+    .map((card) => card.title)))
+    .slice(0, 3);
+  if (documentTitles.length) {
+    questions.push(`Which retrieved document workflow details should apply directly to this requirement, and which remain adjacent context? (${documentTitles.join('; ')})`);
   }
 
   return Array.from(new Set(questions)).slice(0, 9);
@@ -922,7 +924,7 @@ export class HeuristicGenerator implements V3Generator {
         assumptions: hasGroundingContext(input.contextPack)
           ? []
           : ['No matching grounding context was retrieved for this requirement.'],
-        openQuestions: index === 0 ? contextOpenQuestions : [],
+        openQuestions: [],
       };
     });
 
@@ -949,11 +951,11 @@ export class HeuristicGenerator implements V3Generator {
         provenance: 'requirement',
         evidenceRefs,
         assumptions: [],
-        openQuestions: contextOpenQuestions,
+        openQuestions: [],
       });
     }
 
-    const blockingQuestions = features.flatMap((feature) => feature.openQuestions);
+    const blockingQuestions = contextOpenQuestions;
 
     return {
       features,
@@ -1046,16 +1048,8 @@ function demoteUnresolvedValidationIssues(draft: V3GeneratedDraft, issues: V3Val
       return 'Which concrete business fact, decision, output, or exception should this acceptance requirement assert?';
     })));
 
-  const features = draft.features.map((feature, index) => index === 0
-    ? {
-      ...feature,
-      openQuestions: Array.from(new Set([...feature.openQuestions, ...questions])),
-    }
-    : feature);
-
   return {
     ...draft,
-    features,
     confidence: draft.confidence === 'high' ? 'medium' : draft.confidence,
     blockingQuestions: Array.from(new Set([...draft.blockingQuestions, ...questions])),
   };
@@ -1149,7 +1143,7 @@ Rules:
 - Cover primary flow, business rules, exceptions, status outcomes, and downstream outcomes when present in the capability plan.
 - Use true business outcomes, not implementation tasks.
 - Avoid superficial outcomes like "comprehensive planning"; state the concrete operational outcome.
-- Prefer concrete business scenarios over abstract category statements. For complex service plans, name real activity chains such as de-installation, loaner installation, in-house or off-site repair, loaner de-installation, repaired equipment installation, customer-site work, service-facility work, quote line items, work orders, parts orders, and shipments when supported by the requirement or context.
+- Prefer concrete business scenarios over abstract category statements. Use the domain terms named in the requirement or directly supported by context; do not import example-specific workflow details from unrelated domains.
 - Write the THEN as the required business capability or observable result. Do not hide the required capability in WHEN.
 - Acceptance requirements must be actor-neutral unless the source requirement explicitly names the actor as part of the capability.
 - Do not put roles like planner, manager, specialist, technician, requester, approver, or user in GIVEN/WHEN/THEN unless that exact role appears in the source requirement or a cited project context card directly defines the project role.
@@ -1173,7 +1167,7 @@ Rules:
 - Use document cards when they directly support a definition, rule, constraint, workflow step, exception, or example relevant to the source requirement.
 - If work instruction, project, or document context is related but narrower than the source requirement, put its procedure-specific details in openQuestions rather than acceptanceRequirements.
 - Do not promote adjacent workflow details from context into acceptance requirements unless the same concept appears in the source requirement.
-- Plausible but unsupported JSA-style details must become openQuestions, not acceptance requirements. Examples: payment authorization gates, return authorization, preventive maintenance due dates, active-plan modification rules, completed-work locking, or cancellation behavior.
+- Plausible but unsupported benchmark-style details must become openQuestions, not acceptance requirements. Do not add gates, lifecycle rules, status values, ownership rules, or change-locking details unless the requirement or cited context supports them.
 - Use backlog cards for style/scope patterns, not as proof of new behavior.
 - Evidence refs are required when provenance is work_instruction, project_context, document, backlog_pattern, or golden_example.
 - Requirement-derived features can use provenance "requirement" without evidenceRefs if no relevant card supports them.

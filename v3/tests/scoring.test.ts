@@ -5,11 +5,23 @@ import { scoreV3Result, type V3JsaBenchmark } from '../src/scoring';
 import benchmarksFixture from '../fixtures/jsa-benchmarks.json';
 
 const benchmarks = benchmarksFixture as V3JsaBenchmark[];
-const servicePlanBenchmark = benchmarks.find((benchmark) => benchmark.id === 'complex-service-plan-jsa')!;
 const supportTriageBenchmark = benchmarks.find((benchmark) => benchmark.id === 'support-triage-jsa')!;
 
+const launchPlanBenchmark: V3JsaBenchmark = {
+  id: 'launch-plan-generic',
+  label: 'Launch plan generic calibration',
+  requirementIncludes: ['coordinated launch plan', 'materials', 'effort estimates', 'purchase orders'],
+  expectedFeatureRange: { min: 4, max: 7 },
+  minimumAverageAcceptanceRequirements: 2,
+  requiredTerms: ['plan', 'activities', 'materials', 'effort estimates', 'approval packets', 'purchase orders', 'onboarding tasks'],
+  expectedScenarioTerms: ['vendor reviews', 'prototype builds', 'training sessions', 'not ready', 'sequence conflict', 'downstream records'],
+  questionOnlyTerms: ['legal review', 'security review', 'active plan changes'],
+  prohibitedOverreachTerms: ['vendor approval date', 'access capacity', 'legal review', 'security review'],
+  expectedOpenQuestionTerms: ['scope items', 'sequence', 'downstream'],
+};
+
 const baseResult: V3PipelineResult = {
-  requirement: 'Create a single service plan for field service, in-house service, loaners, deinstallations, installations, parts, labor, quotes, and follow-up work orders.',
+  requirement: 'Create a coordinated launch plan with research tasks, vendor reviews, prototype builds, materials, effort estimates, approval packets, and follow-up purchase orders.',
   capabilityPlan: {
     capabilities: [],
     openQuestions: [],
@@ -19,24 +31,24 @@ const baseResult: V3PipelineResult = {
   draft: {
     features: [
       {
-        summary: 'Define Multi-Activity Service Plan',
-        businessOutcome: 'A structured plan encompassing various service types is established.',
-        description: 'As a Service Planner, I need to define a multi-activity service plan so that I can manage complex service work.',
+        summary: 'Define coordinated launch plan',
+        businessOutcome: 'A coordinated plan tracks launch work and downstream handoffs.',
+        description: 'As a Program Coordinator, I need to define a coordinated launch plan so that launch work can be planned in one place.',
         acceptanceRequirements: [
           {
-            given: 'I am creating a new service plan',
-            when: 'I specify multiple service activities',
-            then: 'A new service plan is created, associating all specified activities under it.',
+            given: 'a launch plan is being created',
+            when: 'named activities are specified',
+            then: 'the plan captures the relevant details.',
           },
           {
-            given: 'a service activity is being added',
-            when: 'the planner enters activity details',
-            then: 'the plan captures service type, target location, required parts, quantities, labor role, estimated hours, and dependency status for that activity.',
+            given: 'a launch activity is being added',
+            when: 'resource details are planned',
+            then: 'the plan captures materials, effort estimates, owner, and dependency status for that activity.',
           },
           {
-            given: 'the service plan contains dependent activities',
-            when: 'the planner initiates execution',
-            then: 'a work order is generated for each eligible activity and blocked until prerequisite activity dependencies are complete.',
+            given: 'the launch plan contains dependent activities',
+            when: 'downstream handoffs are prepared',
+            then: 'purchase orders or onboarding tasks are created for eligible activities and blocked until prerequisites are complete.',
           },
         ],
         provenance: 'requirement',
@@ -79,17 +91,17 @@ test('scoreV3Result penalizes thin THEN statements and avoids false status cover
 test('scoreV3Result counts JSA-style features from persona stories instead of row numbers', () => {
   const jsaText = [
     '1',
-    'Define a multi-activity service plan',
+    'Define coordinated launch plan',
     '7.2.1',
     '13',
-    'As a Service Support Specialist, I need to build a single service plan so that I can manage a complex event.',
-    'GIVEN a service case requires off-site repair WHEN a plan is created THEN the plan can contain distinct activities.',
+    'As a Program Coordinator, I need to build a launch plan so that I can manage a complex launch.',
+    'GIVEN a launch needs vendor review WHEN a plan is created THEN the plan can contain distinct activities.',
     '2',
-    'Generate a consolidated quote',
+    'Prepare approval packet',
     '7.1.4',
     '8',
-    'As a Billing Specialist, I need to generate a single quote so that the customer receives a complete estimate.',
-    'GIVEN a plan contains billable activities WHEN a quote is generated THEN the quote includes line items.',
+    'As a Finance Analyst, I need to prepare an approval packet so that reviewers receive the required estimate.',
+    'GIVEN a plan contains estimated effort WHEN an approval packet is prepared THEN the packet includes the estimate context.',
   ].join('\n');
 
   const score = scoreV3Result(baseResult, jsaText);
@@ -103,11 +115,11 @@ test('scoreV3Result penalizes requirement overreach even when coverage and shape
     ...baseResult,
     draft: {
       features: makeScoringFeatures([
-        'the service plan reflects activity type, parts, labor, sequence, dependency, quote, work order, shipment, and status.',
-        'the loaner request captures customer eligibility, equipment availability, expected ship date, and planned return date.',
+        'the launch plan reflects activity type, materials, effort estimate, sequence, dependency, approval packet, purchase order, handoff, and status.',
+        'the vendor access request captures vendor approval date, access capacity, legal review, and security review.',
       ], [
         'all details are available.',
-        'the system stores the planner selection.',
+        'the system stores the coordinator selection.',
       ]),
       confidence: 'high',
       blockingQuestions: [],
@@ -115,13 +127,13 @@ test('scoreV3Result penalizes requirement overreach even when coverage and shape
     contextPack: {
       cards: [
         {
-          id: 'WI-LOANER-001:wi:2',
-          sourceId: 'WI-LOANER-001',
+          id: 'WI-ACCESS-001:wi:2',
+          sourceId: 'WI-ACCESS-001',
           sourceKind: 'work_instruction',
           kind: 'business_rule',
-          title: 'Loaner Request Handling',
-          text: 'The request must include customer eligibility, equipment availability, expected ship date, and planned return date before manager review.',
-          keywords: ['loaner', 'eligibility'],
+          title: 'Vendor Access Handling',
+          text: 'The request must include vendor approval date, access capacity, legal review, and security review before manager review.',
+          keywords: ['vendor', 'approval'],
           weight: 1.35,
           score: 1,
         },
@@ -133,35 +145,32 @@ test('scoreV3Result penalizes requirement overreach even when coverage and shape
       passed: false,
       issues: [
         { code: 'unsupported_role_in_ar', path: '$.features[0].acceptanceRequirements[0]', message: 'Role overreach.' },
-        { code: 'unsupported_role_in_ar', path: '$.features[0].acceptanceRequirements[1]', message: 'Role overreach.' },
         { code: 'solution_language', path: '$.features[0].acceptanceRequirements[2]', message: 'Solution language.' },
-        { code: 'solution_language', path: '$.features[1].acceptanceRequirements[2]', message: 'Solution language.' },
         { code: 'context_overreach', path: '$.features[0].acceptanceRequirements[1]', message: 'Context overreach.' },
-        { code: 'context_overreach', path: '$.features[1].acceptanceRequirements[1]', message: 'Context overreach.' },
         { code: 'confidence_mismatch', path: '$.confidence', message: 'Confidence mismatch.' },
       ],
     },
   };
 
-  const score = scoreV3Result(result, undefined, servicePlanBenchmark);
+  const score = scoreV3Result(result, undefined, launchPlanBenchmark);
   const grounding = score.dimensions.find((dimension) => dimension.id === 'grounding');
 
-  assert.ok(score.overall <= 62);
+  assert.ok(score.overall <= 70);
   assert.equal(grounding?.score, 55);
-  assert.ok(score.jsaComparison?.prohibitedTermsFound.includes('customer eligibility'));
+  assert.ok(score.jsaComparison?.prohibitedTermsFound.includes('vendor approval date'));
   assert.ok(score.qualityWarnings.some((warning) => /context overreach/i.test(warning)));
 });
 
-test('scoreV3Result rewards capability-focused loaner scope over workflow expansion', () => {
+test('scoreV3Result rewards candidate-scope questions over workflow expansion', () => {
   const focused: V3PipelineResult = {
     ...baseResult,
     draft: {
       features: makeScoringFeatures([
-        'the need for a loaner is captured as part of the service plan.',
-        'the service plan reflects activity type, parts, labor, sequence, dependency, quote, work order, shipment, and status.',
+        'vendor reviews are represented as applicable planned scope without making them mandatory for every launch plan.',
+        'the launch plan reflects activity type, materials, effort estimate, sequence, dependency, approval packet, purchase order, handoff, and status.',
       ], [
-        'billable parts and labor are reflected in a consolidated service quote.',
-      ], ['Should loaner request workflow details be handled separately?']),
+        'billable or financial-impacting items are reflected in the approval packet.',
+      ], ['Should vendor review workflow details be handled as a separate capability?']),
       confidence: 'medium',
       blockingQuestions: [],
     },
@@ -188,41 +197,38 @@ test('scoreV3Result rewards capability-focused loaner scope over workflow expans
   assert.ok(scoreV3Result(focused).overall > scoreV3Result(overreaching).overall);
 });
 
-test('scoreV3Result exposes JSA scenario gaps and question-only overreach', () => {
-  const broad = scoreV3Result(baseResult, undefined, servicePlanBenchmark);
+test('scoreV3Result exposes benchmark scenario gaps and question-only overreach', () => {
+  const broad = scoreV3Result(baseResult, undefined, launchPlanBenchmark);
   const scenarioRich: V3PipelineResult = {
     ...baseResult,
     draft: {
       features: makeScoringFeatures([
-        'the plan can contain distinct activities for de-installation, loaner installation, in-house repair, loaner de-installation, and repaired equipment installation.',
-        'the plan can contain de-installation, off-site repair, and re-installation without requiring loaner-related activities.',
-        'the service location for the on-site activity can be the customer site and the location for the off-site activity can be a service facility.',
-        'the quote includes all billable labor and parts from all activities in the plan as distinct line items.',
-        'the required work orders, parts orders, and shipments are derived from eligible planned items.',
-        'the current status of each activity is visible using Not Started, In Progress, and Completed states.',
+        'the plan can contain vendor reviews, prototype builds, and training sessions as distinct planned scope.',
+        'the dependent activity is treated as not ready when prerequisite materials or approvals are incomplete.',
+        'the sequence conflict is visible before downstream records or handoffs proceed.',
+        'purchase orders and onboarding tasks are derived from eligible planned items.',
       ], [
-        'sequence conflicts are visible before downstream work begins.',
+        'approval packet details remain traceable to planned materials and effort estimates.',
       ], [
-        'Should payment authorization be required before execution?',
-        'Should return authorization be created for equipment sent to a service facility?',
-        'Should preventive maintenance due dates apply to this service plan?',
+        'Should legal review apply to vendor reviews?',
+        'Should security review apply to vendor access?',
       ]),
       confidence: 'medium',
-      blockingQuestions: ['Should active multi-activity service plan changes be in scope?'],
+      blockingQuestions: ['Should active plan changes be in scope?'],
     },
     validation: {
       passed: true,
       issues: [],
     },
   };
-  const rich = scoreV3Result(scenarioRich, undefined, servicePlanBenchmark);
+  const rich = scoreV3Result(scenarioRich, undefined, launchPlanBenchmark);
 
   assert.ok((broad.jsaComparison?.missingScenarioTerms.length ?? 0) > (rich.jsaComparison?.missingScenarioTerms.length ?? 0));
   assert.equal(rich.jsaComparison?.questionOnlyTermsFound.length, 0);
   assert.ok((rich.jsaComparison?.suggestedOpenQuestions.length ?? 0) < (broad.jsaComparison?.suggestedOpenQuestions.length ?? 0));
 });
 
-test('scoreV3Result applies the benchmark rubric to a non-service domain', () => {
+test('scoreV3Result applies the benchmark rubric to a support triage domain', () => {
   const result: V3PipelineResult = {
     ...baseResult,
     requirement: 'Classify support requests by priority, route them to the right team, and show triage status.',
@@ -312,19 +318,19 @@ function makeScoringFeatures(specificThens: string[], otherThens: string[], open
   const thens = [...specificThens, ...otherThens];
   return Array.from({ length: 6 }, (_, featureIndex) => ({
     id: `feature_${featureIndex + 1}`,
-    summary: 'Single multi activity service plan with field service in house loaner deinstallation installation parts labor quote work order shipment status sequence dependency validation',
-    businessOutcome: 'Complex service work can be planned, quoted, initiated, and tracked in one place.',
-    description: 'Complex service work can be planned without prescribing implementation details.',
+    summary: 'Coordinated launch plan with activities resources estimates approval packets purchase orders handoffs status sequence dependency validation',
+    businessOutcome: 'Complex launch work can be planned, reviewed, initiated, and tracked in one place.',
+    description: 'Complex launch work can be planned without prescribing implementation details.',
     acceptanceRequirements: Array.from({ length: 3 }, (_, arIndex) => ({
       id: `ar_${featureIndex + 1}_${arIndex + 1}`,
-      given: 'faulty customer equipment is being serviced',
-      when: arIndex === 0 ? 'temporary replacement equipment is required during the service event' : 'the service event is prepared',
-      then: thens[(featureIndex + arIndex) % thens.length] ?? thens[0] ?? 'the service need is captured.',
+      given: 'a launch activity is being planned',
+      when: arIndex === 0 ? 'vendor review scope is considered' : 'the launch plan is prepared',
+      then: thens[(featureIndex + arIndex) % thens.length] ?? thens[0] ?? 'the launch need is captured.',
       provenance: 'requirement' as const,
-      evidenceRefs: [{ cardId: 'WI-LOANER-001:wi:2', sourceId: 'WI-LOANER-001', reason: 'Related work instruction context' }],
+      evidenceRefs: [{ cardId: 'WI-ACCESS-001:wi:2', sourceId: 'WI-ACCESS-001', reason: 'Related work instruction context' }],
     })),
     provenance: 'requirement' as const,
-    evidenceRefs: [{ cardId: 'WI-LOANER-001:wi:2', sourceId: 'WI-LOANER-001', reason: 'Related work instruction context' }],
+    evidenceRefs: [{ cardId: 'WI-ACCESS-001:wi:2', sourceId: 'WI-ACCESS-001', reason: 'Related work instruction context' }],
     assumptions: [],
     openQuestions: featureIndex === 0 ? openQuestions : [],
   }));

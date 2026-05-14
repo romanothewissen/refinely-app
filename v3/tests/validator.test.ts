@@ -16,27 +16,27 @@ const emptyContextPack: V3ContextPack = {
   sourceMix: { workInstructionCards: 0, backlogCards: 0 },
 };
 
-const loanerContextPack: V3ContextPack = {
+const accessContextPack: V3ContextPack = {
   cards: [
     {
-      id: 'WI-LOANER-001:wi:2',
-      sourceId: 'WI-LOANER-001',
+      id: 'WI-ACCESS-001:wi:2',
+      sourceId: 'WI-ACCESS-001',
       sourceKind: 'work_instruction',
       kind: 'business_rule',
-      title: 'Loaner Request Handling',
-      text: 'The request must include customer eligibility, equipment availability, expected ship date, and planned return date before manager review.',
-      keywords: ['loaner', 'eligibility', 'availability'],
+      title: 'Vendor Access Handling',
+      text: 'The request must include vendor approval, access capacity, expected start date, and planned end date before manager review.',
+      keywords: ['vendor', 'approval', 'capacity'],
       weight: 1.35,
       score: 1,
     },
     {
-      id: 'WI-LOANER-001:wi:4',
-      sourceId: 'WI-LOANER-001',
+      id: 'WI-ACCESS-001:wi:4',
+      sourceId: 'WI-ACCESS-001',
       sourceKind: 'work_instruction',
       kind: 'business_rule',
-      title: 'Loaner Request Handling',
-      text: 'Approved urgent loaner requests must notify the Dispatch Manager and reserve the equipment before shipment.',
-      keywords: ['loaner', 'dispatch', 'reserve'],
+      title: 'Vendor Access Handling',
+      text: 'Approved vendor access requests must notify the Access Manager and reserve the access capacity before activation.',
+      keywords: ['vendor', 'access', 'reserve'],
       weight: 1.35,
       score: 1,
     },
@@ -50,9 +50,9 @@ function draftWithAr(ar: { given: string; when: string; then: string }, confiden
     features: [
       {
         id: 'feature_1',
-        summary: 'Define service plan',
-        businessOutcome: 'Complex service work can be planned in one place.',
-        description: 'Complex service work can be planned without prescribing implementation details.',
+        summary: 'Define coordinated plan',
+        businessOutcome: 'Complex work can be planned in one place.',
+        description: 'Complex work can be planned without prescribing implementation details.',
         acceptanceRequirements: [
           {
             id: 'ar_1',
@@ -74,12 +74,12 @@ function draftWithAr(ar: { given: string; when: string; then: string }, confiden
 
 test('validateDraft flags unsupported roles in acceptance requirements', () => {
   const issues = validateDraft({
-    requirement: 'Create a single service plan for complex service events.',
+    requirement: 'Create a coordinated launch plan for complex launch activities.',
     capabilityPlan,
     draft: draftWithAr({
-      given: 'a complex service event is being planned',
-      when: 'the Service Planner adds activities',
-      then: 'the activities are reflected in the service plan.',
+      given: 'a complex launch is being planned',
+      when: 'the Release Manager adds activities',
+      then: 'the activities are reflected in the coordinated plan.',
     }),
     contextPack: emptyContextPack,
   });
@@ -89,12 +89,12 @@ test('validateDraft flags unsupported roles in acceptance requirements', () => {
 
 test('validateDraft flags system and solution-shaped acceptance requirements', () => {
   const issues = validateDraft({
-    requirement: 'Create a single service plan for complex service events.',
+    requirement: 'Create a coordinated launch plan for complex launch activities.',
     capabilityPlan,
     draft: draftWithAr({
-      given: 'a complex service event is being planned',
-      when: 'temporary replacement equipment is required',
-      then: 'the system stores the loaner selection in a checkbox field.',
+      given: 'a complex launch is being planned',
+      when: 'vendor access is required',
+      then: 'the system stores the access selection in a checkbox field.',
     }),
     contextPack: emptyContextPack,
   });
@@ -104,14 +104,14 @@ test('validateDraft flags system and solution-shaped acceptance requirements', (
 
 test('validateDraft flags work-instruction details promoted beyond the requirement', () => {
   const issues = validateDraft({
-    requirement: 'Create a single service plan that can include loaners for complex service events.',
+    requirement: 'Create a coordinated launch plan that can include vendor access for complex launch activities.',
     capabilityPlan,
     draft: draftWithAr({
-      given: 'a service plan includes a loaner need',
-      when: 'temporary replacement equipment is required',
-      then: 'the loaner request captures customer eligibility, equipment availability, expected ship date, and planned return date.',
+      given: 'a launch plan includes a vendor access need',
+      when: 'external partner participation is required',
+      then: 'the access request captures vendor approval, access capacity, expected start date, and planned end date.',
     }),
-    contextPack: loanerContextPack,
+    contextPack: accessContextPack,
   });
 
   assert.ok(issues.some((issue) => issue.code === 'context_overreach'));
@@ -119,14 +119,14 @@ test('validateDraft flags work-instruction details promoted beyond the requireme
 
 test('validateDraft allows work-instruction details when the requirement explicitly asks for them', () => {
   const issues = validateDraft({
-    requirement: 'Allow loaner request approval with customer eligibility, equipment availability, and reservation.',
+    requirement: 'Allow vendor access request approval with vendor approval, access capacity, and reservation.',
     capabilityPlan,
     draft: draftWithAr({
-      given: 'a loaner request is ready for approval',
-      when: 'customer eligibility and equipment availability are assessed',
-      then: 'the loaner request captures customer eligibility and the need to reserve the equipment after approval.',
+      given: 'a vendor access request is ready for approval',
+      when: 'vendor approval and access capacity are assessed',
+      then: 'the vendor access request captures vendor approval and the need to reserve capacity after approval.',
     }),
-    contextPack: loanerContextPack,
+    contextPack: accessContextPack,
   });
 
   assert.equal(issues.some((issue) => issue.code === 'context_overreach'), false);
@@ -134,14 +134,14 @@ test('validateDraft allows work-instruction details when the requirement explici
 
 test('validateDraft flags high confidence while open questions remain', () => {
   const draft = draftWithAr({
-    given: 'faulty customer equipment is being serviced',
-    when: 'temporary replacement equipment is required during the service event',
-    then: 'the need for a loaner is captured as part of the service plan.',
+    given: 'a launch activity requires external partner access',
+    when: 'vendor participation is required during the launch',
+    then: 'the need for vendor access is captured as part of the coordinated plan.',
   }, 'high');
-  draft.features[0]?.openQuestions.push('Should loaner request approval rules apply?');
+  draft.features[0]?.openQuestions.push('Should vendor access approval rules apply?');
 
   const issues = validateDraft({
-    requirement: 'Create a single service plan that can include loaners for complex service events.',
+    requirement: 'Create a coordinated launch plan that can include vendor access for complex launch activities.',
     capabilityPlan,
     draft,
     contextPack: emptyContextPack,
@@ -152,10 +152,10 @@ test('validateDraft flags high confidence while open questions remain', () => {
 
 test('validateDraft flags vague acceptance requirements that lack concrete business facts', () => {
   const issues = validateDraft({
-    requirement: 'Create a single service plan for complex service events with parts, labor, quotes, and follow-up work orders.',
+    requirement: 'Create a coordinated launch plan with materials, effort estimates, approval packets, and follow-up purchase orders.',
     capabilityPlan,
     draft: draftWithAr({
-      given: 'a complex service event is being planned',
+      given: 'a complex launch is being planned',
       when: 'related outputs and handoffs are reviewed',
       then: 'the follow-up work remains traceable to the planned business outcome and any related follow-up work.',
     }),

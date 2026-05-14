@@ -9,10 +9,10 @@
     ".": "./dist/src/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/tests/*.test.js",
-    "demo": "npm run build && node dist/src/cli.js --requirement \"Allow service planners to submit urgent loaner requests for manager approval while enforcing eligibility and return rules.\"",
-    "demo:gemini": "npm run build && node dist/src/cli.js --provider gemini --requirement \"Allow service planners to submit urgent loaner requests for manager approval while enforcing eligibility and return rules.\"",
+    "demo": "npm run build && node dist/src/cli.js --requirement \"Create a coordinated launch plan with research tasks, vendor reviews, materials, effort estimates, approval packets, and follow-up purchase orders.\"",
+    "demo:gemini": "npm run build && node dist/src/cli.js --provider gemini --requirement \"Create a coordinated launch plan with research tasks, vendor reviews, materials, effort estimates, approval packets, and follow-up purchase orders.\"",
     "ui": "npm run build && node dist/src/server.js"
   },
   "devDependencies": {

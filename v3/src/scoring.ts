@@ -131,7 +131,7 @@ const SIGNAL_DEFINITIONS: Array<{
   {
     id: 'decisions',
     label: 'Business decisions or rules',
-    phrases: ['approve', 'approval', 'decision', 'review', 'validate', 'validation', 'rule', 'rules', 'eligibility', 'entitlement', 'authorization'],
+    phrases: ['approve', 'approval', 'decision', 'review', 'validate', 'validation', 'rule', 'rules', 'eligibility', 'authorization'],
   },
   {
     id: 'exceptions',
@@ -146,7 +146,7 @@ const SIGNAL_DEFINITIONS: Array<{
   {
     id: 'records_integrations',
     label: 'Records, integrations, or handoffs',
-    phrases: ['record', 'records', 'ticket', 'issue', 'case', 'order', 'orders', 'shipment', 'shipments', 'work order', 'return authorization', 'jira', 'crm', 'erp'],
+    phrases: ['record', 'records', 'ticket', 'issue', 'case', 'order', 'orders', 'shipment', 'shipments', 'work order', 'authorization', 'jira', 'crm', 'erp'],
   },
   {
     id: 'status',
@@ -181,7 +181,7 @@ export function scoreV3Result(result: V3PipelineResult, jsaText?: string, benchm
     (sum, feature) => sum + feature.evidenceRefs.length + feature.acceptanceRequirements.reduce((arSum, ar) => arSum + (ar.evidenceRefs?.length ?? 0), 0),
     0,
   );
-  const openQuestions = result.draft.features.reduce((sum, feature) => sum + feature.openQuestions.length, result.draft.blockingQuestions.length);
+  const openQuestions = uniqueOpenQuestions(result).length;
 
   const contextOverreachIssues = countIssues(result, 'context_overreach');
   const roleIssues = countIssues(result, 'unsupported_role_in_ar');
@@ -298,7 +298,17 @@ function buildOpenQuestionText(result: V3PipelineResult): string {
     ...result.draft.blockingQuestions,
     ...result.draft.features.flatMap((feature) => feature.openQuestions),
     ...result.capabilityPlan.openQuestions,
+    ...(result.capabilityPlan.sizingAssessment?.openQuestions ?? []),
   ].join('\n');
+}
+
+function uniqueOpenQuestions(result: V3PipelineResult): string[] {
+  return Array.from(new Set([
+    ...result.draft.blockingQuestions,
+    ...result.draft.features.flatMap((feature) => feature.openQuestions),
+    ...result.capabilityPlan.openQuestions,
+    ...(result.capabilityPlan.sizingAssessment?.openQuestions ?? []),
+  ].map((question) => normalizeText(question)).filter(Boolean)));
 }
 
 function deriveRequirementSignals(requirement: string): RequirementSignal[] {
@@ -390,8 +400,7 @@ function scoreOpenQuestionDiscipline(result: V3PipelineResult, benchmark?: V3Jsa
     ...result.draft.blockingQuestions,
     ...result.draft.features.flatMap((feature) => feature.openQuestions),
   ].join(' '));
-  const openQuestionCount = result.draft.blockingQuestions.length
-    + result.draft.features.reduce((sum, feature) => sum + feature.openQuestions.length, 0);
+  const openQuestionCount = uniqueOpenQuestions(result).length;
 
   if (result.draft.confidence === 'high' && openQuestionCount > 0) return 45;
   if (benchmark?.expectedOpenQuestionTerms?.length) {
@@ -517,45 +526,40 @@ function isVagueAcceptanceRequirement(ar: V3AcceptanceRequirement): boolean {
     'approval',
     'billable',
     'blocked',
-    'customer site',
-    'de-installation',
     'dependency',
     'dependencies',
     'decision',
     'distinct line items',
-    'equipment shipment',
+    'equipment',
     'exception',
-    'in-house',
-    'installation',
+    'handoff',
+    'item',
     'labor',
-    'loaner',
     'location',
-    'off-site',
     'order release',
+    'output',
     'parts',
     'quote',
-    'repair',
+    'record',
     'request',
     'rule',
     'rules',
     'scope',
-    'service facility',
     'shipment',
     'status',
-    'temporary replacement',
-    'unavailable equipment',
+    'task',
     'work order',
   ].filter((term) => normalizedThen.includes(normalizeText(term))).length;
   return /\btraceable\b/i.test(ar.then) ? concreteTerms < 2 : concreteTerms < 1;
 }
 
 function suggestedQuestionForTerm(term: string): string {
-  if (/payment authorization/i.test(term)) return 'Should customer payment authorization be required before billable service execution or shipments proceed?';
-  if (/return authorization/i.test(term)) return 'Should return authorization be created when customer equipment is sent to a service facility?';
-  if (/preventive maintenance/i.test(term)) return 'Should preventive maintenance due dates be captured in this service plan scope?';
-  if (/active/i.test(term)) return 'Should active multi-activity service plan changes be in scope after execution starts?';
-  if (/completed activity/i.test(term)) return 'Which completed activity details must remain locked after execution?';
-  if (/cancel/i.test(term)) return 'Should cancellation behavior apply to future service work from this requirement?';
+  if (/authorization/i.test(term)) return `Should ${term} be required before dependent work proceeds?`;
+  if (/return/i.test(term)) return `Should ${term} create a separate downstream record or handoff?`;
+  if (/due date|date/i.test(term)) return `Should ${term} be captured in this planning scope?`;
+  if (/active/i.test(term)) return 'Should changes after execution starts be in scope?';
+  if (/completed/i.test(term)) return 'Which completed details must remain locked after execution?';
+  if (/cancel/i.test(term)) return 'Should cancellation behavior apply to future planned work from this requirement?';
   return `Should ${term} apply to this requirement?`;
 }
 
@@ -573,31 +577,25 @@ function hasSpecificOutcome(then: string, requirement: string): boolean {
     'billable',
     'blocked',
     'condition',
-    'customer site',
     'date',
-    'de-installation',
     'decision',
     'document',
-    'equipment shipment',
+    'equipment',
     'exception',
     'handoff',
-    'installation',
     'item',
     'labor',
     'line item',
-    'loaner',
     'location',
     'output',
     'part',
     'quote',
     'quantity',
     'record',
-    'repair',
     'request',
     'resource',
     'role',
     'rule',
-    'service facility',
     'shipment',
     'status',
     'task',
@@ -620,11 +618,9 @@ function termVariants(term: string): string[] {
   if (normalized.startsWith('single ')) variants.add(normalized.replace(/^single /, 'one '));
   if (normalized.startsWith('one ')) variants.add(normalized.replace(/^one /, 'single '));
   if (normalized === 'single plan' || normalized === 'one plan') {
-    variants.add('one service plan');
-    variants.add('single service plan');
-    variants.add('same service plan');
+    variants.add('same plan');
     variants.add('consolidated plan');
-    variants.add('consolidated service plan');
+    variants.add('coordinated plan');
   }
   if (normalized === 'cancelled' || normalized === 'canceled') {
     variants.add('cancel');

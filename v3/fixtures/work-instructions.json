@@ -1,13 +1,12 @@
 [
   {
-    "id": "WI-LOANER-001",
-    "title": "Loaner Request Handling",
-    "text": "Service Planners may submit loaner requests when a customer service case requires temporary equipment. The request must include customer eligibility, equipment availability, expected ship date, and planned return date before manager review. If the customer is not eligible or the equipment is unavailable, the request must be rejected with a clear reason and returned to the planner for correction. Approved urgent loaner requests must notify the Dispatch Manager and reserve the equipment before shipment. Returned loaners must be inspected and marked available before they can be assigned to another customer."
+    "id": "WI-VENDOR-ACCESS-001",
+    "title": "Vendor Access Handling",
+    "text": "Program Coordinators may submit vendor access requests when external partners need temporary participation in a launch activity. The request must include vendor approval, access capacity, expected start date, and planned end date before manager review. If approval is missing or capacity is unavailable, the request must be returned to the coordinator with a clear reason. Approved access requests must notify the Access Manager and reserve capacity before activation."
   },
   {
-    "id": "WI-SERVICE-APPROVAL-002",
-    "title": "Urgent Service Approval",
-    "text": "Urgent service work requires manager approval before dispatch unless an existing entitlement explicitly allows automatic approval. The Service Manager must review urgency, entitlement, and safety impact before approval. If entitlement is missing, the workflow must pause and notify the planner to collect missing authorization. Approved urgent service work must record the approval timestamp and the approving manager."
+    "id": "WI-APPROVAL-PACKET-002",
+    "title": "Approval Packet Review",
+    "text": "Approval packets require Finance Analyst review before purchase orders are released. The packet should include effort estimates, material needs, budget owner approval, and any missing-information notes. If required information is missing, the packet remains pending until the Program Coordinator resolves it. Approved packets record the decision date and approving role."
   }
 ]
-

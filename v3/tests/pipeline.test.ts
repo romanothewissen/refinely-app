@@ -8,21 +8,21 @@ import { runV3Pipeline } from '../src/pipeline';
 const workInstructions: V3WorkInstruction[] = [
   {
     id: 'WI-1',
-    title: 'Loaner Request Handling',
-    text: 'Service Planners may submit loaner requests when temporary equipment is needed. The request must include customer eligibility and planned return date before manager review. If equipment is unavailable, the request must be rejected with a clear reason.',
+    title: 'Vendor Access Handling',
+    text: 'Program Coordinators may submit vendor access requests when a launch activity requires external partner participation. The request must include vendor approval and planned access end date before manager review. If approval is missing, the request must be rejected with a clear reason.',
   },
 ];
 
 const backlogExamples: V3BacklogExample[] = [
   {
-    key: 'LOAN-1',
-    summary: 'Manage loaner equipment reservation',
-    description: 'As a Dispatch Manager, I need approved loaner requests to reserve equipment so that inventory is not double-booked.',
+    key: 'VEND-1',
+    summary: 'Manage vendor access reservation',
+    description: 'As an Access Manager, I need approved vendor access requests to reserve access capacity so that access is not double-booked.',
     acceptanceRequirements: [
       {
-        given: 'a loaner request has been approved',
-        when: 'available equipment is selected',
-        then: 'the equipment is reserved for that customer',
+        given: 'a vendor access request has been approved',
+        when: 'available access capacity is selected',
+        then: 'the capacity is reserved for that vendor',
       },
     ],
   },
@@ -38,7 +38,7 @@ test('compileContext turns work instructions and backlog into compact grounding 
 test('retrieveContextPack keeps a mixed work-instruction and backlog context pack', () => {
   const cards = compileContext({ workInstructions, backlogExamples });
   const pack = retrieveContextPack({
-    requirement: 'Allow service planners to submit loaner requests for manager review.',
+    requirement: 'Allow program coordinators to submit vendor access requests for manager review.',
     cards,
   });
 
@@ -91,7 +91,7 @@ test('project context and document chunks compile and retrieve as first-class gr
 
 test('runV3Pipeline produces grounded business features with Gherkin acceptance requirements', async () => {
   const result = await runV3Pipeline({
-    requirement: 'Allow service planners to submit loaner requests for manager review while handling unavailable equipment.',
+    requirement: 'Allow program coordinators to submit vendor access requests for manager review while handling missing approvals.',
     workInstructions,
     backlogExamples,
   });
@@ -102,13 +102,13 @@ test('runV3Pipeline produces grounded business features with Gherkin acceptance 
   assert.ok(feature);
   assert.match(feature.description, /^As a /);
   assert.ok(feature.evidenceRefs.some((ref) => ref.sourceId === 'WI-1'));
-  assert.ok(feature.evidenceRefs.some((ref) => ref.sourceId === 'LOAN-1'));
+  assert.ok(feature.evidenceRefs.some((ref) => ref.sourceId === 'VEND-1'));
   const acceptanceRequirements = result.draft.features.flatMap((item) => item.acceptanceRequirements);
   assert.ok(acceptanceRequirements.length >= 2);
   assert.ok(acceptanceRequirements.every((ar) => ar.given && ar.when && ar.then));
 });
 
-test('runV3Pipeline uses project and document context without requiring service-domain fixtures', async () => {
+test('runV3Pipeline uses project and document context without requiring a specific domain fixture', async () => {
   const result = await runV3Pipeline({
     requirement: 'Allow requesters to submit procurement requests that require budget owner approval before order release and show approval status.',
     workInstructions: [],

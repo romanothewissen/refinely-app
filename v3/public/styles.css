@@ -275,6 +275,10 @@ button:disabled {
   background: #fffdf7;
 }
 
+.tab-panel > .feature-card {
+  margin-bottom: 14px;
+}
+
 .feature-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

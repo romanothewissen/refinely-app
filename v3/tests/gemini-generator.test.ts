@@ -20,15 +20,15 @@ test('GeminiJsonGenerator sends compact grounding context and parses structured 
                   features: [
                     {
                       id: 'feature_1',
-                      summary: 'Submit urgent loaner requests',
-                      businessOutcome: 'Urgent loaner requests can be submitted with eligibility checks.',
-                      description: 'As a Service Planner, I need to submit urgent loaner requests so that customers receive temporary equipment consistently.',
+                      summary: 'Submit vendor access requests',
+                      businessOutcome: 'Vendor access requests can be submitted with required policy checks.',
+                      description: 'As a Program Coordinator, I need to submit vendor access requests so that access work follows policy consistently.',
                       acceptanceRequirements: [
                         {
                           id: 'ar_1',
-                          given: 'a loaner request includes eligibility details',
-                          when: 'the Service Planner submits it for manager review',
-                          then: 'the request follows the documented eligibility rule',
+                          given: 'a vendor access request includes policy details',
+                          when: 'the Program Coordinator submits it for manager review',
+                          then: 'the request follows the documented policy rule',
                           provenance: 'work_instruction',
                           evidenceRefs: [{ cardId: 'WI-1:wi:1', sourceId: 'WI-1', reason: 'Work instruction rule' }],
                         },
@@ -60,9 +60,9 @@ test('GeminiJsonGenerator sends compact grounding context and parses structured 
         sourceId: 'WI-1',
         sourceKind: 'work_instruction',
         kind: 'business_rule',
-        title: 'Loaner Request Handling',
-        text: 'The request must include customer eligibility before manager review.',
-        keywords: ['loaner', 'eligibility'],
+        title: 'Vendor Access Policy',
+        text: 'The request must include vendor approval before manager review.',
+        keywords: ['vendor', 'approval'],
         weight: 1,
         score: 1,
       },
@@ -74,11 +74,11 @@ test('GeminiJsonGenerator sends compact grounding context and parses structured 
     capabilities: [
       {
         id: 'cap_1',
-        label: 'Submit urgent loaner requests',
-        businessOutcome: 'Service planners can submit urgent loaner requests with eligibility checks.',
+        label: 'Submit vendor access requests',
+        businessOutcome: 'Program coordinators can submit vendor access requests with required policy checks.',
         rationale: 'Directly derived from the requirement.',
-        requirementEvidence: ['submit urgent loaner requests'],
-        neededEvidence: ['loaner eligibility rules'],
+        requirementEvidence: ['submit vendor access requests'],
+        neededEvidence: ['access policy rules'],
         acceptanceFocus: ['primary submission', 'manager review'],
         provenance: 'requirement',
       },
@@ -90,7 +90,7 @@ test('GeminiJsonGenerator sends compact grounding context and parses structured 
 
   try {
     const draft = await new GeminiJsonGenerator({ apiKey: 'test-key' }).generate({
-      requirement: 'Allow service planners to submit urgent loaner requests.',
+      requirement: 'Allow program coordinators to submit vendor access requests.',
       capabilityPlan,
       contextPack,
     });
@@ -102,7 +102,7 @@ test('GeminiJsonGenerator sends compact grounding context and parses structured 
     assert.equal(generationConfig.maxOutputTokens, 12288);
     assert.deepEqual(generationConfig.thinkingConfig, { thinkingBudget: 2048 });
     assert.match(JSON.stringify(requestBody), /WI-1:wi:1/);
-    assert.match(JSON.stringify(requestBody), /Submit urgent loaner requests/);
+    assert.match(JSON.stringify(requestBody), /Submit vendor access requests/);
     assert.match(JSON.stringify(requestBody), /Do not hide the required capability in WHEN/);
     assert.match(JSON.stringify(requestBody), /actor-neutral/);
     assert.match(JSON.stringify(requestBody), /Do not promote adjacent workflow details/);
@@ -141,15 +141,15 @@ test('GeminiJsonGenerator retries when Gemini returns malformed JSON', async () 
                   features: [
                     {
                       id: 'feature_1',
-                      summary: 'Submit urgent loaner requests',
-                      businessOutcome: 'Urgent loaner requests can be submitted with eligibility checks.',
-                      description: 'As a Service Planner, I need to submit urgent loaner requests so that customers receive temporary equipment consistently.',
+                      summary: 'Submit vendor access requests',
+                      businessOutcome: 'Vendor access requests can be submitted with required policy checks.',
+                      description: 'As a Program Coordinator, I need to submit vendor access requests so that access work follows policy consistently.',
                       acceptanceRequirements: [
                         {
                           id: 'ar_1',
-                          given: 'a loaner request includes eligibility details',
-                          when: 'the Service Planner submits it for manager review',
-                          then: 'the request follows the documented eligibility rule',
+                          given: 'a vendor access request includes policy details',
+                          when: 'the Program Coordinator submits it for manager review',
+                          then: 'the request follows the documented policy rule',
                           provenance: 'work_instruction',
                           evidenceRefs: [{ cardId: 'WI-1:wi:1', sourceId: 'WI-1', reason: 'Work instruction rule' }],
                         },
@@ -181,9 +181,9 @@ test('GeminiJsonGenerator retries when Gemini returns malformed JSON', async () 
         sourceId: 'WI-1',
         sourceKind: 'work_instruction',
         kind: 'business_rule',
-        title: 'Loaner Request Handling',
-        text: 'The request must include customer eligibility before manager review.',
-        keywords: ['loaner', 'eligibility'],
+        title: 'Vendor Access Policy',
+        text: 'The request must include vendor approval before manager review.',
+        keywords: ['vendor', 'approval'],
         weight: 1,
         score: 1,
       },
@@ -195,11 +195,11 @@ test('GeminiJsonGenerator retries when Gemini returns malformed JSON', async () 
     capabilities: [
       {
         id: 'cap_1',
-        label: 'Submit urgent loaner requests',
-        businessOutcome: 'Service planners can submit urgent loaner requests with eligibility checks.',
+        label: 'Submit vendor access requests',
+        businessOutcome: 'Program coordinators can submit vendor access requests with required policy checks.',
         rationale: 'Directly derived from the requirement.',
-        requirementEvidence: ['submit urgent loaner requests'],
-        neededEvidence: ['loaner eligibility rules'],
+        requirementEvidence: ['submit vendor access requests'],
+        neededEvidence: ['access policy rules'],
         acceptanceFocus: ['primary submission', 'manager review'],
         provenance: 'requirement',
       },
@@ -211,13 +211,13 @@ test('GeminiJsonGenerator retries when Gemini returns malformed JSON', async () 
 
   try {
     const draft = await new GeminiJsonGenerator({ apiKey: 'test-key' }).generate({
-      requirement: 'Allow service planners to submit urgent loaner requests.',
+      requirement: 'Allow program coordinators to submit vendor access requests.',
       capabilityPlan,
       contextPack,
     });
 
     assert.equal(calls, 3);
-    assert.equal(draft.features[0]?.summary, 'Submit urgent loaner requests');
+    assert.equal(draft.features[0]?.summary, 'Submit vendor access requests');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -225,35 +225,65 @@ test('GeminiJsonGenerator retries when Gemini returns malformed JSON', async () 
 
 test('GeminiFlashPlanner returns a capability plan before grounding context is applied', async () => {
   const originalFetch = globalThis.fetch;
-  let requestBody: Record<string, unknown> | undefined;
+  const prompts: string[] = [];
+  let calls = 0;
 
   globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    calls += 1;
+    const requestBody = JSON.parse(String(init?.body ?? '{}')) as { contents?: Array<{ parts?: Array<{ text?: string }> }> };
+    prompts.push(requestBody.contents?.[0]?.parts?.[0]?.text ?? '');
+    const text = calls === 1
+      ? JSON.stringify({
+        clarity: 'mixed',
+        complexity: 'complex',
+        ambiguityLevel: 'medium',
+        recommendedFeatureRange: { min: 3, max: 6 },
+        decompositionStyle: 'workflow_slices',
+        candidateCapabilities: [
+          {
+            label: 'Assess vendor reviews as a distinct capability',
+            splitRationale: 'Vendor review work may have its own logistics and exceptions.',
+            mergeRisk: 'Could merge if vendor review is only an optional activity type.',
+            confidence: 'medium',
+            requirementEvidence: ['vendor reviews'],
+          },
+        ],
+        capabilitiesLikelyMissingIfOmitted: ['Assess vendor reviews as a distinct capability'],
+        openQuestions: ['Is vendor review handling a distinct lifecycle?'],
+        reasoningSummary: 'Complex but cohesive launch-plan ask with possible vendor review split.',
+      })
+      : JSON.stringify({
+        capabilities: [
+          {
+            id: 'cap_1',
+            label: 'Define a multi-activity coordinated plan',
+            businessOutcome: 'Launch work can be planned in one place.',
+            rationale: 'The requirement asks for a single plan across several launch activities.',
+            requirementEvidence: ['single plan', 'launch activities', 'vendor reviews'],
+            neededEvidence: ['workflow rules', 'output rules'],
+            acceptanceFocus: ['activity composition', 'downstream actions'],
+            provenance: 'requirement',
+          },
+          {
+            id: 'cap_2',
+            label: 'Assess vendor reviews as a distinct capability',
+            businessOutcome: 'Vendor review needs can be represented without making vendor reviews mandatory.',
+            rationale: 'Sizing identified vendor review as a possible split because it may have a lifecycle.',
+            requirementEvidence: ['vendor reviews'],
+            neededEvidence: ['vendor review lifecycle rules'],
+            acceptanceFocus: ['vendor review optionality'],
+            provenance: 'requirement',
+          },
+        ],
+        openQuestions: [],
+        assumptions: [],
+        complexity: 'complex',
+      });
     return new Response(JSON.stringify({
       candidates: [
         {
           content: {
-            parts: [
-              {
-                text: JSON.stringify({
-                  capabilities: [
-                    {
-                      id: 'cap_1',
-                      label: 'Define a multi-activity service plan',
-                      businessOutcome: 'Complex service work can be planned in one place.',
-                      rationale: 'The requirement asks for a single plan across several service activities.',
-                      requirementEvidence: ['single plan', 'field service activities', 'loaners'],
-                      neededEvidence: ['workflow rules', 'quote rules'],
-                      acceptanceFocus: ['activity composition', 'downstream actions'],
-                      provenance: 'requirement',
-                    },
-                  ],
-                  openQuestions: [],
-                  assumptions: [],
-                  complexity: 'complex',
-                }),
-              },
-            ],
+            parts: [{ text }],
           },
         },
       ],
@@ -265,16 +295,24 @@ test('GeminiFlashPlanner returns a capability plan before grounding context is a
 
   try {
     const plan = await new GeminiFlashPlanner({ apiKey: 'test-key' }).plan({
-      requirement: 'Create a single service plan for field service, loaners, quotes, and work orders.',
+      requirement: 'Create a single coordinated plan for research tasks, vendor reviews, estimates, and purchase orders.',
     });
 
+    assert.equal(calls, 2);
     assert.equal(plan.complexity, 'complex');
+    assert.deepEqual(plan.sizingAssessment?.recommendedFeatureRange, { min: 3, max: 6 });
+    assert.match(plan.sizingAssessment?.candidateCapabilities[0]?.label ?? '', /vendor reviews/i);
     assert.equal(plan.capabilities[0]?.provenance, 'requirement');
-    assert.match(plan.capabilities[0]?.label ?? '', /multi-activity service plan/i);
-    assert.match(JSON.stringify(requestBody), /before seeing project context/i);
-    assert.match(JSON.stringify(requestBody), /Business outcomes must be concrete/i);
-    assert.match(JSON.stringify(requestBody), /reusable discovery lenses/i);
-    assert.match(JSON.stringify(requestBody), /Use domain-native labels/i);
+    assert.match(plan.capabilities[0]?.label ?? '', /multi-activity coordinated plan/i);
+    assert.match(plan.capabilities.map((capability) => capability.label).join('\n'), /vendor reviews/i);
+    assert.match(prompts[0] ?? '', /lightweight sizing pass/i);
+    assert.match(prompts[0] ?? '', /feature count range, not a target quota/i);
+    assert.match(prompts[1] ?? '', /before seeing project context/i);
+    assert.match(prompts[1] ?? '', /guidance, not a quota/i);
+    assert.match(prompts[1] ?? '', /Assess vendor reviews as a distinct capability/i);
+    assert.match(prompts[1] ?? '', /Business outcomes must be concrete/i);
+    assert.match(prompts[1] ?? '', /reusable discovery lenses/i);
+    assert.match(prompts[1] ?? '', /Use domain-native labels/i);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -296,13 +334,14 @@ test('GeminiFlashPlanner falls back locally when Flash planner JSON remains malf
 
   try {
     const plan = await new GeminiFlashPlanner({ apiKey: 'test-key' }).plan({
-      requirement: 'Create a single service plan for field service, loaners, quotes, and work orders.',
+      requirement: 'Create a single coordinated plan for research tasks, vendor reviews, estimates, and purchase orders.',
     });
 
-    assert.equal(calls, 3);
+    assert.equal(calls, 6);
     assert.ok(plan.capabilities.length >= 3);
-    assert.ok(plan.capabilities.some((capability) => /service plan/i.test(capability.label)));
+    assert.ok(plan.capabilities.some((capability) => /coordinated plan/i.test(capability.label)));
     assert.equal(plan.capabilities[0]?.provenance, 'requirement');
+    assert.ok(plan.sizingAssessment?.candidateCapabilities.length);
   } finally {
     globalThis.fetch = originalFetch;
   }

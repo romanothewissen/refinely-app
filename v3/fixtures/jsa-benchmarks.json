@@ -1,84 +1,60 @@
 [
   {
-    "id": "complex-service-plan-jsa",
-    "label": "Complex service plan JSA calibration",
+    "id": "coordinated-launch-plan-jsa",
+    "label": "Coordinated launch plan JSA calibration",
     "requirementIncludes": [
-      "complex services",
-      "single plan",
-      "parts",
-      "labor",
-      "quote",
-      "follow-up actions"
+      "coordinated launch plan",
+      "materials",
+      "effort estimates",
+      "purchase orders"
     ],
     "expectedFeatureRange": {
-      "min": 5,
-      "max": 8
+      "min": 4,
+      "max": 7
     },
-    "minimumAverageAcceptanceRequirements": 3,
+    "minimumAverageAcceptanceRequirements": 2,
     "requiredTerms": [
-      "single plan",
-      "field service",
-      "in-house service",
-      "loaners",
-      "deinstallations",
-      "installations",
+      "coordinated plan",
       "activities",
-      "parts",
-      "labor",
-      "quote",
-      "parts orders",
-      "shipments",
-      "work orders"
+      "resources",
+      "materials",
+      "effort estimates",
+      "approval packets",
+      "purchase orders",
+      "onboarding tasks",
+      "downstream handoffs"
     ],
     "expectedScenarioTerms": [
-      "de-installation",
-      "loaner installation",
-      "in-house repair",
-      "loaner de-installation",
-      "repaired equipment installation",
-      "off-site repair",
-      "re-installation",
-      "customer site",
-      "service facility",
-      "service performer",
-      "not available for scheduling or execution",
-      "illogical sequence",
-      "distinct line items",
-      "work orders",
-      "parts shipment",
-      "equipment shipment",
-      "Not Started",
-      "In Progress",
-      "Completed"
+      "research tasks",
+      "vendor reviews",
+      "prototype builds",
+      "training sessions",
+      "not ready",
+      "sequence conflict",
+      "approval packet",
+      "purchase order",
+      "onboarding task"
     ],
     "questionOnlyTerms": [
-      "payment authorization",
-      "return authorization",
-      "preventive maintenance",
-      "active multi-activity service plan",
-      "completed activity",
-      "cancelled"
+      "legal review",
+      "security review",
+      "budget authorization",
+      "post-launch audit"
     ],
     "prohibitedOverreachTerms": [
-      "customer eligibility",
-      "equipment availability",
-      "expected ship date",
-      "planned return date",
-      "manager approval",
-      "manager review",
-      "dispatch manager",
-      "reserve the equipment",
-      "rejected with a clear reason",
-      "approval timestamp",
-      "safety impact",
-      "entitlement"
+      "vendor approval date",
+      "access capacity",
+      "legal review",
+      "security review",
+      "final sourcing decision",
+      "background check"
     ],
     "expectedOpenQuestionTerms": [
-      "workflow",
-      "pricing",
-      "mapping"
+      "scope items",
+      "sequence",
+      "downstream"
     ],
-    "jsaText": "1\nDefine a multi-activity service plan for complex service events\n7.2.1\n13\nAs a Service Support Specialist, I need to build a single service plan by adding and sequencing multiple distinct activities like de-installation, loaner delivery, and in-house repair, so that I can accurately model and manage a complex service event in one place.\nGIVEN a service case requires equipment to be serviced off-site with a loaner provided WHEN a service plan is created THEN the plan can contain distinct activities for de-installation, loaner installation, off-site repair, loaner de-installation, and repaired equipment installation.\nGIVEN a multi-activity service plan is being created WHEN different service types are added THEN each activity can be recorded with its specific service type within the same plan.\nGIVEN a service case requires equipment to be serviced at a remote facility without a loaner WHEN a service plan is created THEN the plan can contain activities for de-installation, off-site repair, and re-installation without requiring loaner-related activities.\n2\nSpecify resources and details for each activity within a consolidated plan\n7.2.1\n5\nAs a Service Support Specialist, I need to specify the unique location, parts, and service performer for each distinct activity within a consolidated service plan so that all resource requirements for the entire service event are accurately captured.\nGIVEN a multi-activity service plan includes an on-site and an off-site service WHEN resource details are specified for each activity THEN the service location for the on-site activity can be the customer site and the location for the off-site activity can be a service facility.\nGIVEN a multi-activity service plan includes a repair and a loaner installation WHEN parts are specified for each activity THEN the repair parts can be designated for the service facility and the loaner equipment can be designated for the customer location.\nGIVEN a multi-activity service plan includes work performed by different service performers WHEN a service performer is specified for each activity THEN each activity carries the performer type needed for that service location.\n3\nEnforce scheduling dependencies between sequenced activities in a service plan\n7.2.1\n5\nAs a Service Support Specialist, I need the system to enforce dependencies between service activities so that a subsequent activity, like an installation, cannot be scheduled before a prerequisite activity, like a repair, is completed.\nGIVEN a service plan contains a sequence of dependent activities WHEN the preceding activity has not been completed THEN the subsequent activity is not available for scheduling or execution.\nGIVEN a service plan contains a sequence of dependent activities WHEN the preceding activity's completion is recorded THEN the subsequent activity becomes available for scheduling and execution.\nGIVEN a service plan contains an activity that requires a part to be shipped WHEN the required part has not been shipped THEN the service activity is not available for scheduling.\n4\nValidate the logical sequence of activities in a service plan\n7.2.1\n2\nAs a Service Support Specialist, I need to be warned if I create an illogical sequence of activities in a service plan, such as a re-installation before a de-installation, so that I can prevent errors in the service workflow.\nGIVEN a multi-activity service plan is being created WHEN an installation activity is sequenced before a de-installation activity for the same service event THEN the illogical sequence is identified before execution.\nGIVEN a multi-activity service plan is being created WHEN a loaner de-installation is sequenced before the loaner installation THEN the illogical sequence is identified before execution.\n5\nGenerate a consolidated quote from a multi-activity service plan\n7.1.4\n8\nAs a Billing Specialist, I need to generate a single quote that itemizes all billable and covered activities from a complex service plan so that the customer receives a clear and complete estimate for the entire service event.\nGIVEN a multi-activity service plan contains multiple billable activities and parts WHEN a quote is generated from the plan THEN the quote includes all billable labor and parts from all activities in the plan as distinct line items.\nGIVEN a service quote is prepared from planned work WHEN the plan includes billable and non-billable service needs THEN the quote reflects the billable planned service scope without losing activity, parts, or labor context.\n6\nInitiate all follow-on transactions from a single service plan\n7.2.1\n8\nAs a Service Support Specialist, I need to initiate the creation of all required work orders, parts orders, and shipments from a finalized multi-activity service plan so that I can efficiently dispatch all components of a complex service event.\nGIVEN a finalized multi-activity service plan contains multiple service activities at different locations WHEN the plan is initiated THEN a separate work order is created for each distinct service activity.\nGIVEN a finalized multi-activity service plan requires parts at a service facility and loaner equipment at a customer site WHEN the plan is initiated THEN a parts shipment is created for the service facility and a separate equipment shipment is created for the customer site.\nGIVEN a multi-activity service plan has not been marked as ready for execution WHEN follow-on transactions are initiated THEN no work orders, parts orders, or shipments are created.\n7\nView the consolidated status of a multi-activity service plan\n7.3.6\n5\nAs a Service Manager, I need to view a consolidated status of all related activities within a single service plan so that I can track the end-to-end progress of a complex service event without reviewing multiple, separate records.\nGIVEN a multi-activity service plan has been initiated WHEN viewing the plan THEN the current status of each individual associated service activity is visible using Not Started, In Progress, and Completed states.\nGIVEN all but one activity in a multi-activity service plan are complete WHEN viewing the plan THEN the overall status of the plan indicates that it is still in progress.\nGIVEN all activities within a multi-activity service plan are completed WHEN viewing the plan THEN the overall status of the plan indicates it is complete."
+    "jsaText": "1\nDefine a coordinated launch plan\n7.2.1\n8\nAs a Program Coordinator, I need to create one coordinated launch plan that can include research tasks, vendor reviews, prototype builds, training sessions, materials, and effort estimates so that launch work can be planned from one place.\nGIVEN a launch initiative includes research tasks, vendor reviews, prototype builds, and training sessions WHEN the launch plan is created THEN each applicable activity is represented as planned scope within the coordinated plan.\nGIVEN a named activity is not needed for a specific launch WHEN plan scope is reviewed THEN the inapplicable activity can be omitted without blocking the remaining launch plan.\n2\nSpecify resources and effort for planned work\n7.2.2\n5\nAs a Program Coordinator, I need to capture materials, effort estimates, owners, and readiness details for planned activities so that downstream outputs can use the right planning context.\nGIVEN a planned launch activity has material or effort needs WHEN activity details are specified THEN the materials and effort estimates remain tied to the activity that requires them.\nGIVEN a planned activity is missing resource details WHEN approval packet or handoff readiness is reviewed THEN the missing materials, effort, or ownership details are visible before dependent work proceeds.\n3\nCoordinate sequencing and readiness\n7.2.3\n5\nAs a Program Coordinator, I need dependent launch activities and handoffs to respect sequence and readiness rules so that later work does not proceed from incomplete prerequisites.\nGIVEN a plan contains dependent activities WHEN a prerequisite activity is incomplete THEN the dependent activity is treated as not ready for downstream work.\nGIVEN a planned sequence conflicts with a required order WHEN readiness is reviewed THEN the sequence conflict is visible before outputs or handoffs proceed.\n4\nPrepare approval packets from planned scope\n7.1.4\n5\nAs a Finance Analyst, I need approval packets to reflect the planned materials and effort estimates so that reviewers can decide based on the proposed launch scope.\nGIVEN a launch plan contains materials and effort estimates WHEN an approval packet is prepared THEN the packet reflects the planned items and the estimates that affect the decision.\nGIVEN a launch plan contains items that should not affect approval WHEN the approval packet is prepared THEN the packet includes only the applicable decision scope while other planned work remains in the plan.\n5\nCreate downstream handoffs from eligible planned items\n7.2.4\n8\nAs a Program Coordinator, I need follow-up purchase orders or onboarding tasks to be derived from eligible planned items so that downstream work traces back to the coordinated plan.\nGIVEN a ready plan contains items eligible for purchasing WHEN downstream handoffs are initiated THEN purchase order handoffs are created from eligible planned items and remain tied to the source plan.\nGIVEN a ready plan contains onboarding work WHEN downstream handoffs are initiated THEN onboarding tasks are created from eligible planned items and remain tied to the source plan.\nGIVEN a planned item has unresolved details WHEN downstream handoffs are initiated THEN no purchase order or onboarding task is created for that item until the missing details are resolved."
   },
   {
     "id": "support-triage-jsa",

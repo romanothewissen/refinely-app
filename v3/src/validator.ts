@@ -21,57 +21,41 @@ const CONCRETE_BUSINESS_FACTS = [
   'complete',
   'completed',
   'conflict',
-  'customer site',
-  'de-installation',
-  'deinstallation',
   'dependency',
   'dependencies',
   'decision',
   'distinct line items',
-  'equipment shipment',
+  'equipment',
   'exception',
-  'field service',
   'follow-on',
-  'in-house',
-  'installation',
+  'handoff',
+  'item',
   'labor',
   'line item',
-  'loaner',
   'location',
   'not started',
-  'off-site',
   'order release',
+  'output',
   'part',
   'parts',
   'parts order',
   'prerequisite',
   'quote',
-  're-installation',
-  'repair',
+  'record',
   'request',
   'resource',
   'rule',
   'rules',
   'scope',
-  'service facility',
   'sequence',
   'shipment',
   'status',
-  'temporary replacement',
-  'unavailable equipment',
+  'task',
   'work order',
 ];
 const ROLE_TERMS = [
-  'service planner',
-  'service planners',
-  'dispatch manager',
-  'dispatch managers',
-  'service manager',
-  'service managers',
   'billing specialist',
   'billing specialists',
-  'service support specialist',
-  'service support specialists',
   'release manager',
   'release managers',
   'business analyst',
@@ -82,6 +66,8 @@ const ROLE_TERMS = [
   'requesters',
   'approver',
   'approvers',
+  'coordinator',
+  'coordinators',
   'planner',
   'planners',
   'manager',
@@ -99,23 +85,13 @@ const ROLE_TERMS = [
 ];
 
 const CONTEXT_SENSITIVE_TERMS: Array<{ term: string; allowedBy: string[] }> = [
-  { term: 'customer eligibility', allowedBy: ['customer eligibility', 'eligibility', 'eligible'] },
-  { term: 'equipment availability', allowedBy: ['equipment availability', 'availability', 'available equipment', 'unavailable equipment', 'unavailable'] },
-  { term: 'expected ship date', allowedBy: ['expected ship date', 'ship date', 'shipment', 'shipping', 'ship'] },
-  { term: 'planned return date', allowedBy: ['planned return date', 'return date', 'return'] },
   { term: 'manager review', allowedBy: ['manager review', 'manager approval', 'approval', 'approve', 'manager'] },
-  { term: 'not eligible', allowedBy: ['not eligible', 'eligibility', 'eligible'] },
-  { term: 'equipment is unavailable', allowedBy: ['equipment unavailable', 'unavailable equipment', 'unavailable', 'availability'] },
   { term: 'rejected', allowedBy: ['reject', 'rejection', 'rejected'] },
   { term: 'clear reason', allowedBy: ['clear reason', 'reason'] },
-  { term: 'returned to the planner', allowedBy: ['returned to the planner', 'planner correction', 'correction'] },
-  { term: 'Dispatch Manager', allowedBy: ['dispatch manager'] },
-  { term: 'reserve the equipment', allowedBy: ['reserve', 'reservation', 'reserved'] },
-  { term: 'before shipment', allowedBy: ['shipment', 'shipping', 'ship'] },
-  { term: 'returned loaners', allowedBy: ['returned loaner', 'returned loaners', 'return'] },
-  { term: 'inspected', allowedBy: ['inspection', 'inspected', 'inspect'] },
-  { term: 'entitlement', allowedBy: ['entitlement'] },
-  { term: 'safety impact', allowedBy: ['safety impact', 'safety'] },
+  { term: 'returned for correction', allowedBy: ['returned for correction', 'correction'] },
+  { term: 'expected start date', allowedBy: ['expected start date', 'start date', 'date'] },
+  { term: 'planned end date', allowedBy: ['planned end date', 'end date', 'date'] },
+  { term: 'capacity is unavailable', allowedBy: ['capacity', 'availability', 'available', 'unavailable'] },
   { term: 'automatic approval', allowedBy: ['automatic approval'] },
   { term: 'approval timestamp', allowedBy: ['approval timestamp', 'timestamp'] },
   { term: 'approving manager', allowedBy: ['approving manager', 'manager approval', 'approval'] },
@@ -144,8 +120,6 @@ const GENERIC_CONTEXT_WORDS = new Set([
   'request',
   'requests',
   'workflow',
-  'service',
-  'services',
   'work',
   'plan',
   'plans',
@@ -156,7 +130,12 @@ const GENERIC_CONTEXT_WORDS = new Set([
   'equipment',
 ]);
 const BROAD_CONTEXT_TOKENS = new Set([
+  'been',
   'case',
+  'complete',
+  'completed',
+  'completion',
+  'created',
   'need',
   'needs',
   'needed',
@@ -169,6 +148,10 @@ const BROAD_CONTEXT_TOKENS = new Set([
   'handling',
   'available',
   'another',
+  'recorded',
+  'resolved',
+  'unresolved',
+  'visible',
 ]);
 
 export function validateDraft(input: {
@@ -338,9 +321,12 @@ export function validateDraft(input: {
     });
   }
 
-  const openQuestionCount = input.draft.blockingQuestions.length
-    + input.draft.features.reduce((sum, feature) => sum + feature.openQuestions.length, 0)
-    + input.capabilityPlan.openQuestions.length;
+  const openQuestionCount = new Set([
+    ...input.draft.blockingQuestions,
+    ...input.draft.features.flatMap((feature) => feature.openQuestions),
+    ...input.capabilityPlan.openQuestions,
+    ...(input.capabilityPlan.sizingAssessment?.openQuestions ?? []),
+  ].map(normalizeText).filter(Boolean)).size;
   const hasSeriousIssue = issues.some((issue) => [
     'unsupported_role_in_ar',
     'solution_language',
@@ -469,6 +455,9 @@ function isSpecificContextToken(token: string): boolean {
 
 function isTermSupportedByRequirement(requirementText: string, term: string): boolean {
   if (hasPhrase(requirementText, term)) return true;
+  if (/\bline items?\b/.test(term) && /\b(quote|quotes|pricing|price|cost|costs|billable|financial|estimate|estimates)\b/.test(requirementText)) {
+    return true;
+  }
   return term
     .split(' ')
     .filter(isSpecificContextToken)
